@@ -1,10 +1,8 @@
 use futures::future;
-use std::sync::{
-    atomic::{AtomicU8, Ordering},
-    Arc,
-};
+
 use tokio::{
     runtime::Runtime,
+    sync::watch,
     time::{timeout, Duration},
 };
 
@@ -75,11 +73,11 @@ fn request_genesis_is_rate_limited() {
     // The number of calls to `request_genesis()` we are going to be testing for
     const RETRIES_TO_RUN: u8 = 3;
 
-    // create some counters that will be updated inside async blocks
-    let peer_requests_counter = Arc::new(AtomicU8::new(0));
-    let peer_requests_counter_in_service = Arc::clone(&peer_requests_counter);
-    let state_requests_counter = Arc::new(AtomicU8::new(0));
-    let state_requests_counter_in_service = Arc::clone(&state_requests_counter);
+    // create some watchers that will be updated inside async blocks
+    let mut peer_requests_counter = 0;
+    let mut state_requests_counter = 0;
+    let (peer_requests_sender, peer_requests_receiver) = watch::channel(peer_requests_counter);
+    let (state_requests_sender, state_requests_receiver) = watch::channel(state_requests_counter);
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
@@ -90,7 +88,8 @@ fn request_genesis_is_rate_limited() {
         match request {
             zebra_network::Request::BlocksByHash(_) => {
                 // Track the call
-                peer_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
+                peer_requests_counter += 1;
+                let _ = peer_requests_sender.send(peer_requests_counter);
                 // Respond with `Error`
                 future::err("block not found".into())
             }
@@ -104,7 +103,8 @@ fn request_genesis_is_rate_limited() {
         match request {
             zebra_state::Request::Depth(_) => {
                 // Track the call
-                state_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
+                state_requests_counter += 1;
+                let _ = state_requests_sender.send(state_requests_counter);
                 // Respond with `None`
                 future::ok(zebra_state::Response::Depth(None))
             }
@@ -138,11 +138,10 @@ fn request_genesis_is_rate_limited() {
         .await;
     });
 
-    let peer_requests_counter = peer_requests_counter.load(Ordering::SeqCst);
-    assert!(peer_requests_counter >= RETRIES_TO_RUN);
-    assert!(peer_requests_counter <= RETRIES_TO_RUN * (BLOCK_DOWNLOAD_RETRY_LIMIT as u8) * 2);
-    assert_eq!(
-        state_requests_counter.load(Ordering::SeqCst),
-        RETRIES_TO_RUN
+    //let peer_requests_counter = peer_requests_counter.load(Ordering::SeqCst);
+    assert!(*peer_requests_receiver.borrow() >= RETRIES_TO_RUN);
+    assert!(
+        *peer_requests_receiver.borrow() <= RETRIES_TO_RUN * (BLOCK_DOWNLOAD_RETRY_LIMIT as u8) * 2
     );
+    assert_eq!(*state_requests_receiver.borrow(), RETRIES_TO_RUN);
 }
