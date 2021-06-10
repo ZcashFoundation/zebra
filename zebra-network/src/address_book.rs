@@ -8,10 +8,9 @@ use std::{
     time::Instant,
 };
 
-use chrono::{DateTime, Utc};
 use tracing::Span;
 
-use crate::{constants, meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
+use crate::{meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
 
 /// A database of peer listener addresses, their advertised services, and
 /// information on when they were last seen.
@@ -202,21 +201,6 @@ impl AddressBook {
         }
     }
 
-    /// Compute a cutoff time that can determine whether an entry
-    /// in an address book being updated with peer message timestamps
-    /// represents a likely-dead (or hung) peer, or a potentially-connected peer.
-    ///
-    /// [`constants::LIVE_PEER_DURATION`] represents the time interval in which
-    /// we should receive at least one message from a peer, or close the
-    /// connection. Therefore, if the last-seen timestamp is older than
-    /// [`constants::LIVE_PEER_DURATION`] ago, we know we should have
-    /// disconnected from it. Otherwise, we could potentially be connected to it.
-    fn liveness_cutoff_time() -> DateTime<Utc> {
-        Utc::now()
-            - chrono::Duration::from_std(constants::LIVE_PEER_DURATION)
-                .expect("unexpectedly large constant")
-    }
-
     /// Returns true if the given [`SocketAddr`] has recently sent us a message.
     pub fn recently_live_addr(&self, addr: &SocketAddr) -> bool {
         let _guard = self.span.enter();
@@ -224,8 +208,7 @@ impl AddressBook {
             None => false,
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
-                peer.last_connection_state == PeerAddrState::Responded
-                    && peer.get_last_seen() > AddressBook::liveness_cutoff_time()
+                peer.last_connection_state == PeerAddrState::Responded && peer.was_recently_live()
             }
         }
     }
@@ -238,12 +221,6 @@ impl AddressBook {
             None => false,
             Some(peer) => peer.last_connection_state == PeerAddrState::AttemptPending,
         }
-    }
-
-    /// Returns true if the given [`SocketAddr`] might be connected to a node
-    /// feeding timestamps into this address book.
-    pub fn maybe_connected_addr(&self, addr: &SocketAddr) -> bool {
-        self.recently_live_addr(addr) || self.pending_reconnection_addr(addr)
     }
 
     /// Return an iterator over all peers.
@@ -266,7 +243,7 @@ impl AddressBook {
         // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
         self.by_addr
             .values()
-            .filter(move |peer| !self.maybe_connected_addr(&peer.addr))
+            .filter(|peer| peer.is_ready_for_attempt())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .cloned()
@@ -289,7 +266,7 @@ impl AddressBook {
 
         self.by_addr
             .values()
-            .filter(move |peer| self.maybe_connected_addr(&peer.addr))
+            .filter(|peer| !peer.is_ready_for_attempt())
             .cloned()
     }
 

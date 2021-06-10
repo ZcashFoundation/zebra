@@ -34,6 +34,21 @@ impl DateTime32 {
             .try_into()
             .expect("unexpected out of range chrono::DateTime")
     }
+
+    /// If `earlier` is less than or equal to `self`, returns the number of
+    /// seconds elapsed between `earlier` and `self`.
+    ///
+    /// Otherwise, returns `None`.
+    pub fn checked_sub(&self, earlier: DateTime32) -> Option<u32> {
+        self.timestamp.checked_sub(earlier.timestamp)
+    }
+
+    /// Returns the number of seconds elapsed since this time.
+    ///
+    /// If this time is in the future, returns `None`.
+    pub fn elapsed(&self) -> Option<u32> {
+        DateTime32::now().checked_sub(*self)
+    }
 }
 
 impl fmt::Debug for DateTime32 {

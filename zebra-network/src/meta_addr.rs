@@ -2,6 +2,7 @@
 
 use std::{
     cmp::{Ord, Ordering},
+    convert::TryInto,
     io::{Read, Write},
     net::SocketAddr,
     time::Instant,
@@ -9,13 +10,15 @@ use std::{
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use chrono::Duration;
 use zebra_chain::serialization::{
     DateTime32, ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt,
     ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 
-use crate::protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices};
+use crate::{
+    constants,
+    protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices},
+};
 
 use MetaAddrChange::*;
 use PeerAddrState::*;
@@ -243,34 +246,7 @@ pub enum MetaAddrChange {
     },
 }
 
-// TODO: remove this use in a follow-up PR
-use chrono::{DateTime, Utc};
-
 impl MetaAddr {
-    /// Returns the maximum time among all the time fields.
-    ///
-    /// This function exists to replicate an old Zebra bug.
-    /// TODO: remove this function in a follow-up PR
-    pub(crate) fn get_last_seen(&self) -> DateTime<Utc> {
-        let latest_seen = self
-            .untrusted_last_seen
-            .max(self.last_response)
-            .map(DateTime32::to_chrono);
-
-        // At this point it's pretty obvious why we want to get rid of this code
-        let latest_try = self
-            .last_attempt
-            .max(self.last_failure)
-            .map(|latest_try| Instant::now().checked_duration_since(latest_try))
-            .flatten()
-            .map(Duration::from_std)
-            .map(Result::ok)
-            .flatten()
-            .map(|before_now| Utc::now() - before_now);
-
-        latest_seen.or(latest_try).unwrap_or(chrono::MIN_DATETIME)
-    }
-
     /// Returns a new `MetaAddr`, based on the deserialized fields from a
     /// gossiped peer [`Addr`][crate::protocol::external::Message::Addr] message.
     pub fn new_gossiped_meta_addr(
@@ -420,6 +396,71 @@ impl MetaAddr {
     /// - an open connection encountered a fatal protocol error.
     pub fn last_failure(&self) -> Option<Instant> {
         self.last_failure
+    }
+
+    /// Have we had any recently messages from this peer?
+    ///
+    /// Returns `true` if the peer is likely connected and responsive in the peer
+    /// set.
+    ///
+    /// [`constants::LIVE_PEER_DURATION`] represents the time interval in which
+    /// we should receive at least one message from a peer, or close the
+    /// connection. Therefore, if the last-seen timestamp is older than
+    /// [`constants::LIVE_PEER_DURATION`] ago, we know we should have
+    /// disconnected from it. Otherwise, we could potentially be connected to it.
+    pub fn was_recently_live(&self) -> bool {
+        if let Some(last_response) = self.last_response {
+            if let Some(elapsed) = last_response.elapsed() {
+                elapsed
+                    <= constants::LIVE_PEER_DURATION
+                        .as_secs()
+                        .try_into()
+                        .expect("unexpectedly large constant")
+            } else {
+                info!(last_response = ?self.last_response,
+                      now = ?DateTime32::now(),
+                      "unexpected future response time: assuming peer is live. Hint: has the system clock changed?"
+                );
+                // future times should be considered live
+                true
+            }
+        } else {
+            // if there is no response, it can't possibly be live
+            false
+        }
+    }
+
+    /// Have we recently attempted an outbound connection to this peer?
+    ///
+    /// Returns `true` if this peer was recently attempted, or has a connection
+    /// attempt in progress.
+    pub fn was_recently_attempted(&self) -> bool {
+        self.last_attempt
+            // `now` should always be later than `last_attempt`, except for tests
+            // so we can call future attempts "not recent" to simplify the code
+            .map(|last_attempt| Instant::now().checked_duration_since(last_attempt))
+            .flatten()
+            .map(|since_last_attempt| since_last_attempt <= constants::LIVE_PEER_DURATION)
+            .unwrap_or(false)
+    }
+
+    /// Have we recently had a failed connection to this peer?
+    ///
+    /// Returns `true` if this peer has recently failed.
+    pub fn was_recently_failed(&self) -> bool {
+        self.last_failure
+            // `now` should always be later than `last_failure`, except for tests
+            .map(|last_failure| Instant::now().checked_duration_since(last_failure))
+            .flatten()
+            .map(|since_last_failure| since_last_failure <= constants::LIVE_PEER_DURATION)
+            .unwrap_or(false)
+    }
+
+    /// Is this address ready for a new outbound connection attempt?
+    pub fn is_ready_for_attempt(&self) -> bool {
+        assert!(self.is_valid_for_outbound());
+
+        !self.was_recently_live() && !self.was_recently_attempted() && !self.was_recently_failed()
     }
 
     /// Is this address a directly connected client?
@@ -656,32 +697,82 @@ impl Ord for MetaAddr {
         use std::net::IpAddr::{V4, V6};
         use Ordering::*;
 
-        let oldest_first = self.get_last_seen().cmp(&other.get_last_seen());
-        let newest_first = oldest_first.reverse();
+        // First, try states that are more likely to work
+        let responded_never_failed_attempting =
+            self.last_connection_state.cmp(&other.last_connection_state);
 
-        let connection_state = self.last_connection_state.cmp(&other.last_connection_state);
-        let reconnection_time = match self.last_connection_state {
-            Responded => oldest_first,
-            NeverAttemptedGossiped => newest_first,
-            NeverAttemptedAlternate => newest_first,
-            Failed => oldest_first,
-            AttemptPending => oldest_first,
-        };
-        let ip_numeric = match (self.addr.ip(), other.addr.ip()) {
+        // # Security and Correctness
+        //
+        // Prioritise older attempt times, so we try all peers in each state,
+        // before re-trying any of them. This avoids repeatedly reconnecting to
+        // peers that aren't working.
+        //
+        // Using the internal attempt time for peer ordering also minimises the
+        // amount of information `Addrs` responses leak about Zebra's retry order.
+
+        // If the states are the same, try peers that we haven't tried for a while.
+        //
+        // Each state change updates a specific time field, and
+        // None is less than Some(T),
+        // so the resulting ordering for each state is:
+        // - Responded: oldest attempts first (attempt times are required and unique)
+        // - NeverAttempted...: recent gossiped times first (all other times are None)
+        // - Failed: oldest attempts first (attempt times are required and unique)
+        // - AttemptPending: oldest attempts first (attempt times are required and unique)
+        //
+        // We also compare the other local times, because:
+        // - seed peers may not have an attempt time, and
+        // - updates can be applied to the address book in any order.
+        let older_attempt = self.last_attempt.cmp(&other.last_attempt);
+        let older_failure = self.last_failure.cmp(&other.last_failure);
+        let older_response = self.last_response.cmp(&other.last_response);
+
+        // # Security
+        //
+        // Compare local times before untrusted gossiped times and services.
+        // This gives malicious peers less influence over our peer connection
+        // order.
+
+        // If all local times are None, try peers that other peers have seen more recently
+        let recent_untrusted_last_seen = self
+            .untrusted_last_seen
+            .cmp(&other.untrusted_last_seen)
+            .reverse();
+
+        // Finally, prefer numerically larger service bit patterns
+        //
+        // As of June 2021, Zebra only recognises the node service bit,
+        // and excludes non-nodes from its address book. So this comparison
+        // will have no impact until Zebra implements more service features.
+        //
+        // TODO: order services by usefulness, not bit pattern values
+        //       Security: split gossiped and direct services
+        let larger_services = self.services.cmp(&other.services);
+
+        // The remaining comparisons are meaningless for peer connection priority.
+        // But they are required so that we have a total order on `MetaAddr` values:
+        // self and other must compare as Equal iff they are equal.
+
+        // As a tie-breaker, compare ip and port numerically
+        //
+        // Since SocketAddrs are unique in the address book, these comparisons
+        // guarantee a total, unique order.
+        let ip_tie_breaker = match (self.addr.ip(), other.addr.ip()) {
             (V4(a), V4(b)) => a.octets().cmp(&b.octets()),
             (V6(a), V6(b)) => a.octets().cmp(&b.octets()),
             (V4(_), V6(_)) => Less,
             (V6(_), V4(_)) => Greater,
         };
+        let port_tie_breaker = self.addr.port().cmp(&other.addr.port());
 
-        connection_state
-            .then(reconnection_time)
-            // The remainder is meaningless as an ordering, but required so that we
-            // have a total order on `MetaAddr` values: self and other must compare
-            // as Equal iff they are equal.
-            .then(ip_numeric)
-            .then(self.addr.port().cmp(&other.addr.port()))
-            .then(self.services.bits().cmp(&other.services.bits()))
+        responded_never_failed_attempting
+            .then(older_attempt)
+            .then(older_failure)
+            .then(older_response)
+            .then(recent_untrusted_last_seen)
+            .then(larger_services)
+            .then(ip_tie_breaker)
+            .then(port_tie_breaker)
     }
 }
 

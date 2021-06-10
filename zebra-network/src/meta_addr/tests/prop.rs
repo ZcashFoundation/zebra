@@ -150,7 +150,7 @@ proptest! {
         prop_assert_eq!(
             &addr_bytes,
             &addr_bytes2,
-            "unexpected round-trip bytes mismatch: original addr: {:?}, bytes: {:?}, deserialized addr: {:?}, bytes: {:?}",
+            "unexpected double-serialization round-trip mismatch with original addr: {:?}, bytes: {:?}, deserialized addr: {:?}, bytes: {:?}",
             sanitized_addr,
             hex::encode(&addr_bytes),
             deserialized_addr,
