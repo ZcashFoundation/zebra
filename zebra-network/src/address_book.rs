@@ -148,8 +148,8 @@ impl AddressBook {
 
         // Then sanitize and shuffle
         let mut peers = peers
-            .into_values()
-            .filter_map(|a| MetaAddr::sanitize(&a))
+            .values()
+            .filter_map(MetaAddr::sanitize)
             .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
         peers
