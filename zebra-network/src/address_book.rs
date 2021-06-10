@@ -126,16 +126,29 @@ impl AddressBook {
     }
 
     /// Get the local listener address.
-    pub fn get_local_listener(&self) -> MetaAddrChange {
+    ///
+    /// This address contains minimal state, but it is not sanitized.
+    pub fn get_local_listener(&self) -> MetaAddr {
         MetaAddr::new_local_listener(&self.local_listener)
+            .into_new_meta_addr()
+            .expect("unexpected invalid new local listener addr")
     }
 
     /// Get the contents of `self` in random order with sanitized timestamps.
     pub fn sanitized(&self) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
-        let mut peers = self
-            .peers()
+
+        let mut peers = self.by_addr.clone();
+
+        // Unconditionally add our local listener address to the advertised peers,
+        // to replace any self-connection failures
+        let local_listener = self.get_local_listener();
+        peers.insert(local_listener.addr, local_listener);
+
+        // Then sanitize and shuffle
+        let mut peers = peers
+            .into_values()
             .filter_map(|a| MetaAddr::sanitize(&a))
             .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
