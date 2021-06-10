@@ -15,7 +15,7 @@ use crate::{
 /// A MMR Tree using zcash_history::Tree.
 ///
 /// Currently it should not be used as a long-term data structure because it
-/// may grow undefinitely.
+/// may grow without limits.
 pub struct Tree {
     network: Network,
     tree: zcash_history::Tree,
@@ -59,7 +59,7 @@ impl From<zcash_history::Entry> for Entry {
 }
 
 impl Entry {
-    /// Create a leaf Entry for the given block, its netwrok, and the root of its
+    /// Create a leaf Entry for the given block, its network, and the root of its
     /// Sapling note commitment tree.
     fn new_leaf(block: Arc<Block>, network: Network, sapling_root: &sapling::tree::Root) -> Self {
         let node_data = block_to_history_node(block, network, sapling_root);
