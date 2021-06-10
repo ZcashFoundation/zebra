@@ -290,10 +290,6 @@ where
     /// new peer connections are initiated at least
     /// [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL] apart.
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        let current_deadline = self.wait_next_handshake.deadline().max(Instant::now());
-        let mut sleep = sleep_until(current_deadline + constants::MIN_PEER_CONNECTION_INTERVAL);
-        mem::swap(&mut self.wait_next_handshake, &mut sleep);
-
         // # Correctness
         //
         // In this critical section, we hold the address mutex, blocking the
@@ -317,6 +313,9 @@ where
         };
 
         // SECURITY: rate-limit new candidate connections
+        let current_deadline = self.wait_next_handshake.deadline().max(Instant::now());
+        let mut sleep = sleep_until(current_deadline + constants::MIN_PEER_CONNECTION_INTERVAL);
+        mem::swap(&mut self.wait_next_handshake, &mut sleep);
         sleep.await;
 
         Some(reconnect)
