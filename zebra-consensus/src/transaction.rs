@@ -169,7 +169,7 @@ where
                     )
                     .await
                 }
-                Transaction::V5 { .. } => Self::verify_v5_transaction().await,
+                Transaction::V5 { .. } => Self::verify_v5_transaction(req, network).await,
             }
         }
         .instrument(span)
@@ -363,9 +363,39 @@ where
         Ok(tx.hash())
     }
 
-    async fn verify_v5_transaction() -> Result<transaction::Hash, TransactionError> {
+    async fn verify_v5_transaction(
+        request: Request,
+        network: Network,
+    ) -> Result<transaction::Hash, TransactionError> {
+        Self::verify_v5_transaction_network_upgrade(
+            &request.transaction(),
+            request.upgrade(network),
+        )?;
+
         unimplemented!(
             "v5 transaction validation as specified in ZIP-216, ZIP-224, ZIP-225, and ZIP-244"
         );
+    }
+
+    fn verify_v5_transaction_network_upgrade(
+        transaction: &Transaction,
+        upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match upgrade {
+            // Supports V5 transactions
+            NetworkUpgrade::Nu5 => Ok(()),
+
+            // Does not support V5 transactions
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                upgrade,
+            )),
+        }
     }
 }
