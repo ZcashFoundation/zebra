@@ -18,22 +18,22 @@ use crate::{
 /// may grow without limits.
 pub struct Tree {
     network: Network,
-    tree: zcash_history::Tree,
+    inner: zcash_history::Tree,
 }
 
 /// An encoded tree node data.
 pub struct NodeData {
-    encoded: [u8; zcash_history::MAX_NODE_DATA_SIZE],
+    inner: [u8; zcash_history::MAX_NODE_DATA_SIZE],
 }
 
 impl From<&zcash_history::NodeData> for NodeData {
     /// Convert from librustzcash.
-    fn from(low_node: &zcash_history::NodeData) -> Self {
+    fn from(inner_node: &zcash_history::NodeData) -> Self {
         let mut node = NodeData {
-            encoded: [0; zcash_history::MAX_NODE_DATA_SIZE],
+            inner: [0; zcash_history::MAX_NODE_DATA_SIZE],
         };
-        low_node
-            .write(&mut &mut node.encoded[..])
+        inner_node
+            .write(&mut &mut node.inner[..])
             .expect("buffer has the proper size");
         node
     }
@@ -42,17 +42,17 @@ impl From<&zcash_history::NodeData> for NodeData {
 /// An encoded entry in the tree.
 /// Contains the node data and information about its position in the tree.
 pub struct Entry {
-    encoded: [u8; zcash_history::MAX_ENTRY_SIZE],
+    inner: [u8; zcash_history::MAX_ENTRY_SIZE],
 }
 
 impl From<zcash_history::Entry> for Entry {
     /// Convert from librustzcash.
-    fn from(low_entry: zcash_history::Entry) -> Self {
+    fn from(inner_entry: zcash_history::Entry) -> Self {
         let mut entry = Entry {
-            encoded: [0; zcash_history::MAX_ENTRY_SIZE],
+            inner: [0; zcash_history::MAX_ENTRY_SIZE],
         };
-        low_entry
-            .write(&mut &mut entry.encoded[..])
+        inner_entry
+            .write(&mut &mut entry.inner[..])
             .expect("buffer has the proper size");
         entry
     }
@@ -63,8 +63,8 @@ impl Entry {
     /// Sapling note commitment tree.
     fn new_leaf(block: Arc<Block>, network: Network, sapling_root: &sapling::tree::Root) -> Self {
         let node_data = block_to_history_node(block, network, sapling_root);
-        let low_entry: zcash_history::Entry = node_data.into();
-        low_entry.into()
+        let inner_entry: zcash_history::Entry = node_data.into();
+        inner_entry.into()
     }
 
     /// Create a node (non-leaf) Entry from the encoded node data and the indices of
@@ -75,13 +75,13 @@ impl Entry {
         left_idx: u32,
         right_idx: u32,
     ) -> Result<Self, io::Error> {
-        let node_data = zcash_history::NodeData::from_bytes(branch_id.into(), data.encoded)?;
-        let low_entry = zcash_history::Entry::new(
+        let node_data = zcash_history::NodeData::from_bytes(branch_id.into(), data.inner)?;
+        let inner_entry = zcash_history::Entry::new(
             node_data,
             zcash_history::EntryLink::Stored(left_idx),
             zcash_history::EntryLink::Stored(right_idx),
         );
-        Ok(low_entry.into())
+        Ok(inner_entry.into())
     }
 }
 
@@ -106,16 +106,16 @@ impl Tree {
             .expect("unexpected pre-Overwinter MMR history tree");
         let mut peaks_vec = Vec::new();
         for (idx, entry) in peaks {
-            let low_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.encoded)?;
-            peaks_vec.push((*idx, low_entry));
+            let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
+            peaks_vec.push((*idx, inner_entry));
         }
         let mut extra_vec = Vec::new();
         for (idx, entry) in extra {
-            let low_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.encoded)?;
-            extra_vec.push((*idx, low_entry));
+            let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
+            extra_vec.push((*idx, inner_entry));
         }
-        let tree = zcash_history::Tree::new(length, peaks_vec, extra_vec);
-        Ok(Tree { network, tree })
+        let inner = zcash_history::Tree::new(length, peaks_vec, extra_vec);
+        Ok(Tree { network, inner })
     }
 
     /// Append a new block to the tree, as a new leaf.
@@ -129,18 +129,18 @@ impl Tree {
         sapling_root: &sapling::tree::Root,
     ) -> Result<Vec<NodeData>, zcash_history::Error> {
         let node_data = block_to_history_node(block, self.network, sapling_root);
-        let appended = self.tree.append_leaf(node_data)?;
+        let appended = self.inner.append_leaf(node_data)?;
 
         let mut new_nodes = Vec::new();
         for entry in appended {
             let mut node = NodeData {
-                encoded: [0; zcash_history::MAX_NODE_DATA_SIZE],
+                inner: [0; zcash_history::MAX_NODE_DATA_SIZE],
             };
-            self.tree
+            self.inner
                 .resolve_link(entry)
                 .expect("entry was just generated so it must be valid")
                 .data()
-                .write(&mut &mut node.encoded[..])
+                .write(&mut &mut node.inner[..])
                 .expect("buffer was created with enough capacity");
             new_nodes.push(node);
         }
@@ -163,14 +163,14 @@ impl Tree {
     ///
     /// Returns the number of nodes removed from the tree after the operation.
     fn truncate_leaf(&mut self) -> Result<u32, zcash_history::Error> {
-        self.tree.truncate_leaf()
+        self.inner.truncate_leaf()
     }
 
     /// Return the root hash of the tree, i.e. `hashChainHistoryRoot`.
     fn hash(&self) -> ChainHistoryMmrRootHash {
         // Both append_leaf() and truncate_leaf() leave a root node, so it should
         // always exist.
-        self.tree
+        self.inner
             .root_node()
             .expect("must have root node")
             .data()
@@ -320,7 +320,7 @@ mod test {
 
         // Tree how has 3 nodes: two leafs for each block, and one parent node
         // which is the new root
-        assert_eq!(tree.tree.len(), 3);
+        assert_eq!(tree.inner.len(), 3);
         // Two nodes were appended: the new leaf and the parent node
         assert_eq!(append.len(), 2);
 
