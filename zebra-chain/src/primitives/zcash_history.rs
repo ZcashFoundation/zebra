@@ -270,20 +270,25 @@ mod test {
         MAINNET_BLOCKS, MAINNET_FINAL_SAPLING_ROOTS, TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS,
     };
 
+    /// Test the MMR tree using the activation block of a network upgrade
+    /// and its next block.
     #[test]
     fn tree() -> Result<()> {
-        tree_for_network(Network::Mainnet, 903_000)?;
-        tree_for_network(Network::Testnet, 903_800)?;
+        tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
+        tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
+        tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Canopy)?;
+        tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Canopy)?;
         Ok(())
     }
 
-    fn tree_for_network(network: Network, height: u32) -> Result<()> {
+    fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
         let (blocks, sapling_roots) = match network {
             Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
             Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
         };
+        let height = network_upgrade.activation_height(network).unwrap().0;
 
-        // Load Block 0 (Heartwood activation block)
+        // Load Block 0 (activation block of the given network upgrade)
         let block0 = Arc::new(
             blocks
                 .get(&height)
@@ -294,7 +299,12 @@ mod test {
 
         // Check its commitment
         let commitment0 = block0.commitment(network)?;
-        assert_eq!(commitment0, ChainHistoryActivationReserved);
+        if network_upgrade == NetworkUpgrade::Heartwood {
+            // Heartwood is the only upgrade that has a reserved value.
+            // (For other upgrades we could compare with the expected commitment,
+            // but we haven't calculated them.)
+            assert_eq!(commitment0, ChainHistoryActivationReserved);
+        }
 
         // Build initial MMR tree with only Block 0
         let sapling_root0 =
@@ -302,18 +312,12 @@ mod test {
         let entry0 = Entry::new_leaf(block0, network, &sapling_root0);
         let mut peaks = HashMap::new();
         peaks.insert(0u32, &entry0);
-        let mut tree = Tree::new(
-            network,
-            NetworkUpgrade::Heartwood,
-            1,
-            &peaks,
-            &HashMap::new(),
-        )?;
+        let mut tree = Tree::new(network, network_upgrade, 1, &peaks, &HashMap::new())?;
 
         // Compute root hash of the MMR tree, which will be included in the next block
         let hash0 = tree.hash();
 
-        // Load Block 1 (Heartwood + 1)
+        // Load Block 1 (activation + 1)
         let block1 = Arc::new(
             blocks
                 .get(&(height + 1))
