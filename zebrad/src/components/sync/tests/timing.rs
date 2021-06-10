@@ -78,6 +78,8 @@ fn request_genesis_is_rate_limited() {
     let mut state_requests_counter = 0;
     let (peer_requests_sender, peer_requests_receiver) = watch::channel(peer_requests_counter);
     let (state_requests_sender, state_requests_receiver) = watch::channel(state_requests_counter);
+    let peer_requests_sender = Arc::new(peer_requests_sender);
+    let state_requests_sender = Arc::new(state_requests_sender);
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
