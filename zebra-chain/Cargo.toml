@@ -51,7 +51,6 @@ proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 itertools = { version = "0.10.0", optional = true }
 
-
 # ZF deps
 ed25519-zebra = "2"
 equihash = "0.1"
