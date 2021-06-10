@@ -18,6 +18,7 @@ use crate::{
 /// may grow without limits.
 pub struct Tree {
     network: Network,
+    network_upgrade: NetworkUpgrade,
     inner: zcash_history::Tree,
 }
 
@@ -115,7 +116,11 @@ impl Tree {
             extra_vec.push((*idx, inner_entry));
         }
         let inner = zcash_history::Tree::new(length, peaks_vec, extra_vec);
-        Ok(Tree { network, inner })
+        Ok(Tree {
+            network,
+            network_upgrade,
+            inner,
+        })
     }
 
     /// Append a new block to the tree, as a new leaf.
@@ -128,6 +133,17 @@ impl Tree {
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
     ) -> Result<Vec<NodeData>, zcash_history::Error> {
+        let height = block
+            .coinbase_height()
+            .expect("block must have coinbase height during contextual verification");
+        let network_upgrade = NetworkUpgrade::current(self.network, height);
+        if self.network_upgrade != network_upgrade {
+            panic!(
+                "added block from network upgrade {:?} but MMR tree is restricted to {:?}",
+                network_upgrade, self.network_upgrade
+            );
+        }
+
         let node_data = block_to_history_node(block, self.network, sapling_root);
         let appended = self.inner.append_leaf(node_data)?;
 
