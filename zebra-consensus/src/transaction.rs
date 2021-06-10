@@ -87,6 +87,29 @@ pub enum Request {
     },
 }
 
+impl Request {
+    pub fn transaction(&self) -> Arc<Transaction> {
+        match self {
+            Request::Block { transaction, .. } => transaction.clone(),
+            Request::Mempool { transaction, .. } => transaction.clone(),
+        }
+    }
+
+    pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
+        match self {
+            Request::Block { known_utxos, .. } => known_utxos.clone(),
+            Request::Mempool { known_utxos, .. } => known_utxos.clone(),
+        }
+    }
+
+    pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
+        match self {
+            Request::Block { height, .. } => NetworkUpgrade::current(network, *height),
+            Request::Mempool { upgrade, .. } => *upgrade,
+        }
+    }
+}
+
 impl<ZS> Service<Request> for Verifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -112,22 +135,6 @@ where
             unimplemented!();
         }
 
-        let (tx, known_utxos, upgrade) = match req {
-            Request::Block {
-                transaction,
-                known_utxos,
-                height,
-            } => {
-                let upgrade = NetworkUpgrade::current(self.network, height);
-                (transaction, known_utxos, upgrade)
-            }
-            Request::Mempool {
-                transaction,
-                known_utxos,
-                upgrade,
-            } => (transaction, known_utxos, upgrade),
-        };
-
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
 
@@ -135,11 +142,17 @@ where
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
         let mut script_verifier = self.script_verifier.clone();
 
+        let network = self.network;
+
+        let tx = req.transaction();
         let span = tracing::debug_span!("tx", hash = %tx.hash());
 
         async move {
+            let upgrade = req.upgrade(network);
+            let known_utxos = req.known_utxos();
+
             tracing::trace!(?tx);
-            match &*tx {
+            match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     Err(TransactionError::WrongVersion)
