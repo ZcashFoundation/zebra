@@ -482,11 +482,18 @@ impl MetaAddr {
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     pub fn sanitize(&self) -> Option<MetaAddr> {
+        // Make sure this address is valid for outbound connections
+        if !self.is_valid_for_outbound() {
+            return None;
+        }
+
+        // Sanitize time
         let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
         let ts = self.last_seen()?.timestamp();
         // This can't underflow, because `0 <= rem_euclid < ts`
         let last_seen = ts - ts.rem_euclid(interval);
         let last_seen = DateTime32::from(last_seen);
+
         Some(MetaAddr {
             addr: self.addr,
             // deserialization also sanitizes services to known flags
