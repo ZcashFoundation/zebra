@@ -23,6 +23,8 @@ use PeerAddrState::*;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::serialization::arbitrary::canonical_socket_addr;
+#[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
 #[cfg(test)]
@@ -118,8 +120,13 @@ impl PartialOrd for PeerAddrState {
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct MetaAddr {
     /// The peer's address.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(strategy = "canonical_socket_addr()")
+    )]
     pub addr: SocketAddr,
 
     /// The services advertised by the peer.
@@ -171,9 +178,14 @@ pub struct MetaAddr {
 
 /// A change to an existing `MetaAddr`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum MetaAddrChange {
     /// Creates a new gossiped `MetaAddr`.
     NewGossiped {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr()")
+        )]
         addr: SocketAddr,
         untrusted_services: PeerServices,
         untrusted_last_seen: DateTime32,
@@ -183,25 +195,49 @@ pub enum MetaAddrChange {
     ///
     /// Based on the canonical peer address in `Version` messages.
     NewAlternate {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr()")
+        )]
         addr: SocketAddr,
         untrusted_services: PeerServices,
     },
 
     /// Creates new local listener `MetaAddr`.
-    NewLocal { addr: SocketAddr },
+    NewLocal {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr()")
+        )]
+        addr: SocketAddr,
+    },
 
     /// Updates an existing `MetaAddr` when an outbound connection attempt
     /// starts.
-    UpdateAttempt { addr: SocketAddr },
+    UpdateAttempt {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr()")
+        )]
+        addr: SocketAddr,
+    },
 
     /// Updates an existing `MetaAddr` when a peer responds with a message.
     UpdateResponded {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr()")
+        )]
         addr: SocketAddr,
         services: PeerServices,
     },
 
     /// Updates an existing `MetaAddr` when a peer fails.
     UpdateFailed {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr()")
+        )]
         addr: SocketAddr,
         services: Option<PeerServices>,
     },
