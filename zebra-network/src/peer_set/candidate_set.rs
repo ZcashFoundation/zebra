@@ -271,12 +271,10 @@ where
 
     /// Returns the next candidate for a connection attempt, if any are available.
     ///
-    /// Returns peers in this order:
-    /// - oldest `Responded` that are not live
-    /// - newest `NeverAttempted`
-    /// - oldest `Failed`
+    /// Returns peers in reconnection order, based on
+    /// [`AddressBook::reconnection_peers`].
     ///
-    /// Skips `AttemptPending` peers and live `Responded` peers.
+    /// Skips peers that have recently been active, attempted, or failed.
     ///
     /// ## Correctness
     ///
