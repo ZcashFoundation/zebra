@@ -155,8 +155,12 @@ impl ZcashSerialize for Flags {
 
 impl ZcashDeserialize for Flags {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let flags = Flags::from_bits(reader.read_u8()?).unwrap();
-
-        Ok(flags)
+        // Consensus rule: In a version 5 transaction,
+        // the reserved bits 2..7 of the flagsOrchard field MUST be zero.
+        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        match Flags::from_bits(reader.read_u8()?) {
+            Some(flags) => Ok(flags),
+            None => Err(SerializationError::Parse("invalid orchard flags")),
+        }
     }
 }
