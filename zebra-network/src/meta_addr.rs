@@ -647,18 +647,31 @@ impl MetaAddrChange {
 
             if change_to_never_attempted {
                 if previous_has_been_attempted {
-                    // Security: ignore never attempted changes once we have made an attempt
+                    // Existing entry has been attempted, change is NeverAttempted
+                    // - ignore the change
+                    //
+                    // # Security
+                    //
+                    // Ignore NeverAttempted changes once we have made an attempt,
+                    // so malicious peers can't keep changing our peer connection order.
                     None
                 } else {
-                    // never attempted to never attempted update: preserve original values
+                    // Existing entry and change are both NeverAttempted
+                    // - preserve original values of all fields
+                    // - but replace None with Some
+                    //
+                    // # Security
+                    //
+                    // Preserve the original field values for NeverAttempted peers,
+                    // so malicious peers can't keep changing our peer connection order.
                     Some(MetaAddr {
                         addr: self.addr(),
                         // TODO: or(self.untrusted_services()) when services become optional
                         services: previous.services,
-                        // Security: only update the last seen time if it is missing
                         untrusted_last_seen: previous
                             .untrusted_last_seen
                             .or_else(|| self.untrusted_last_seen()),
+                        // The peer has not been attempted, so these fields must be None
                         last_response: None,
                         last_attempt: None,
                         last_failure: None,
@@ -666,15 +679,25 @@ impl MetaAddrChange {
                     })
                 }
             } else {
-                // any to attempt, responded, or failed: prefer newer values
+                // Existing entry and change are both Attempt, Responded, Failed
+                // - ignore changes to earlier times
+                // - update the services from the change
+                //
+                // # Security
+                //
+                // Ignore changes to earlier times. This enforces the peer
+                // connection timeout, even if changes are applied out of order.
                 Some(MetaAddr {
                     addr: self.addr(),
                     services: self.untrusted_services().unwrap_or(previous.services),
-                    // we don't modify the last seen field at all
+                    // only NeverAttempted changes can modify the last seen field
                     untrusted_last_seen: previous.untrusted_last_seen,
-                    last_response: self.last_response().or(previous.last_response),
-                    last_attempt: self.last_attempt().or(previous.last_attempt),
-                    last_failure: self.last_failure().or(previous.last_failure),
+                    // Since Some(time) is always greater than None, `max` prefers:
+                    // - the latest time if both are Some
+                    // - Some(time) if the other is None
+                    last_response: self.last_response().max(previous.last_response),
+                    last_attempt: self.last_attempt().max(previous.last_attempt),
+                    last_failure: self.last_failure().max(previous.last_failure),
                     last_connection_state: self.peer_addr_state(),
                 })
             }
