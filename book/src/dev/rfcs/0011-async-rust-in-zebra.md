@@ -652,7 +652,7 @@ when we specify `Relaxed`. But ARM processors like the Apple M1
 section of the Rust nomicon.
  
 But if a Zebra feature requires atomics:
-1. use the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
+1. use an `AtomicUsize` with the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
 2. use a weaker memory ordering, with:
   - a correctness comment,
   - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), on x86 and ARM, and
