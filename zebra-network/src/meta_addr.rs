@@ -475,6 +475,21 @@ impl MetaAddrChange {
         }
     }
 
+    #[cfg(any(test, feature = "proptest-impl"))]
+    /// Set the address for this change to `new_addr`.
+    ///
+    /// This method should only be used in tests.
+    pub fn set_addr(&mut self, new_addr: SocketAddr) {
+        match self {
+            NewGossiped { addr, .. }
+            | NewAlternate { addr, .. }
+            | NewLocal { addr, .. }
+            | UpdateAttempt { addr }
+            | UpdateResponded { addr, .. }
+            | UpdateFailed { addr, .. } => *addr = new_addr,
+        }
+    }
+
     /// Return the untrusted services for this change, if available.
     pub fn untrusted_services(&self) -> Option<PeerServices> {
         match self {

@@ -2,7 +2,7 @@
 
 use super::check;
 
-use crate::meta_addr::MetaAddr;
+use crate::meta_addr::{arbitrary::MAX_ADDR_CHANGE, MetaAddr, MetaAddrChange, PeerAddrState::*};
 
 use proptest::prelude::*;
 
@@ -159,4 +159,33 @@ proptest! {
 
     }
 
+    /// Make sure that `[MetaAddrChange]`s:
+    /// - do not modify the last seen time, unless it was None, and
+    /// - only modify the services after a response or failure.
+    #[test]
+    fn preserve_initial_untrusted_values((mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)) {
+        zebra_test::init();
+
+        for change in changes {
+            if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
+                // untrusted last seen times:
+                // check that we replace None with Some, but leave Some unchanged
+                if addr.untrusted_last_seen.is_some() {
+                    prop_assert_eq!(changed_addr.untrusted_last_seen, addr.untrusted_last_seen);
+                } else {
+                    prop_assert_eq!(changed_addr.untrusted_last_seen, change.untrusted_last_seen());
+                }
+
+                // services:
+                // check that we only change if there was a handshake
+                if changed_addr.last_connection_state.is_never_attempted()
+                    || changed_addr.last_connection_state == AttemptPending
+                    || change.untrusted_services().is_none() {
+                    prop_assert_eq!(changed_addr.services, addr.services);
+                }
+
+                addr = changed_addr;
+            }
+        }
+    }
 }
