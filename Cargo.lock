@@ -284,6 +284,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bigint"
+version = "4.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0e8c8a600052b52482eff2cf4d810e462fdff1f656ac1ecb6232132a1ed7def"
+dependencies = [
+ "byteorder",
+ "crunchy 0.1.6",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -884,6 +894,12 @@ dependencies = [
  "const_fn",
  "lazy_static",
 ]
+
+[[package]]
+name = "crunchy"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2f4a431c5c9f662e1200b7c7f02c34e91361150e382089a8f2dec3ba680cbda"
 
 [[package]]
 name = "crunchy"
@@ -3944,7 +3960,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e11fe9a9348741cf134085ad57c249508345fe16411b3d7fb4ff2da2f1d6382e"
 dependencies = [
  "byteorder",
- "crunchy",
+ "crunchy 0.2.2",
  "hex",
  "static_assertions",
 ]
@@ -4396,6 +4412,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_history"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash.git#d50bb12a97da768dc8f3ee39b81f84262103e6eb"
+dependencies = [
+ "bigint",
+ "blake2b_simd",
+ "byteorder",
+]
+
+[[package]]
 name = "zcash_script"
 version = "0.1.6-alpha.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4413,6 +4439,7 @@ version = "1.0.0-alpha.10"
 dependencies = [
  "aes",
  "bech32",
+ "bigint",
  "bincode",
  "bitflags",
  "bitvec 0.17.4",
@@ -4452,6 +4479,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "x25519-dalek",
+ "zcash_history",
  "zebra-test",
 ]
 
