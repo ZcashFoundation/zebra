@@ -461,7 +461,7 @@ The reference section contains in-depth information about concurrency in Zebra:
 - [Awaiting Multiple Futures](#awaiting-multiple-futures)
   - [Unbiased Selection](#unbiased-selection)
   - [Biased Selection](#biased-selection)
-- [Using Atomics](#using-atomics)
+- [Replacing Atomics with Channels](#replacing-atomics)
 - [Testing Async Code](#testing-async-code)
 - [Monitoring Async Code](#monitoring-async-code)
 
@@ -618,33 +618,48 @@ mapping all arguments to the same type.)
 The `futures::select` `Either` return type is complex, particularly when nested. This
 makes code hard to read and maintain. Map the `Either` to a custom enum.
 
-## Using Atomics
+## Replacing Atomics with Channels
+[replacing-atomics]: #replacing-atomics
 [using-atomics]: #using-atomics
 
-If you're considering using atomics, prefer:
-1. a safe, tested abstraction, like tokio's [watch](https://docs.rs/tokio/*/tokio/sync/watch/index.html) or [oneshot](https://docs.rs/tokio/*/tokio/sync/oneshot/index.html) channels
-2. using the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
-3. using a weaker memory ordering, with:
-  - a correctness comment,
-  - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), ideally on x86 and ARM, and
-  - benchmarks to prove that the low-level code is faster.
+If you're considering using atomics, prefer a safe, tested, portable abstraction,
+like tokio's [watch](https://docs.rs/tokio/*/tokio/sync/watch/index.html) or
+[oneshot](https://docs.rs/tokio/*/tokio/sync/oneshot/index.html) channels.
 
 In Zebra, we try to use safe abstractions, and write obviously correct code. It takes
 a lot of effort to write, test, and maintain low-level code. Almost all of our
 performance-critical code is in cryptographic libraries. And our biggest performance
 gains from those libraries come from async batch cryptography.
 
-### Atomic Details
+We are [gradually replacing atomics with channels](https://github.com/ZcashFoundation/zebra/issues/2268)
+in Zebra.
+
+### Atomic Risks
+[atomic-risks]: #atomic-risks
 [atomic-details]: #atomic-details
 
-x86 processors [guarantee strong orderings, even for `Relaxed` accesses](https://stackoverflow.com/questions/10537810/memory-ordering-restrictions-on-x86-architecture#18512212).
-Since Zebra's CI all runs on x86 (as of June 2021), our tests get `AcqRel` orderings, even when we specify `Relaxed`.
-But ARM processors like the Apple M1 [implement weaker memory orderings, including genuinely `Relaxed` access](https://stackoverflow.com/questions/59089084/loads-and-stores-reordering-on-arm#59089757).
-For more details, see the [hardware reordering](https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering)
+Some atomic sizes and atomic operations [are not available on some platforms](https://doc.rust-lang.org/std/sync/atomic/#portability).
+Others come with a performance penalty on some platforms.
+
+It's also easy to use a memory ordering that's too weak. Future code changes might require
+a stronger memory ordering. But it's hard to test for these kinds of memory ordering bugs. 
+
+Some memory ordering bugs can only be discovered on non-x86 platforms. And when they do occur,
+they can be rare. x86 processors [guarantee strong orderings, even for `Relaxed` accesses](https://stackoverflow.com/questions/10537810/memory-ordering-restrictions-on-x86-architecture#18512212).
+Since Zebra's CI all runs on x86 (as of June 2021), our tests get `AcqRel` orderings, even
+when we specify `Relaxed`. But ARM processors like the Apple M1
+[implement weaker memory orderings, including genuinely `Relaxed` access](https://stackoverflow.com/questions/59089084/loads-and-stores-reordering-on-arm#59089757). For more details, see the [hardware reordering](https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering)
 section of the Rust nomicon.
+ 
+But if a Zebra feature requires atomics:
+1. use an `AtomicUsize` with the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
+2. use a weaker memory ordering, with:
+  - a correctness comment,
+  - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), on x86 and ARM, and
+  - benchmarks to prove that the low-level code is faster.
 
 Tokio's watch channel [uses `SeqCst` for reads and writes](https://docs.rs/tokio/1.6.1/src/tokio/sync/watch.rs.html#286)
-to its internal atomics. So unless we're very sure, Zebra should do the same.
+to its internal "version" atomic. So Zebra should do the same.
 
 ## Testing Async Code
 [testing-async-code]: #testing-async-code
