@@ -19,11 +19,14 @@ proptest! {
         let invalid_bits_mask = !orchard::Flags::all().bits();
         match orchard::Flags::from_bits(flags) {
             Some(valid_flags) => {
-                prop_assert_eq!(maybe_deserialized, Ok(valid_flags));
+                prop_assert_eq!(maybe_deserialized.ok(), Some(valid_flags));
                 prop_assert_eq!(flags & invalid_bits_mask, 0);
             }
             None => {
-                prop_assert_eq!(maybe_deserialized, Err(SerializationError::Parse("invalid orchard flags")));
+                prop_assert_eq!(
+                    maybe_deserialized.err().unwrap().to_string(),
+                    "parse error: invalid orchard flags"
+                );
                 prop_assert_ne!(flags & invalid_bits_mask, 0);
             }
         }
