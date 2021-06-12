@@ -1,9 +1,10 @@
 use proptest::prelude::*;
 use std::io::Cursor;
 
-use crate::orchard;
-
-use crate::serialization::{ZcashDeserializeInto, ZcashSerialize};
+use crate::{
+    orchard,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+};
 
 proptest! {
     #[test]
