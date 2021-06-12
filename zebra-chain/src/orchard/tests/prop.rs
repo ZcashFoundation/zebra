@@ -1,7 +1,7 @@
 use proptest::prelude::*;
 use std::io::Cursor;
 
-use super::super::super::*;
+use crate::orchard;
 
 use crate::serialization::{ZcashDeserializeInto, ZcashSerialize};
 
