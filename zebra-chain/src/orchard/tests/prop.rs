@@ -16,28 +16,16 @@ proptest! {
         serialized.set_position(0);
         let maybe_deserialized = (&mut serialized).zcash_deserialize_into();
 
-        let mut error_catch = String::new();
-        let maybe_deserialized: Option<orchard::Flags> = match maybe_deserialized {
-            Ok(deserialized) => Some(deserialized),
-            Err(e) => {
-                error_catch = e.to_string();
-                None
-            },
-        };
-
-        let binary_repr = format!("{:b}", flags);
-        if maybe_deserialized.is_some() {
-            let flag = maybe_deserialized.unwrap();
-            prop_assert!(binary_repr.len() <= 2);
-            prop_assert!(
-                flag == orchard::Flags::empty()
-                || flag == orchard::Flags::ENABLE_SPENDS
-                || flag == orchard::Flags::ENABLE_OUTPUTS
-                || flag == orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS);
-        }
-        else {
-            prop_assert!(binary_repr.len() > 2);
-            prop_assert_eq!(error_catch, "parse error: invalid orchard flags");
+        let invalid_bits_mask = !orchard::Flags::all().bits();
+        match orchard::Flags::from_bits(flags) {
+            Some(valid_flags) => {
+                prop_assert_eq!(maybe_deserialized, Ok(valid_flags));
+                prop_assert_eq!(flags & invalid_bits_mask, 0);
+            }
+            None => {
+                prop_assert_eq!(maybe_deserialized, Err(SerializationError::Parse("invalid orchard flags")));
+                prop_assert_ne!(flags & invalid_bits_mask, 0);
+            }
         }
     }
 }
