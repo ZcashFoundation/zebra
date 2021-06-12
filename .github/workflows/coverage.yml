@@ -20,7 +20,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rs/toolchain@v1.0.7
         with:
           toolchain: nightly
           override: true
@@ -30,28 +30,15 @@ jobs:
       - name: Install rustfilt symbol demangler
         run: |
           cargo install rustfilt
-      - name: Rerun tests for coverage
-        env:
-          RUSTFLAGS: -Zinstrument-coverage -C link-dead-code -C debuginfo=2
-          LLVM_PROFILE_FILE: "${{ github.workspace }}/test.%p.profraw"
-          ZEBRA_SKIP_NETWORK_TESTS: 1
-          CARGO_INCREMENTAL: 0
-        run: |
-          cargo test
-          cargo test --no-run --message-format=json | jq -r "select(.profile.test == true) | .filenames[]" | grep -v dSYM - > filenames.txt
-      - name: Merge coverage data
-        run: |
-          $(rustc --print target-libdir)/../bin/llvm-profdata merge test.*.profraw -o test.profdata
-      - name: Generate detailed html coverage report for github artifact
-        run: |
-          $(rustc --print target-libdir)/../bin/llvm-cov show -format=html -ignore-filename-regex=".*/.cargo/registry/.*" -ignore-filename-regex=".*/.cargo/git/.*" -ignore-filename-regex=".*/.rustup/.*" -Xdemangler=rustfilt -show-instantiations -output-dir=./coverage -instr-profile=./test.profdata $(printf -- "-object %s " $(cat filenames.txt))
-      - uses: actions/upload-artifact@v2
-        with:
-          name: coverage
-          path: ./coverage
 
-      - name: Generate lcov coverage report for codecov
+      - name: Install cargo-llvm-cov cargo command
         run: |
-          $(rustc --print target-libdir)/../bin/llvm-cov export -format=lcov -instr-profile=test.profdata $(printf -- "-object %s " $(cat filenames.txt)) > "lcov.info"
+          cargo install cargo-llvm-cov --version 0.1.0-alpha.3
+
+      - name: Generate code coverage
+        env:
+          ZEBRA_SKIP_NETWORK_TESTS: 1
+        run: cargo llvm-cov --lcov > lcov.info
+
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v1.5.2
