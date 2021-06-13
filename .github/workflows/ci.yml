@@ -27,40 +27,50 @@ jobs:
       - uses: actions/checkout@v2.3.4
         with:
           persist-credentials: false
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
           profile: minimal
           override: true
+
+      - uses: Swatinem/rust-cache@v1
+
       - name: cargo fetch
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fetch
+
       - name: Install LLVM on Windows
         if: matrix.os == 'windows-latest'
         run: |
           choco install llvm -y
           echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Skip network tests on Ubuntu
         # Ubuntu runners don't have network or DNS configured during test steps
         if: matrix.os == 'ubuntu-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+
       - name: Skip network tests on Windows
         # Windows runners have an unreliable network
         if: matrix.os == 'windows-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+
       - name: Run tests
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
           args: --verbose --all
       # Explicitly run any tests that are usually #[ignored]
+
       - name: Run zebrad large sync tests
         # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
         if: matrix.os == 'macOS-latest'
@@ -85,20 +95,26 @@ jobs:
       - uses: actions/checkout@v2.3.4
         with:
           persist-credentials: false
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
           profile: minimal
           override: true
+
+      - uses: Swatinem/rust-cache@v1
+
       - name: cargo fetch
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fetch
+
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+
       - name: Run build without features enabled
         working-directory: ./zebra-chain
         run: cargo build --verbose --no-default-features
@@ -116,20 +132,26 @@ jobs:
       - uses: actions/checkout@v2.3.4
         with:
           persist-credentials: false
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
           override: true
+
+      - uses: Swatinem/rust-cache@v1
+
       - name: cargo fetch
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fetch
+
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+
       - name: Build
         uses: actions-rs/cargo@v1.0.3
         with:
@@ -148,16 +170,21 @@ jobs:
       - uses: actions/checkout@v2.3.4
         with:
           persist-credentials: false
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           components: clippy
           override: true
+
+      - uses: Swatinem/rust-cache@v1
+
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+
       - name: Run clippy
         uses: actions-rs/clippy-check@v1.0.7
         with:
@@ -178,17 +205,22 @@ jobs:
       - uses: actions/checkout@v2.3.4
         with:
           persist-credentials: false
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           components: rustfmt
           override: true
-      - run: rustup component add rustfmt
+      #- run: rustup component add rustfmt
+
+      - uses: Swatinem/rust-cache@v1
+
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: fmt
