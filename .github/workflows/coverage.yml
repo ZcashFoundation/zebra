@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  manual_dispatch:
   pull_request:
     branches:
       - main
@@ -26,6 +27,8 @@ jobs:
           override: true
           profile: minimal
           components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v1
 
       - name: Install rustfilt symbol demangler
         run: |
