@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures::FutureExt;
 use proptest::{collection::vec, prelude::*};
 use tokio::{
     runtime::Runtime,
@@ -41,6 +42,34 @@ proptest! {
 
         for peer in validated_peers {
             prop_assert![peer.get_last_seen() <= last_seen_limit];
+        }
+    }
+
+    /// Test that the outbound peer connection rate limit is only applied when
+    /// a peer address is actually returned.
+    ///
+    /// TODO: after PR #2275 merges, add a similar proptest,
+    ///       using a "not ready for attempt" peer generation strategy
+    #[test]
+    fn skipping_outbound_peer_connection_skips_rate_limit(next_peer_attempts in 0..TEST_ADDRESSES) {
+        zebra_test::init();
+
+        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let _guard = runtime.enter();
+
+        let peer_service = tower::service_fn(|_| async {
+            unreachable!("Mock peer service is never used");
+        });
+
+        // Since the address book is empty, there won't be any available peers
+        let address_book = AddressBook::new(&Config::default(), Span::none());
+
+        let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+
+        // Make sure that the rate-limit is never triggered, even after multiple calls
+        for _ in 0..next_peer_attempts {
+            // An empty address book immediately returns "no next peer"
+            assert!(matches!(candidate_set.next().now_or_never(), Some(None)));
         }
     }
 }
