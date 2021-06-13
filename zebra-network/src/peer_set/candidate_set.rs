@@ -1,7 +1,7 @@
 use std::{cmp::min, mem, sync::Arc, time::Duration};
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::time::{sleep, sleep_until, timeout, Instant, Sleep};
+use tokio::time::{sleep, timeout, Instant, Sleep};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::serialization::DateTime32;
@@ -312,11 +312,10 @@ where
             reconnect
         };
 
-        // SECURITY: rate-limit new candidate connections
-        let current_deadline = self.wait_next_handshake.deadline().max(Instant::now());
-        let mut sleep = sleep_until(current_deadline + constants::MIN_PEER_CONNECTION_INTERVAL);
+        // SECURITY: rate-limit new outbound peer connections
+        (&mut self.wait_next_handshake).await;
+        let mut sleep = sleep(constants::MIN_PEER_CONNECTION_INTERVAL);
         mem::swap(&mut self.wait_next_handshake, &mut sleep);
-        sleep.await;
 
         Some(reconnect)
     }
