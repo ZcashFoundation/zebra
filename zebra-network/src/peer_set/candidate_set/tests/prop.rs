@@ -90,7 +90,7 @@ proptest! {
     /// Test that new outbound peer connections are rate-limited.
     #[test]
     fn new_outbound_peer_connections_are_rate_limited(
-        peers in vec(MetaAddr::alternate_node_strategy(), TEST_ADDRESSES),
+        peers in vec(MetaAddr::ready_outbound_strategy(), TEST_ADDRESSES),
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {
