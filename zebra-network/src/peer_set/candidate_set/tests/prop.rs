@@ -119,9 +119,11 @@ proptest! {
         };
 
         // Allow enough time for the maximum number of candidates,
-        // plus some extra time for test machines with high CPU load
-        let max_sleep = 3 * MAX_TEST_CANDIDATES * MIN_PEER_CONNECTION_INTERVAL + 2 * MAX_SLEEP_EXTRA_DELAY;
-        assert!(runtime.block_on(timeout(max_sleep, checks)).is_ok());
+        // plus some extra time for test machines with high CPU load.
+        // (The max delay asserts usually fail before hitting this timeout.)
+        let max_rate_limit_sleep = 3 * MAX_TEST_CANDIDATES * MIN_PEER_CONNECTION_INTERVAL;
+        let max_extra_delay = (2 * MAX_TEST_CANDIDATES + 1) * MAX_SLEEP_EXTRA_DELAY;
+        assert!(runtime.block_on(timeout(max_rate_limit_sleep + max_extra_delay, checks)).is_ok());
     }
 }
 
@@ -138,16 +140,32 @@ where
     S: tower::Service<Request, Response = Response, Error = BoxError>,
     S::Future: Send + 'static,
 {
-    let mut minimum_reconnect_instant = Instant::now();
+    let mut now = Instant::now();
+    let mut minimum_reconnect_instant = now;
     // Allow extra time for test machines with high CPU load
-    let mut maximum_reconnect_instant = Instant::now() + MAX_SLEEP_EXTRA_DELAY;
+    let mut maximum_reconnect_instant = now + MAX_SLEEP_EXTRA_DELAY;
 
     for _ in 0..candidates {
-        assert!(candidate_set.next().await.is_some());
-        assert!(Instant::now() >= minimum_reconnect_instant);
-        assert!(Instant::now() <= maximum_reconnect_instant);
+        assert!(
+            candidate_set.next().await.is_some(),
+            "there are enough available candidates"
+        );
 
-        minimum_reconnect_instant += MIN_PEER_CONNECTION_INTERVAL;
-        maximum_reconnect_instant += MIN_PEER_CONNECTION_INTERVAL;
+        now = Instant::now();
+        assert!(
+            now >= minimum_reconnect_instant,
+            "all candidates should obey the minimum rate-limit: now: {:?} min: {:?}",
+            now,
+            minimum_reconnect_instant,
+        );
+        assert!(
+            now <= maximum_reconnect_instant,
+            "rate-limited candidates should not be delayed too long: now: {:?} max: {:?}. Hint: is the test machine overloaded?",
+            now,
+            maximum_reconnect_instant,
+        );
+
+        minimum_reconnect_instant = now + MIN_PEER_CONNECTION_INTERVAL;
+        maximum_reconnect_instant = now + MIN_PEER_CONNECTION_INTERVAL + MAX_SLEEP_EXTRA_DELAY;
     }
 }
