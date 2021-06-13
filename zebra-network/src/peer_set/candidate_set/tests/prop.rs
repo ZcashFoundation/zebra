@@ -29,6 +29,11 @@ const TEST_ADDRESSES: usize = 2 * MAX_TEST_CANDIDATES as usize;
 /// The default number of proptest cases for each test that includes sleeps.
 const DEFAULT_SLEEP_TEST_PROPTEST_CASES: u32 = 16;
 
+/// The largest extra delay we allow after every test sleep.
+///
+/// This makes the tests more reliable on machines with high CPU load.
+const MAX_SLEEP_EXTRA_DELAY: Duration = Duration::from_secs(1);
+
 proptest! {
     /// Test that validated gossiped peers never have a `last_seen` time that's in the future.
     #[test]
@@ -115,8 +120,8 @@ proptest! {
 
         // Allow enough time for the maximum number of candidates,
         // plus some extra time for test machines with high CPU load
-        let max_sleep = 3 * MAX_TEST_CANDIDATES * MIN_PEER_CONNECTION_INTERVAL;
-        assert!(runtime.block_on(timeout(max_sleep + Duration::from_secs(5), checks)).is_ok());
+        let max_sleep = 3 * MAX_TEST_CANDIDATES * MIN_PEER_CONNECTION_INTERVAL + 2 * MAX_SLEEP_EXTRA_DELAY;
+        assert!(runtime.block_on(timeout(max_sleep, checks)).is_ok());
     }
 }
 
@@ -134,10 +139,8 @@ where
     S::Future: Send + 'static,
 {
     let mut minimum_reconnect_instant = Instant::now();
-    // Allow any delay within a peer connection interval of the minimum.
-    // This allows a small amount of extra time for test machines with high CPU load.
-    // Note: the maximum time check might still be unreliable on loaded VMs
-    let mut maximum_reconnect_instant = Instant::now() + MIN_PEER_CONNECTION_INTERVAL;
+    // Allow extra time for test machines with high CPU load
+    let mut maximum_reconnect_instant = Instant::now() + MAX_SLEEP_EXTRA_DELAY;
 
     for _ in 0..candidates {
         assert!(candidate_set.next().await.is_some());
