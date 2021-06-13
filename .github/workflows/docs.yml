@@ -28,7 +28,7 @@ jobs:
     - name: Install mdbook
       run: |
         cd book
-        curl -L https://github.com/rust-lang/mdBook/releases/download/v0.4.5/mdbook-v0.4.5-x86_64-unknown-linux-gnu.tar.gz | tar xz
+        curl -L https://github.com/rust-lang/mdBook/releases/download/v0.4.10/mdbook-v0.4.10-x86_64-unknown-linux-gnu.tar.gz | tar xz
         # Add the book directory to the $PATH
         echo "$GITHUB_WORKSPACE/book" >> $GITHUB_PATH
     
