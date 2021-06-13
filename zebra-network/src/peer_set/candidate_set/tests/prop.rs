@@ -1,4 +1,5 @@
 use std::{
+    env,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -18,11 +19,20 @@ use crate::{
     Request, Response,
 };
 
+/// The maximum number of candidates for a "next peer" test.
+const MAX_TEST_CANDIDATES: u32 = 4;
+
+/// The number of random test addresses for each test.
+const TEST_ADDRESSES: usize = 2 * MAX_TEST_CANDIDATES as usize;
+
+/// The default number of proptest cases for each test that includes sleeps.
+const DEFAULT_SLEEP_TEST_PROPTEST_CASES: u32 = 16;
+
 proptest! {
     /// Test that validated gossiped peers never have a `last_seen` time that's in the future.
     #[test]
     fn no_last_seen_times_are_in_the_future(
-        gossiped_peers in vec(MetaAddr::gossiped_strategy(), 1..10),
+        gossiped_peers in vec(MetaAddr::gossiped_strategy(), 1..TEST_ADDRESSES),
         last_seen_limit in any::<DateTime32>(),
     ) {
         zebra_test::init();
@@ -35,11 +45,13 @@ proptest! {
     }
 }
 
-const MAX_TEST_CANDIDATES: u32 = 4;
-const TEST_ADDRESSES: usize = 2 * MAX_TEST_CANDIDATES as usize;
-
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(16))]
+    // These tests contain sleeps, so we use a small number of cases by default.
+    // Set the PROPTEST_CASES env var to override this default.
+    #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+                                          .ok()
+                                          .and_then(|v| v.parse().ok())
+                                          .unwrap_or(DEFAULT_SLEEP_TEST_PROPTEST_CASES)))]
 
     /// Test that new outbound peer connections are rate-limited.
     #[test]
