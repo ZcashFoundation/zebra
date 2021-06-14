@@ -38,6 +38,7 @@ jobs:
       - name: Generate code coverage
         env:
           ZEBRA_SKIP_NETWORK_TESTS: 1
+          CARGO_INCREMENTAL: 0
         run: cargo llvm-cov --lcov > lcov.info
 
       - name: Upload coverage report to Codecov
