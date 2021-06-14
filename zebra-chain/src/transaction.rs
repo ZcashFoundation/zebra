@@ -151,6 +151,14 @@ impl Transaction {
 
     // header
 
+    /// Return if the `fOverwintered` flag of this transaction is set.
+    pub fn is_overwintered(&self) -> bool {
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } => false,
+            Transaction::V3 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => true,
+        }
+    }
+
     /// Return the version of this transaction.
     pub fn version(&self) -> u32 {
         match self {
