@@ -6,8 +6,13 @@ use std::{
 
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
-    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
-    transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
+    block::{self, ChainHistoryMmrRootHash},
+    orchard,
+    primitives::Groth16Proof,
+    sapling, sprout, transaction,
+    transaction::Transaction::*,
+    transparent,
+    work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{PreparedBlock, Utxo};
@@ -27,6 +32,7 @@ pub struct Chain {
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
+    // TODO: MMR tree
 }
 
 impl Chain {
@@ -117,6 +123,10 @@ impl Chain {
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
+
+    pub fn mmr_hash(&self) -> ChainHistoryMmrRootHash {
+        todo!("get MMR hash from the MMR tree");
+    }
 }
 
 /// Helper trait to organize inverse operations done on the `Chain` type. Used to
@@ -159,6 +169,8 @@ impl UpdateWith<PreparedBlock> for Chain {
             .to_work()
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
+
+        // TODO: add block data to MMR tree
 
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
@@ -240,6 +252,10 @@ impl UpdateWith<PreparedBlock> for Chain {
             .to_work()
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
+
+        // TODO: remove block data from MMR tree
+        // In order to do that, we need to load some "extra" nodes (blocks) from the
+        // state (see zcash_history and librustzcash). How to do that here?
 
         // for each transaction in block
         for (transaction, transaction_hash) in

@@ -4,7 +4,7 @@ use std::borrow::Borrow;
 
 use chrono::Duration;
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, ChainHistoryMmrRootHash},
     parameters::POW_AVERAGING_WINDOW,
     parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
@@ -84,6 +84,41 @@ where
 
     // TODO: other contextual validation design and implementation
     Ok(())
+}
+
+#[tracing::instrument(
+    name = "contextual_validation_for_chain",
+    fields(?network),
+    skip(prepared, network)
+)]
+pub(crate) fn block_is_contextually_valid_for_chain(
+    prepared: &PreparedBlock,
+    network: Network,
+    mmr_hash: &ChainHistoryMmrRootHash,
+) -> Result<(), ValidateContextError> {
+    match prepared
+        .block
+        .commitment(network)
+        .expect("should have commitment (TODO: confirm)")
+    {
+        block::Commitment::PreSaplingReserved(_) => todo!("Confirm where this is being checked"),
+        block::Commitment::FinalSaplingRoot(_) => todo!("Confirm where this is being checked"),
+        block::Commitment::ChainHistoryActivationReserved => {
+            todo!("Confirm where this is being checked")
+        }
+        block::Commitment::ChainHistoryRoot(block_mmr_hash) => {
+            if block_mmr_hash == *mmr_hash {
+                Ok(())
+            } else {
+                Err(ValidateContextError::InvalidHistoryCommitment {})
+            }
+        }
+        block::Commitment::ChainHistoryBlockTxAuthCommitment(_) => {
+            // TODO: Get auth_hash from block (ZIP-244), e.g.
+            // let auth_hash = prepared.block.auth_hash();
+            todo!("hash mmr_hash and auth_hash per ZIP-244 and compare")
+        }
+    }
 }
 
 /// Returns `ValidateContextError::OrphanedBlock` if the height of the given

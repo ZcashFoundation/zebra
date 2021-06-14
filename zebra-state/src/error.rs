@@ -74,4 +74,10 @@ pub enum ValidateContextError {
         difficulty_threshold: CompactDifficulty,
         expected_difficulty: CompactDifficulty,
     },
+
+    #[error("block has the wrong history commitment")]
+    #[non_exhaustive]
+    InvalidHistoryCommitment {
+        // TODO: add commitments?
+    },
 }

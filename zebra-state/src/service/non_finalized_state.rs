@@ -21,9 +21,11 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo};
+use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo, ValidateContextError};
 
 use self::chain::Chain;
+
+use super::check;
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Default)]
@@ -76,7 +78,7 @@ impl NonFinalizedState {
     }
 
     /// Commit block to the non-finalized state.
-    pub fn commit_block(&mut self, prepared: PreparedBlock) {
+    pub fn commit_block(&mut self, prepared: PreparedBlock) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -97,19 +99,31 @@ impl NonFinalizedState {
             })
             .expect("commit_block is only called with blocks that are ready to be commited");
 
+        check::block_is_contextually_valid_for_chain(
+            &prepared,
+            self.network,
+            &parent_chain.mmr_hash(),
+        )?;
         parent_chain.push(prepared);
         self.chain_set.insert(parent_chain);
         self.update_metrics_for_committed_block(height, hash);
+        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
-    pub fn commit_new_chain(&mut self, prepared: PreparedBlock) {
+    pub fn commit_new_chain(
+        &mut self,
+        prepared: PreparedBlock,
+    ) -> Result<(), ValidateContextError> {
+        // TODO: will need to pass the MMR tree of the finalized tip to the newly built chain. How?
         let mut chain = Chain::default();
         let (height, hash) = (prepared.height, prepared.hash);
+        check::block_is_contextually_valid_for_chain(&prepared, self.network, &chain.mmr_hash())?;
         chain.push(prepared);
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
+        Ok(())
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
