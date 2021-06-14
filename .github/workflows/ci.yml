@@ -161,6 +161,8 @@ jobs:
       - name: Run clippy
         uses: actions-rs/clippy-check@v1.0.7
         with:
+          # GitHub displays the clippy job and its results as separate entries
+          name: ${{ jobs.clippy.name }} Results
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --all-targets -- -D warnings
 
