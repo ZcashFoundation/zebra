@@ -151,6 +151,17 @@ impl Transaction {
 
     // header
 
+    /// Return the version of this transaction.
+    pub fn version(&self) -> u32 {
+        match self {
+            Transaction::V1 { .. } => 1,
+            Transaction::V2 { .. } => 2,
+            Transaction::V3 { .. } => 3,
+            Transaction::V4 { .. } => 4,
+            Transaction::V5 { .. } => 5,
+        }
+    }
+
     /// Get this transaction's lock time.
     pub fn lock_time(&self) -> LockTime {
         match self {
