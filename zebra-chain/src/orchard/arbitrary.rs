@@ -1,6 +1,6 @@
 use group::prime::PrimeCurveAffine;
 use halo2::pasta::pallas;
-use proptest::{arbitrary::any, array, prelude::*};
+use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKeyBytes};
 
@@ -41,9 +41,11 @@ impl Arbitrary for note::Nullifier {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use halo2::arithmetic::FieldExt;
 
-        (any::<u64>())
-            .prop_map(|number| {
-                Self::try_from(pallas::Scalar::from_u64(number).to_bytes())
+        (vec(any::<u8>(), 64))
+            .prop_map(|bytes| {
+                let mut b = [0u8; 64];
+                b.copy_from_slice(bytes.as_slice());
+                Self::try_from(pallas::Scalar::from_bytes_wide(&b).to_bytes())
                     .expect("a valid generated nullifier")
             })
             .boxed()
