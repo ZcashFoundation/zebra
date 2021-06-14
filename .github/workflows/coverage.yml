@@ -33,7 +33,7 @@ jobs:
 
       - name: Install cargo-llvm-cov cargo command
         run: |
-          cargo install cargo-llvm-cov --version 0.1.0-alpha
+          cargo install cargo-llvm-cov --version 0.1.0-alpha.4
 
       - name: Generate code coverage
         env:
