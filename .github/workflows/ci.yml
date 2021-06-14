@@ -211,7 +211,6 @@ jobs:
           toolchain: stable
           components: rustfmt
           override: true
-      #- run: rustup component add rustfmt
 
       - uses: Swatinem/rust-cache@v1
 
