@@ -569,6 +569,9 @@ impl MetaAddrChange {
             NewGossiped { .. } => None,
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
+            // Attempt changes are applied before we start the handshake to the
+            // peer address. So the attempt time is a lower bound for the actual
+            // handshake time.
             UpdateAttempt { .. } => Some(Instant::now()),
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,
@@ -582,6 +585,11 @@ impl MetaAddrChange {
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
             UpdateAttempt { .. } => None,
+            // If there is a large delay applying this change, then:
+            // - the peer might stay in the `AttemptPending` state for longer,
+            // - we might send outdated last seen times to our peers, and
+            // - the peer will appear to be live for longer, delaying future
+            //   reconnection attempts.
             UpdateResponded { .. } => Some(DateTime32::now()),
             UpdateFailed { .. } => None,
         }
@@ -595,6 +603,11 @@ impl MetaAddrChange {
             NewLocal { .. } => None,
             UpdateAttempt { .. } => None,
             UpdateResponded { .. } => None,
+            // If there is a large delay applying this change, then:
+            // - the peer might stay in the `AttemptPending` or `Responded`
+            //   states for longer, and
+            // - the peer will appear to be used for longer, delaying future
+            //   reconnection attempts.
             UpdateFailed { .. } => Some(Instant::now()),
         }
     }
@@ -604,7 +617,7 @@ impl MetaAddrChange {
         match self {
             NewGossiped { .. } => NeverAttemptedGossiped,
             NewAlternate { .. } => NeverAttemptedAlternate,
-            // local listeners get sanitized, so the exact value doesn't matter
+            // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
             UpdateResponded { .. } => Responded,
