@@ -7,8 +7,8 @@ use crate::{
 };
 
 proptest! {
+    /// Make sure only valid flags deserialize
     #[test]
-    // Make sure only valid flags deserialize
     fn flags_roundtrip(flags in any::<u8>()) {
 
         let mut serialized = Cursor::new(Vec::new());
@@ -26,7 +26,7 @@ proptest! {
             None => {
                 prop_assert_eq!(
                     maybe_deserialized.err().unwrap().to_string(),
-                    "parse error: invalid orchard flags"
+                    "parse error: invalid reserved orchard flags"
                 );
                 prop_assert_ne!(flags & invalid_bits_mask, 0);
             }

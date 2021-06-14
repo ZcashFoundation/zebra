@@ -133,6 +133,14 @@ bitflags! {
     ///
     /// The spend and output flags are passed to the `Halo2Proof` verifier, which verifies
     /// the relevant note spending and creation consensus rules.
+    ///
+    /// Consensus rules:
+    ///
+    /// - "In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard field MUST be zero."
+    /// ([`bitflags`](https://docs.rs/bitflags/1.2.1/bitflags/index.html) restricts its values to the
+    /// set of valid flags)
+    /// - "In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0."
+    /// (Checked in zebra-consensus)
     #[derive(Deserialize, Serialize)]
     pub struct Flags: u8 {
         /// Enable spending non-zero valued Orchard notes.
@@ -141,7 +149,6 @@ bitflags! {
         const ENABLE_SPENDS = 0b00000001;
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
-        // Reserved, zeros (bits 2 .. 7)
     }
 }
 
@@ -155,12 +162,10 @@ impl ZcashSerialize for Flags {
 
 impl ZcashDeserialize for Flags {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // Consensus rule: In a version 5 transaction,
-        // the reserved bits 2..7 of the flagsOrchard field MUST be zero.
+        // Consensus rule: "In a version 5 transaction,
+        // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-        match Flags::from_bits(reader.read_u8()?) {
-            Some(flags) => Ok(flags),
-            None => Err(SerializationError::Parse("invalid orchard flags")),
-        }
+        Flags::from_bits(reader.read_u8()?)
+            .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
     }
 }
