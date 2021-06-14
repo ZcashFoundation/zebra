@@ -9,7 +9,7 @@ use crate::{
 proptest! {
     /// Make sure only valid flags deserialize
     #[test]
-    fn flags_roundtrip(flags in any::<u8>()) {
+    fn flag_roundtrip_bytes(flags in any::<u8>()) {
 
         let mut serialized = Cursor::new(Vec::new());
         flags.zcash_serialize(&mut serialized)?;
