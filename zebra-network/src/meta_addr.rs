@@ -296,7 +296,7 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::UpdateConnectionAttempt`] for a peer that we
+    /// Returns a [`MetaAddrChange::UpdateAttempt`] for a peer that we
     /// want to make an outbound connection to.
     pub fn new_reconnect(addr: &SocketAddr) -> MetaAddrChange {
         UpdateAttempt { addr: *addr }
@@ -311,7 +311,7 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::NewLocalListener`] for our own listener address.
+    /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
     pub fn new_local_listener(addr: &SocketAddr) -> MetaAddrChange {
         NewLocal { addr: *addr }
     }
