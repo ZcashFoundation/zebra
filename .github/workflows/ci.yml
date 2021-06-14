@@ -161,7 +161,6 @@ jobs:
       - name: Run clippy
         uses: actions-rs/clippy-check@v1.0.7
         with:
-          name: Clippy (stable)
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --all-targets -- -D warnings
 
