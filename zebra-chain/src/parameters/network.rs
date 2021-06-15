@@ -1,5 +1,7 @@
 use std::{convert::From, fmt};
 
+use crate::{block::Height, parameters::NetworkUpgrade::Canopy};
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
@@ -41,6 +43,14 @@ impl Network {
             Network::Mainnet => 8233,
             Network::Testnet => 18233,
         }
+    }
+
+    /// Get the minimum mandatory checkpoint for this network.
+    pub fn mandatory_checkpoint_height(&self) -> Height {
+        // Currently this is Canopy for both networks.
+        Canopy
+            .activation_height(*self)
+            .expect("Canopy activation height must be present for both networks")
     }
 }
 
