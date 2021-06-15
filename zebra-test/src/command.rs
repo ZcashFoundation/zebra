@@ -10,7 +10,7 @@ use tracing::instrument;
 use std::os::unix::process::ExitStatusExt;
 use std::{
     convert::Infallible as NoDir,
-    fmt::Write as _,
+    fmt::{self, Write as _},
     io::BufRead,
     io::{BufReader, Lines, Read},
     path::Path,
@@ -194,7 +194,7 @@ impl<T> TestChild<T> {
         })
     }
 
-    /// Set a timeout for `expect_stdout` or `expect_stderr`.
+    /// Set a timeout for `expect_stdout_line_matches` or `expect_stderr_line_matches`.
     ///
     /// Does not apply to `wait_with_output`.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -215,7 +215,7 @@ impl<T> TestChild<T> {
     /// Kills the child after the configured timeout has elapsed.
     /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
-    pub fn expect_stdout(&mut self, regex: &str) -> Result<&mut Self> {
+    pub fn expect_stdout_line_matches(&mut self, regex: &str) -> Result<&mut Self> {
         if self.stdout.is_none() {
             self.stdout = self
                 .child
@@ -228,7 +228,7 @@ impl<T> TestChild<T> {
         let mut lines = self
             .stdout
             .take()
-            .expect("child must capture stdout to call expect_stdout");
+            .expect("child must capture stdout to call expect_stdout_line_matches");
 
         match self.expect_line_matching(&mut lines, regex, "stdout") {
             Ok(()) => {
@@ -245,7 +245,7 @@ impl<T> TestChild<T> {
     /// Kills the child after the configured timeout has elapsed.
     /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
-    pub fn expect_stderr(&mut self, regex: &str) -> Result<&mut Self> {
+    pub fn expect_stderr_line_matches(&mut self, regex: &str) -> Result<&mut Self> {
         if self.stderr.is_none() {
             self.stderr = self
                 .child
@@ -258,7 +258,7 @@ impl<T> TestChild<T> {
         let mut lines = self
             .stderr
             .take()
-            .expect("child must capture stderr to call expect_stderr");
+            .expect("child must capture stderr to call expect_stderr_line_matches");
 
         match self.expect_line_matching(&mut lines, regex, "stderr") {
             Ok(()) => {
@@ -399,94 +399,181 @@ impl<T> TestOutput<T> {
         Ok(self)
     }
 
-    #[instrument(skip(self))]
-    pub fn stdout_contains(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(&self.output.stdout);
+    /// Checks the output of a command, using a closure to determine if the
+    /// output is valid.
+    ///
+    /// If the closure returns `true`, the check returns `Ok(self)`.
+    /// If the closure returns `false`, the check returns an error containing
+    /// `output_name` and `err_msg`, with context from the command.
+    ///
+    /// `output` is typically `self.output.stdout` or `self.output.stderr`.
+    #[instrument(skip(self, output_predicate, output))]
+    pub fn output_check<P>(
+        &self,
+        output_predicate: P,
+        output: &[u8],
+        output_name: impl ToString + fmt::Debug,
+        err_msg: impl ToString + fmt::Debug,
+    ) -> Result<&Self>
+    where
+        P: FnOnce(&str) -> bool,
+    {
+        let output = String::from_utf8_lossy(output);
 
-        for line in stdout.lines() {
-            if re.is_match(line) {
-                return Ok(self);
-            }
-        }
-
-        Err(eyre!(
-            "stdout of command did not contain any matches for the given regex"
-        ))
-        .context_from(self)
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
-    }
-
-    #[instrument(skip(self))]
-    pub fn stdout_equals(&self, s: &str) -> Result<&Self> {
-        let stdout = String::from_utf8_lossy(&self.output.stdout);
-
-        if stdout == s {
-            return Ok(self);
-        }
-
-        Err(eyre!("stdout of command is not equal the given string"))
+        if output_predicate(&output) {
+            Ok(self)
+        } else {
+            Err(eyre!(
+                "{} of command did not {}",
+                output_name.to_string(),
+                err_msg.to_string()
+            ))
             .context_from(self)
-            .with_section(|| format!("{:?}", s).header("Match String:"))
+        }
     }
 
+    /// Checks each line in the output of a command, using a closure to determine
+    /// if the line is valid.
+    ///
+    /// See [`output_check`] for details.
+    #[instrument(skip(self, line_predicate, output))]
+    pub fn any_output_line<P>(
+        &self,
+        mut line_predicate: P,
+        output: &[u8],
+        output_name: impl ToString + fmt::Debug,
+        err_msg: impl ToString + fmt::Debug,
+    ) -> Result<&Self>
+    where
+        P: FnMut(&str) -> bool,
+    {
+        let output_predicate = |stdout: &str| {
+            for line in stdout.lines() {
+                if line_predicate(line) {
+                    return true;
+                }
+            }
+            false
+        };
+
+        self.output_check(
+            output_predicate,
+            output,
+            output_name,
+            format!("have any lines that {}", err_msg.to_string()),
+        )
+    }
+
+    /// Tests if any lines in the output of a command contain `s`.
+    ///
+    /// See [`any_output_line`] for details.
+    #[instrument(skip(self, output))]
+    pub fn any_output_line_contains(
+        &self,
+        s: &str,
+        output: &[u8],
+        output_name: impl ToString + fmt::Debug,
+        err_msg: impl ToString + fmt::Debug,
+    ) -> Result<&Self> {
+        self.any_output_line(
+            |line| line.contains(s),
+            output,
+            output_name,
+            format!("contain {}", err_msg.to_string()),
+        )
+        .with_section(|| format!("{:?}", s).header("Match String:"))
+    }
+
+    /// Tests if standard output contains `s`.
+    #[instrument(skip(self))]
+    pub fn stdout_contains(&self, s: &str) -> Result<&Self> {
+        self.output_check(
+            |stdout| stdout.contains(s),
+            &self.output.stdout,
+            "stdout",
+            "contain the given string",
+        )
+        .with_section(|| format!("{:?}", s).header("Match String:"))
+    }
+
+    /// Tests if standard output matches `regex`.
     #[instrument(skip(self))]
     pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
-        let stdout = String::from_utf8_lossy(&self.output.stdout);
 
-        if re.is_match(&stdout) {
-            return Ok(self);
-        }
-
-        Err(eyre!("stdout of command is not equal to the given regex"))
-            .context_from(self)
-            .with_section(|| format!("{:?}", regex).header("Match Regex:"))
-    }
-
-    #[instrument(skip(self))]
-    pub fn stderr_contains(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
-        let stderr = String::from_utf8_lossy(&self.output.stderr);
-
-        for line in stderr.lines() {
-            if re.is_match(line) {
-                return Ok(self);
-            }
-        }
-
-        Err(eyre!(
-            "stderr of command did not contain any matches for the given regex"
-        ))
-        .context_from(self)
+        self.output_check(
+            |stdout| re.is_match(stdout),
+            &self.output.stdout,
+            "stdout",
+            "matched the given regex",
+        )
         .with_section(|| format!("{:?}", regex).header("Match Regex:"))
     }
 
+    /// Tests if any lines in standard output contain `s`.
     #[instrument(skip(self))]
-    pub fn stderr_equals(&self, s: &str) -> Result<&Self> {
-        let stderr = String::from_utf8_lossy(&self.output.stderr);
-
-        if stderr == s {
-            return Ok(self);
-        }
-
-        Err(eyre!("stderr of command is not equal the given string"))
-            .context_from(self)
-            .with_section(|| format!("{:?}", s).header("Match String:"))
+    pub fn stdout_line_contains(&self, s: &str) -> Result<&Self> {
+        self.any_output_line_contains(s, &self.output.stdout, "stdout", "the given string")
     }
 
+    /// Tests if any lines in standard output match `regex`.
+    #[instrument(skip(self))]
+    pub fn stdout_line_matches(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+
+        self.any_output_line(
+            |line| re.is_match(line),
+            &self.output.stdout,
+            "stdout",
+            "matched the given regex",
+        )
+        .with_section(|| format!("{:?}", regex).header("Line Match Regex:"))
+    }
+
+    /// Tests if standard error contains `s`.
+    #[instrument(skip(self))]
+    pub fn stderr_contains(&self, s: &str) -> Result<&Self> {
+        self.output_check(
+            |stderr| stderr.contains(s),
+            &self.output.stderr,
+            "stderr",
+            "contain the given string",
+        )
+        .with_section(|| format!("{:?}", s).header("Match String:"))
+    }
+
+    /// Tests if standard error matches `regex`.
     #[instrument(skip(self))]
     pub fn stderr_matches(&self, regex: &str) -> Result<&Self> {
         let re = regex::Regex::new(regex)?;
-        let stderr = String::from_utf8_lossy(&self.output.stderr);
 
-        if re.is_match(&stderr) {
-            return Ok(self);
-        }
+        self.output_check(
+            |stderr| re.is_match(stderr),
+            &self.output.stderr,
+            "stderr",
+            "matched the given regex",
+        )
+        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+    }
 
-        Err(eyre!("stderr of command is not equal to the given regex"))
-            .context_from(self)
-            .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+    /// Tests if any lines in standard error contain `s`.
+    #[instrument(skip(self))]
+    pub fn stderr_line_contains(&self, s: &str) -> Result<&Self> {
+        self.any_output_line_contains(s, &self.output.stderr, "stderr", "the given string")
+    }
+
+    /// Tests if any lines in standard error match `regex`.
+    #[instrument(skip(self))]
+    pub fn stderr_line_matches(&self, regex: &str) -> Result<&Self> {
+        let re = regex::Regex::new(regex)?;
+
+        self.any_output_line(
+            |line| re.is_match(line),
+            &self.output.stderr,
+            "stderr",
+            "matched the given regex",
+        )
+        .with_section(|| format!("{:?}", regex).header("Line Match Regex:"))
     }
 
     /// Returns Ok if the program was killed, Err(Report) if exit was by another

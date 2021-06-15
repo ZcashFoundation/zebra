@@ -19,7 +19,7 @@ dependencies = [
  "once_cell",
  "regex",
  "secrecy",
- "semver",
+ "semver 0.9.0",
  "serde",
  "signal-hook",
  "termcolor",
@@ -281,6 +281,16 @@ dependencies = [
  "pairing",
  "rand_core 0.6.2",
  "subtle",
+]
+
+[[package]]
+name = "bigint"
+version = "4.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0e8c8a600052b52482eff2cf4d810e462fdff1f656ac1ecb6232132a1ed7def"
+dependencies = [
+ "byteorder",
+ "crunchy 0.1.6",
 ]
 
 [[package]]
@@ -722,7 +732,7 @@ dependencies = [
  "clap",
  "criterion-plot",
  "csv",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "lazy_static",
  "num-traits",
  "oorandom",
@@ -884,6 +894,12 @@ dependencies = [
  "const_fn",
  "lazy_static",
 ]
+
+[[package]]
+name = "crunchy"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2f4a431c5c9f662e1200b7c7f02c34e91361150e382089a8f2dec3ba680cbda"
 
 [[package]]
 name = "crunchy"
@@ -1785,9 +1801,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37d572918e350e82412fe766d24b15e6682fb2ed2bbe018280caa810397cb319"
+checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
 dependencies = [
  "either",
 ]
@@ -2227,9 +2243,9 @@ checksum = "8d3b63360ec3cb337817c2dbd47ab4a0f170d285d8e5a2064600f3def1402397"
 
 [[package]]
 name = "once_cell"
-version = "1.7.2"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af8b08b04175473088b46763e51ee54da5f9a164bc162f615b91bc179dbf15a3"
+checksum = "692fcb63b64b1758029e0a96ee63e049ce8c5948587f2f7208df04625e5f6b56"
 
 [[package]]
 name = "oorandom"
@@ -2632,7 +2648,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c24fcd450d3fa2b592732565aa4f17a27a61c65ece4726353e000939b0edee34"
 dependencies = [
  "libc",
- "rand_chacha 0.3.0",
+ "rand_chacha 0.3.1",
  "rand_core 0.6.2",
  "rand_hc 0.3.0",
 ]
@@ -2649,9 +2665,9 @@ dependencies = [
 
 [[package]]
 name = "rand_chacha"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e12735cf05c9e10bf21534da50a147b924d555dc7a547c42e6bb2d5b6017ae0d"
+checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.6.2",
@@ -2954,7 +2970,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
- "semver",
+ "semver 0.9.0",
 ]
 
 [[package]]
@@ -3063,6 +3079,12 @@ dependencies = [
  "semver-parser",
  "serde",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f3aac57ee7f3272d8395c6e4f502f434f0e289fcd62876f70daa008c20dcabe"
 
 [[package]]
 name = "semver-parser"
@@ -3938,7 +3960,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e11fe9a9348741cf134085ad57c249508345fe16411b3d7fb4ff2da2f1d6382e"
 dependencies = [
  "byteorder",
- "crunchy",
+ "crunchy 0.2.2",
  "hex",
  "static_assertions",
 ]
@@ -4390,6 +4412,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_history"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash.git#cc533a9da4f6a7209a7be05f82b12a03969152c9"
+dependencies = [
+ "bigint",
+ "blake2b_simd",
+ "byteorder",
+]
+
+[[package]]
 name = "zcash_script"
 version = "0.1.6-alpha.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4407,6 +4439,7 @@ version = "1.0.0-alpha.10"
 dependencies = [
  "aes",
  "bech32",
+ "bigint",
  "bincode",
  "bitflags",
  "bitvec 0.17.4",
@@ -4426,14 +4459,14 @@ dependencies = [
  "group",
  "halo2",
  "hex",
- "itertools 0.10.0",
+ "itertools 0.10.1",
  "jubjub",
  "lazy_static",
  "primitive-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.1",
- "rand_chacha 0.3.0",
+ "rand_chacha 0.3.1",
  "rand_core 0.6.2",
  "redjubjub",
  "ripemd160",
@@ -4446,6 +4479,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "x25519-dalek",
+ "zcash_history",
  "zebra-test",
 ]
 
@@ -4622,6 +4656,8 @@ dependencies = [
  "once_cell",
  "pin-project 0.4.27",
  "rand 0.8.1",
+ "regex",
+ "semver 1.0.3",
  "sentry",
  "sentry-tracing",
  "serde",

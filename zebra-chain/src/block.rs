@@ -15,7 +15,7 @@ pub mod tests;
 
 use std::fmt;
 
-pub use commitment::{Commitment, CommitmentError};
+pub use commitment::{ChainHistoryMmrRootHash, Commitment, CommitmentError};
 pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header};
 pub use height::Height;

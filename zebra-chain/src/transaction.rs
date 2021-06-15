@@ -151,6 +151,25 @@ impl Transaction {
 
     // header
 
+    /// Return if the `fOverwintered` flag of this transaction is set.
+    pub fn is_overwintered(&self) -> bool {
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } => false,
+            Transaction::V3 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => true,
+        }
+    }
+
+    /// Return the version of this transaction.
+    pub fn version(&self) -> u32 {
+        match self {
+            Transaction::V1 { .. } => 1,
+            Transaction::V2 { .. } => 2,
+            Transaction::V3 { .. } => 3,
+            Transaction::V4 { .. } => 4,
+            Transaction::V5 { .. } => 5,
+        }
+    }
+
     /// Get this transaction's lock time.
     pub fn lock_time(&self) -> LockTime {
         match self {
@@ -390,6 +409,21 @@ impl Transaction {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Return if the transaction has any Sapling shielded data.
+    pub fn has_sapling_shielded_data(&self) -> bool {
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => false,
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data.is_some(),
+            Transaction::V5 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data.is_some(),
         }
     }
 

@@ -143,6 +143,12 @@ impl Commitment {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryMmrRootHash([u8; 32]);
 
+impl From<[u8; 32]> for ChainHistoryMmrRootHash {
+    fn from(hash: [u8; 32]) -> Self {
+        ChainHistoryMmrRootHash(hash)
+    }
+}
+
 /// A block commitment to chain history and transaction auth.
 /// - the chain history tree for all ancestors in the current network upgrade,
 ///   and

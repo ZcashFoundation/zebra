@@ -416,6 +416,9 @@ bitflags! {
 
 This type is also defined in `orchard/shielded_data.rs`.
 
+Note: A [consensus rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus) was added to the protocol specification stating that:
+> In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard field MUST be zero.
+
 ## Test Plan
 [test-plan]: #test-plan
 
