@@ -16,7 +16,6 @@
 //! at the cost of higher latency (the entire batch must complete), complexity of
 //! caller code (which must assemble a batch of signatures across work-items),
 //! and loss of the ability to easily pinpoint failing signatures.
-//!
 
 use std::convert::TryFrom;
 
