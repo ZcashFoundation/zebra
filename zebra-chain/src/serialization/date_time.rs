@@ -39,7 +39,7 @@ impl DateTime32 {
     /// seconds elapsed between `earlier` and `self`.
     ///
     /// Otherwise, returns `None`.
-    pub fn checked_sub(&self, earlier: DateTime32) -> Option<u32> {
+    pub fn checked_duration_since(&self, earlier: DateTime32) -> Option<u32> {
         self.timestamp.checked_sub(earlier.timestamp)
     }
 
@@ -47,7 +47,7 @@ impl DateTime32 {
     ///
     /// If this time is in the future, returns `None`.
     pub fn elapsed(&self) -> Option<u32> {
-        DateTime32::now().checked_sub(*self)
+        DateTime32::now().checked_duration_since(*self)
     }
 }
 
