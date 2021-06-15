@@ -163,18 +163,6 @@ impl AddressBook {
         peers
     }
 
-    /// Returns true if the address book has an entry for `addr`.
-    pub fn contains_addr(&self, addr: &SocketAddr) -> bool {
-        let _guard = self.span.enter();
-        self.by_addr.contains_key(addr)
-    }
-
-    /// Returns the entry corresponding to `addr`, or `None` if it does not exist.
-    pub fn get_by_addr(&self, addr: SocketAddr) -> Option<MetaAddr> {
-        let _guard = self.span.enter();
-        self.by_addr.get(&addr).cloned()
-    }
-
     /// Apply `change` to the address book, returning the updated `MetaAddr`,
     /// if the change was valid.
     ///
@@ -242,6 +230,7 @@ impl AddressBook {
     ///
     /// All address removals should go through `take`, so that the address
     /// book metrics are accurate.
+    #[allow(dead_code)]
     fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
         trace!(
@@ -336,14 +325,6 @@ impl AddressBook {
             .values()
             .filter(move |peer| self.recently_live_addr(&peer.addr))
             .cloned()
-    }
-
-    /// Returns an iterator that drains entries from the address book.
-    ///
-    /// Removes entries in reconnection attempt then arbitrary order,
-    /// see [`peers`] for details.
-    pub fn drain(&'_ mut self) -> impl Iterator<Item = MetaAddr> + '_ {
-        Drain { book: self }
     }
 
     /// Returns the number of entries in this address book.
@@ -464,18 +445,5 @@ impl Extend<MetaAddrChange> for AddressBook {
         for change in iter.into_iter() {
             self.update(change);
         }
-    }
-}
-
-struct Drain<'a> {
-    book: &'a mut AddressBook,
-}
-
-impl<'a> Iterator for Drain<'a> {
-    type Item = MetaAddr;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next_item_addr = self.book.peers().next()?.addr;
-        self.book.take(next_item_addr)
     }
 }
