@@ -835,7 +835,7 @@ fn sync_until(
     Ok(child.dir)
 }
 
-fn cached_canopy_test_config() -> Result<ZebradConfig> {
+fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
     config.consensus.checkpoint_sync = true;
     config.state.cache_dir = "/zebrad-cache".into();
@@ -848,7 +848,7 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     let timeout = Duration::from_secs(60 * 60 * 8);
 
     // Use a persistent state, so we can handle large syncs
-    let mut config = cached_canopy_test_config()?;
+    let mut config = cached_mandatory_checkpoint_test_config()?;
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
@@ -869,12 +869,12 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
 }
 
 fn create_cached_database(network: Network) -> Result<()> {
-    let height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+    let height = network.mandatory_checkpoint_height();
     create_cached_database_height(network, height)
 }
 
-fn sync_past_canopy(network: Network) -> Result<()> {
-    let height = NetworkUpgrade::Canopy.activation_height(network).unwrap() + 1200;
+fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
+    let height = network.mandatory_checkpoint_height() + 1200;
     create_cached_database_height(network, height.unwrap())
 }
 
@@ -885,48 +885,48 @@ fn sync_past_canopy(network: Network) -> Result<()> {
 // drives populated by the first two tests, snapshot those drives, and then use
 // those to more quickly run the second two tests.
 
-/// Sync up to the canopy activation height on mainnet and stop.
+/// Sync up to the mandatory checkpoint height on mainnet and stop.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_to_canopy_mainnet", test)]
-fn sync_to_canopy_mainnet() {
+#[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_mainnet", test)]
+fn sync_to_mandatory_checkpoint_mainnet() {
     zebra_test::init();
     let network = Mainnet;
     create_cached_database(network).unwrap();
 }
 
-/// Sync to the canopy activation height testnet and stop.
+/// Sync to the mandatory checkpoint height testnet and stop.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_to_canopy_testnet", test)]
-fn sync_to_canopy_testnet() {
+#[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_testnet", test)]
+fn sync_to_mandatory_checkpoint_testnet() {
     zebra_test::init();
     let network = Testnet;
     create_cached_database(network).unwrap();
 }
 
-/// Test syncing 1200 blocks (3 checkpoints) past the last checkpoint on mainnet.
+/// Test syncing 1200 blocks (3 checkpoints) past the mandatory checkpoint on mainnet.
 ///
-/// This assumes that the config'd state is already synced at or near Canopy
-/// activation on mainnet. If the state has already synced past Canopy
+/// This assumes that the config'd state is already synced at or near the mandatory checkpoint
+/// activation on mainnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_past_canopy_mainnet", test)]
-fn sync_past_canopy_mainnet() {
+#[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_mainnet", test)]
+fn sync_past_mandatory_checkpoint_mainnet() {
     zebra_test::init();
     let network = Mainnet;
-    sync_past_canopy(network).unwrap();
+    sync_past_mandatory_checkpoint(network).unwrap();
 }
 
-/// Test syncing 1200 blocks (3 checkpoints) past the last checkpoint on testnet.
+/// Test syncing 1200 blocks (3 checkpoints) past the mandatory checkpoint on testnet.
 ///
-/// This assumes that the config'd state is already synced at or near Canopy
-/// activation on testnet. If the state has already synced past Canopy
+/// This assumes that the config'd state is already synced at or near the mandatory checkpoint
+/// activation on testnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_past_canopy_testnet", test)]
-fn sync_past_canopy_testnet() {
+#[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_testnet", test)]
+fn sync_past_mandatory_checkpoint_testnet() {
     zebra_test::init();
     let network = Testnet;
-    sync_past_canopy(network).unwrap();
+    sync_past_mandatory_checkpoint(network).unwrap();
 }
 
 /// Returns a random port number from the ephemeral port range.

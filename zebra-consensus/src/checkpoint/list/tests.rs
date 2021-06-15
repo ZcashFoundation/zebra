@@ -241,29 +241,26 @@ fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
 }
 
 #[test]
-fn checkpoint_list_hard_coded_canopy_mainnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_canopy(Mainnet)
+fn checkpoint_list_hard_coded_mandatory_mainnet() -> Result<(), BoxError> {
+    checkpoint_list_hard_coded_mandatory(Mainnet)
 }
 
 #[test]
-fn checkpoint_list_hard_coded_canopy_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_canopy(Testnet)
+fn checkpoint_list_hard_coded_mandatory_testnet() -> Result<(), BoxError> {
+    checkpoint_list_hard_coded_mandatory(Testnet)
 }
 
-/// Check that the hard-coded lists cover the Canopy network upgrade, and the
-/// Canopy activation block
-fn checkpoint_list_hard_coded_canopy(network: Network) -> Result<(), BoxError> {
+/// Check that the hard-coded lists cover the mandatory checkpoint
+fn checkpoint_list_hard_coded_mandatory(network: Network) -> Result<(), BoxError> {
     zebra_test::init();
 
-    let canopy_activation = Canopy
-        .activation_height(network)
-        .expect("Unexpected network upgrade info: Canopy must have an activation height");
+    let mandatory_checkpoint = network.mandatory_checkpoint_height();
 
     let list = CheckpointList::new(network);
 
     assert!(
-        list.max_height() >= canopy_activation,
-        "Pre-Canopy blocks and the Canopy activation block must be verified by checkpoints"
+        list.max_height() >= mandatory_checkpoint,
+        "Mandatory checkpoint block must be verified by checkpoints"
     );
 
     Ok(())
