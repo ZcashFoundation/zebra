@@ -214,8 +214,8 @@ proptest! {
     /// applied to them.
     ///
     /// This is the simple version of the test, which checks [`MetaAddr`]s by
-    /// themselves. It detects bugs in [`MetaAddr`]s which have compensating bugs
-    /// in the [`CandidateSet`] or [`AddressBook`].
+    /// themselves. It detects bugs in [`MetaAddr`]s, even if there are
+    /// compensating bugs in the [`CandidateSet`] or [`AddressBook`].
     #[test]
     fn individual_peer_retry_limit_meta_addr(
         (mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
