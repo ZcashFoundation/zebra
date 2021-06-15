@@ -218,7 +218,7 @@ where
     async fn verify_v4_transaction(
         request: Request,
         network: Network,
-        mut script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
@@ -239,25 +239,15 @@ where
         // Do basic checks first
         check::has_inputs_and_outputs(&tx)?;
 
-        // Handle transparent inputs and outputs.
-        if tx.is_coinbase() {
-            check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-        } else {
-            // feed all of the inputs to the script and shielded verifiers
-            // the script_verifier also checks transparent sighashes, using its own implementation
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(tx.clone()));
-
-            for input_index in 0..inputs.len() {
-                let rsp = script_verifier.ready_and().await?.call(script::Request {
-                    upgrade,
-                    known_utxos: request.known_utxos(),
-                    cached_ffi_transaction: cached_ffi_transaction.clone(),
-                    input_index,
-                });
-
-                async_checks.push(rsp);
-            }
-        }
+        // Add asynchronous checks of the transparent inputs and outputs
+        Self::verify_transparent_inputs_and_outputs(
+            &request,
+            network,
+            inputs,
+            script_verifier,
+            &mut async_checks,
+        )
+        .await?;
 
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
@@ -453,5 +443,40 @@ where
                 upgrade,
             )),
         }
+    }
+
+    /// Verifies if a transaction's transparent `inputs` are valid using the provided
+    /// `script_verifier`.
+    async fn verify_transparent_inputs_and_outputs(
+        request: &Request,
+        network: Network,
+        inputs: &[transparent::Input],
+        mut script_verifier: script::Verifier<ZS>,
+        async_checks: &mut AsyncChecks,
+    ) -> Result<(), TransactionError> {
+        let transaction = request.transaction();
+
+        // Handle transparent inputs and outputs.
+        if transaction.is_coinbase() {
+            check::coinbase_tx_no_prevout_joinsplit_spend(&transaction)?;
+        } else {
+            // feed all of the inputs to the script and shielded verifiers
+            // the script_verifier also checks transparent sighashes, using its own implementation
+            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+            let upgrade = request.upgrade(network);
+
+            for input_index in 0..inputs.len() {
+                let rsp = script_verifier.ready_and().await?.call(script::Request {
+                    upgrade,
+                    known_utxos: request.known_utxos(),
+                    cached_ffi_transaction: cached_ffi_transaction.clone(),
+                    input_index,
+                });
+
+                async_checks.push(rsp);
+            }
+        }
+
+        Ok(())
     }
 }
