@@ -28,6 +28,7 @@ use zebra_chain::primitives::redpallas::{batch, *};
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
+#[allow(dead_code)]
 pub static VERIFIER: Lazy<
     Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), Error>>>>,
 > = Lazy::new(|| {
