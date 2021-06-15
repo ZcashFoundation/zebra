@@ -184,7 +184,9 @@ where
                     )
                     .await
                 }
-                Transaction::V5 { .. } => Self::verify_v5_transaction(req, network).await,
+                Transaction::V5 { inputs, .. } => {
+                    Self::verify_v5_transaction(req, network, script_verifier, inputs).await
+                }
             }
         }
         .instrument(span)
@@ -399,11 +401,24 @@ where
     async fn verify_v5_transaction(
         request: Request,
         network: Network,
+        script_verifier: script::Verifier<ZS>,
+        inputs: &[transparent::Input],
     ) -> Result<transaction::Hash, TransactionError> {
+        let mut async_checks = FuturesUnordered::new();
+
         Self::verify_v5_transaction_network_upgrade(
             &request.transaction(),
             request.upgrade(network),
         )?;
+
+        async_checks.extend(Self::verify_transparent_inputs_and_outputs(
+            &request,
+            network,
+            inputs,
+            script_verifier,
+        )?);
+
+        Self::wait_for_checks(async_checks).await?;
 
         // TODO:
         // - verify transparent pool (#1981)
