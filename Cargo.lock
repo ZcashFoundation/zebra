@@ -4503,7 +4503,6 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
- "pairing",
  "rand 0.8.1",
  "serde",
  "spandoc",
