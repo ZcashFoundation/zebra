@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::{
-    stream::{FuturesUnordered, StreamExt},
+    stream::{self, FuturesUnordered, Stream, StreamExt},
     FutureExt,
 };
 use tower::{Service, ServiceExt};
@@ -229,25 +229,22 @@ where
         let mut ed25519_verifier = primitives::ed25519::VERIFIER.clone();
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
 
-        // A set of asynchronous checks which must all succeed.
-        // We finish by waiting on these below.
-        let mut async_checks = AsyncChecks::new();
-
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
 
         // Do basic checks first
         check::has_inputs_and_outputs(&tx)?;
 
-        // Add asynchronous checks of the transparent inputs and outputs
-        Self::verify_transparent_inputs_and_outputs(
+        // Build a stream of asynchronous checks of the transparent inputs and outputs
+        let transparent_checks = Self::verify_transparent_inputs_and_outputs(
             &request,
             network,
             inputs,
             script_verifier,
-            &mut async_checks,
-        )
-        .await?;
+        )?;
+
+        // A set of asynchronous checks over the shielded data which must all succeed.
+        let shielded_checks = AsyncChecks::new();
 
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
@@ -279,7 +276,7 @@ where
                     .into(),
             );
 
-            async_checks.push(rsp.boxed());
+            shielded_checks.push(rsp.boxed());
         }
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
@@ -305,7 +302,7 @@ where
                     .await?
                     .call(primitives::groth16::ItemWrapper::from(&spend).into());
 
-                async_checks.push(spend_rsp.boxed());
+                shielded_checks.push(spend_rsp.boxed());
 
                 // Consensus rule: The spend authorization signature
                 // MUST be a valid SpendAuthSig signature over
@@ -321,7 +318,7 @@ where
                     .await?
                     .call((spend.rk, spend.spend_auth_sig, &shielded_sighash).into());
 
-                async_checks.push(rsp.boxed());
+                shielded_checks.push(rsp.boxed());
             }
 
             for output in sapling_shielded_data.outputs() {
@@ -346,7 +343,7 @@ where
                     .await?
                     .call(primitives::groth16::ItemWrapper::from(output).into());
 
-                async_checks.push(output_rsp.boxed());
+                shielded_checks.push(output_rsp.boxed());
             }
 
             let bvk = sapling_shielded_data.binding_verification_key();
@@ -373,13 +370,16 @@ where
                 .boxed();
 
             // TODO: stop ignoring binding signature errors - #1939
-            // async_checks.push(rsp);
+            // shielded_checks.push(rsp);
         }
+
+        // A set of asynchronous checks which must all succeed.
+        let mut async_checks = stream::select(transparent_checks, shielded_checks);
 
         // Finally, wait for all asynchronous checks to complete
         // successfully, or fail verification if they error.
         while let Some(check) = async_checks.next().await {
-            tracing::trace!(?check, remaining = async_checks.len());
+            tracing::trace!(?check, remaining = async_checks.size_hint().0);
             check?;
         }
 
@@ -447,36 +447,39 @@ where
 
     /// Verifies if a transaction's transparent `inputs` are valid using the provided
     /// `script_verifier`.
-    async fn verify_transparent_inputs_and_outputs(
+    fn verify_transparent_inputs_and_outputs(
         request: &Request,
         network: Network,
         inputs: &[transparent::Input],
-        mut script_verifier: script::Verifier<ZS>,
-        async_checks: &mut AsyncChecks,
-    ) -> Result<(), TransactionError> {
+        script_verifier: script::Verifier<ZS>,
+    ) -> Result<impl Stream<Item = Result<(), BoxError>>, TransactionError> {
         let transaction = request.transaction();
 
-        // Handle transparent inputs and outputs.
         if transaction.is_coinbase() {
             check::coinbase_tx_no_prevout_joinsplit_spend(&transaction)?;
+
+            Ok(stream::empty().boxed())
         } else {
             // feed all of the inputs to the script and shielded verifiers
             // the script_verifier also checks transparent sighashes, using its own implementation
             let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+            let known_utxos = request.known_utxos();
             let upgrade = request.upgrade(network);
 
-            for input_index in 0..inputs.len() {
-                let rsp = script_verifier.ready_and().await?.call(script::Request {
-                    upgrade,
-                    known_utxos: request.known_utxos(),
-                    cached_ffi_transaction: cached_ffi_transaction.clone(),
-                    input_index,
-                });
+            let verify_requests =
+                stream::iter((0..inputs.len()).into_iter().map(move |input_index| {
+                    script::Request {
+                        upgrade,
+                        known_utxos: known_utxos.clone(),
+                        cached_ffi_transaction: cached_ffi_transaction.clone(),
+                        input_index,
+                    }
+                }));
 
-                async_checks.push(rsp);
-            }
+            Ok(script_verifier
+                .call_all(verify_requests)
+                .unordered()
+                .boxed())
         }
-
-        Ok(())
     }
 }
