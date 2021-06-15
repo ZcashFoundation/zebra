@@ -374,12 +374,7 @@ where
             // async_checks.push(rsp);
         }
 
-        // Finally, wait for all asynchronous checks to complete
-        // successfully, or fail verification if they error.
-        while let Some(check) = async_checks.next().await {
-            tracing::trace!(?check, remaining = async_checks.len());
-            check?;
-        }
+        Self::wait_for_checks(async_checks).await?;
 
         Ok(tx.hash())
     }
@@ -480,5 +475,20 @@ where
 
             Ok(script_checks)
         }
+    }
+
+    /// Await a set of checks that should all succeed.
+    ///
+    /// If any of the checks fail, this method immediately returns the error and cancels all other
+    /// checks by dropping them.
+    async fn wait_for_checks(mut checks: AsyncChecks) -> Result<(), TransactionError> {
+        // Wait for all asynchronous checks to complete
+        // successfully, or fail verification if they error.
+        while let Some(check) = checks.next().await {
+            tracing::trace!(?check, remaining = checks.len());
+            check?;
+        }
+
+        Ok(())
     }
 }
