@@ -25,8 +25,10 @@ use rand_core::{CryptoRng, RngCore};
 
 use super::{private::Sealed, scalar_mul::VartimeMultiscalarMul, *};
 
-// Shim to generate a random 128bit value in a [u64; 4], without
-// importing `rand`.
+/// Shim to generate a random 128 bit value in a `[u64; 4]`, without
+/// importing `rand`.
+///
+/// The final 128 bits are zero.
 fn gen_128_bits<R: RngCore + CryptoRng>(mut rng: R) -> [u64; 4] {
     let mut bytes = [0u64; 4];
     bytes[0] = rng.next_u64();
