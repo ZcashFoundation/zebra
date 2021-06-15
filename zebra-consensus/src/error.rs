@@ -78,6 +78,9 @@ pub enum TransactionError {
     #[error("bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
     RedJubjub(zebra_chain::primitives::redjubjub::Error),
 
+    #[error("bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    RedPallas(zebra_chain::primitives::redpallas::Error),
+
     // temporary error type until #1186 is fixed
     #[error("Downcast from BoxError to redjubjub::Error failed")]
     InternalDowncastError(String),
@@ -88,6 +91,7 @@ pub enum TransactionError {
 
 impl From<BoxError> for TransactionError {
     fn from(err: BoxError) -> Self {
+        // TODO: handle redpallas Error?
         match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
             Ok(e) => TransactionError::RedJubjub(*e),
             Err(e) => TransactionError::InternalDowncastError(format!(
