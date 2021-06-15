@@ -25,6 +25,8 @@ jobs:
         components: rust-docs
         override: true
 
+    - uses: Swatinem/rust-cache@v1
+
     - name: Install mdbook
       run: |
         cargo install mdbook
