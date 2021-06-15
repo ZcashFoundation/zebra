@@ -113,7 +113,7 @@ mod tests;
 // When we add the Seed state:
 //   * show that seed peers that transition to other never attempted
 //     states are already in the address book
-pub(super) struct CandidateSet<S> {
+pub(crate) struct CandidateSet<S> {
     pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
     wait_next_handshake: Sleep,

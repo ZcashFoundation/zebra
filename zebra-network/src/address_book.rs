@@ -103,6 +103,28 @@ impl AddressBook {
         new_book
     }
 
+    /// Construct an [`AddressBook`] with the given [`Config`],
+    /// [`tracing::Span`], and addresses.
+    ///
+    /// This constructor can be used to break address book invariants,
+    /// so it should only be used in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn new_with_addrs(
+        config: &Config,
+        span: Span,
+        addrs: impl IntoIterator<Item = MetaAddr>,
+    ) -> AddressBook {
+        let mut new_book = AddressBook::new(config, span);
+
+        let addrs = addrs
+            .into_iter()
+            .map(|meta_addr| (meta_addr.addr, meta_addr));
+        new_book.by_addr.extend(addrs);
+
+        new_book.update_metrics();
+        new_book
+    }
+
     /// Get the local listener address.
     pub fn get_local_listener(&self) -> MetaAddrChange {
         MetaAddr::new_local_listener(&self.local_listener)
