@@ -12,6 +12,13 @@ proptest! {
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
     fn meta_addr_size_is_correct(addr in MetaAddr::arbitrary()) {
+        zebra_test::init();
+
+        // We require sanitization before serialization
+        let addr = addr.sanitize();
+        prop_assume!(addr.is_some());
+        let addr = addr.unwrap();
+
         let serialized = addr
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
@@ -23,6 +30,13 @@ proptest! {
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
     #[test]
     fn meta_addr_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
+        zebra_test::init();
+
+        // We require sanitization before serialization
+        let addr = addr.sanitize();
+        prop_assume!(addr.is_some());
+        let addr = addr.unwrap();
+
         let max_allocation: usize = MetaAddr::max_allocation().try_into().unwrap();
         let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
         for _ in 0..(MetaAddr::max_allocation() + 1) {

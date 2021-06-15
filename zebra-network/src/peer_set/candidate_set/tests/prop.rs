@@ -16,8 +16,8 @@ use zebra_chain::serialization::DateTime32;
 
 use super::super::{validate_addrs, CandidateSet};
 use crate::{
-    constants::MIN_PEER_CONNECTION_INTERVAL, types::MetaAddr, AddressBook, BoxError, Config,
-    Request, Response,
+    constants::MIN_PEER_CONNECTION_INTERVAL, meta_addr::MetaAddrChange, types::MetaAddr,
+    AddressBook, BoxError, Config, Request, Response,
 };
 
 /// The maximum number of candidates for a "next peer" test.
@@ -46,7 +46,7 @@ proptest! {
         let validated_peers = validate_addrs(gossiped_peers, last_seen_limit);
 
         for peer in validated_peers {
-            prop_assert![peer.get_last_seen() <= last_seen_limit];
+            prop_assert!(peer.untrusted_last_seen().unwrap() <= last_seen_limit);
         }
     }
 
@@ -90,7 +90,7 @@ proptest! {
     /// Test that new outbound peer connections are rate-limited.
     #[test]
     fn new_outbound_peer_connections_are_rate_limited(
-        peers in vec(MetaAddr::ready_outbound_strategy(), TEST_ADDRESSES),
+        peers in vec(MetaAddrChange::ready_outbound_strategy(), TEST_ADDRESSES),
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {

@@ -258,6 +258,8 @@ where
 
     /// Add new `addrs` to the address book.
     fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
+        let addrs = addrs.into_iter().map(MetaAddr::new_gossiped_change);
+
         // # Correctness
         //
         // Briefly hold the address book threaded mutex, to extend
@@ -307,9 +309,8 @@ where
             // `None`. We only need to sleep before yielding an address.
             let reconnect = guard.reconnection_peers().next()?;
 
-            let reconnect = MetaAddr::new_reconnect(&reconnect.addr, &reconnect.services);
-            guard.update(reconnect);
-            reconnect
+            let reconnect = MetaAddr::new_reconnect(&reconnect.addr);
+            guard.update(reconnect)?
         };
 
         // SECURITY: rate-limit new outbound peer connections
@@ -322,7 +323,7 @@ where
 
     /// Mark `addr` as a failed peer.
     pub fn report_failed(&mut self, addr: &MetaAddr) {
-        let addr = MetaAddr::new_errored(&addr.addr, &addr.services);
+        let addr = MetaAddr::new_errored(&addr.addr, addr.services);
         // # Correctness
         //
         // Briefly hold the address book threaded mutex, to update the state for
@@ -378,7 +379,10 @@ fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32)
         addrs
             .iter()
             .fold((u32::MAX, u32::MIN), |(oldest, newest), addr| {
-                let last_seen = addr.get_last_seen().timestamp();
+                let last_seen = addr
+                    .untrusted_last_seen()
+                    .expect("unexpected missing last seen")
+                    .timestamp();
                 (oldest.min(last_seen), newest.max(last_seen))
             });
 
@@ -391,10 +395,13 @@ fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32)
         if oldest_resulting_timestamp >= 0 {
             // No underflow is possible, so apply offset to all addresses
             for addr in addrs {
-                let old_last_seen = addr.get_last_seen().timestamp();
+                let old_last_seen = addr
+                    .untrusted_last_seen()
+                    .expect("unexpected missing last seen")
+                    .timestamp();
                 let new_last_seen = old_last_seen - offset;
 
-                addr.set_last_seen(new_last_seen.into());
+                addr.set_untrusted_last_seen(new_last_seen.into());
             }
         } else {
             // An underflow will occur, so reject all gossiped peers
