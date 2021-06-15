@@ -1,13 +1,15 @@
 //! Randomised property tests for MetaAddr.
 
 use std::{
+    collections::HashMap,
     convert::{TryFrom, TryInto},
     env,
+    net::SocketAddr,
     sync::Arc,
     time::Duration,
 };
 
-use proptest::prelude::*;
+use proptest::{collection::vec, prelude::*};
 use tokio::{runtime::Runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
@@ -236,7 +238,9 @@ proptest! {
                     .expect("unexpected invalid attempt");
             }
 
+            // If `change` is invalid for the current MetaAddr state, skip it.
             if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
+                assert_eq!(changed_addr.addr, addr.addr);
                 addr = changed_addr;
             }
         }
@@ -332,7 +336,83 @@ proptest! {
         });
     }
 
-    // TODO: Make sure that [`MetaAddr`]s:
-    // - all disconnected [`MetaAddr`]s in a particular state are retried once,
-    //   before any are retried twice.
+    /// Make sure that all disconnected [`MetaAddr`]s are retried once, before
+    /// any are retried twice.
+    ///
+    /// This is the simple version of the test, which checks [`MetaAddr`]s by
+    /// themselves. It detects bugs in [`MetaAddr`]s, even if there are
+    /// compensating bugs in the [`CandidateSet`] or [`AddressBook`].
+    //
+    // TODO: write a similar test using the AddressBook and CandidateSet
+    #[test]
+    fn multiple_peer_retry_order_meta_addr(
+        addr_changes_lists in vec(
+            MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE),
+            2..MAX_ADDR_CHANGE
+        ),
+    ) {
+        zebra_test::init();
+
+        // Run the test for this many simulated live peer durations
+        const LIVE_PEER_INTERVALS: u32 = 3;
+        // Run the test for this much simulated time
+        let overall_test_time: Duration = LIVE_PEER_DURATION * LIVE_PEER_INTERVALS;
+        // Advance the clock by this much for every peer change
+        let peer_change_interval: Duration = overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
+
+        assert!(
+            u32::try_from(MAX_ADDR_CHANGE).unwrap() >= 3 * LIVE_PEER_INTERVALS,
+            "there are enough changes for good test coverage",
+        );
+
+        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let _guard = runtime.enter();
+
+        let attempt_counts = runtime.block_on(async move {
+            tokio::time::pause();
+
+            // The current attempt counts for each peer in this interval
+            let mut attempt_counts: HashMap<SocketAddr, u32> = HashMap::new();
+
+            // The most recent address info for each peer
+            let mut addrs: HashMap<SocketAddr, MetaAddr> = HashMap::new();
+
+            for change_index in 0..MAX_ADDR_CHANGE {
+                for (addr, changes) in addr_changes_lists.iter() {
+                    let addr = addrs.entry(addr.addr).or_insert(*addr);
+                    let change = changes.get(change_index);
+
+                    while addr.is_ready_for_attempt() {
+                        *attempt_counts.entry(addr.addr).or_default() += 1;
+                        assert!(*attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1);
+
+                        // Simulate an attempt
+                        *addr = MetaAddr::new_reconnect(&addr.addr)
+                            .apply_to_meta_addr(*addr)
+                            .expect("unexpected invalid attempt");
+                    }
+
+                    // If `change` is invalid for the current MetaAddr state, skip it.
+                    // If we've run out of changes for this addr, do nothing.
+                    if let Some(changed_addr) = change
+                        .map(|change| change.apply_to_meta_addr(*addr))
+                        .flatten() {
+                            assert_eq!(changed_addr.addr, addr.addr);
+                            *addr = changed_addr;
+                        }
+                }
+
+                tokio::time::advance(peer_change_interval).await;
+            }
+
+            attempt_counts
+        });
+
+        let min_attempts = attempt_counts.values().min();
+        let max_attempts = attempt_counts.values().max();
+        if let (Some(&min_attempts), Some(&max_attempts)) = (min_attempts, max_attempts) {
+            prop_assert!(max_attempts >= min_attempts);
+            prop_assert!(max_attempts - min_attempts <= 1);
+        }
+    }
 }
