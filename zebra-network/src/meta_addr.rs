@@ -458,24 +458,30 @@ impl MetaAddr {
 
     /// Is this address ready for a new outbound connection attempt?
     pub fn is_ready_for_attempt(&self) -> bool {
-        assert!(self.is_valid_for_outbound());
-
-        !self.was_recently_live() && !self.was_recently_attempted() && !self.was_recently_failed()
+        self.last_known_info_is_valid_for_outbound()
+            && !self.was_recently_live()
+            && !self.was_recently_attempted()
+            && !self.was_recently_failed()
     }
 
-    /// Is this address a directly connected client?
-    pub fn is_direct_client(&self) -> bool {
-        match self.last_connection_state {
-            Responded => !self.services.contains(PeerServices::NODE_NETWORK),
-            NeverAttemptedGossiped | NeverAttemptedAlternate | Failed | AttemptPending => false,
-        }
+    /// Is the [`SocketAddr`] we have for this peer valid for outbound
+    /// connections?
+    ///
+    /// Since the addresses in the address book are unique, this check can be
+    /// used to permanently reject entire [`MetaAddr`]s.
+    pub fn address_is_valid_for_outbound(&self) -> bool {
+        !self.addr.ip().is_unspecified() && self.addr.port() != 0
     }
 
-    /// Is this address valid for outbound connections?
-    pub fn is_valid_for_outbound(&self) -> bool {
-        self.services.contains(PeerServices::NODE_NETWORK)
-            && !self.addr.ip().is_unspecified()
-            && self.addr.port() != 0
+    /// Is the last known information for this peer valid for outbound
+    /// connections?
+    ///
+    /// The last known info might be outdated or untrusted, so this check can
+    /// only be used to:
+    /// - reject `NeverAttempted...` [`MetaAddrChange`]s, and
+    /// - temporarily stop outbound connections to a [`MetaAddr`].
+    pub fn last_known_info_is_valid_for_outbound(&self) -> bool {
+        self.services.contains(PeerServices::NODE_NETWORK) && self.address_is_valid_for_outbound()
     }
 
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.

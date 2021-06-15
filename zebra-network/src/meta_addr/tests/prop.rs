@@ -225,7 +225,7 @@ proptest! {
         let mut attempt_count: usize = 0;
 
         for change in changes {
-            while addr.is_valid_for_outbound() && addr.is_ready_for_attempt() {
+            while addr.is_ready_for_attempt() {
                 attempt_count += 1;
                 // Assume that this test doesn't last longer than LIVE_PEER_DURATION
                 prop_assert!(attempt_count <= 1);
@@ -280,7 +280,7 @@ proptest! {
 
         // Only put valid addresses in the address book.
         // This means some tests will start with an empty address book.
-        let addrs = if addr.is_valid_for_outbound() {
+        let addrs = if addr.last_known_info_is_valid_for_outbound() {
             Some(addr)
         } else {
             None
@@ -313,7 +313,7 @@ proptest! {
                         LIVE_PEER_INTERVALS,
                         overall_test_time,
                         peer_change_interval,
-                        addr.is_valid_for_outbound(),
+                        addr.last_known_info_is_valid_for_outbound(),
                     );
                 }
 

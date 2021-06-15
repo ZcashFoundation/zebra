@@ -161,6 +161,15 @@ impl AddressBook {
     ///
     /// All changes should go through `update`, so that the address book
     /// only contains valid outbound addresses.
+    ///
+    /// # Security
+    ///
+    /// This function must apply every attempted, responded, and failed change
+    /// to the address bookt. This prevents rapid reconnections to the same peer.
+    ///
+    /// As an exception, this function can ignore all changes for specific
+    /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
+    /// peers.
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         let _guard = self.span.enter();
 
@@ -176,19 +185,22 @@ impl AddressBook {
         );
 
         if let Some(updated) = updated {
-            // If a node that we are directly connected to has changed to a client,
-            // remove it from the address book.
-            if updated.is_direct_client() && previous.is_some() {
-                std::mem::drop(_guard);
-                self.take(updated.addr);
+            // Ignore invalid outbound addresses.
+            // (Inbound connections can be monitored via Zebra's metrics.)
+            if !updated.address_is_valid_for_outbound() {
                 return None;
             }
 
-            // Never add unspecified addresses or client services.
+            // Ignore invalid outbound services and other info,
+            // but only if the peer has never been attempted.
             //
-            // Communication with these addresses can be monitored via Zebra's
-            // metrics. (The address book is for valid peer addresses.)
-            if !updated.is_valid_for_outbound() {
+            // Otherwise, if we got the info directly from the peer,
+            // store it in the address book, so we know not to reconnect.
+            //
+            // TODO: delete peers with invalid info when they get too old (#1873)
+            if !updated.last_known_info_is_valid_for_outbound()
+                && updated.last_connection_state.is_never_attempted()
+            {
                 return None;
             }
 
