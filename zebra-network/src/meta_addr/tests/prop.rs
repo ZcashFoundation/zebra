@@ -159,7 +159,7 @@ proptest! {
 
     }
 
-    /// Make sure that `[MetaAddrChange]`s:
+    /// Make sure that [`MetaAddrChange`]s:
     /// - do not modify the last seen time, unless it was None, and
     /// - only modify the services after a response or failure.
     #[test]
@@ -188,4 +188,40 @@ proptest! {
             }
         }
     }
+
+    /// Make sure that [`MetaAddr`]s:
+    /// - do not get retried more than once per [`LIVE_PEER_DURATION`],
+    ///   regardless of the [`MetaAddrChange`]s that are applied to them, and
+    /// - all disconnected [`MetaAddr`]s in a particular state are retried once,
+    ///   before any are retried twice.
+    #[test]
+    fn individual_peer_retry_limit(
+        (mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
+    ) {
+        zebra_test::init();
+
+        let mut ready_count: usize = 0;
+
+        for change in changes {
+            while addr.is_valid_for_outbound() && addr.is_ready_for_attempt() {
+                ready_count += 1;
+                // Assume that this test doesn't last longer than LIVE_PEER_DURATION
+                prop_assert!(ready_count <= 1);
+
+                // simulate an attempt
+                // TODO: replace this with the actual CandidateSet/AddressBook code
+                addr = MetaAddr::new_reconnect(&addr.addr)
+                    .apply_to_meta_addr(addr)
+                    .expect("unexpected invalid attempt");
+            }
+
+            if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
+                addr = changed_addr;
+            }
+        }
+    }
+
+    // TODO: Make sure that [`MetaAddr`]s:
+    // - all disconnected [`MetaAddr`]s in a particular state are retried once,
+    //   before any are retried twice.
 }
