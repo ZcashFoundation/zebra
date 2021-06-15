@@ -43,9 +43,8 @@ impl Arbitrary for note::Nullifier {
 
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
-                let mut b = [0u8; 64];
-                b.copy_from_slice(bytes.as_slice());
-                Self::try_from(pallas::Scalar::from_bytes_wide(&b).to_bytes())
+                let bytes = bytes.try_into().expect("array is the correct length");
+                Self::try_from(pallas::Scalar::from_bytes_wide(&bytes).to_bytes())
                     .expect("a valid generated nullifier")
             })
             .boxed()
