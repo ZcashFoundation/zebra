@@ -1,15 +1,19 @@
+use std::{collections::HashMap, sync::Arc};
+
+use tower::{service_fn, ServiceExt};
+
 use zebra_chain::{
     orchard,
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
         Transaction,
     },
 };
 
-use super::check;
+use super::{check, Request, Verifier};
 
-use crate::error::TransactionError;
+use crate::{error::TransactionError, script};
 use color_eyre::eyre::Report;
 
 #[test]
@@ -159,4 +163,81 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
         check::coinbase_tx_no_prevout_joinsplit_spend(&transaction),
         Err(TransactionError::CoinbaseHasEnableSpendsOrchard)
     );
+}
+
+#[tokio::test]
+async fn v5_transaction_is_rejected_before_nu5_activation() {
+    const V5_TRANSACTION_VERSION: u32 = 5;
+
+    let canopy = NetworkUpgrade::Canopy;
+    let networks = vec![
+        (Network::Mainnet, zebra_test::vectors::MAINNET_BLOCKS.iter()),
+        (Network::Testnet, zebra_test::vectors::TESTNET_BLOCKS.iter()),
+    ];
+
+    for (network, blocks) in networks {
+        let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        let transaction = fake_v5_transactions_for_network(network, blocks)
+            .rev()
+            .next()
+            .expect("At least one fake V5 transaction in the test vectors");
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: canopy
+                    .activation_height(network)
+                    .expect("Canopy activation height is specified"),
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::UnsupportedByNetworkUpgrade(
+                V5_TRANSACTION_VERSION,
+                canopy
+            ))
+        );
+    }
+}
+
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_transaction_is_accepted_after_nu5_activation() {
+    let nu5 = NetworkUpgrade::Nu5;
+    let networks = vec![
+        (Network::Mainnet, zebra_test::vectors::MAINNET_BLOCKS.iter()),
+        (Network::Testnet, zebra_test::vectors::TESTNET_BLOCKS.iter()),
+    ];
+
+    for (network, blocks) in networks {
+        let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        let transaction = fake_v5_transactions_for_network(network, blocks)
+            .rev()
+            .next()
+            .expect("At least one fake V5 transaction in the test vectors");
+
+        let expected_hash = transaction.hash();
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: nu5
+                    .activation_height(network)
+                    .expect("NU5 activation height is specified"),
+            })
+            .await;
+
+        assert_eq!(result, Ok(expected_hash));
+    }
 }
