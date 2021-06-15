@@ -290,17 +290,19 @@ proptest! {
         let peer_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let mut candidate_set = CandidateSet::new(address_book.clone(), peer_service);
 
-        let mut attempt_count: usize = 0;
-
         runtime.block_on(async move {
             tokio::time::pause();
 
             // The earliest time we can have a valid next attempt for this peer
             let earliest_next_attempt = Instant::now() + LIVE_PEER_DURATION;
 
+            // The number of attempts for this peer in the last LIVE_PEER_DURATION
+            let mut attempt_count: usize = 0;
+
             for (i, change) in changes.into_iter().enumerate() {
                 while let Some(candidate_addr) = candidate_set.next().await {
                     assert_eq!(candidate_addr.addr, addr.addr);
+
                     attempt_count += 1;
                     assert!(
                         attempt_count <= 1,
@@ -317,9 +319,9 @@ proptest! {
                     );
                 }
 
-                // Changes can be invalid for the current MetaAddr state,
-                // so multiple intervals can elapse between actual changes to
-                // the MetaAddr in the AddressBook
+                // If `change` is invalid for the current MetaAddr state,
+                // multiple intervals will elapse between actual changes to
+                // the MetaAddr in the AddressBook.
                 address_book.clone().lock().unwrap().update(change);
 
                 tokio::time::advance(peer_change_interval).await;
