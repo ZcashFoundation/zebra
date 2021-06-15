@@ -783,9 +783,10 @@ impl Ord for MetaAddr {
 
         // Finally, prefer numerically larger service bit patterns
         //
-        // As of June 2021, Zebra only recognises the node service bit,
-        // and excludes non-nodes from its address book. So this comparison
-        // will have no impact until Zebra implements more service features.
+        // As of June 2021, Zebra only recognises the NODE_NETWORK bit.
+        // When making outbound connections, Zebra skips non-nodes.
+        // So this comparison will have no impact until Zebra implements
+        // more service features.
         //
         // TODO: order services by usefulness, not bit pattern values
         //       Security: split gossiped and direct services
