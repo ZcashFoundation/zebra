@@ -112,7 +112,6 @@ impl Item {
     /// [`VerificationKey::verify`](crate::VerificationKey::verify), which requires
     /// borrowing the message data, the `Item` type is unlinked from the lifetime of
     /// the message.
-    #[allow(non_snake_case)]
     pub fn verify_single(self) -> Result<(), Error> {
         match self.inner {
             Inner::Binding { vk_bytes, sig, c } => VerificationKey::<Binding>::try_from(vk_bytes)
