@@ -3,7 +3,7 @@ use std::{
     convert::TryInto,
     iter,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration as StdDuration,
 };
 
@@ -139,12 +139,15 @@ fn candidate_set_updates_are_rate_limited() {
     // How many times should `update` be called in each rate limit interval
     const POLL_FREQUENCY_FACTOR: u32 = 3;
 
+    zebra_test::init();
+
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(&Config::default(), Span::none());
     let (peer_service, call_count) = mock_peer_service();
-    let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+    let mut candidate_set =
+        CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
     runtime.block_on(async move {
         time::pause();
@@ -178,7 +181,8 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
 
     let address_book = AddressBook::new(&Config::default(), Span::none());
     let (peer_service, call_count) = mock_peer_service();
-    let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+    let mut candidate_set =
+        CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
     runtime.block_on(async move {
         time::pause();
