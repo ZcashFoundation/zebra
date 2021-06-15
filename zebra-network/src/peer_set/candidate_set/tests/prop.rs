@@ -1,6 +1,6 @@
 use std::{
     env,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -69,7 +69,7 @@ proptest! {
         // Since the address book is empty, there won't be any available peers
         let address_book = AddressBook::new(&Config::default(), Span::none());
 
-        let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
         // Make sure that the rate-limit is never triggered, even after multiple calls
         for _ in 0..next_peer_attempts {
@@ -106,7 +106,7 @@ proptest! {
         let mut address_book = AddressBook::new(&Config::default(), Span::none());
         address_book.extend(peers);
 
-        let mut candidate_set = CandidateSet::new(Arc::new(Mutex::new(address_book)), peer_service);
+        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
         let checks = async move {
             // Check rate limiting for initial peers
