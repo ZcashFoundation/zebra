@@ -734,8 +734,7 @@ impl Ord for MetaAddr {
         use Ordering::*;
 
         // First, try states that are more likely to work
-        let responded_never_failed_attempting =
-            self.last_connection_state.cmp(&other.last_connection_state);
+        let more_reliable_state = self.last_connection_state.cmp(&other.last_connection_state);
 
         // # Security and Correctness
         //
@@ -770,7 +769,7 @@ impl Ord for MetaAddr {
         // order.
 
         // If all local times are None, try peers that other peers have seen more recently
-        let recent_untrusted_last_seen = self
+        let newer_untrusted_last_seen = self
             .untrusted_last_seen
             .cmp(&other.untrusted_last_seen)
             .reverse();
@@ -802,11 +801,11 @@ impl Ord for MetaAddr {
         };
         let port_tie_breaker = self.addr.port().cmp(&other.addr.port());
 
-        responded_never_failed_attempting
+        more_reliable_state
             .then(older_attempt)
             .then(older_failure)
             .then(older_response)
-            .then(recent_untrusted_last_seen)
+            .then(newer_untrusted_last_seen)
             .then(larger_services)
             .then(ip_tie_breaker)
             .then(port_tie_breaker)
