@@ -164,10 +164,10 @@ where
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
 
-            match tx.as_ref() {
+            let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
-                    Err(TransactionError::WrongVersion)
+                    return Err(TransactionError::WrongVersion);
                 }
                 Transaction::V4 {
                     inputs,
@@ -186,12 +186,16 @@ where
                         joinsplit_data,
                         sapling_shielded_data,
                     )
-                    .await
+                    .await?
                 }
                 Transaction::V5 { inputs, .. } => {
-                    Self::verify_v5_transaction(req, network, script_verifier, inputs).await
+                    Self::verify_v5_transaction(req, network, script_verifier, inputs).await?
                 }
-            }
+            };
+
+            Self::wait_for_checks(async_checks).await?;
+
+            Ok(tx.hash())
         }
         .instrument(span)
         .boxed()
@@ -205,7 +209,7 @@ where
 {
     /// Verify a V4 transaction.
     ///
-    /// Performs a set of asynchronous checks that must all succeed for the transaction to be
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
     /// considered valid. These checks include:
     ///
     /// - transparent transfers
@@ -228,7 +232,7 @@ where
         inputs: &[transparent::Input],
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
-    ) -> Result<transaction::Hash, TransactionError> {
+    ) -> Result<AsyncChecks, TransactionError> {
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
 
@@ -377,14 +381,12 @@ where
             // async_checks.push(rsp);
         }
 
-        Self::wait_for_checks(async_checks).await?;
-
-        Ok(tx.hash())
+        Ok(async_checks)
     }
 
     /// Verify a V5 transaction.
     ///
-    /// Performs a set of asynchronous checks that must all succeed for the transaction to be
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
     /// considered valid. These checks include:
     ///
     /// - transaction support by the considered network upgrade (see [`Request::upgrade`])
@@ -404,22 +406,18 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
-    ) -> Result<transaction::Hash, TransactionError> {
-        let mut async_checks = FuturesUnordered::new();
-
+    ) -> Result<AsyncChecks, TransactionError> {
         Self::verify_v5_transaction_network_upgrade(
             &request.transaction(),
             request.upgrade(network),
         )?;
 
-        async_checks.extend(Self::verify_transparent_inputs_and_outputs(
+        let _async_checks = Self::verify_transparent_inputs_and_outputs(
             &request,
             network,
             inputs,
             script_verifier,
-        )?);
-
-        Self::wait_for_checks(async_checks).await?;
+        )?;
 
         // TODO:
         // - verify transparent pool (#1981)
