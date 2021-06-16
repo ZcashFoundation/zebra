@@ -45,9 +45,13 @@ impl Network {
         }
     }
 
-    /// Get the minimum mandatory checkpoint for this network.
+    /// Get the mandatory minimum checkpoint height for this network.
+    ///
+    /// Mandatory checkpoints are a Zebra-specific feature.
+    /// If a Zcash consensus rule only applies before the mandatory checkpoint,
+    /// Zebra can skip validation of that rule.
     pub fn mandatory_checkpoint_height(&self) -> Height {
-        // Currently this is Canopy for both networks.
+        // Currently this is the Canopy activation height for both networks.
         Canopy
             .activation_height(*self)
             .expect("Canopy activation height must be present for both networks")
