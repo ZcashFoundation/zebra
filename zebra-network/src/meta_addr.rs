@@ -148,7 +148,7 @@ pub struct MetaAddr {
     /// records, older peer versions, or buggy or malicious peers.
     //
     // TODO: make services private and optional
-    //       split gossiped and handshake services?
+    //       split gossiped and handshake services? (#2234)
     pub services: PeerServices,
 
     /// The unverified "last seen time" gossiped by the remote peer that sent us
@@ -549,9 +549,10 @@ impl MetaAddrChange {
             NewAlternate {
                 untrusted_services, ..
             } => Some(*untrusted_services),
-            // TODO: create a "services implemented by Zebra" constant
+            // TODO: create a "services implemented by Zebra" constant (#2234)
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
+            // TODO: split untrusted and direct services (#2234)
             UpdateResponded { services, .. } => Some(*services),
             UpdateFailed { services, .. } => *services,
         }
@@ -639,7 +640,7 @@ impl MetaAddrChange {
         match self {
             NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } => Some(MetaAddr {
                 addr: self.addr(),
-                // TODO: make services optional when we add a DNS seeder change/state
+                // TODO: make services optional when we add a DNS seeder change and state
                 services: self
                     .untrusted_services()
                     .expect("unexpected missing services"),
@@ -688,7 +689,7 @@ impl MetaAddrChange {
                     // so malicious peers can't keep changing our peer connection order.
                     Some(MetaAddr {
                         addr: self.addr(),
-                        // TODO: or(self.untrusted_services()) when services become optional
+                        // TODO: or(self.untrusted_services()) when services become optional (#2234)
                         services: previous.services,
                         untrusted_last_seen: previous
                             .untrusted_last_seen
@@ -711,8 +712,10 @@ impl MetaAddrChange {
                 // connection timeout, even if changes are applied out of order.
                 Some(MetaAddr {
                     addr: self.addr(),
+                    // We want up-to-date services, even if they have fewer bits,
+                    // or they are applied out of order.
                     services: self.untrusted_services().unwrap_or(previous.services),
-                    // only NeverAttempted changes can modify the last seen field
+                    // Only NeverAttempted changes can modify the last seen field
                     untrusted_last_seen: previous.untrusted_last_seen,
                     // Since Some(time) is always greater than None, `max` prefers:
                     // - the latest time if both are Some
@@ -790,7 +793,7 @@ impl Ord for MetaAddr {
         // So this comparison will have no impact until Zebra implements
         // more service features.
         //
-        // TODO: order services by usefulness, not bit pattern values
+        // TODO: order services by usefulness, not bit pattern values (#2234)
         //       Security: split gossiped and direct services
         let larger_services = self.services.cmp(&other.services);
 
