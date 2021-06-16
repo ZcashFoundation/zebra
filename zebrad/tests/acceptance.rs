@@ -28,10 +28,7 @@ use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf
 
 use zebra_chain::{
     block::Height,
-    parameters::{
-        Network::{self, *},
-        NetworkUpgrade,
-    },
+    parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;

@@ -4,7 +4,7 @@ use super::*;
 
 use std::sync::Arc;
 
-use zebra_chain::parameters::{Network, Network::*, NetworkUpgrade::*};
+use zebra_chain::parameters::{Network, Network::*};
 use zebra_chain::{
     block::{self, Block},
     serialization::ZcashDeserialize,
