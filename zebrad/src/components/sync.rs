@@ -70,6 +70,9 @@ const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 
 /// failure loop.
 const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
+/// Controls how long we wait for a state `Depth` response to return.
+const DEPTH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
+
 /// Controls how long we wait for a block download request to complete.
 ///
 /// This timeout makes sure that the syncer doesn't hang when:
@@ -183,6 +186,7 @@ where
             Downloads<
                 Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
                 Timeout<ZV>,
+                Timeout<ZS>,
             >,
         >,
     >,
@@ -241,7 +245,7 @@ where
             2 * SYNC_RESTART_DELAY,
         );
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
-        let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
+        let verifier_timeout = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
         // Warn the user if we're ignoring their configured lookahead limit
         assert!(
             config.sync.lookahead_limit >= MIN_LOOKAHEAD_LIMIT,
@@ -249,11 +253,19 @@ where
             config.sync.lookahead_limit,
             MIN_LOOKAHEAD_LIMIT
         );
+
+        // We apply a timeout to the state to avoid hangs due to missing earlier blocks.
+        let state_timeout = Timeout::new(state.clone(), DEPTH_RESPONSE_TIMEOUT);
+
         Self {
             genesis_hash: genesis_hash(config.network.network),
             lookahead_limit: config.sync.lookahead_limit,
             tip_network,
-            downloads: Box::pin(Downloads::new(block_network, verifier)),
+            downloads: Box::pin(Downloads::new(
+                block_network,
+                verifier_timeout,
+                state_timeout,
+            )),
             state,
             prospective_tips: HashSet::new(),
         }
