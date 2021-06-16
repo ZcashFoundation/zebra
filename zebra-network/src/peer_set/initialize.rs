@@ -201,12 +201,16 @@ where
     S::Future: Send + 'static,
 {
     info!(?initial_peers, "connecting to initial peer set");
-    // ## Correctness:
+    // # Security
     //
-    // Each `CallAll` can hold one `Buffer` or `Batch` reservation for
-    // an indefinite period. We can use `CallAllUnordered` without filling
-    // the underlying `Inbound` buffer, because we immediately drive this
-    // single `CallAll` to completion, and handshakes have a short timeout.
+    // TODO: rate-limit initial seed peer connections (#2326)
+    //
+    // # Correctness
+    //
+    // Each `FuturesUnordered` can hold one `Buffer` or `Batch` reservation for
+    // an indefinite period. We can use `FuturesUnordered` without filling
+    // the underlying network buffers, because we immediately drive this
+    // single `FuturesUnordered` to completion, and handshakes have a short timeout.
     let mut handshakes: FuturesUnordered<_> = initial_peers
         .into_iter()
         .map(|addr| {
