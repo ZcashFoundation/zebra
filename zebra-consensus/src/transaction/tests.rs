@@ -1,15 +1,18 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, sync::Arc};
 
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
-    orchard,
+    amount::Amount,
+    block, orchard,
     parameters::{Network, NetworkUpgrade},
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
-        Transaction,
+        Hash, Transaction,
     },
+    transparent,
 };
+use zebra_state::Utxo;
 
 use super::{check, Request, Verifier};
 
@@ -240,4 +243,78 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
 
         assert_eq!(result, Ok(expected_hash));
     }
+}
+
+// Utility functions
+
+/// Create a mock transparent transfer to be included in a transaction.
+///
+/// First, this creates a fake unspent transaction output from a fake transaction included in the
+/// specified `previous_utxo_height` block height. This fake [`Utxo`] also contains a simple script
+/// that can either accept or reject any spend attempt, depending on if `script_should_succeed` is
+/// `true` or `false`.
+///
+/// Then, a [`transparent::Input`] is created that attempts to spends the previously created fake
+/// UTXO. A new UTXO is created with the [`transparent::Output`] resulting from the spend.
+///
+/// Finally, the initial fake UTXO is placed in a `known_utxos` [`HashMap`] so that it can be
+/// retrieved during verification.
+///
+/// The function then returns the generated transparent input and output, as well as the
+/// `known_utxos` map.
+fn mock_transparent_transfer(
+    previous_utxo_height: block::Height,
+    script_should_succeed: bool,
+) -> (
+    transparent::Input,
+    transparent::Output,
+    HashMap<transparent::OutPoint, Utxo>,
+) {
+    // A script with a single opcode that accepts the transaction (pushes true on the stack)
+    let accepting_script = transparent::Script::new(&[1, 1]);
+    // A script with a single opcode that rejects the transaction (OP_FALSE)
+    let rejecting_script = transparent::Script::new(&[0]);
+
+    // Mock an unspent transaction output
+    let previous_outpoint = transparent::OutPoint {
+        hash: Hash([1u8; 32]),
+        index: 0,
+    };
+
+    let lock_script = if script_should_succeed {
+        accepting_script.clone()
+    } else {
+        rejecting_script.clone()
+    };
+
+    let previous_output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script,
+    };
+
+    let previous_utxo = Utxo {
+        output: previous_output,
+        height: previous_utxo_height,
+        from_coinbase: false,
+    };
+
+    // Use the `previous_outpoint` as input
+    let input = transparent::Input::PrevOut {
+        outpoint: previous_outpoint,
+        unlock_script: accepting_script,
+        sequence: 0,
+    };
+
+    // The output resulting from the transfer
+    // Using the rejecting script pretends the amount is burned because it can't be spent again
+    let output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script: rejecting_script,
+    };
+
+    // Cache the source of the fund so that it can be used during verification
+    let mut known_utxos = HashMap::new();
+    known_utxos.insert(previous_outpoint, previous_utxo);
+
+    (input, output, known_utxos)
 }
