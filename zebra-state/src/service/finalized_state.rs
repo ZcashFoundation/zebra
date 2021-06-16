@@ -7,6 +7,7 @@ mod tests;
 
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
+use zebra_chain::mmr::MerkleMountainRange;
 use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},
@@ -376,6 +377,11 @@ impl FinalizedState {
 
                 block.transactions[index as usize].clone()
             })
+    }
+
+    /// Returns the MMR for the finalized state.
+    pub fn mmr(&self) -> &MerkleMountainRange {
+        todo!("add MMR to finalized state");
     }
 
     /// If the database is `ephemeral`, delete it.

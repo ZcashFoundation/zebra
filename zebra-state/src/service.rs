@@ -149,9 +149,14 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared)?;
+            self.mem
+                .commit_new_chain(prepared, self.disk.mmr().clone())?;
         } else {
-            self.mem.commit_block(prepared)?;
+            let block_iter = self.any_ancestor_blocks(parent_hash);
+            // TODO: the above creates a immutable borrow of self, and below it uses
+            // a mutable borrow. which causes a compiler error. How to solve this?
+            self.mem
+                .commit_block(prepared, self.disk.mmr(), &block_iter)?;
         }
 
         Ok(())

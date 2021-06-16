@@ -96,21 +96,21 @@ pub(crate) fn block_is_contextually_valid_for_chain(
     network: Network,
     mmr_hash: &ChainHistoryMmrRootHash,
 ) -> Result<(), ValidateContextError> {
-    match prepared
-        .block
-        .commitment(network)
-        .expect("should have commitment (TODO: confirm)")
-    {
-        block::Commitment::PreSaplingReserved(_) => todo!("Confirm where this is being checked"),
-        block::Commitment::FinalSaplingRoot(_) => todo!("Confirm where this is being checked"),
-        block::Commitment::ChainHistoryActivationReserved => {
-            todo!("Confirm where this is being checked")
+    match prepared.block.commitment(network)? {
+        block::Commitment::PreSaplingReserved(_)
+        | block::Commitment::FinalSaplingRoot(_)
+        | block::Commitment::ChainHistoryActivationReserved => {
+            // No contextual checks needed for those.
+            Ok(())
         }
         block::Commitment::ChainHistoryRoot(block_mmr_hash) => {
             if block_mmr_hash == *mmr_hash {
                 Ok(())
             } else {
-                Err(ValidateContextError::InvalidHistoryCommitment {})
+                Err(ValidateContextError::InvalidHistoryCommitment {
+                    candidate_commitment: block_mmr_hash,
+                    expected_commitment: *mmr_hash,
+                })
             }
         }
         block::Commitment::ChainHistoryBlockTxAuthCommitment(_) => {

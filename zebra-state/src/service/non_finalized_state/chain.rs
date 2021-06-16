@@ -7,6 +7,7 @@ use std::{
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash},
+    mmr::MerkleMountainRange,
     orchard,
     primitives::Groth16Proof,
     sapling, sprout, transaction,
@@ -17,7 +18,7 @@ use zebra_chain::{
 
 use crate::{PreparedBlock, Utxo};
 
-#[derive(Default, Clone)]
+// #[derive(Clone)]
 pub struct Chain {
     pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,
@@ -32,10 +33,30 @@ pub struct Chain {
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
-    // TODO: MMR tree
+    mmr: MerkleMountainRange,
 }
 
 impl Chain {
+    /// Create a new empty non-finalized chain with the given MMR.
+    ///
+    /// The MMR must contain the history of the previous (finalized) blocks.
+    pub fn new(mmr: MerkleMountainRange) -> Self {
+        Chain {
+            blocks: Default::default(),
+            height_by_hash: Default::default(),
+            tx_by_hash: Default::default(),
+            created_utxos: Default::default(),
+            spent_utxos: Default::default(),
+            sprout_anchors: Default::default(),
+            sapling_anchors: Default::default(),
+            sprout_nullifiers: Default::default(),
+            sapling_nullifiers: Default::default(),
+            orchard_nullifiers: Default::default(),
+            partial_cumulative_work: Default::default(),
+            mmr,
+        }
+    }
+
     /// Push a contextually valid non-finalized block into a chain as the new tip.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(&mut self, block: PreparedBlock) {
@@ -73,12 +94,14 @@ impl Chain {
 
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
-    pub fn fork(&self, fork_tip: block::Hash) -> Option<Self> {
+    ///
+    /// `mmr`: the MMR for the fork.
+    pub fn fork(&self, fork_tip: block::Hash, mmr: MerkleMountainRange) -> Option<Self> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return None;
         }
 
-        let mut forked = self.clone();
+        let mut forked = self.clone_with_mmr(mmr);
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
@@ -125,7 +148,27 @@ impl Chain {
     }
 
     pub fn mmr_hash(&self) -> ChainHistoryMmrRootHash {
-        todo!("get MMR hash from the MMR tree");
+        self.mmr.hash()
+    }
+
+    /// Clone the Chain but not the MMR.
+    ///
+    /// Useful when forking, where the MMR is rebuilt anyway.
+    fn clone_with_mmr(&self, mmr: MerkleMountainRange) -> Self {
+        Chain {
+            blocks: self.blocks.clone(),
+            height_by_hash: self.height_by_hash.clone(),
+            tx_by_hash: self.tx_by_hash.clone(),
+            created_utxos: self.created_utxos.clone(),
+            spent_utxos: self.spent_utxos.clone(),
+            sprout_anchors: self.sprout_anchors.clone(),
+            sapling_anchors: self.sapling_anchors.clone(),
+            sprout_nullifiers: self.sprout_nullifiers.clone(),
+            sapling_nullifiers: self.sapling_nullifiers.clone(),
+            orchard_nullifiers: self.orchard_nullifiers.clone(),
+            partial_cumulative_work: self.partial_cumulative_work,
+            mmr,
+        }
     }
 }
 
@@ -170,7 +213,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
 
-        // TODO: add block data to MMR tree
+        self.mmr.push(block);
 
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
@@ -253,9 +296,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
 
-        // TODO: remove block data from MMR tree
-        // In order to do that, we need to load some "extra" nodes (blocks) from the
-        // state (see zcash_history and librustzcash). How to do that here?
+        // Note: the MMR is not reverted here; it's rebuilt and passed in fork()
 
         // for each transaction in block
         for (transaction, transaction_hash) in
