@@ -96,6 +96,7 @@ pub enum Request {
 }
 
 impl Request {
+    /// The transaction to verify that's in this request.
     pub fn transaction(&self) -> Arc<Transaction> {
         match self {
             Request::Block { transaction, .. } => transaction.clone(),
@@ -103,6 +104,7 @@ impl Request {
         }
     }
 
+    /// The set of additional known unspent transaction outputs that's in this request.
     pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
@@ -110,6 +112,10 @@ impl Request {
         }
     }
 
+    /// The network upgrade to consider for the verification.
+    ///
+    /// This is specified either explicitly in a request to verify a mempool transaction, or based
+    /// on the block height specified in a request to validate a transaction in a block.
     pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
         match self {
             Request::Block { height, .. } => NetworkUpgrade::current(network, *height),
@@ -188,6 +194,24 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
+    /// Verify a V4 transaction.
+    ///
+    /// Performs a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transparent transfers
+    /// - sprout shielded data
+    /// - sapling shielded data
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the transparent `inputs` in the transaction
+    /// - the Sprout `joinsplit_data` shielded data in the transaction
+    /// - the `sapling_shielded_data` in the transaction
     async fn verify_v4_transaction(
         request: Request,
         network: Network,
@@ -369,6 +393,23 @@ where
         Ok(tx.hash())
     }
 
+    /// Verify a V5 transaction.
+    ///
+    /// Performs a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transaction support by the considered network upgrade (see [`Request::upgrade`])
+    /// - transparent transfers
+    /// - sapling shielded data (TODO)
+    /// - orchard shielded data (TODO)
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the transparent `inputs` in the transaction
     async fn verify_v5_transaction(
         request: Request,
         network: Network,
@@ -388,6 +429,7 @@ where
         unimplemented!("V5 transaction validation is not yet complete");
     }
 
+    /// Verifies if a V5 `transaction` is supported by the network `upgrade`.
     fn verify_v5_transaction_network_upgrade(
         transaction: &Transaction,
         upgrade: NetworkUpgrade,
