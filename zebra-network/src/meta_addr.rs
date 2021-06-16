@@ -413,7 +413,6 @@ impl MetaAddr {
             // Recent times and future times are considered live
             last_response.saturating_elapsed()
                 <= constants::LIVE_PEER_DURATION
-                    .as_secs()
                     .try_into()
                     .expect("unexpectedly large constant")
         } else {
