@@ -165,7 +165,7 @@ impl AddressBook {
     /// # Security
     ///
     /// This function must apply every attempted, responded, and failed change
-    /// to the address bookt. This prevents rapid reconnections to the same peer.
+    /// to the address book. This prevents rapid reconnections to the same peer.
     ///
     /// As an exception, this function can ignore all changes for specific
     /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
