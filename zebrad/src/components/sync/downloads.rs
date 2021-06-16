@@ -18,6 +18,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::{self, Block};
 use zebra_network as zn;
+use zebra_state as zs;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -36,12 +37,14 @@ impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV>
+pub struct Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
     ZN::Future: Send,
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
 {
     // Services
     /// A service that forwards requests to connected peers, and returns their
@@ -50,6 +53,9 @@ where
 
     /// A service that verifies downloaded blocks.
     verifier: ZV,
+
+    /// A service that manages cached blockchain state.
+    state: ZS,
 
     // Internal downloads state
     /// A list of pending block download and verify tasks.
@@ -61,12 +67,14 @@ where
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
 }
 
-impl<ZN, ZV> Stream for Downloads<ZN, ZV>
+impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
     ZN::Future: Send,
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
 {
     type Item = Result<block::Hash, BoxError>;
 
@@ -103,12 +111,14 @@ where
     }
 }
 
-impl<ZN, ZV> Downloads<ZN, ZV>
+impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
     ZN::Future: Send,
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
 {
     /// Initialize a new download stream with the provided `network` and
     /// `verifier` services.
@@ -116,10 +126,11 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV) -> Self {
+    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
         Self {
             network,
             verifier,
+            state,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
         }
@@ -156,6 +167,8 @@ where
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
         let mut verifier = self.verifier.clone();
+        let state = self.state.clone();
+
         let task = tokio::spawn(
             async move {
                 // TODO: if the verifier and cancel are both ready, which should
@@ -168,6 +181,16 @@ where
                     }
                     rsp = block_req => rsp?,
                 };
+
+                // Check if the block is already in the state.
+                // BUG: check if the hash is in any chain (#862).
+                // Depth only checks the main chain.
+                match state.oneshot(zs::Request::Depth(hash)).await {
+                    Ok(zs::Response::Depth(None)) => Ok(()),
+                    Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
+                    Ok(_) => unreachable!("wrong response"),
+                    Err(e) => Err(e),
+                }?;
 
                 let block = if let zn::Response::Blocks(blocks) = rsp {
                     blocks

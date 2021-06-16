@@ -121,22 +121,6 @@ where
         // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
             let hash = block.hash();
-            // Check that this block is actually a new block.
-            tracing::trace!("checking that block is not already in state");
-            match state_service
-                .ready_and()
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::Depth(hash))
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-            {
-                zs::Response::Depth(Some(depth)) => {
-                    return Err(BlockError::AlreadyInChain(hash, depth).into())
-                }
-                zs::Response::Depth(None) => {}
-                _ => unreachable!("wrong response to Request::Depth"),
-            }
 
             tracing::trace!("performing block checks");
             let height = block
