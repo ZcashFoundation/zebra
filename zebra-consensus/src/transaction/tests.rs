@@ -8,7 +8,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
-        Hash, Transaction,
+        Hash, LockTime, Transaction,
     },
     transparent,
 };
@@ -243,6 +243,52 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
 
         assert_eq!(result, Ok(expected_hash));
     }
+}
+
+/// Test if V4 transaction with transparent funds is accepted.
+#[tokio::test]
+async fn v4_transaction_with_transparent_transfer_is_accepted() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
 }
 
 // Utility functions
