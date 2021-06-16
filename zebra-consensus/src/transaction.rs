@@ -31,6 +31,9 @@ mod check;
 #[cfg(test)]
 mod tests;
 
+/// An alias for a set of asynchronous checks that should succeed.
+type AsyncChecks = FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send>>>;
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -228,7 +231,7 @@ where
 
         // A set of asynchronous checks which must all succeed.
         // We finish by waiting on these below.
-        let mut async_checks = FuturesUnordered::new();
+        let mut async_checks = AsyncChecks::new();
 
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
