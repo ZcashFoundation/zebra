@@ -482,8 +482,7 @@ impl MetaAddr {
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     pub fn sanitize(&self) -> Option<MetaAddr> {
-        // Make sure this address is valid for outbound connections
-        if !self.is_valid_for_outbound() {
+        if !self.last_known_info_is_valid_for_outbound() {
             return None;
         }
 
