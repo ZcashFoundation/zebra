@@ -487,16 +487,19 @@ impl MetaAddr {
         }
 
         // Sanitize time
-        let interval = crate::constants::TIMESTAMP_TRUNCATION_SECONDS;
-        let ts = self.last_seen()?.timestamp();
-        // This can't underflow, because `0 <= rem_euclid < ts`
-        let last_seen = ts - ts.rem_euclid(interval);
-        let last_seen = DateTime32::from(last_seen);
+        let last_seen = self.last_seen()?;
+        let remainder = last_seen
+            .timestamp()
+            .rem_euclid(crate::constants::TIMESTAMP_TRUNCATION_SECONDS);
+        let last_seen = last_seen
+            .checked_sub(remainder.into())
+            .expect("unexpected underflow: rem_euclid is strictly less than timestamp");
 
         Some(MetaAddr {
             addr: self.addr,
-            // deserialization also sanitizes services to known flags
-            services: self.services & PeerServices::all(),
+            // TODO: split untrusted and direct services
+            //       sanitize untrusted services to NODE_NETWORK only? (#2234)
+            services: self.services,
             // only put the last seen time in the untrusted field,
             // this matches deserialization, and avoids leaking internal state
             untrusted_last_seen: Some(last_seen),
