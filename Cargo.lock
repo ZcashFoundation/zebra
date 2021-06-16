@@ -279,7 +279,7 @@ dependencies = [
  "group",
  "num_cpus",
  "pairing",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -452,7 +452,7 @@ dependencies = [
  "ff",
  "group",
  "pairing",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -1062,7 +1062,7 @@ source = "git+https://github.com/ZcashFoundation/ed25519-zebra?rev=539fad040c443
 dependencies = [
  "curve25519-dalek",
  "hex",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "serde",
  "sha2",
  "thiserror",
@@ -1144,7 +1144,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a4d941a5b7c2a75222e2d44fcdf634a67133d9db31e177ae5ff6ecda852bfe"
 dependencies = [
  "bitvec 0.20.1",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -1438,7 +1438,7 @@ checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
  "ff",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -1842,7 +1842,7 @@ dependencies = [
  "bls12_381",
  "ff",
  "group",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -2649,7 +2649,7 @@ checksum = "c24fcd450d3fa2b592732565aa4f17a27a61c65ece4726353e000939b0edee34"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "rand_hc 0.3.0",
 ]
 
@@ -2670,7 +2670,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -2699,9 +2699,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34cf66eb183df1c5876e2dcf6b13d57340741e8dc255b48e40a26de954d06ae7"
+checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
 dependencies = [
  "getrandom 0.2.0",
 ]
@@ -2721,7 +2721,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
 dependencies = [
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -2787,7 +2787,7 @@ dependencies = [
  "digest",
  "funty",
  "jubjub",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "serde",
  "thiserror",
  "zeroize",
@@ -4467,7 +4467,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.1",
  "rand_chacha 0.3.1",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "redjubjub",
  "ripemd160",
  "secp256k1",
