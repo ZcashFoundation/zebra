@@ -291,6 +291,58 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
     assert_eq!(result, Ok(transaction_hash));
 }
 
+/// Test if V4 transaction with transparent funds is rejected if the source script prevents it.
+///
+/// This test simulates the case where the script verifier rejects the transaction because the
+/// script prevents spending the source UTXO.
+#[tokio::test]
+async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should not succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::InternalDowncastError(
+            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+        ))
+    );
+}
+
 // Utility functions
 
 /// Create a mock transparent transfer to be included in a transaction.
