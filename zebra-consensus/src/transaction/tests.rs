@@ -343,6 +343,57 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     );
 }
 
+/// Test if V5 transaction with transparent funds is accepted.
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_transaction_with_transparent_transfer_is_accepted() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let nu5_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V5 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
 // Utility functions
 
 /// Create a mock transparent transfer to be included in a transaction.
