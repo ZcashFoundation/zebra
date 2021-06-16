@@ -35,20 +35,39 @@ impl DateTime32 {
             .expect("unexpected out of range chrono::DateTime")
     }
 
-    /// If `earlier` is less than or equal to `self`, returns the number of
-    /// seconds elapsed between `earlier` and `self`.
-    ///
-    /// Otherwise, returns `None`.
+    /// Returns the number of seconds elapsed between `earlier` and this time,
+    /// or `None` if `earlier` is later than this time.
     pub fn checked_duration_since(&self, earlier: DateTime32) -> Option<u32> {
         self.timestamp.checked_sub(earlier.timestamp)
     }
 
-    /// Returns the number of seconds elapsed since this time.
-    ///
-    /// If this time is in the future, returns `None`.
-    pub fn elapsed(&self) -> Option<u32> {
+    /// Returns the number of seconds elapsed between `earlier` and this time,
+    /// or zero if `earlier` is later than this time.
+    pub fn saturating_duration_since(&self, earlier: DateTime32) -> u32 {
+        self.timestamp.saturating_sub(earlier.timestamp)
+    }
+
+    /// Returns the number of seconds elapsed since this time,
+    /// or if this time is in the future, returns `None`.
+    pub fn checked_elapsed(&self) -> Option<u32> {
         DateTime32::now().checked_duration_since(*self)
     }
+
+    /// Returns the number of seconds elapsed since this time,
+    /// or if this time is in the future, returns zero.
+    pub fn saturating_elapsed(&self) -> u32 {
+        DateTime32::now().saturating_duration_since(*self)
+    }
+
+    /// The earliest possible `DateTime32` value.
+    pub const MIN: DateTime32 = DateTime32 {
+        timestamp: u32::MIN,
+    };
+
+    /// The latest possible `DateTime32` value.
+    pub const MAX: DateTime32 = DateTime32 {
+        timestamp: u32::MAX,
+    };
 }
 
 impl fmt::Debug for DateTime32 {

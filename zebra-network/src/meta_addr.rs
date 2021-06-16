@@ -410,22 +410,14 @@ impl MetaAddr {
     /// disconnected from it. Otherwise, we could potentially be connected to it.
     pub fn was_recently_live(&self) -> bool {
         if let Some(last_response) = self.last_response {
-            if let Some(elapsed) = last_response.elapsed() {
-                elapsed
-                    <= constants::LIVE_PEER_DURATION
-                        .as_secs()
-                        .try_into()
-                        .expect("unexpectedly large constant")
-            } else {
-                info!(last_response = ?self.last_response,
-                      now = ?DateTime32::now(),
-                      "unexpected future response time: assuming peer is live. Hint: has the system clock changed?"
-                );
-                // future times should be considered live
-                true
-            }
+            // Recent times and future times are considered live
+            last_response.saturating_elapsed()
+                <= constants::LIVE_PEER_DURATION
+                    .as_secs()
+                    .try_into()
+                    .expect("unexpectedly large constant")
         } else {
-            // if there is no response, it can't possibly be live
+            // If there has never been any response, it can't possibly be live
             false
         }
     }
@@ -435,25 +427,28 @@ impl MetaAddr {
     /// Returns `true` if this peer was recently attempted, or has a connection
     /// attempt in progress.
     pub fn was_recently_attempted(&self) -> bool {
-        self.last_attempt
-            // `now` should always be later than `last_attempt`, except for tests
-            // so we can call future attempts "not recent" to simplify the code
-            .map(|last_attempt| Instant::now().checked_duration_since(last_attempt))
-            .flatten()
-            .map(|since_last_attempt| since_last_attempt <= constants::LIVE_PEER_DURATION)
-            .unwrap_or(false)
+        if let Some(last_attempt) = self.last_attempt {
+            // Recent times and future times are considered live.
+            // Instants are monotonic, so `now` should always be later than `last_attempt`,
+            // except for synthetic data in tests.
+            Instant::now().saturating_duration_since(last_attempt) <= constants::LIVE_PEER_DURATION
+        } else {
+            // If there has never been any attempt, it can't possibly be live
+            false
+        }
     }
 
     /// Have we recently had a failed connection to this peer?
     ///
     /// Returns `true` if this peer has recently failed.
     pub fn was_recently_failed(&self) -> bool {
-        self.last_failure
-            // `now` should always be later than `last_failure`, except for tests
-            .map(|last_failure| Instant::now().checked_duration_since(last_failure))
-            .flatten()
-            .map(|since_last_failure| since_last_failure <= constants::LIVE_PEER_DURATION)
-            .unwrap_or(false)
+        if let Some(last_failure) = self.last_failure {
+            // Recent times and future times are considered live
+            Instant::now().saturating_duration_since(last_failure) <= constants::LIVE_PEER_DURATION
+        } else {
+            // If there has never been any failure, it can't possibly be recent
+            false
+        }
     }
 
     /// Is this address ready for a new outbound connection attempt?
