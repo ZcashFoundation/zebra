@@ -4414,7 +4414,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.2.0"
-source = "git+https://github.com/zcash/librustzcash.git#d50bb12a97da768dc8f3ee39b81f84262103e6eb"
+source = "git+https://github.com/zcash/librustzcash.git#0c3ed159985affa774e44d10172d4471d798a85a"
 dependencies = [
  "bigint",
  "blake2b_simd",

@@ -21,7 +21,7 @@ use crate::{
 pub struct Tree {
     network: Network,
     network_upgrade: NetworkUpgrade,
-    inner: zcash_history::Tree,
+    inner: zcash_history::Tree<zcash_history::V1>,
 }
 
 /// An encoded tree node data.
@@ -48,9 +48,9 @@ pub struct Entry {
     inner: [u8; zcash_history::MAX_ENTRY_SIZE],
 }
 
-impl From<zcash_history::Entry> for Entry {
+impl From<zcash_history::Entry<zcash_history::V1>> for Entry {
     /// Convert from librustzcash.
-    fn from(inner_entry: zcash_history::Entry) -> Self {
+    fn from(inner_entry: zcash_history::Entry<zcash_history::V1>) -> Self {
         let mut entry = Entry {
             inner: [0; zcash_history::MAX_ENTRY_SIZE],
         };
@@ -66,7 +66,7 @@ impl Entry {
     /// Sapling note commitment tree.
     fn new_leaf(block: Arc<Block>, network: Network, sapling_root: &sapling::tree::Root) -> Self {
         let node_data = block_to_history_node(block, network, sapling_root);
-        let inner_entry: zcash_history::Entry = node_data.into();
+        let inner_entry = zcash_history::Entry::<zcash_history::V1>::new_leaf(node_data);
         inner_entry.into()
     }
 
