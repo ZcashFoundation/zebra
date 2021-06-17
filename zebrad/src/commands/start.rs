@@ -26,7 +26,7 @@
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use tokio::sync::oneshot;
-use tower::builder::ServiceBuilder;
+use tower::{builder::ServiceBuilder, ServiceExt};
 
 use crate::components::{tokio::RuntimeRun, Inbound};
 use crate::config::ZebradConfig;
@@ -55,12 +55,47 @@ impl StartCmd {
         ));
 
         info!("initializing verifiers");
-        let verifier = zebra_consensus::chain::init(
+        let chain_verifier = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
             state.clone(),
         )
         .await;
+
+        let block_verifier =
+            zebra_consensus::block::BlockVerifier::new(config.network.network, state.clone());
+
+        // 1- get the finalized tip
+        let tip = match state.clone().oneshot(zebra_state::Request::Tip).await {
+            Ok(zebra_state::Response::Tip(Some(tip))) => tip,
+            Ok(zebra_state::Response::Tip(None)) => (
+                zebra_chain::block::Height(1),
+                zebra_chain::parameters::genesis_hash(config.network.network),
+            ),
+            _ => unreachable!("wrong response to Request::Tip"),
+        };
+
+        // 2- skip check if the block height is below the mandatory checkpoint
+        let tip_height = tip.0;
+        if tip_height >= config.network.network.mandatory_checkpoint_height() {
+            // 3- we need a call to Request::Block as block verifier needs the full block
+            let tip_block = match state
+                .clone()
+                .oneshot(zebra_state::Request::Block(
+                    zebra_state::HashOrHeight::Height(tip.0),
+                ))
+                .await
+            {
+                Ok(zebra_state::Response::Block(Some(b))) => b,
+                _ => unreachable!("wrong response to Request::Block"),
+            };
+
+            // 3- call BlockVerifier with the tip block
+            let verifier_response = match block_verifier.oneshot(tip_block).await {
+                Ok(zebra_chain::block::Hash(h)) => h,
+                Err(e) => panic!("{}", e),
+            };
+        }
 
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
@@ -70,7 +105,11 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(20)
-            .service(Inbound::new(setup_rx, state.clone(), verifier.clone()));
+            .service(Inbound::new(
+                setup_rx,
+                state.clone(),
+                chain_verifier.clone(),
+            ));
 
         let (peer_set, address_book) = zebra_network::init(config.network.clone(), inbound).await;
         setup_tx
@@ -78,7 +117,7 @@ impl StartCmd {
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
         info!("initializing syncer");
-        let syncer = ChainSync::new(&config, peer_set, state, verifier);
+        let syncer = ChainSync::new(&config, peer_set, state, chain_verifier);
 
         syncer.sync().await
     }

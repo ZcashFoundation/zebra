@@ -40,7 +40,6 @@
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 
-mod block;
 mod checkpoint;
 mod config;
 #[allow(dead_code)]
@@ -49,6 +48,8 @@ mod primitives;
 mod script;
 mod transaction;
 
+#[allow(missing_docs)]
+pub mod block;
 pub mod chain;
 #[allow(missing_docs)]
 pub mod error;
