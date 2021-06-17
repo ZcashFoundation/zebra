@@ -23,6 +23,7 @@ use zebra_chain::{block, parameters::Network};
 
 use crate::{
     constants,
+    meta_addr::MetaAddrChange,
     protocol::{
         external::{types::*, Codec, InventoryHash, Message},
         internal::{Request, Response},
@@ -45,7 +46,7 @@ use super::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerEr
 pub struct Handshake<S> {
     config: Config,
     inbound_service: S,
-    timestamp_collector: mpsc::Sender<MetaAddr>,
+    timestamp_collector: mpsc::Sender<MetaAddrChange>,
     inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
     user_agent: String,
@@ -296,7 +297,7 @@ impl fmt::Debug for ConnectedAddr {
 pub struct Builder<S> {
     config: Option<Config>,
     inbound_service: Option<S>,
-    timestamp_collector: Option<mpsc::Sender<MetaAddr>>,
+    timestamp_collector: Option<mpsc::Sender<MetaAddrChange>>,
     our_services: Option<PeerServices>,
     user_agent: Option<String>,
     relay: Option<bool>,
@@ -336,7 +337,10 @@ where
     ///
     /// This channel takes `MetaAddr`s, permanent addresses which can be used to
     /// make outbound connections to peers.
-    pub fn with_timestamp_collector(mut self, timestamp_collector: mpsc::Sender<MetaAddr>) -> Self {
+    pub fn with_timestamp_collector(
+        mut self,
+        timestamp_collector: mpsc::Sender<MetaAddrChange>,
+    ) -> Self {
         self.timestamp_collector = Some(timestamp_collector);
         self
     }
@@ -671,16 +675,8 @@ where
             let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
             for alt_addr in alternate_addrs {
                 let alt_addr = MetaAddr::new_alternate(&alt_addr, &remote_services);
-                if alt_addr.is_valid_for_outbound() {
-                    tracing::info!(
-                        ?alt_addr,
-                        "sending valid alternate peer address to the address book"
-                    );
-                    // awaiting a local task won't hang
-                    let _ = timestamp_collector.send(alt_addr).await;
-                } else {
-                    tracing::trace!(?alt_addr, "dropping invalid alternate peer address");
-                }
+                // awaiting a local task won't hang
+                let _ = timestamp_collector.send(alt_addr).await;
             }
 
             // Set the connection's version to the minimum of the received version or our own.
@@ -772,7 +768,7 @@ where
 
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                     let _ = inbound_ts_collector
-                                        .send(MetaAddr::new_errored(&book_addr, &remote_services))
+                                        .send(MetaAddr::new_errored(&book_addr, remote_services))
                                         .await;
                                 }
                             }
@@ -882,7 +878,7 @@ where
                             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                 // awaiting a local task won't hang
                                 let _ = timestamp_collector
-                                    .send(MetaAddr::new_shutdown(&book_addr, &remote_services))
+                                    .send(MetaAddr::new_shutdown(&book_addr, remote_services))
                                     .await;
                             }
                             return;
@@ -970,7 +966,7 @@ async fn send_one_heartbeat(server_tx: &mut mpsc::Sender<ClientRequest>) -> Resu
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout<F, T>(
     fut: F,
-    timestamp_collector: &mut mpsc::Sender<MetaAddr>,
+    timestamp_collector: &mut mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, BoxError>
@@ -1004,7 +1000,7 @@ where
 /// If `result.is_err()`, mark `connected_addr` as failed using `timestamp_collector`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    timestamp_collector: &mut mpsc::Sender<MetaAddr>,
+    timestamp_collector: &mut mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, E>
@@ -1018,7 +1014,7 @@ where
 
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = timestamp_collector
-                    .send(MetaAddr::new_errored(&book_addr, remote_services))
+                    .send(MetaAddr::new_errored(&book_addr, *remote_services))
                     .await;
             }
             Err(err)

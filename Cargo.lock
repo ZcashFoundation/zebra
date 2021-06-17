@@ -279,7 +279,7 @@ dependencies = [
  "group",
  "num_cpus",
  "pairing",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -452,7 +452,7 @@ dependencies = [
  "ff",
  "group",
  "pairing",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -1062,7 +1062,7 @@ source = "git+https://github.com/ZcashFoundation/ed25519-zebra?rev=539fad040c443
 dependencies = [
  "curve25519-dalek",
  "hex",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "serde",
  "sha2",
  "thiserror",
@@ -1144,7 +1144,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a4d941a5b7c2a75222e2d44fcdf634a67133d9db31e177ae5ff6ecda852bfe"
 dependencies = [
  "bitvec 0.20.1",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -1155,7 +1155,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
 dependencies = [
  "byteorder",
- "rand 0.8.1",
+ "rand 0.8.4",
  "rustc-hex",
  "static_assertions",
 ]
@@ -1438,7 +1438,7 @@ checksum = "61b3c1e8b4f1ca07e6605ea1be903a5f6956aec5c8a67fd44d56076631675ed8"
 dependencies = [
  "byteorder",
  "ff",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -1519,7 +1519,7 @@ dependencies = [
  "group",
  "num_cpus",
  "pasta_curves",
- "rand 0.8.1",
+ "rand 0.8.4",
 ]
 
 [[package]]
@@ -1842,7 +1842,7 @@ dependencies = [
  "bls12_381",
  "ff",
  "group",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "subtle",
 ]
 
@@ -2347,7 +2347,7 @@ dependencies = [
  "funty",
  "group",
  "lazy_static",
- "rand 0.8.1",
+ "rand 0.8.4",
  "static_assertions",
  "subtle",
 ]
@@ -2643,13 +2643,13 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.1"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c24fcd450d3fa2b592732565aa4f17a27a61c65ece4726353e000939b0edee34"
+checksum = "2e7573632e6454cf6b99d7aac4ccca54be06da05aca2ef7423d22d27d4d4bcd8"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "rand_hc 0.3.0",
 ]
 
@@ -2670,7 +2670,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -2699,9 +2699,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34cf66eb183df1c5876e2dcf6b13d57340741e8dc255b48e40a26de954d06ae7"
+checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
 dependencies = [
  "getrandom 0.2.0",
 ]
@@ -2721,7 +2721,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3190ef7066a446f2e7f42e239d161e905420ccab01eb967c9eb27d21b2322a73"
 dependencies = [
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -2787,7 +2787,7 @@ dependencies = [
  "digest",
  "funty",
  "jubjub",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "serde",
  "thiserror",
  "zeroize",
@@ -3753,7 +3753,7 @@ dependencies = [
  "futures 0.3.15",
  "futures-core",
  "pin-project 0.4.27",
- "rand 0.8.1",
+ "rand 0.8.4",
  "tokio 0.3.6",
  "tokio-test",
  "tower",
@@ -4074,9 +4074,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.8"
+version = "5.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59032138343003a17090952a1eaa7c1b260080b44d3dbb0d68905bd2230260ee"
+checksum = "f989a8a6dca13ecebbd7b892b69069f4321d19999f1a7e15a308f05ef4f5dbcd"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -4465,9 +4465,9 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "rand 0.8.1",
+ "rand 0.8.4",
  "rand_chacha 0.3.1",
- "rand_core 0.6.2",
+ "rand_core 0.6.3",
  "redjubjub",
  "ripemd160",
  "secp256k1",
@@ -4503,8 +4503,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
- "pairing",
- "rand 0.8.1",
+ "rand 0.8.4",
  "serde",
  "spandoc",
  "thiserror",
@@ -4539,7 +4538,7 @@ dependencies = [
  "pin-project 0.4.27",
  "proptest",
  "proptest-derive",
- "rand 0.8.1",
+ "rand 0.8.4",
  "regex",
  "serde",
  "thiserror",
@@ -4655,7 +4654,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 0.4.27",
- "rand 0.8.1",
+ "rand 0.8.4",
  "regex",
  "semver 1.0.3",
  "sentry",

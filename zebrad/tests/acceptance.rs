@@ -724,9 +724,18 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint, restart, and stop on load.
 #[test]
 fn restart_stop_at_height() -> Result<()> {
+    zebra_test::init();
+
+    restart_stop_at_height_for_network(Network::Mainnet, Height(0))?;
+    restart_stop_at_height_for_network(Network::Testnet, Height(0))?;
+
+    Ok(())
+}
+
+fn restart_stop_at_height_for_network(network: Network, height: Height) -> Result<()> {
     let reuse_tempdir = sync_until(
-        Height(0),
-        Mainnet,
+        height,
+        network,
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
@@ -735,8 +744,8 @@ fn restart_stop_at_height() -> Result<()> {
     // if stopping does not write the rocksdb database to disk, Zebra will
     // sync, rather than stopping immediately at the configured height
     sync_until(
-        Height(0),
-        Mainnet,
+        height,
+        network,
         "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),

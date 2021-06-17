@@ -1,4 +1,4 @@
-use std::io;
+use std::{convert::TryFrom, io};
 
 use halo2::pasta::pallas;
 
@@ -61,7 +61,7 @@ impl ZcashDeserialize for Action {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Action {
             cv: ValueCommitment::zcash_deserialize(&mut reader)?,
-            nullifier: Nullifier::from(reader.read_32_bytes()?),
+            nullifier: Nullifier::try_from(reader.read_32_bytes()?)?,
             rk: reader.read_32_bytes()?.into(),
             cm_x: pallas::Base::zcash_deserialize(&mut reader)?,
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
