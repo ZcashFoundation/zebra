@@ -1,4 +1,11 @@
-//! State storage code for Zebra. 🦓
+//! State contextual verification and storage code for Zebra. 🦓
+//!
+//! # Correctness
+//!
+//! Block commit requests should be wrapped in a timeout, because contextual verification
+//! and state updates wait for all previous blocks.
+//!
+//! Otherwise, verification of out-of-order and invalid blocks can hang indefinitely.
 
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
