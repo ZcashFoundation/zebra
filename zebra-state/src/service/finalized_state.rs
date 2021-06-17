@@ -7,7 +7,7 @@ mod tests;
 
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
-use zebra_chain::mmr::MerkleMountainRange;
+use zebra_chain::mmr::HistoryTree;
 use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},
@@ -379,9 +379,9 @@ impl FinalizedState {
             })
     }
 
-    /// Returns the MMR for the finalized state.
-    pub fn mmr(&self) -> &MerkleMountainRange {
-        todo!("add MMR to finalized state");
+    /// Returns the history tree for the finalized state.
+    pub fn history_tree(&self) -> &HistoryTree {
+        todo!("add history tree to finalized state");
     }
 
     /// If the database is `ephemeral`, delete it.

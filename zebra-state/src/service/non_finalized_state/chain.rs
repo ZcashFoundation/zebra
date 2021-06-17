@@ -7,7 +7,7 @@ use std::{
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash},
-    mmr::MerkleMountainRange,
+    mmr::HistoryTree,
     orchard,
     primitives::Groth16Proof,
     sapling, sprout, transaction,
@@ -33,14 +33,14 @@ pub struct Chain {
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
-    mmr: MerkleMountainRange,
+    history_tree: HistoryTree,
 }
 
 impl Chain {
-    /// Create a new empty non-finalized chain with the given MMR.
+    /// Create a new empty non-finalized chain with the given history tree.
     ///
-    /// The MMR must contain the history of the previous (finalized) blocks.
-    pub fn new(mmr: MerkleMountainRange) -> Self {
+    /// The history tree must contain the history of the previous (finalized) blocks.
+    pub fn new(history_tree: HistoryTree) -> Self {
         Chain {
             blocks: Default::default(),
             height_by_hash: Default::default(),
@@ -53,7 +53,7 @@ impl Chain {
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
             partial_cumulative_work: Default::default(),
-            mmr,
+            history_tree,
         }
     }
 
@@ -95,17 +95,32 @@ impl Chain {
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
     ///
-    /// `mmr`: the MMR for the fork.
-    pub fn fork(&self, fork_tip: block::Hash, mmr: MerkleMountainRange) -> Option<Self> {
+    /// `finalized_tip_history_tree`: the history tree for the finalized tip
+    /// from which the tree of the fork will be computed.
+    pub fn fork(
+        &self,
+        fork_tip: block::Hash,
+        finalized_tip_history_tree: &HistoryTree,
+    ) -> Option<Self> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return None;
         }
 
-        let mut forked = self.clone_with_mmr(mmr);
+        let mut forked = self.with_history_tree(finalized_tip_history_tree.clone());
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
+
+        // Rebuild the history tree starting from the finalized tip tree.
+        // TODO: change to a more efficient approach by removing nodes
+        // from the tree of the original chain (in `pop_tip()`).
+        forked.history_tree.extend(
+            forked
+                .blocks
+                .values()
+                .map(|prepared_block| prepared_block.block.clone()),
+        );
 
         Some(forked)
     }
@@ -147,14 +162,15 @@ impl Chain {
         self.blocks.is_empty()
     }
 
-    pub fn mmr_hash(&self) -> ChainHistoryMmrRootHash {
-        self.mmr.hash()
+    pub fn history_root_hash(&self) -> ChainHistoryMmrRootHash {
+        self.history_tree.hash()
     }
 
-    /// Clone the Chain but not the MMR.
+    /// Clone the Chain but not the history tree, using the history tree
+    /// specified instead.
     ///
-    /// Useful when forking, where the MMR is rebuilt anyway.
-    fn clone_with_mmr(&self, mmr: MerkleMountainRange) -> Self {
+    /// Useful when forking, where the history tree is rebuilt anyway.
+    fn with_history_tree(&self, history_tree: HistoryTree) -> Self {
         Chain {
             blocks: self.blocks.clone(),
             height_by_hash: self.height_by_hash.clone(),
@@ -167,7 +183,7 @@ impl Chain {
             sapling_nullifiers: self.sapling_nullifiers.clone(),
             orchard_nullifiers: self.orchard_nullifiers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
-            mmr,
+            history_tree,
         }
     }
 }
@@ -213,7 +229,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
 
-        self.mmr.push(block);
+        self.history_tree.push(block);
 
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
@@ -296,7 +312,9 @@ impl UpdateWith<PreparedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
 
-        // Note: the MMR is not reverted here; it's rebuilt and passed in fork()
+        // Note: the MMR is not reverted here.
+        // When popping the root: there is no need to change the MMR.
+        // When popping the tip: the MMR is rebuilt in fork().
 
         // for each transaction in block
         for (transaction, transaction_hash) in

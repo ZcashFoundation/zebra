@@ -12,11 +12,11 @@ mod tests;
 
 pub use queued_blocks::QueuedBlocks;
 
-use std::{borrow::Borrow, collections::BTreeSet, mem, ops::Deref, sync::Arc};
+use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
-    mmr::MerkleMountainRange,
+    mmr::HistoryTree,
     parameters::{Network, NetworkUpgrade::Canopy},
     transaction::{self, Transaction},
     transparent,
@@ -79,17 +79,11 @@ impl NonFinalizedState {
     }
 
     /// Commit block to the non-finalized state.
-    pub fn commit_block<C>(
+    pub fn commit_block(
         &mut self,
         prepared: PreparedBlock,
-        finalized_tip_mmr: &MerkleMountainRange,
-        block_iter: &C,
-    ) -> Result<(), ValidateContextError>
-    where
-        C: IntoIterator,
-        C::Item: Borrow<Block>,
-        C::IntoIter: ExactSizeIterator,
-    {
+        finalized_tip_history_tree: &HistoryTree,
+    ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -105,12 +99,7 @@ impl NonFinalizedState {
             .or_else(|| {
                 self.chain_set
                     .iter()
-                    .find_map(|chain| {
-                        let mut mmr = finalized_tip_mmr.clone();
-                        // TODO: pass Sapling and Orchard roots for each block. How?
-                        mmr.extend(block_iter);
-                        chain.fork(parent_hash, mmr)
-                    })
+                    .find_map(|chain| chain.fork(parent_hash, finalized_tip_history_tree))
                     .map(Box::new)
             })
             .expect("commit_block is only called with blocks that are ready to be commited");
@@ -118,7 +107,7 @@ impl NonFinalizedState {
         check::block_is_contextually_valid_for_chain(
             &prepared,
             self.network,
-            &parent_chain.mmr_hash(),
+            &parent_chain.history_root_hash(),
         )?;
         parent_chain.push(prepared);
         self.chain_set.insert(parent_chain);
@@ -131,11 +120,15 @@ impl NonFinalizedState {
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
-        mmr: MerkleMountainRange,
+        history_tree: HistoryTree,
     ) -> Result<(), ValidateContextError> {
-        let mut chain = Chain::new(mmr);
+        let mut chain = Chain::new(history_tree);
         let (height, hash) = (prepared.height, prepared.hash);
-        check::block_is_contextually_valid_for_chain(&prepared, self.network, &chain.mmr_hash())?;
+        check::block_is_contextually_valid_for_chain(
+            &prepared,
+            self.network,
+            &chain.history_root_hash(),
+        )?;
         chain.push(prepared);
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);

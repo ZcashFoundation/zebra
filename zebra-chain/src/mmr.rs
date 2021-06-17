@@ -1,43 +1,39 @@
-//! Merkle mountain range structure that contains information about
+//! History tree (Merkle mountain range) structure that contains information about
 //! the block history as specified in ZIP-221.
 
-use std::borrow::Borrow;
+use std::sync::Arc;
 
 use crate::block::{Block, ChainHistoryMmrRootHash};
 
-/// Merkle mountain range structure.
-pub struct MerkleMountainRange {
+/// History tree structure.
+pub struct HistoryTree {
     // TODO
 }
 
-impl MerkleMountainRange {
-    pub fn push(&mut self, block: &Block) {
+impl HistoryTree {
+    /// Add block data to the tree.
+    pub fn push(&mut self, _block: &Block) {
         // TODO: zcash_history::Tree::append_leaf receives an Arc<Block>. Should
         // change that to match, or create an Arc to pass to it?
         todo!();
     }
 
-    /// Extend the MMR with the given blocks.
-    // TODO: add Sapling and Orchard roots to parameters
-    pub fn extend<C>(&mut self, _vals: &C)
-    where
-        C: IntoIterator,
-        C::Item: Borrow<Block>,
-        C::IntoIter: ExactSizeIterator,
-    {
-        // TODO: How to convert C to `impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>`
-        // for zcash_history::Tree::append_leaf_iter? Should change that to match C?
-        todo!();
-    }
-
-    /// Return the hash of the MMR root.
+    /// Return the hash of the tree root.
     pub fn hash(&self) -> ChainHistoryMmrRootHash {
         todo!();
     }
 }
 
-impl Clone for MerkleMountainRange {
+impl Clone for HistoryTree {
     fn clone(&self) -> Self {
         todo!();
+    }
+}
+
+impl Extend<Arc<Block>> for HistoryTree {
+    /// Extend the history tree with the given blocks.
+    // TODO: add Sapling and Orchard roots to parameters
+    fn extend<T: IntoIterator<Item = Arc<Block>>>(&mut self, _iter: T) {
+        todo!()
     }
 }
