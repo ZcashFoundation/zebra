@@ -115,12 +115,16 @@ impl Chain {
         // Rebuild the history tree starting from the finalized tip tree.
         // TODO: change to a more efficient approach by removing nodes
         // from the tree of the original chain (in `pop_tip()`).
-        forked.history_tree.extend(
-            forked
-                .blocks
-                .values()
-                .map(|prepared_block| prepared_block.block.clone()),
-        );
+        forked
+            .history_tree
+            .extend(forked.blocks.values().map(|prepared_block| {
+                (
+                    prepared_block.block.clone(),
+                    // TODO: pass Sapling and Orchard roots
+                    &sapling::tree::Root([0; 32]),
+                    None,
+                )
+            }));
 
         Some(forked)
     }
@@ -229,7 +233,9 @@ impl UpdateWith<PreparedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
 
-        self.history_tree.push(block);
+        // TODO: pass Sapling and Orchard roots
+        self.history_tree
+            .push(prepared.block.clone(), &sapling::tree::Root([0; 32]), None);
 
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
