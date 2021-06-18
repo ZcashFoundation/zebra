@@ -199,7 +199,7 @@ where
         let fut = async move {
             // Check if the block is already in the state.
             // BUG: check if the hash is in any chain (#862).
-            // Depth only checks the main chain.
+            // Depth only checks the best chain.
             match state.oneshot(zs::Request::Depth(hash)).await {
                 Ok(zs::Response::Depth(None)) => Ok(()),
                 Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
