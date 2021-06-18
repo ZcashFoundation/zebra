@@ -151,11 +151,25 @@ impl NoteCommitment {
         let psi_bytes: [u8; 32] = psi.into();
 
         // g*d || pk*d || I2LEBSP_64(v) || I2LEBSP_l^Orchard_Base(ρ) || I2LEBSP_l^Orchard_base(ψ)
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&rho_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&psi_bytes[..]));
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..])
+                .expect("must work for small slices"),
+        );
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..])
+                .expect("must work for small slices"),
+        );
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]).expect("must work for small slices"),
+        );
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&rho_bytes[..])
+                .expect("must work for small slices"),
+        );
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&psi_bytes[..])
+                .expect("must work for small slices"),
+        );
 
         let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 

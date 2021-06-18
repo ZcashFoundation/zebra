@@ -554,12 +554,14 @@ impl From<FullViewingKey> for IncomingViewingKey {
     fn from(fvk: FullViewingKey) -> Self {
         let mut M: BitVec<Lsb0, u8> = BitVec::new();
 
-        M.append(&mut BitVec::<Lsb0, u8>::from_slice(
-            &<[u8; 32]>::from(fvk.spend_validating_key)[..],
-        ));
-        M.append(&mut BitVec::<Lsb0, u8>::from_slice(
-            &<[u8; 32]>::from(fvk.nullifier_deriving_key)[..],
-        ));
+        M.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&<[u8; 32]>::from(fvk.spend_validating_key)[..])
+                .expect("must work for small slices"),
+        );
+        M.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&<[u8; 32]>::from(fvk.nullifier_deriving_key)[..])
+                .expect("must work for small slices"),
+        );
 
         // Commit^ivk_rivk
         let commit_x = sinsemilla_short_commit(

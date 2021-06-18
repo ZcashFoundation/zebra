@@ -16,7 +16,7 @@ bench = ["zebra-test"]
 aes = "0.6"
 bech32 = "0.8.0"
 bitflags = "1.2.1"
-bitvec = "0.17.4"
+bitvec = "0.22"
 blake2b_simd = "0.5.11"
 blake2s_simd = "0.5.11"
 bs58 = { version = "0.4", features = ["check"] }
@@ -24,15 +24,13 @@ byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.1"
 fpe = "0.4"
-# Temporary workaround for https://github.com/myrrlyn/funty/issues/3
-# TODO: remove: https://github.com/ZcashFoundation/zebra/issues/2082
-funty = "=1.1.0"
 futures = "0.3"
-group = "0.9"
+group = "0.10"
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
-halo2 = { git = "https://github.com/zcash/halo2.git", rev = "dda60a363001373d564156ad0334e2022d85a5b4"}
+# Note: if updating this, also update the workspace Cargo.toml to match.
+halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
 hex = "0.4"
-jubjub = "0.6.0"
+jubjub = "0.7.0"
 lazy_static = "1.4.0"
 rand_core = "0.6"
 ripemd160 = "0.9"
@@ -44,6 +42,7 @@ subtle = "2.4"
 thiserror = "1"
 x25519-dalek = { version = "1.1", features = ["serde"] }
 zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
 bigint = "4"
 uint = "0.9.0"
 
@@ -54,7 +53,8 @@ itertools = { version = "0.10.1", optional = true }
 # ZF deps
 ed25519-zebra = "2"
 equihash = "0.1"
-redjubjub = "0.4"
+# TODO: Update to 0.5 release when published
+redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", rev = "f772176560b0b7daf25eff2460e08dc127ac8407" }
 
 zebra-test = { path = "../zebra-test/", optional = true }
 

@@ -126,9 +126,17 @@ impl NoteCommitment {
         let pk_d_bytes = <[u8; 32]>::from(transmission_key);
         let v_bytes = value.to_bytes();
 
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..])
+                .expect("must work for small slices"),
+        );
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..])
+                .expect("must work for small slices"),
+        );
+        s.append(
+            &mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]).expect("must work for small slices"),
+        );
 
         let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 
