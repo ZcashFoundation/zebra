@@ -23,7 +23,7 @@ use std::{
     ops::Mul,
 };
 
-use primitive_types::U256;
+pub use crate::work::u256::U256;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;

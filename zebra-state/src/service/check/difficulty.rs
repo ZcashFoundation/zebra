@@ -6,14 +6,17 @@
 //!  * `median-time-past`.
 
 use chrono::{DateTime, Duration, Utc};
-use primitive_types::U256;
 
 use std::{cmp::max, cmp::min, convert::TryInto};
 
 use zebra_chain::{
-    block, block::Block, parameters::Network, parameters::NetworkUpgrade,
-    parameters::POW_AVERAGING_WINDOW, work::difficulty::CompactDifficulty,
+    block,
+    block::Block,
+    parameters::Network,
+    parameters::NetworkUpgrade,
+    parameters::POW_AVERAGING_WINDOW,
     work::difficulty::ExpandedDifficulty,
+    work::difficulty::{CompactDifficulty, U256},
 };
 
 /// The median block span for time median calculations.
