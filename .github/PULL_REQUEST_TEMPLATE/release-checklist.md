@@ -123,6 +123,7 @@ From "Keep a Changelog":
 - [ ] Set the tag name to the version tag, for example: `1.0.0-alpha.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
+- [ ] Create a new PR to update the CHANGELOG.md file with the final change log.
 
 ## Final Testing
 
@@ -134,3 +135,4 @@ If the build fails after tagging:
 2. check if the fixes changed any extra crates, and do the required version increments
 3. update `README.md` with a **new** git tag
 4. tag a **new** release
+5. Update CHANGELOG.md
