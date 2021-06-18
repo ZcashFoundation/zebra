@@ -1,12 +1,11 @@
 use std::{convert::TryFrom, mem, sync::Arc};
 
-use primitive_types::U256;
 use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
     transparent,
     work::difficulty::ExpandedDifficulty,
-    work::difficulty::Work,
+    work::difficulty::{Work, U256},
 };
 
 use super::*;
