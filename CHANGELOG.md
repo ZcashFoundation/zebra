@@ -1,5 +1,9 @@
 # CHANGELOG
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
+
 ## [Zebra 1.0.0-alpha.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.11)
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes some security fixes.
