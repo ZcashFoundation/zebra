@@ -27,7 +27,7 @@ fn coinbase_has_height() -> Result<()> {
 fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::coinbase_strategy(None)
+    let strategy = LedgerState::coinbase_strategy(None, None, false)
         .prop_flat_map(|ledger_state| Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS));
 
     proptest!(|(inputs in strategy.prop_map(SummaryDebug))| {

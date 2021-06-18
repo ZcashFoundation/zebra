@@ -1,12 +1,13 @@
-use std::env;
-use std::io::ErrorKind;
+use std::{env, io::ErrorKind};
 
 use proptest::{arbitrary::any, prelude::*, test_runner::Config};
+
 use zebra_test::prelude::*;
 
-use crate::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
 use crate::{
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize},
+    transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     LedgerState,
 };
 
@@ -128,7 +129,8 @@ proptest! {
 fn blocks_have_coinbase() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::coinbase_strategy(None).prop_flat_map(Block::arbitrary_with);
+    let strategy =
+        LedgerState::coinbase_strategy(None, None, false).prop_flat_map(Block::arbitrary_with);
 
     proptest!(|(block in strategy)| {
         let has_coinbase = block.coinbase_height().is_some();
@@ -144,7 +146,8 @@ fn blocks_have_coinbase() -> Result<()> {
 fn block_genesis_strategy() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::genesis_strategy(None).prop_flat_map(Block::arbitrary_with);
+    let strategy =
+        LedgerState::genesis_strategy(None, None, false).prop_flat_map(Block::arbitrary_with);
 
     proptest!(|(block in strategy)| {
         prop_assert_eq!(block.coinbase_height(), Some(Height(0)));
@@ -160,8 +163,8 @@ fn block_genesis_strategy() -> Result<()> {
 fn partial_chain_strategy() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::genesis_strategy(None)
-        .prop_flat_map(|init| Block::partial_chain_strategy(init, 3));
+    let strategy = LedgerState::genesis_strategy(None, None, false)
+        .prop_flat_map(|init| Block::partial_chain_strategy(init, MAX_ARBITRARY_ITEMS));
 
     proptest!(|(chain in strategy)| {
         let mut height = Height(0);
@@ -171,6 +174,35 @@ fn partial_chain_strategy() -> Result<()> {
             prop_assert_eq!(block.header.previous_block_hash, previous_block_hash);
             height = Height(height.0 + 1);
             previous_block_hash = block.hash();
+        }
+    });
+
+    Ok(())
+}
+
+/// Make sure our block height strategy generates a chain with the correct coinbase
+/// heights and hashes.
+#[test]
+fn arbitrary_height_partial_chain_strategy() -> Result<()> {
+    zebra_test::init();
+
+    let strategy = any::<Height>()
+        .prop_flat_map(|height| LedgerState::height_strategy(height, None, None, false))
+        .prop_flat_map(|init| Block::partial_chain_strategy(init, MAX_ARBITRARY_ITEMS));
+
+    proptest!(|(chain in strategy)| {
+        let mut height = None;
+        let mut previous_block_hash = None;
+        for block in chain {
+            if height.is_none() {
+                prop_assert!(block.coinbase_height().is_some());
+                height = block.coinbase_height();
+            } else {
+                height = Some(Height(height.unwrap().0 + 1));
+                prop_assert_eq!(block.coinbase_height(), height);
+                prop_assert_eq!(Some(block.header.previous_block_hash), previous_block_hash);
+            }
+            previous_block_hash = Some(block.hash());
         }
     });
 
