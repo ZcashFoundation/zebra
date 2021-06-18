@@ -20,7 +20,7 @@ use tracing::instrument;
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{Network, NetworkUpgrade::Canopy},
+    parameters::Network,
 };
 
 use zebra_state as zs;
@@ -147,7 +147,7 @@ where
     let max_checkpoint_height = if config.checkpoint_sync {
         list.max_height()
     } else {
-        list.min_height_in_range(Canopy.activation_height(network).unwrap()..)
+        list.min_height_in_range(network.mandatory_checkpoint_height()..)
             .expect("hardcoded checkpoint list extends past canopy activation")
     };
 

@@ -60,7 +60,7 @@ zebra-test = { path = "../zebra-test" }
 
 [features]
 enable-sentry = []
-test_sync_to_canopy_mainnet = []
-test_sync_to_canopy_testnet = []
-test_sync_past_canopy_mainnet = []
-test_sync_past_canopy_testnet = []
+test_sync_to_mandatory_checkpoint_mainnet = []
+test_sync_to_mandatory_checkpoint_testnet = []
+test_sync_past_mandatory_checkpoint_mainnet = []
+test_sync_past_mandatory_checkpoint_testnet = []

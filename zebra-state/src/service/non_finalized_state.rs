@@ -16,7 +16,7 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{Network, NetworkUpgrade::Canopy},
+    parameters::Network,
     transaction::{self, Transaction},
     transparent,
 };
@@ -80,8 +80,8 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let canopy_activation_height = Canopy.activation_height(self.network).unwrap();
-        if height <= canopy_activation_height {
+        let mandatory_checkpoint = self.network.mandatory_checkpoint_height();
+        if height <= mandatory_checkpoint {
             panic!(
                 "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
             );
