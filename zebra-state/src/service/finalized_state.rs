@@ -5,7 +5,7 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::transparent;
 use zebra_chain::{
@@ -72,6 +72,10 @@ impl FinalizedState {
             ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
         };
+
+        // Make sure the database returned from the `db_config()` is always the same
+        // as the one returned by the `path()` method of the FinalizedState.
+        assert_eq!(new_state.path(), path);
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
             if new_state.is_at_stop_height(tip_height) {
@@ -397,6 +401,11 @@ impl FinalizedState {
             // (The OS will delete them eventually anyway.)
             let _res = std::fs::remove_dir_all(path);
         }
+    }
+
+    /// Returns the `Path` where the files used by this database are located.
+    pub fn path(&self) -> &Path {
+        self.db.path()
     }
 }
 
