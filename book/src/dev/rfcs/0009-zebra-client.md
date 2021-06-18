@@ -202,7 +202,8 @@ Support for sending tx's via _non-privileged_ RPC endpoints, or via Stolon:
     - (can use servo/bincode to communicate with zebrad)
     - via the privileged (and possibly the unprivileged) RPC endpoints
     - can use [cap-std](https://blog.sunfishcode.online/introducing-cap-std/)
-      to restrict filesystem and network access for zebra-client
+      to restrict filesystem and network access for zebra-client.
+      See https://github.com/ZcashFoundation/zebra/issues/2340
 
 ## Task isolation in Tokio
 - TODO: fill in
@@ -319,7 +320,8 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
     - this helps somewhat but the benefit is reduced by our prexisting memory safety, thanks to Rust
     - not meaningful without other isolation (need to restrict `zebrad` from accessing viewing keys on disk, etc)
     - could use [cap-std](https://blog.sunfishcode.online/introducing-cap-std/)
-      to restrict filesystem and network access for zebra-client
+      to restrict filesystem and network access for zebra-client.
+      See https://github.com/ZcashFoundation/zebra/issues/2340
     - instead of process isolation, maybe you actually want the Light Client
 Protocol, or something similar?
 
