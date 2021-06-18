@@ -264,8 +264,11 @@ pub enum Request {
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
     /// Its purpose is to allow asynchronous script verification.
     ///
-    /// Code making this request should apply a timeout layer to the service to
-    /// handle missing UTXOs.
+    /// # Correctness
+    ///
+    /// UTXO requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
     AwaitUtxo(transparent::OutPoint),
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.

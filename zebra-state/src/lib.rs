@@ -2,8 +2,9 @@
 //!
 //! # Correctness
 //!
-//! Block commit requests should be wrapped in a timeout, because contextual verification
-//! and state updates wait for all previous blocks.
+//! Await UTXO and block commit requests should be wrapped in a timeout, because:
+//! - await UTXO requests wait for a block containing that UTXO, and
+//! - contextual verification and state updates wait for all previous blocks.
 //!
 //! Otherwise, verification of out-of-order and invalid blocks can hang indefinitely.
 
