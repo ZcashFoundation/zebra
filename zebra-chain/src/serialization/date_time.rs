@@ -24,6 +24,16 @@ pub struct Duration32 {
 }
 
 impl DateTime32 {
+    /// The earliest possible `DateTime32` value.
+    pub const MIN: DateTime32 = DateTime32 {
+        timestamp: u32::MIN,
+    };
+
+    /// The latest possible `DateTime32` value.
+    pub const MAX: DateTime32 = DateTime32 {
+        timestamp: u32::MAX,
+    };
+
     /// Returns the number of seconds since the UNIX epoch.
     pub fn timestamp(&self) -> u32 {
         self.timestamp
@@ -68,19 +78,15 @@ impl DateTime32 {
     pub fn saturating_elapsed(&self) -> Duration32 {
         DateTime32::now().saturating_duration_since(*self)
     }
-
-    /// The earliest possible `DateTime32` value.
-    pub const MIN: DateTime32 = DateTime32 {
-        timestamp: u32::MIN,
-    };
-
-    /// The latest possible `DateTime32` value.
-    pub const MAX: DateTime32 = DateTime32 {
-        timestamp: u32::MAX,
-    };
 }
 
 impl Duration32 {
+    /// The earliest possible `Duration32` value.
+    pub const MIN: Duration32 = Duration32 { seconds: u32::MIN };
+
+    /// The latest possible `Duration32` value.
+    pub const MAX: Duration32 = Duration32 { seconds: u32::MAX };
+
     /// Returns the number of seconds.
     pub fn seconds(&self) -> u32 {
         self.seconds
@@ -95,12 +101,6 @@ impl Duration32 {
     pub fn to_std(self) -> std::time::Duration {
         self.into()
     }
-
-    /// The earliest possible `Duration32` value.
-    pub const MIN: Duration32 = Duration32 { seconds: u32::MIN };
-
-    /// The latest possible `Duration32` value.
-    pub const MAX: Duration32 = Duration32 { seconds: u32::MAX };
 }
 
 impl fmt::Debug for DateTime32 {
