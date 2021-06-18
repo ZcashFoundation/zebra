@@ -4,7 +4,7 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-alpha.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.11)
+## [Zebra 1.0.0-alpha.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.11) - 2021-06-18
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes some security fixes.
 
@@ -49,7 +49,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Only apply the outbound connection rate-limit to actual connections (#2278)
 - Rate limit initial genesis block download retries, Credit: Equilibrium (#2255)
 
-## [Zebra 1.0.0-alpha.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.10)
+## [Zebra 1.0.0-alpha.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.10) - 2021-06-09
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes some security fixes.
 
@@ -104,7 +104,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Rate limit GetAddr messages to any peer, Credit: Equilibrium (#2254)
 - Prevent bursts of reconnection attempts (#2251)
 
-## [Zebra 1.0.0-alpha.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.9)
+## [Zebra 1.0.0-alpha.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.9) - 2021-05-26
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5, and includes several security fixes.
 
@@ -149,7 +149,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Make CandidateSet timeout and initial fanout more reliable (#2172)
 - Remove CandidateSet state and add last seen time limit to validate_addrs (#2177)
 
-## [Zebra 1.0.0-alpha.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.8)
+## [Zebra 1.0.0-alpha.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.8) - 2021-05-12
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5.
 
@@ -188,7 +188,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Improve CI speed by removing redundant build jobs and Rust components (#2088)
 - Fix a bad merge that was committed to main (#2085)
 
-## [Zebra v1.0.0-alpha.7](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.7)
+## [Zebra v1.0.0-alpha.7](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.7) - 2021-04-23
 
 Zebra's latest alpha continues our work on NU5/Orchard, and fixes some security and protocol correctness issues.
 
@@ -265,7 +265,7 @@ Zebra now has best-effort support for Apple M1 builds, and logging to systemd-jo
 
 
 
-## [Zebra v1.0.0-alpha.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.6)
+## [Zebra v1.0.0-alpha.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.6) - 2021-04-09
 
 Zebra's latest alpha includes more validation of pre-NU5 consensus rules, continues our work on NU5/Orchard, and fixes some security and protocol correctness issues.
 
@@ -304,7 +304,7 @@ The Zebra project now has a [Code of Conduct](https://github.com/ZcashFoundation
 - Avoid starvation of request cancellations and timeouts under heavy peer response load (#1950)
 - Async network code correctness documentation (#1954, #1972)
 
-## [Zebra v1.0.0-alpha.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.5)
+## [Zebra v1.0.0-alpha.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.5) - 2021-03-23
 
 Zebra's latest alpha checkpoints on Canopy activation, continues our work on NU5, and fixes a security issue.
 
@@ -327,7 +327,7 @@ Some notable changes include:
 ### Security
 - Stop relying on unchecked length fields when preallocating vectors (#1925) 
 
-## [Zebra v1.0.0-alpha.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.4)
+## [Zebra v1.0.0-alpha.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.4) - 2021-03-17
 
 Zebra's latest alpha starts our work on NU5 and fixes several security issues.
 
@@ -387,7 +387,7 @@ Some notable changes include:
 - Implement outbound connection rate limiting (#1855)
 - Document that the configured Zcash listener IP address is advertised to remote peers (#1891)
 
-## [Zebra v1.0.0-alpha.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.3)
+## [Zebra v1.0.0-alpha.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.3) - 2021-02-23
 
 Zebra's latest alpha brings multiple reliability and stability improvements for node startup, long-running syncs, and testing.
 
@@ -429,7 +429,7 @@ Some notable changes include:
 - Update PeerSet metrics after every change (#1727)
 - Log initial peer connection failures (#1763)
 
-## [Zebra v1.0.0-alpha.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.2)
+## [Zebra v1.0.0-alpha.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.2) - 2021-02-09
 
 Zebra's latest alpha brings multiple reliability and stability improvements for node startup, node shutdown, and long-running syncs.
 
@@ -456,7 +456,7 @@ Some notable changes include:
 - Fix a f64::NAN metrics sentinel (#1642)
 - Actually use `VerifyCheckpointError::CommitFinalized` (#1706)
 
-## [Zebra v1.0.0-alpha.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.1)
+## [Zebra v1.0.0-alpha.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.1) - 2021-01-30
 
 Zebra's second alpha brings multiple reliability and stability improvements for long-running syncs.
 
@@ -487,7 +487,7 @@ Some notable changes include:
 
 Currently, Zebra does not validate all the Zcash consensus rules.
 
-## [Zebra v1.0.0-alpha.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.0)
+## [Zebra v1.0.0-alpha.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.0) - 2021-01-30
 
 Zebra first alpha release 🎉
 
