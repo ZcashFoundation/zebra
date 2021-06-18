@@ -192,6 +192,19 @@ impl Transaction {
         }
     }
 
+    /// Get this transaction network_upgrade, if any.
+    pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+            Transaction::V5 {
+                network_upgrade, ..
+            } => Some(*network_upgrade),
+        }
+    }
+
     // transparent
 
     /// Access the transparent inputs of this transaction, regardless of version.

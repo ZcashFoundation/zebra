@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     fmt::DisplayToDebug,
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
     transaction::Transaction,
     transparent,
@@ -86,6 +86,34 @@ impl Block {
             Some(height) => Commitment::from_bytes(self.header.commitment_bytes, network, height),
         }
     }
+
+    /// Check if the `network_upgrade` fields from the transactions match block height.
+    ///
+    /// # Consensus rule:
+    ///
+    ///  The nConsensusBranchId field MUST match the consensus branch ID used for
+    ///  SIGHASH transaction hashes, as specifed in [ZIP-244] ([7.1]).
+    ///
+    /// [ZIP-244]: https://zips.z.cash/zip-0244
+    /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+    pub fn check_transaction_network_upgrade(
+        &self,
+        network: Network,
+    ) -> Result<(), TransactionError> {
+        let block_nu =
+            NetworkUpgrade::current(network, self.coinbase_height().expect("a valid height"));
+
+        if self
+            .transactions
+            .iter()
+            .filter_map(|trans| trans.as_ref().network_upgrade())
+            .any(|trans_nu| trans_nu != block_nu)
+        {
+            return Err(TransactionError::InvalidNetworkUpgrade);
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a> From<&'a Block> for Hash {
@@ -104,4 +132,19 @@ impl TrustedPreallocate for Hash {
         // Since a block::Hash takes 32 bytes, we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN - 1) / 32 hashes in a single message
         ((MAX_PROTOCOL_MESSAGE_LEN - 1) as u64) / BLOCK_HASH_SIZE
     }
+}
+
+use thiserror::Error;
+
+/// Errors that can occur when checking Block consensus rules.
+///
+/// Each error variant corresponds to a consensus rule, so enumerating
+/// all possible verification failures enumerates the consensus rules we
+/// implement, and ensures that we don't reject blocks or transactions
+/// for a non-enumerated reason.
+#[allow(dead_code, missing_docs)]
+#[derive(Error, Debug, PartialEq)]
+pub enum TransactionError {
+    #[error("invalid network upgrade")]
+    InvalidNetworkUpgrade,
 }

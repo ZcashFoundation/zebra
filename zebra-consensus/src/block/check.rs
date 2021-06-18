@@ -189,24 +189,7 @@ pub fn merkle_root_validity(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
-    use transaction::Transaction;
-    let block_nu =
-        NetworkUpgrade::current(network, block.coinbase_height().expect("a valid height"));
-
-    if block
-        .transactions
-        .iter()
-        .filter_map(|trans| match *trans.as_ref() {
-            Transaction::V5 {
-                network_upgrade, ..
-            } => Some(network_upgrade),
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
-        })
-        .any(|trans_nu| trans_nu != block_nu)
-    {
+    if block.check_transaction_network_upgrade(network).is_err() {
         return Err(BlockError::WrongTransactionConsensusBranchId);
     }
 
