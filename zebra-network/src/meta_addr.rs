@@ -2,6 +2,7 @@
 
 use std::{
     cmp::{Ord, Ordering},
+    convert::TryInto,
     io::{Read, Write},
     net::SocketAddr,
     time::Instant,
@@ -9,13 +10,15 @@ use std::{
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use chrono::Duration;
 use zebra_chain::serialization::{
     DateTime32, ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt,
     ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 
-use crate::protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices};
+use crate::{
+    constants,
+    protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices},
+};
 
 use MetaAddrChange::*;
 use PeerAddrState::*;
@@ -243,34 +246,7 @@ pub enum MetaAddrChange {
     },
 }
 
-// TODO: remove this use in a follow-up PR
-use chrono::{DateTime, Utc};
-
 impl MetaAddr {
-    /// Returns the maximum time among all the time fields.
-    ///
-    /// This function exists to replicate an old Zebra bug.
-    /// TODO: remove this function in a follow-up PR
-    pub(crate) fn get_last_seen(&self) -> DateTime<Utc> {
-        let latest_seen = self
-            .untrusted_last_seen
-            .max(self.last_response)
-            .map(DateTime32::to_chrono);
-
-        // At this point it's pretty obvious why we want to get rid of this code
-        let latest_try = self
-            .last_attempt
-            .max(self.last_failure)
-            .map(|latest_try| Instant::now().checked_duration_since(latest_try))
-            .flatten()
-            .map(Duration::from_std)
-            .map(Result::ok)
-            .flatten()
-            .map(|before_now| Utc::now() - before_now);
-
-        latest_seen.or(latest_try).unwrap_or(chrono::MIN_DATETIME)
-    }
-
     /// Returns a new `MetaAddr`, based on the deserialized fields from a
     /// gossiped peer [`Addr`][crate::protocol::external::Message::Addr] message.
     pub fn new_gossiped_meta_addr(
@@ -320,7 +296,7 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::UpdateConnectionAttempt`] for a peer that we
+    /// Returns a [`MetaAddrChange::UpdateAttempt`] for a peer that we
     /// want to make an outbound connection to.
     pub fn new_reconnect(addr: &SocketAddr) -> MetaAddrChange {
         UpdateAttempt { addr: *addr }
@@ -335,7 +311,7 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::NewLocalListener`] for our own listener address.
+    /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
     pub fn new_local_listener(addr: &SocketAddr) -> MetaAddrChange {
         NewLocal { addr: *addr }
     }
@@ -422,19 +398,84 @@ impl MetaAddr {
         self.last_failure
     }
 
-    /// Is this address a directly connected client?
-    pub fn is_direct_client(&self) -> bool {
-        match self.last_connection_state {
-            Responded => !self.services.contains(PeerServices::NODE_NETWORK),
-            NeverAttemptedGossiped | NeverAttemptedAlternate | Failed | AttemptPending => false,
+    /// Have we had any recently messages from this peer?
+    ///
+    /// Returns `true` if the peer is likely connected and responsive in the peer
+    /// set.
+    ///
+    /// [`constants::LIVE_PEER_DURATION`] represents the time interval in which
+    /// we should receive at least one message from a peer, or close the
+    /// connection. Therefore, if the last-seen timestamp is older than
+    /// [`constants::LIVE_PEER_DURATION`] ago, we know we should have
+    /// disconnected from it. Otherwise, we could potentially be connected to it.
+    pub fn was_recently_live(&self) -> bool {
+        if let Some(last_response) = self.last_response {
+            // Recent times and future times are considered live
+            last_response.saturating_elapsed()
+                <= constants::LIVE_PEER_DURATION
+                    .try_into()
+                    .expect("unexpectedly large constant")
+        } else {
+            // If there has never been any response, it can't possibly be live
+            false
         }
     }
 
-    /// Is this address valid for outbound connections?
-    pub fn is_valid_for_outbound(&self) -> bool {
-        self.services.contains(PeerServices::NODE_NETWORK)
-            && !self.addr.ip().is_unspecified()
-            && self.addr.port() != 0
+    /// Have we recently attempted an outbound connection to this peer?
+    ///
+    /// Returns `true` if this peer was recently attempted, or has a connection
+    /// attempt in progress.
+    pub fn was_recently_attempted(&self) -> bool {
+        if let Some(last_attempt) = self.last_attempt {
+            // Recent times and future times are considered live.
+            // Instants are monotonic, so `now` should always be later than `last_attempt`,
+            // except for synthetic data in tests.
+            Instant::now().saturating_duration_since(last_attempt) <= constants::LIVE_PEER_DURATION
+        } else {
+            // If there has never been any attempt, it can't possibly be live
+            false
+        }
+    }
+
+    /// Have we recently had a failed connection to this peer?
+    ///
+    /// Returns `true` if this peer has recently failed.
+    pub fn was_recently_failed(&self) -> bool {
+        if let Some(last_failure) = self.last_failure {
+            // Recent times and future times are considered live
+            Instant::now().saturating_duration_since(last_failure) <= constants::LIVE_PEER_DURATION
+        } else {
+            // If there has never been any failure, it can't possibly be recent
+            false
+        }
+    }
+
+    /// Is this address ready for a new outbound connection attempt?
+    pub fn is_ready_for_attempt(&self) -> bool {
+        self.last_known_info_is_valid_for_outbound()
+            && !self.was_recently_live()
+            && !self.was_recently_attempted()
+            && !self.was_recently_failed()
+    }
+
+    /// Is the [`SocketAddr`] we have for this peer valid for outbound
+    /// connections?
+    ///
+    /// Since the addresses in the address book are unique, this check can be
+    /// used to permanently reject entire [`MetaAddr`]s.
+    pub fn address_is_valid_for_outbound(&self) -> bool {
+        !self.addr.ip().is_unspecified() && self.addr.port() != 0
+    }
+
+    /// Is the last known information for this peer valid for outbound
+    /// connections?
+    ///
+    /// The last known info might be outdated or untrusted, so this check can
+    /// only be used to:
+    /// - reject `NeverAttempted...` [`MetaAddrChange`]s, and
+    /// - temporarily stop outbound connections to a [`MetaAddr`].
+    pub fn last_known_info_is_valid_for_outbound(&self) -> bool {
+        self.services.contains(PeerServices::NODE_NETWORK) && self.address_is_valid_for_outbound()
     }
 
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
@@ -528,6 +569,9 @@ impl MetaAddrChange {
             NewGossiped { .. } => None,
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
+            // Attempt changes are applied before we start the handshake to the
+            // peer address. So the attempt time is a lower bound for the actual
+            // handshake time.
             UpdateAttempt { .. } => Some(Instant::now()),
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,
@@ -541,6 +585,11 @@ impl MetaAddrChange {
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
             UpdateAttempt { .. } => None,
+            // If there is a large delay applying this change, then:
+            // - the peer might stay in the `AttemptPending` state for longer,
+            // - we might send outdated last seen times to our peers, and
+            // - the peer will appear to be live for longer, delaying future
+            //   reconnection attempts.
             UpdateResponded { .. } => Some(DateTime32::now()),
             UpdateFailed { .. } => None,
         }
@@ -554,6 +603,11 @@ impl MetaAddrChange {
             NewLocal { .. } => None,
             UpdateAttempt { .. } => None,
             UpdateResponded { .. } => None,
+            // If there is a large delay applying this change, then:
+            // - the peer might stay in the `AttemptPending` or `Responded`
+            //   states for longer, and
+            // - the peer will appear to be used for longer, delaying future
+            //   reconnection attempts.
             UpdateFailed { .. } => Some(Instant::now()),
         }
     }
@@ -563,7 +617,7 @@ impl MetaAddrChange {
         match self {
             NewGossiped { .. } => NeverAttemptedGossiped,
             NewAlternate { .. } => NeverAttemptedAlternate,
-            // local listeners get sanitized, so the exact value doesn't matter
+            // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
             UpdateResponded { .. } => Responded,
@@ -606,18 +660,31 @@ impl MetaAddrChange {
 
             if change_to_never_attempted {
                 if previous_has_been_attempted {
-                    // Security: ignore never attempted changes once we have made an attempt
+                    // Existing entry has been attempted, change is NeverAttempted
+                    // - ignore the change
+                    //
+                    // # Security
+                    //
+                    // Ignore NeverAttempted changes once we have made an attempt,
+                    // so malicious peers can't keep changing our peer connection order.
                     None
                 } else {
-                    // never attempted to never attempted update: preserve original values
+                    // Existing entry and change are both NeverAttempted
+                    // - preserve original values of all fields
+                    // - but replace None with Some
+                    //
+                    // # Security
+                    //
+                    // Preserve the original field values for NeverAttempted peers,
+                    // so malicious peers can't keep changing our peer connection order.
                     Some(MetaAddr {
                         addr: self.addr(),
                         // TODO: or(self.untrusted_services()) when services become optional
                         services: previous.services,
-                        // Security: only update the last seen time if it is missing
                         untrusted_last_seen: previous
                             .untrusted_last_seen
                             .or_else(|| self.untrusted_last_seen()),
+                        // The peer has not been attempted, so these fields must be None
                         last_response: None,
                         last_attempt: None,
                         last_failure: None,
@@ -625,15 +692,25 @@ impl MetaAddrChange {
                     })
                 }
             } else {
-                // any to attempt, responded, or failed: prefer newer values
+                // Existing entry and change are both Attempt, Responded, Failed
+                // - ignore changes to earlier times
+                // - update the services from the change
+                //
+                // # Security
+                //
+                // Ignore changes to earlier times. This enforces the peer
+                // connection timeout, even if changes are applied out of order.
                 Some(MetaAddr {
                     addr: self.addr(),
                     services: self.untrusted_services().unwrap_or(previous.services),
-                    // we don't modify the last seen field at all
+                    // only NeverAttempted changes can modify the last seen field
                     untrusted_last_seen: previous.untrusted_last_seen,
-                    last_response: self.last_response().or(previous.last_response),
-                    last_attempt: self.last_attempt().or(previous.last_attempt),
-                    last_failure: self.last_failure().or(previous.last_failure),
+                    // Since Some(time) is always greater than None, `max` prefers:
+                    // - the latest time if both are Some
+                    // - Some(time) if the other is None
+                    last_response: self.last_response().max(previous.last_response),
+                    last_attempt: self.last_attempt().max(previous.last_attempt),
+                    last_failure: self.last_failure().max(previous.last_failure),
                     last_connection_state: self.peer_addr_state(),
                 })
             }
@@ -656,32 +733,82 @@ impl Ord for MetaAddr {
         use std::net::IpAddr::{V4, V6};
         use Ordering::*;
 
-        let oldest_first = self.get_last_seen().cmp(&other.get_last_seen());
-        let newest_first = oldest_first.reverse();
+        // First, try states that are more likely to work
+        let more_reliable_state = self.last_connection_state.cmp(&other.last_connection_state);
 
-        let connection_state = self.last_connection_state.cmp(&other.last_connection_state);
-        let reconnection_time = match self.last_connection_state {
-            Responded => oldest_first,
-            NeverAttemptedGossiped => newest_first,
-            NeverAttemptedAlternate => newest_first,
-            Failed => oldest_first,
-            AttemptPending => oldest_first,
-        };
-        let ip_numeric = match (self.addr.ip(), other.addr.ip()) {
+        // # Security and Correctness
+        //
+        // Prioritise older attempt times, so we try all peers in each state,
+        // before re-trying any of them. This avoids repeatedly reconnecting to
+        // peers that aren't working.
+        //
+        // Using the internal attempt time for peer ordering also minimises the
+        // amount of information `Addrs` responses leak about Zebra's retry order.
+
+        // If the states are the same, try peers that we haven't tried for a while.
+        //
+        // Each state change updates a specific time field, and
+        // None is less than Some(T),
+        // so the resulting ordering for each state is:
+        // - Responded: oldest attempts first (attempt times are required and unique)
+        // - NeverAttempted...: recent gossiped times first (all other times are None)
+        // - Failed: oldest attempts first (attempt times are required and unique)
+        // - AttemptPending: oldest attempts first (attempt times are required and unique)
+        //
+        // We also compare the other local times, because:
+        // - seed peers may not have an attempt time, and
+        // - updates can be applied to the address book in any order.
+        let older_attempt = self.last_attempt.cmp(&other.last_attempt);
+        let older_failure = self.last_failure.cmp(&other.last_failure);
+        let older_response = self.last_response.cmp(&other.last_response);
+
+        // # Security
+        //
+        // Compare local times before untrusted gossiped times and services.
+        // This gives malicious peers less influence over our peer connection
+        // order.
+
+        // If all local times are None, try peers that other peers have seen more recently
+        let newer_untrusted_last_seen = self
+            .untrusted_last_seen
+            .cmp(&other.untrusted_last_seen)
+            .reverse();
+
+        // Finally, prefer numerically larger service bit patterns
+        //
+        // As of June 2021, Zebra only recognises the NODE_NETWORK bit.
+        // When making outbound connections, Zebra skips non-nodes.
+        // So this comparison will have no impact until Zebra implements
+        // more service features.
+        //
+        // TODO: order services by usefulness, not bit pattern values
+        //       Security: split gossiped and direct services
+        let larger_services = self.services.cmp(&other.services);
+
+        // The remaining comparisons are meaningless for peer connection priority.
+        // But they are required so that we have a total order on `MetaAddr` values:
+        // self and other must compare as Equal iff they are equal.
+
+        // As a tie-breaker, compare ip and port numerically
+        //
+        // Since SocketAddrs are unique in the address book, these comparisons
+        // guarantee a total, unique order.
+        let ip_tie_breaker = match (self.addr.ip(), other.addr.ip()) {
             (V4(a), V4(b)) => a.octets().cmp(&b.octets()),
             (V6(a), V6(b)) => a.octets().cmp(&b.octets()),
             (V4(_), V6(_)) => Less,
             (V6(_), V4(_)) => Greater,
         };
+        let port_tie_breaker = self.addr.port().cmp(&other.addr.port());
 
-        connection_state
-            .then(reconnection_time)
-            // The remainder is meaningless as an ordering, but required so that we
-            // have a total order on `MetaAddr` values: self and other must compare
-            // as Equal iff they are equal.
-            .then(ip_numeric)
-            .then(self.addr.port().cmp(&other.addr.port()))
-            .then(self.services.bits().cmp(&other.services.bits()))
+        more_reliable_state
+            .then(older_attempt)
+            .then(older_failure)
+            .then(older_response)
+            .then(newer_untrusted_last_seen)
+            .then(larger_services)
+            .then(ip_tie_breaker)
+            .then(port_tie_breaker)
     }
 }
 
