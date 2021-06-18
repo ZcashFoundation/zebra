@@ -187,7 +187,8 @@ where
                 // Depth only checks the best chain.
                 match state.oneshot(zs::Request::Depth(hash)).await {
                     Ok(zs::Response::Depth(None)) => Ok(()),
-                    Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
+                    // TODO: use an error enum here, and update the syncer AlreadyVerified check (#2338, #2339)
+                    Ok(zs::Response::Depth(Some(_))) => Err("AlreadyVerified { }".into()),
                     Ok(_) => unreachable!("wrong response"),
                     Err(e) => Err(e),
                 }?;
