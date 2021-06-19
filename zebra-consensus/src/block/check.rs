@@ -189,7 +189,10 @@ pub fn merkle_root_validity(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
-    if block.check_transaction_network_upgrade(network).is_err() {
+    if block
+        .check_consensus_branch_id_consistency(network)
+        .is_err()
+    {
         return Err(BlockError::WrongTransactionConsensusBranchId);
     }
 
