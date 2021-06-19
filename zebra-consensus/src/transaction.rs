@@ -117,8 +117,7 @@ impl Request {
 
     /// The network upgrade to consider for the verification.
     ///
-    /// This is specified either explicitly in a request to verify a mempool transaction, or based
-    /// on the block height specified in a request to validate a transaction in a block.
+    /// This is based on the block height from the request, and the supplied `network`.
     pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
         match self {
             Request::Block { height, .. } => NetworkUpgrade::current(network, *height),
