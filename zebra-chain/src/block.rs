@@ -1,6 +1,7 @@
 //! Blocks and block-related structures (heights, headers, etc.)
 
 mod commitment;
+mod error;
 mod hash;
 mod header;
 mod height;
@@ -99,7 +100,7 @@ impl Block {
     pub fn check_transaction_network_upgrade(
         &self,
         network: Network,
-    ) -> Result<(), TransactionError> {
+    ) -> Result<(), error::BlockError> {
         let block_nu =
             NetworkUpgrade::current(network, self.coinbase_height().expect("a valid height"));
 
@@ -109,7 +110,7 @@ impl Block {
             .filter_map(|trans| trans.as_ref().network_upgrade())
             .any(|trans_nu| trans_nu != block_nu)
         {
-            return Err(TransactionError::InvalidNetworkUpgrade);
+            return Err(error::BlockError::InvalidNetworkUpgrade);
         }
 
         Ok(())
@@ -132,19 +133,4 @@ impl TrustedPreallocate for Hash {
         // Since a block::Hash takes 32 bytes, we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN - 1) / 32 hashes in a single message
         ((MAX_PROTOCOL_MESSAGE_LEN - 1) as u64) / BLOCK_HASH_SIZE
     }
-}
-
-use thiserror::Error;
-
-/// Errors that can occur when checking Block consensus rules.
-///
-/// Each error variant corresponds to a consensus rule, so enumerating
-/// all possible verification failures enumerates the consensus rules we
-/// implement, and ensures that we don't reject blocks or transactions
-/// for a non-enumerated reason.
-#[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, PartialEq)]
-pub enum TransactionError {
-    #[error("invalid network upgrade")]
-    InvalidNetworkUpgrade,
 }
