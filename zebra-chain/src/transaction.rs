@@ -192,7 +192,7 @@ impl Transaction {
         }
     }
 
-    /// Get this transaction network_upgrade, if any.
+    /// Get this transaction's network_upgrade, if any.
     pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
         match self {
             Transaction::V1 { .. }
