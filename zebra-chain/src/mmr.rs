@@ -1,7 +1,11 @@
 //! History tree (Merkle mountain range) structure that contains information about
 //! the block history as specified in ZIP-221.
 
-use std::{collections::HashMap, io, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    io,
+    sync::Arc,
+};
 
 use thiserror::Error;
 
@@ -21,6 +25,9 @@ pub enum HistoryTreeError {
     #[error("error from the underlying library: {inner:?}")]
     #[non_exhaustive]
     InnerError { inner: zcash_history::Error },
+
+    #[error("I/O error")]
+    IOError(#[from] io::Error),
 }
 
 /// History tree structure.
@@ -79,9 +86,8 @@ impl HistoryTree {
             self.peaks.insert(self.size, entry);
             self.size += 1;
         }
-        // TODO: trim entries?
-        // TODO: rebuild Tree from the peaks? When / how often?
-        // (zcashd rebuilds it on every operation)
+        // TODO: should we really prune every iteration?
+        self.prune()?;
         // TODO: implement network upgrade logic: drop previous history, start new history
         Ok(())
     }
@@ -103,6 +109,54 @@ impl HistoryTree {
         for (block, sapling_root, orchard_root) in iter {
             self.push(block, sapling_root, orchard_root)?;
         }
+        Ok(())
+    }
+
+    /// Prune tree, removing all non-peak entries.
+    fn prune(&mut self) -> Result<(), io::Error> {
+        // Go through all the peaks of the tree.
+        // This code is from a librustzcash example.
+        // https://github.com/zcash/librustzcash/blob/02052526925fba9389f1428d6df254d4dec967e6/zcash_history/examples/long.rs
+        // See also coins.cpp in zcashd for a explanation of how it works.
+        // https://github.com/zcash/zcash/blob/0247c0c682d59184a717a6536edb0d18834be9a7/src/coins.cpp#L351
+
+        // TODO: should we just copy the explanation here?
+
+        let mut peak_pos_set = HashSet::new();
+        // integer log2 of (self.size+1), -1
+        let mut h = (32 - ((self.size + 1) as u32).leading_zeros() - 1) - 1;
+        let mut peak_pos = (1 << (h + 1)) - 1;
+
+        loop {
+            if peak_pos > self.size {
+                // left child, -2^h
+                peak_pos -= 1 << h;
+                h -= 1;
+            }
+
+            if peak_pos <= self.size {
+                // There is a peak at index `peak_pos`
+                peak_pos_set.insert(peak_pos);
+
+                // right sibling
+                peak_pos = peak_pos + (1 << (h + 1)) - 1;
+            }
+
+            if h == 0 {
+                break;
+            }
+        }
+
+        // Remove all non-peak entries
+        self.peaks.retain(|k, _| peak_pos_set.contains(k));
+        // Rebuild tree
+        self.inner = Tree::new_from_cache(
+            self.network,
+            self.network_upgrade,
+            self.size,
+            &self.peaks,
+            &Default::default(),
+        )?;
         Ok(())
     }
 
