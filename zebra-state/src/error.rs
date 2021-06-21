@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash, CommitmentError},
+    mmr::HistoryTreeError,
     work::difficulty::CompactDifficulty,
 };
 
@@ -87,4 +88,7 @@ pub enum ValidateContextError {
         candidate_commitment: ChainHistoryMmrRootHash,
         expected_commitment: ChainHistoryMmrRootHash,
     },
+
+    #[error("error building the history tree")]
+    HistoryTreeError(#[from] HistoryTreeError),
 }

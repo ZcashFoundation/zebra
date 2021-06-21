@@ -7,7 +7,7 @@ use std::{
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash},
-    mmr::HistoryTree,
+    mmr::{HistoryTree, HistoryTreeError},
     orchard,
     primitives::Groth16Proof,
     sapling, sprout, transaction,
@@ -59,11 +59,12 @@ impl Chain {
 
     /// Push a contextually valid non-finalized block into a chain as the new tip.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(&mut self, block: PreparedBlock) {
+    pub fn push(&mut self, block: PreparedBlock) -> Result<(), HistoryTreeError> {
         // update cumulative data members
-        self.update_chain_state_with(&block);
+        self.update_chain_state_with(&block)?;
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
+        Ok(())
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
@@ -101,9 +102,9 @@ impl Chain {
         &self,
         fork_tip: block::Hash,
         finalized_tip_history_tree: &HistoryTree,
-    ) -> Option<Self> {
+    ) -> Result<Option<Self>, HistoryTreeError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
-            return None;
+            return Ok(None);
         }
 
         let mut forked = self.with_history_tree(finalized_tip_history_tree.clone());
@@ -124,9 +125,9 @@ impl Chain {
                     &sapling::tree::Root([0; 32]),
                     None,
                 )
-            }));
+            }))?;
 
-        Some(forked)
+        Ok(Some(forked))
     }
 
     pub fn non_finalized_tip_hash(&self) -> block::Hash {
@@ -202,7 +203,7 @@ impl Chain {
 trait UpdateWith<T> {
     /// Update `Chain` cumulative data members to add data that are derived from
     /// `T`
-    fn update_chain_state_with(&mut self, _: &T);
+    fn update_chain_state_with(&mut self, _: &T) -> Result<(), HistoryTreeError>;
 
     /// Update `Chain` cumulative data members to remove data that are derived
     /// from `T`
@@ -210,7 +211,10 @@ trait UpdateWith<T> {
 }
 
 impl UpdateWith<PreparedBlock> for Chain {
-    fn update_chain_state_with(&mut self, prepared: &PreparedBlock) {
+    fn update_chain_state_with(
+        &mut self,
+        prepared: &PreparedBlock,
+    ) -> Result<(), HistoryTreeError> {
         let (block, hash, height, transaction_hashes) = (
             prepared.block.as_ref(),
             prepared.hash,
@@ -235,7 +239,7 @@ impl UpdateWith<PreparedBlock> for Chain {
 
         // TODO: pass Sapling and Orchard roots
         self.history_tree
-            .push(prepared.block.clone(), &sapling::tree::Root([0; 32]), None);
+            .push(prepared.block.clone(), &sapling::tree::Root([0; 32]), None)?;
 
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
@@ -284,16 +288,18 @@ impl UpdateWith<PreparedBlock> for Chain {
             );
 
             // add the utxos this produced
-            self.update_chain_state_with(&prepared.new_outputs);
+            self.update_chain_state_with(&prepared.new_outputs)?;
             // add the utxos this consumed
-            self.update_chain_state_with(inputs);
+            self.update_chain_state_with(inputs)?;
 
             // add the shielded data
-            self.update_chain_state_with(joinsplit_data);
-            self.update_chain_state_with(sapling_shielded_data_per_spend_anchor);
-            self.update_chain_state_with(sapling_shielded_data_shared_anchor);
-            self.update_chain_state_with(orchard_shielded_data);
+            self.update_chain_state_with(joinsplit_data)?;
+            self.update_chain_state_with(sapling_shielded_data_per_spend_anchor)?;
+            self.update_chain_state_with(sapling_shielded_data_shared_anchor)?;
+            self.update_chain_state_with(orchard_shielded_data)?;
         }
+
+        Ok(())
     }
 
     #[instrument(skip(self, prepared), fields(block = %prepared.block))]
@@ -377,9 +383,13 @@ impl UpdateWith<PreparedBlock> for Chain {
 }
 
 impl UpdateWith<HashMap<transparent::OutPoint, Utxo>> for Chain {
-    fn update_chain_state_with(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
+    fn update_chain_state_with(
+        &mut self,
+        utxos: &HashMap<transparent::OutPoint, Utxo>,
+    ) -> Result<(), HistoryTreeError> {
         self.created_utxos
             .extend(utxos.iter().map(|(k, v)| (*k, v.clone())));
+        Ok(())
     }
 
     fn revert_chain_state_with(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
@@ -389,7 +399,10 @@ impl UpdateWith<HashMap<transparent::OutPoint, Utxo>> for Chain {
 }
 
 impl UpdateWith<Vec<transparent::Input>> for Chain {
-    fn update_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
+    fn update_chain_state_with(
+        &mut self,
+        inputs: &Vec<transparent::Input>,
+    ) -> Result<(), HistoryTreeError> {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut { outpoint, .. } => {
@@ -398,6 +411,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
                 transparent::Input::Coinbase { .. } => {}
             }
         }
+        Ok(())
     }
 
     fn revert_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
@@ -420,7 +434,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     fn update_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-    ) {
+    ) -> Result<(), HistoryTreeError> {
         if let Some(joinsplit_data) = joinsplit_data {
             for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
                 let span = debug_span!("revert_chain_state_with", ?nullifiers);
@@ -430,6 +444,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
                 self.sprout_nullifiers.insert(nullifiers[1]);
             }
         }
+        Ok(())
     }
 
     #[instrument(skip(self, joinsplit_data))]
@@ -462,12 +477,13 @@ where
     fn update_chain_state_with(
         &mut self,
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
-    ) {
+    ) -> Result<(), HistoryTreeError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for nullifier in sapling_shielded_data.nullifiers() {
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
+        Ok(())
     }
 
     fn revert_chain_state_with(
@@ -486,12 +502,16 @@ where
 }
 
 impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
-    fn update_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
+    fn update_chain_state_with(
+        &mut self,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    ) -> Result<(), HistoryTreeError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for nullifier in orchard_shielded_data.nullifiers() {
                 self.orchard_nullifiers.insert(*nullifier);
             }
         }
+        Ok(())
     }
 
     fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {

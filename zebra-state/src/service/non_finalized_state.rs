@@ -94,22 +94,29 @@ impl NonFinalizedState {
             );
         }
 
-        let mut parent_chain = self
-            .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
-            .or_else(|| {
-                self.chain_set
-                    .iter()
-                    .find_map(|chain| chain.fork(parent_hash, finalized_tip_history_tree))
-                    .map(Box::new)
-            })
-            .expect("commit_block is only called with blocks that are ready to be commited");
+        let mut parent_chain =
+            match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
+                Some(chain) => chain,
+                None => Box::new(
+                    self.chain_set
+                        .iter()
+                        .find_map(|chain| {
+                            chain
+                                .fork(parent_hash, finalized_tip_history_tree)
+                                .transpose()
+                        })
+                        .expect(
+                            "commit_block is only called with blocks that are ready to be commited",
+                        )?,
+                ),
+            };
 
         check::block_is_contextually_valid_for_chain(
             &prepared,
             self.network,
             &parent_chain.history_root_hash(),
         )?;
-        parent_chain.push(prepared);
+        parent_chain.push(prepared)?;
         self.chain_set.insert(parent_chain);
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
@@ -129,7 +136,7 @@ impl NonFinalizedState {
             self.network,
             &chain.history_root_hash(),
         )?;
-        chain.push(prepared);
+        chain.push(prepared)?;
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
