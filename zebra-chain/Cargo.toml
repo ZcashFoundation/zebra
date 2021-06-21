@@ -36,7 +36,7 @@ jubjub = "0.6.0"
 lazy_static = "1.4.0"
 rand_core = "0.6"
 ripemd160 = "0.9"
-secp256k1 = { version = "0.20.2", features = ["serde"] }
+secp256k1 = { version = "0.20.3", features = ["serde"] }
 serde = { version = "1", features = ["serde_derive", "rc"] }
 serde-big-array = "0.3.2"
 sha2 = { version = "0.9.5", features=["compress"] }
