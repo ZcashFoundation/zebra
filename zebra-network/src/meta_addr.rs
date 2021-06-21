@@ -574,7 +574,8 @@ impl MetaAddrChange {
                 ..
             } => Some(*untrusted_last_seen),
             NewAlternate { .. } => None,
-            NewLocal { .. } => None,
+            // We know that our local listener is available
+            NewLocal { .. } => Some(DateTime32::now()),
             UpdateAttempt { .. } => None,
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,

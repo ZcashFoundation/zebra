@@ -6,11 +6,17 @@ use super::{MetaAddr, MetaAddrChange, PeerServices};
 
 use zebra_chain::serialization::{arbitrary::canonical_socket_addr_strategy, DateTime32};
 
-/// The largest number of random changes we want to apply to a MetaAddr
+/// The largest number of random changes we want to apply to a [`MetaAddr`].
 ///
-/// This should be at least twice the number of [`PeerAddrState`]s, so
-/// the tests can cover multiple transitions through every state.
+/// This should be at least twice the number of [`PeerAddrState`]s, so the tests
+/// can cover multiple transitions through every state.
 pub const MAX_ADDR_CHANGE: usize = 15;
+
+/// The largest number of random addresses we want to add to an [`AddressBook`].
+///
+/// This should be at least the number of [`PeerAddrState`]s, so the tests can
+/// cover interactions between addresses in different states.
+pub const MAX_META_ADDR: usize = 8;
 
 impl MetaAddr {
     /// Create a strategy that generates [`MetaAddr`]s in the

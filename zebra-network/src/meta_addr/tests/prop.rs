@@ -14,12 +14,16 @@ use tokio::{runtime::Runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
 
-use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use zebra_chain::serialization::{canonical_socket_addr, ZcashDeserialize, ZcashSerialize};
 
 use super::check;
 use crate::{
     constants::LIVE_PEER_DURATION,
-    meta_addr::{arbitrary::MAX_ADDR_CHANGE, MetaAddr, MetaAddrChange, PeerAddrState::*},
+    meta_addr::{
+        arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
+        MetaAddr, MetaAddrChange,
+        PeerAddrState::*,
+    },
     peer_set::candidate_set::CandidateSet,
     protocol::types::PeerServices,
     AddressBook, Config,
@@ -255,6 +259,40 @@ proptest! {
                 addr = changed_addr;
             }
         }
+    }
+
+    /// Make sure that a sanitized [`AddressBook`] contains the local listener
+    /// [`MetaAddr`], regardless of the previous contents of the address book.
+    ///
+    /// If Zebra gossips its own listener address to peers, and gets it back,
+    /// its address book will contain its local listener address. This address
+    /// will likely be in [`PeerAddrState::Failed`], due to failed
+    /// self-connection attempts.
+    #[test]
+    fn sanitized_address_book_contains_local_listener(
+        local_listener in any::<SocketAddr>(),
+        address_book_addrs in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
+    ) {
+        zebra_test::init();
+
+        let config = Config { listen_addr: local_listener, ..Config::default() };
+        let address_book = AddressBook::new_with_addrs(&config, Span::none(), address_book_addrs);
+        let sanitized_addrs = address_book.sanitized();
+
+        let expected_local_listener = address_book.get_local_listener();
+        let canonical_local_listener = canonical_socket_addr(local_listener);
+        let book_sanitized_local_listener = sanitized_addrs.iter().find(|meta_addr| meta_addr.addr == canonical_local_listener );
+
+        // invalid addresses should be removed by sanitization,
+        // regardless of where they have come from
+        prop_assert_eq!(
+            book_sanitized_local_listener.cloned(),
+            expected_local_listener.sanitize(),
+            "address book: {:?}, sanitized_addrs: {:?}, canonical_local_listener: {:?}",
+            address_book,
+            sanitized_addrs,
+            canonical_local_listener,
+        );
     }
 }
 
