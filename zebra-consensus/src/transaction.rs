@@ -416,10 +416,14 @@ where
     }
 
     /// Verifies a transaction's Sapling shielded data.
-    fn verify_sapling_shielded_data(
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
+    fn verify_sapling_shielded_data<A>(
+        sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
         shielded_sighash: &blake2b_simd::Hash,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<AsyncChecks, TransactionError>
+    where
+        A: sapling::AnchorVariant + Clone,
+        sapling::Spend<sapling::PerSpendAnchor>: From<(sapling::Spend<A>, A::Shared)>,
+    {
         let mut async_checks = AsyncChecks::new();
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
