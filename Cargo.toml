@@ -35,5 +35,4 @@ tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52a
 # These are librustzcash requirements specified in its workspace Cargo.toml that we must replicate here
 halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "37b1b7f357cd34d93f9c55bb96efd05ab4e84408" }
-# Must point to the same revision used in zebra-chain/Cargo.toml
 zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
