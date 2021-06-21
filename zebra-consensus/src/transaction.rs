@@ -269,10 +269,10 @@ where
                 joinsplit_data,
                 &shielded_sighash,
             ))
-            .and(
-                Self::verify_sapling_shielded_data(sapling_shielded_data, &shielded_sighash)
-                    .await?,
-            ),
+            .and(Self::verify_sapling_shielded_data(
+                sapling_shielded_data,
+                &shielded_sighash,
+            )?),
         )
     }
 
@@ -419,17 +419,13 @@ where
     }
 
     /// Verifies a transaction's Sapling shielded data.
-    async fn verify_sapling_shielded_data(
+    fn verify_sapling_shielded_data(
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
         shielded_sighash: &blake2b_simd::Hash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
-            let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
-            let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
-
             for spend in sapling_shielded_data.spends_per_anchor() {
                 // Consensus rule: cv and rk MUST NOT be of small
                 // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
@@ -447,12 +443,11 @@ where
                 // resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
-                let spend_rsp = spend_verifier
-                    .ready_and()
-                    .await?
-                    .call(primitives::groth16::ItemWrapper::from(&spend).into());
-
-                async_checks.push(spend_rsp);
+                async_checks.push(
+                    primitives::groth16::SPEND_VERIFIER
+                        .clone()
+                        .oneshot(primitives::groth16::ItemWrapper::from(&spend).into()),
+                );
 
                 // Consensus rule: The spend authorization signature
                 // MUST be a valid SpendAuthSig signature over
@@ -463,12 +458,11 @@ where
                 // description while adding the resulting future to
                 // our collection of async checks that (at a
                 // minimum) must pass for the transaction to verify.
-                let rsp = redjubjub_verifier
-                    .ready_and()
-                    .await?
-                    .call((spend.rk, spend.spend_auth_sig, &shielded_sighash).into());
-
-                async_checks.push(rsp);
+                async_checks.push(
+                    primitives::redjubjub::VERIFIER
+                        .clone()
+                        .oneshot((spend.rk, spend.spend_auth_sig, shielded_sighash).into()),
+                );
             }
 
             for output in sapling_shielded_data.outputs() {
@@ -488,12 +482,11 @@ where
                 // the resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
-                let output_rsp = output_verifier
-                    .ready_and()
-                    .await?
-                    .call(primitives::groth16::ItemWrapper::from(output).into());
-
-                async_checks.push(output_rsp);
+                async_checks.push(
+                    primitives::groth16::OUTPUT_VERIFIER
+                        .clone()
+                        .oneshot(primitives::groth16::ItemWrapper::from(output).into()),
+                );
             }
 
             let bvk = sapling_shielded_data.binding_verification_key();
@@ -513,13 +506,12 @@ where
                 //.map_err(|e| BoxError::from(Box::new(e)))?;
             }
 
-            let _rsp = redjubjub_verifier
-                .ready_and()
-                .await?
-                .call((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into());
-
             // TODO: stop ignoring binding signature errors - #1939
-            // async_checks.push(rsp);
+            // async_checks.push(
+            //     primitives::redjubjub::VERIFIER
+            //         .clone()
+            //         .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
+            // );
         }
 
         Ok(async_checks)
