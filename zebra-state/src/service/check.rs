@@ -30,8 +30,7 @@ pub(crate) mod difficulty;
 /// (`POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN`) blocks.
 #[tracing::instrument(
     name = "contextual_validation",
-    fields(?network),
-    skip(prepared, network, finalized_tip_height, relevant_chain)
+    skip(prepared, finalized_tip_height, relevant_chain)
 )]
 pub(crate) fn block_is_contextually_valid<C>(
     prepared: &PreparedBlock,
@@ -86,11 +85,7 @@ where
     Ok(())
 }
 
-#[tracing::instrument(
-    name = "contextual_validation_for_chain",
-    fields(?network),
-    skip(prepared, network)
-)]
+#[tracing::instrument(skip(prepared))]
 pub(crate) fn block_is_contextually_valid_for_chain(
     prepared: &PreparedBlock,
     network: Network,
