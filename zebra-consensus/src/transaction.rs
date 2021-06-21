@@ -235,7 +235,6 @@ where
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
 
-        let mut ed25519_verifier = primitives::ed25519::VERIFIER.clone();
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
 
         // A set of asynchronous checks which must all succeed.
@@ -255,36 +254,10 @@ where
 
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
-        if let Some(joinsplit_data) = joinsplit_data {
-            // XXX create a method on JoinSplitData
-            // that prepares groth16::Items with the correct proofs
-            // and proof inputs, handling interstitial treestates
-            // correctly.
-
-            // Then, pass those items to self.joinsplit to verify them.
-
-            // Consensus rule: The joinSplitSig MUST represent a
-            // valid signature, under joinSplitPubKey, of the
-            // sighash.
-            //
-            // Queue the validation of the JoinSplit signature while
-            // adding the resulting future to our collection of
-            // async checks that (at a minimum) must pass for the
-            // transaction to verify.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
-            // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-            let rsp = ed25519_verifier.ready_and().await?.call(
-                (
-                    joinsplit_data.pub_key,
-                    joinsplit_data.sig,
-                    &shielded_sighash,
-                )
-                    .into(),
-            );
-
-            async_checks.push(rsp.boxed());
-        }
+        async_checks.extend(Self::verify_sprout_shielded_data(
+            joinsplit_data,
+            &shielded_sighash,
+        ));
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for spend in sapling_shielded_data.spends_per_anchor() {
@@ -487,6 +460,42 @@ where
 
             Ok(script_checks)
         }
+    }
+
+    /// Verifies a transaction's Sprout shielded join split data.
+    fn verify_sprout_shielded_data(
+        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        shielded_sighash: &blake2b_simd::Hash,
+    ) -> AsyncChecks {
+        let checks = AsyncChecks::new();
+
+        if let Some(joinsplit_data) = joinsplit_data {
+            // XXX create a method on JoinSplitData
+            // that prepares groth16::Items with the correct proofs
+            // and proof inputs, handling interstitial treestates
+            // correctly.
+
+            // Then, pass those items to self.joinsplit to verify them.
+
+            // Consensus rule: The joinSplitSig MUST represent a
+            // valid signature, under joinSplitPubKey, of the
+            // sighash.
+            //
+            // Queue the validation of the JoinSplit signature while
+            // adding the resulting future to our collection of
+            // async checks that (at a minimum) must pass for the
+            // transaction to verify.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
+            // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+            let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
+            let ed25519_item =
+                (joinsplit_data.pub_key, joinsplit_data.sig, shielded_sighash).into();
+
+            checks.push(ed25519_verifier.oneshot(ed25519_item).boxed());
+        }
+
+        checks
     }
 
     /// Await a set of checks that should all succeed.
