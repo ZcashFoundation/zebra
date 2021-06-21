@@ -92,19 +92,20 @@ Also check for crates that depend on crates that have changed. They should get a
 
 ## Change Log
 
-**Important**: Any merge into `main` deletes any edits to the draft changelog. Edit the draft changelog in a pad like https://pad.riseup.net
+**Important**: Any merge into `main` deletes any edits to the draft changelog. Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
 
 We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases).
 
 To create the final change log:
-- [ ] Copy the draft changelog into a pad like https://pad.riseup.net
+- [ ] Copy the draft changelog into `CHANGELOG.md`
 - [ ] Delete any trivial changes
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
 - [ ] Check the category for each change
   - prefer the "Fix" category if you're not sure
+- [ ] Create a draft PR to update `CHANGELOG.md`
 
 #### Change Categories
 
@@ -116,14 +117,14 @@ From "Keep a Changelog":
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
 
-## After merging this PR
-- [ ] Check for any PRs that have been merged since you created the changelog pad
-- [ ] Update the draft release with the final changelog
+## After merging the version update PR
+- [ ] Check for any PRs that have been merged since you created the draft PR to update `CHANGELOG.md` and push any updates if necessary
+- [ ] Mark the PR to update `CHANGELOG.md` as "Ready for Review"
+- [ ] Once the changelog PR has been approved and merged, update the draft release with the final changelog
 - [ ] Set the release title to `Zebra ` followed by the version tag, for example: `Zebra 1.0.0-alpha.0` 
 - [ ] Set the tag name to the version tag, for example: `1.0.0-alpha.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
-- [ ] Create a new PR to update the CHANGELOG.md file with the final change log.
 
 ## Final Testing
 
@@ -134,5 +135,5 @@ If the build fails after tagging:
 1. fix the build
 2. check if the fixes changed any extra crates, and do the required version increments
 3. update `README.md` with a **new** git tag
-4. tag a **new** release
-5. Update CHANGELOG.md
+4. update `CHANGELOG.md` with details about the fix
+5. tag a **new** release
