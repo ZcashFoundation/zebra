@@ -16,7 +16,7 @@ use crate::{
         redpallas::{Binding, Signature},
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
-    sapling,
+    sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     sprout, transparent, LedgerState,
 };
@@ -24,7 +24,6 @@ use crate::{
 use itertools::Itertools;
 
 use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
-use sapling::{AnchorVariant, PerSpendAnchor, SharedAnchor};
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
 ///
@@ -130,7 +129,7 @@ impl Transaction {
             option::of(any::<orchard::ShieldedData>()),
         )
             .prop_map(
-                |(
+                move |(
                     network_upgrade,
                     lock_time,
                     expiry_height,
@@ -140,7 +139,11 @@ impl Transaction {
                     orchard_shielded_data,
                 )| {
                     Transaction::V5 {
-                        network_upgrade,
+                        network_upgrade: if ledger_state.transaction_has_valid_network_upgrade() {
+                            ledger_state.network_upgrade()
+                        } else {
+                            network_upgrade
+                        },
                         lock_time,
                         expiry_height,
                         inputs,
@@ -393,6 +396,16 @@ impl Arbitrary for Transaction {
     type Parameters = LedgerState;
 
     fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
+        match ledger_state.transaction_version_override() {
+            Some(1) => return Self::v1_strategy(ledger_state),
+            Some(2) => return Self::v2_strategy(ledger_state),
+            Some(3) => return Self::v3_strategy(ledger_state),
+            Some(4) => return Self::v4_strategy(ledger_state),
+            Some(5) => return Self::v5_strategy(ledger_state),
+            Some(_) => unreachable!("invalid transaction version in override"),
+            None => {}
+        }
+
         match ledger_state.network_upgrade() {
             NetworkUpgrade::Genesis | NetworkUpgrade::BeforeOverwinter => {
                 Self::v1_strategy(ledger_state)

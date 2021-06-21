@@ -79,7 +79,6 @@ bitflags! {
     /// Note that bits 24-31 are reserved for temporary experiments; other
     /// service bits should be allocated via the ZIP process.
     #[derive(Default)]
-    #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
     pub struct PeerServices: u64 {
         /// NODE_NETWORK means that the node is a full node capable of serving
         /// blocks, as opposed to a light client that makes network requests but

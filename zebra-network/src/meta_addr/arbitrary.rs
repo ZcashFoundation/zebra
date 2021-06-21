@@ -87,7 +87,7 @@ impl MetaAddrChange {
                 if change
                     .into_new_meta_addr()
                     .expect("unexpected invalid alternate change")
-                    .is_valid_for_outbound()
+                    .last_known_info_is_valid_for_outbound()
                 {
                     Some(change)
                 } else {

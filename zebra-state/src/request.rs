@@ -186,6 +186,12 @@ pub enum Request {
     /// future will have no effect on whether it is eventually processed. A
     /// request to commit a block which has been queued internally but not yet
     /// committed will fail the older request and replace it with the newer request.
+    ///
+    /// # Correctness
+    ///
+    /// Block commit requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
     CommitBlock(PreparedBlock),
 
     /// Commit a finalized block to the state, skipping all validation.
@@ -202,6 +208,12 @@ pub enum Request {
     /// future will have no effect on whether it is eventually processed.
     /// Duplicate requests should not be made, because it is the caller's
     /// responsibility to ensure that each block is valid and final.
+    ///
+    /// # Correctness
+    ///
+    /// Block commit requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
     CommitFinalizedBlock(FinalizedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
@@ -252,8 +264,11 @@ pub enum Request {
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
     /// Its purpose is to allow asynchronous script verification.
     ///
-    /// Code making this request should apply a timeout layer to the service to
-    /// handle missing UTXOs.
+    /// # Correctness
+    ///
+    /// UTXO requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
     AwaitUtxo(transparent::OutPoint),
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.

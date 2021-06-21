@@ -201,6 +201,9 @@ Support for sending tx's via _non-privileged_ RPC endpoints, or via Stolon:
 - zebra-cli talks to the subcomponent running in zebrad
     - (can use servo/bincode to communicate with zebrad)
     - via the privileged (and possibly the unprivileged) RPC endpoints
+    - can use [cap-std](https://blog.sunfishcode.online/introducing-cap-std/)
+      to restrict filesystem and network access for zebra-client.
+      See https://github.com/ZcashFoundation/zebra/issues/2340
 
 ## Task isolation in Tokio
 - TODO: fill in
@@ -296,6 +299,9 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
+- [BlazeSync algorithm](https://forum.zcashcommunity.com/t/zecwallets-blazesync-sync-entire-chain-in-60s/39447)
+  for fast syncing, like Zecwallet
+
 - mandatory sweeps for legacy keys
     - blazingly fast wallet startup, to match `zebrad`'s blazingly fast sync
     - generate unified address from a new seed phrase (or one provided by the user)
@@ -313,6 +319,9 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
 - split `Client` component into subprocess
     - this helps somewhat but the benefit is reduced by our prexisting memory safety, thanks to Rust
     - not meaningful without other isolation (need to restrict `zebrad` from accessing viewing keys on disk, etc)
+    - could use [cap-std](https://blog.sunfishcode.online/introducing-cap-std/)
+      to restrict filesystem and network access for zebra-client.
+      See https://github.com/ZcashFoundation/zebra/issues/2340
     - instead of process isolation, maybe you actually want the Light Client
 Protocol, or something similar?
 

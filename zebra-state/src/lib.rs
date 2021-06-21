@@ -1,4 +1,12 @@
-//! State storage code for Zebra. 🦓
+//! State contextual verification and storage code for Zebra. 🦓
+//!
+//! # Correctness
+//!
+//! Await UTXO and block commit requests should be wrapped in a timeout, because:
+//! - await UTXO requests wait for a block containing that UTXO, and
+//! - contextual verification and state updates wait for all previous blocks.
+//!
+//! Otherwise, verification of out-of-order and invalid blocks can hang indefinitely.
 
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]

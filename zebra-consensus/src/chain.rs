@@ -2,6 +2,15 @@
 //!
 //! Verifies blocks using the [`CheckpointVerifier`] or full [`BlockVerifier`],
 //! depending on the config and block height.
+//!
+//! # Correctness
+//!
+//! Block and transaction verification requests should be wrapped in a timeout, because:
+//! - checkpoint verification waits for previous blocks, and
+//! - full block and transaction verification wait for UTXOs from previous blocks.
+//!
+//! Otherwise, verification of out-of-order and invalid blocks and transactions can hang
+//! indefinitely.
 
 #[cfg(test)]
 mod tests;
@@ -20,7 +29,7 @@ use tracing::instrument;
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{Network, NetworkUpgrade::Canopy},
+    parameters::Network,
 };
 
 use zebra_state as zs;
@@ -47,6 +56,12 @@ const VERIFIER_BUFFER_BOUND: usize = 4;
 
 /// The chain verifier routes requests to either the checkpoint verifier or the
 /// block verifier, depending on the maximum checkpoint height.
+///
+/// # Correctness
+///
+/// Block verification requests should be wrapped in a timeout, so that
+/// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
+/// module documentation for details.
 struct ChainVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -132,6 +147,12 @@ where
 /// This function should only be called once for a particular state service.
 ///
 /// Dropped requests are cancelled on a best-effort basis, but may continue to be processed.
+///
+/// # Correctness
+///
+/// Block verification requests should be wrapped in a timeout, so that
+/// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
+/// module documentation for details.
 #[instrument(skip(state_service))]
 pub async fn init<S>(
     config: Config,
@@ -147,7 +168,7 @@ where
     let max_checkpoint_height = if config.checkpoint_sync {
         list.max_height()
     } else {
-        list.min_height_in_range(Canopy.activation_height(network).unwrap()..)
+        list.min_height_in_range(network.mandatory_checkpoint_height()..)
             .expect("hardcoded checkpoint list extends past canopy activation")
     };
 

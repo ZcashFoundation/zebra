@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-alpha.10"
+version = "1.0.0-alpha.11"
 edition = "2018"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
@@ -60,7 +60,7 @@ zebra-test = { path = "../zebra-test" }
 
 [features]
 enable-sentry = []
-test_sync_to_canopy_mainnet = []
-test_sync_to_canopy_testnet = []
-test_sync_past_canopy_mainnet = []
-test_sync_past_canopy_testnet = []
+test_sync_to_mandatory_checkpoint_mainnet = []
+test_sync_to_mandatory_checkpoint_testnet = []
+test_sync_past_mandatory_checkpoint_mainnet = []
+test_sync_past_mandatory_checkpoint_testnet = []

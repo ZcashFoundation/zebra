@@ -55,7 +55,7 @@ impl Strategy for PreparedChain {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
-            let ledger_strategy = LedgerState::genesis_strategy(Nu5);
+            let ledger_strategy = LedgerState::genesis_strategy(Nu5, None, false);
 
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {

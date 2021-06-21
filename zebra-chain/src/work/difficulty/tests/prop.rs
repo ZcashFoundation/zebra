@@ -1,4 +1,3 @@
-use primitive_types::U256;
 use proptest::{arbitrary::any, prelude::*};
 
 use std::cmp::Ordering;

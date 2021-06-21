@@ -32,6 +32,12 @@ mod check;
 mod tests;
 
 /// Asynchronous transaction verification.
+///
+/// # Correctness
+///
+/// Transaction verification requests should be wrapped in a timeout, so that
+/// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
+/// module documentation for details.
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
     network: Network,

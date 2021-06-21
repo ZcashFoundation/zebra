@@ -1,6 +1,6 @@
 use proptest::{arbitrary::any, arbitrary::Arbitrary, prelude::*};
 
-use super::InventoryHash;
+use super::{types::PeerServices, InventoryHash};
 
 use zebra_chain::{block, transaction};
 
@@ -48,6 +48,19 @@ impl Arbitrary for InventoryHash {
             Self::filtered_block_strategy(),
         ]
         .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl Arbitrary for PeerServices {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u64>()
+            .prop_map(PeerServices::from_bits_truncate)
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

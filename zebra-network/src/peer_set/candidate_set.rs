@@ -11,101 +11,107 @@ use crate::{constants, types::MetaAddr, AddressBook, BoxError, Request, Response
 #[cfg(test)]
 mod tests;
 
-/// The `CandidateSet` manages the `PeerSet`'s peer reconnection attempts.
+/// The [`CandidateSet`] manages outbound peer connection attempts.
+/// Successful connections become peers in the [`PeerSet`].
 ///
-/// It divides the set of all possible candidate peers into disjoint subsets,
-/// using the `PeerAddrState`:
+/// The candidate set divides the set of all possible outbound peers into
+/// disjoint subsets, using the [`PeerAddrState`]:
 ///
-/// 1. `Responded` peers, which we previously had inbound or outbound connections
-///    to. If we have not received any messages from a `Responded` peer within a
-///    cutoff time, we assume that it has disconnected or hung, and attempt
-///    reconnection;
-/// 2. `NeverAttempted` peers, which we learned about from other peers or a DNS
-///    seeder, but have never connected to;
-/// 3. `Failed` peers, to whom we attempted to connect but were unable to;
-/// 4. `AttemptPending` peers, which we've recently queued for reconnection.
+/// 1. [`Responded`] peers, which we have had an outbound connection to.
+/// 2. [`NeverAttemptedGossiped`] peers, which we learned about from other peers
+///    but have never connected to.
+/// 3. [`NeverAttemptedAlternate`] peers, canonical addresses which we learned
+///    from the [`Version`] messages of inbound and outbound connections,
+///    but have never connected to.
+/// 4. [`Failed`] peers, which failed a connection attempt, or had an error
+///    during an outbound connection.
+/// 5. [`AttemptPending`] peers, which we've recently queued for a connection.
+///
+/// Never attempted peers are always available for connection.
+///
+/// If a peer's attempted, responded, or failure time is recent
+/// (within the liveness limit), we avoid reconnecting to it.
+/// Otherwise, we assume that it has disconnected or hung,
+/// and attempt reconnection.
 ///
 /// ```ascii,no_run
 ///                         ┌──────────────────┐
-///                         │     PeerSet      │
-///                         │GetPeers Responses│
-///                         └──────────────────┘
-///                                  │
-///                                  │
-///                                  │
-///                                  │
+///                         │   Config / DNS   │
+///             ┌───────────│       Seed       │───────────┐
+///             │           │    Addresses     │           │
+///             │           └──────────────────┘           │
+///             │                    │ untrusted_last_seen │
+///             │                    │     is unknown      │
+///             ▼                    │                     ▼
+///    ┌──────────────────┐          │          ┌──────────────────┐
+///    │    Handshake     │          │          │     Peer Set     │
+///    │    Canonical     │──────────┼──────────│     Gossiped     │
+///    │    Addresses     │          │          │    Addresses     │
+///    └──────────────────┘          │          └──────────────────┘
+///     untrusted_last_seen          │                provides
+///         set to now               │           untrusted_last_seen
 ///                                  ▼
-///             filter by            Λ
-///          !contains_addr         ╱ ╲
-///  ┌────────────────────────────▶▕   ▏
-///  │                              ╲ ╱
-///  │                               V
-///  │                               │
-///  │                               │
-///  │                               │
-///  │ ┌──────────────────┐          │
-///  │ │     Inbound      │          │
-///  │ │ Peer Connections │          │
-///  │ └──────────────────┘          │
-///  │          │                    │
-///  ├──────────┼────────────────────┼───────────────────────────────┐
-///  │ PeerSet  ▼  AddressBook       ▼                               │
-///  │ ┌─────────────┐       ┌────────────────┐      ┌─────────────┐ │
-///  │ │  Possibly   │       │`NeverAttempted`│      │  `Failed`   │ │
-///  │ │Disconnected │       │     Peers      │      │   Peers     │◀┼┐
-///  │ │ `Responded` │       │                │      │             │ ││
-///  │ │    Peers    │       │                │      │             │ ││
-///  │ └─────────────┘       └────────────────┘      └─────────────┘ ││
-///  │        │                      │                      │        ││
-///  │ #1 oldest_first        #2 newest_first        #3 oldest_first ││
-///  │        │                      │                      │        ││
-///  │        ├──────────────────────┴──────────────────────┘        ││
-///  │        │         disjoint `PeerAddrState`s                    ││
-///  ├────────┼──────────────────────────────────────────────────────┘│
-///  │        ▼                                                       │
-///  │        Λ                                                       │
-///  │       ╱ ╲         filter by                                    │
-///  └─────▶▕   ▏!is_potentially_connected                            │
-///          ╲ ╱      to remove live                                  │
-///           V      `Responded` peers                                │
-///           │                                                       │
-///           │ Try outbound connection                               │
-///           ▼                                                       │
-///    ┌────────────────┐                                             │
-///    │`AttemptPending`│                                             │
-///    │     Peers      │                                             │
-///    │                │                                             │
-///    └────────────────┘                                             │
-///           │                                                       │
-///           │                                                       │
-///           ▼                                                       │
-///           Λ                                                       │
-///          ╱ ╲                                                      │
-///         ▕   ▏─────────────────────────────────────────────────────┘
-///          ╲ ╱   connection failed, update last_seen to now()
-///           V
-///           │
-///           │
-///           ▼
-///    ┌────────────┐
-///    │    send    │
-///    │peer::Client│
-///    │to Discover │
-///    └────────────┘
-///           │
-///           │
-///           ▼
-///  ┌───────────────────────────────────────┐
-///  │ every time we receive a peer message: │
-///  │  * update state to `Responded`        │
-///  │  * update last_seen to now()          │
+///                                  Λ   if attempted, responded, or failed:
+///                                 ╱ ╲         ignore gossiped info
+///                                ▕   ▏    otherwise, if never attempted:
+///                                 ╲ ╱    skip updates to existing fields
+///                                  V
+///  ┌───────────────────────────────┼───────────────────────────────┐
+///  │ AddressBook                   │                               │
+///  │ disjoint `PeerAddrState`s     ▼                               │
+///  │ ┌─────────────┐  ┌─────────────────────────┐  ┌─────────────┐ │
+///  │ │ `Responded` │  │`NeverAttemptedGossiped` │  │  `Failed`   │ │
+/// ┌┼▶│    Peers    │  │`NeverAttemptedAlternate`│  │   Peers     │◀┼┐
+/// ││ │             │  │          Peers          │  │             │ ││
+/// ││ └─────────────┘  └─────────────────────────┘  └─────────────┘ ││
+/// ││        │                      │                      │        ││
+/// ││ #1 oldest_first        #2 newest_first        #3 oldest_first ││
+/// ││        ├──────────────────────┴──────────────────────┘        ││
+/// ││        ▼                                                      ││
+/// ││        Λ                                                      ││
+/// ││       ╱ ╲              filter by                              ││
+/// ││      ▕   ▏        is_ready_for_attempt                        ││
+/// ││       ╲ ╱    to remove recent `Responded`,                    ││
+/// ││        V  `AttemptPending`, and `Failed` peers                ││
+/// ││        │                                                      ││
+/// ││        │    try outbound connection,                          ││
+/// ││        ▼  update last_attempt to now()                        ││
+/// ││┌────────────────┐                                             ││
+/// │││`AttemptPending`│                                             ││
+/// │││     Peers      │                                             ││
+/// ││└────────────────┘                                             ││
+/// │└────────┼──────────────────────────────────────────────────────┘│
+/// │         ▼                                                       │
+/// │         Λ                                                       │
+/// │        ╱ ╲                                                      │
+/// │       ▕   ▏─────────────────────────────────────────────────────┘
+/// │        ╲ ╱   connection failed, update last_failure to now()
+/// │         V
+/// │         │
+/// │         │ connection succeeded
+/// │         ▼
+/// │  ┌────────────┐
+/// │  │    send    │
+/// │  │peer::Client│
+/// │  │to Discover │
+/// │  └────────────┘
+/// │         │
+/// │         ▼
+/// │┌───────────────────────────────────────┐
+/// ││ every time we receive a peer message: │
+/// └│  * update state to `Responded`        │
+///  │  * update last_response to now()      │
 ///  └───────────────────────────────────────┘
-///
 /// ```
 // TODO:
-//   * draw arrow from the "peer message" box into the `Responded` state box
-//   * make the "disjoint states" box include `AttemptPending`
-pub(super) struct CandidateSet<S> {
+//   * show all possible transitions between Attempt/Responded/Failed,
+//     except Failed -> Responded is invalid, must go through Attempt
+//   * for now, seed peers go straight to handshaking and responded,
+//     but we'll fix that once we add the Seed state
+// When we add the Seed state:
+//   * show that seed peers that transition to other never attempted
+//     states are already in the address book
+pub(crate) struct CandidateSet<S> {
     pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
     wait_next_handshake: Sleep,
@@ -271,12 +277,10 @@ where
 
     /// Returns the next candidate for a connection attempt, if any are available.
     ///
-    /// Returns peers in this order:
-    /// - oldest `Responded` that are not live
-    /// - newest `NeverAttempted`
-    /// - oldest `Failed`
+    /// Returns peers in reconnection order, based on
+    /// [`AddressBook::reconnection_peers`].
     ///
-    /// Skips `AttemptPending` peers and live `Responded` peers.
+    /// Skips peers that have recently been active, attempted, or failed.
     ///
     /// ## Correctness
     ///

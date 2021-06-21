@@ -8,10 +8,9 @@ use std::{
     time::Instant,
 };
 
-use chrono::{DateTime, Utc};
 use tracing::Span;
 
-use crate::{constants, meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
+use crate::{meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
 
 /// A database of peer listener addresses, their advertised services, and
 /// information on when they were last seen.
@@ -104,6 +103,28 @@ impl AddressBook {
         new_book
     }
 
+    /// Construct an [`AddressBook`] with the given [`Config`],
+    /// [`tracing::Span`], and addresses.
+    ///
+    /// This constructor can be used to break address book invariants,
+    /// so it should only be used in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn new_with_addrs(
+        config: &Config,
+        span: Span,
+        addrs: impl IntoIterator<Item = MetaAddr>,
+    ) -> AddressBook {
+        let mut new_book = AddressBook::new(config, span);
+
+        let addrs = addrs
+            .into_iter()
+            .map(|meta_addr| (meta_addr.addr, meta_addr));
+        new_book.by_addr.extend(addrs);
+
+        new_book.update_metrics();
+        new_book
+    }
+
     /// Get the local listener address.
     pub fn get_local_listener(&self) -> MetaAddrChange {
         MetaAddr::new_local_listener(&self.local_listener)
@@ -140,6 +161,15 @@ impl AddressBook {
     ///
     /// All changes should go through `update`, so that the address book
     /// only contains valid outbound addresses.
+    ///
+    /// # Security
+    ///
+    /// This function must apply every attempted, responded, and failed change
+    /// to the address book. This prevents rapid reconnections to the same peer.
+    ///
+    /// As an exception, this function can ignore all changes for specific
+    /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
+    /// peers.
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         let _guard = self.span.enter();
 
@@ -155,19 +185,22 @@ impl AddressBook {
         );
 
         if let Some(updated) = updated {
-            // If a node that we are directly connected to has changed to a client,
-            // remove it from the address book.
-            if updated.is_direct_client() && previous.is_some() {
-                std::mem::drop(_guard);
-                self.take(updated.addr);
+            // Ignore invalid outbound addresses.
+            // (Inbound connections can be monitored via Zebra's metrics.)
+            if !updated.address_is_valid_for_outbound() {
                 return None;
             }
 
-            // Never add unspecified addresses or client services.
+            // Ignore invalid outbound services and other info,
+            // but only if the peer has never been attempted.
             //
-            // Communication with these addresses can be monitored via Zebra's
-            // metrics. (The address book is for valid peer addresses.)
-            if !updated.is_valid_for_outbound() {
+            // Otherwise, if we got the info directly from the peer,
+            // store it in the address book, so we know not to reconnect.
+            //
+            // TODO: delete peers with invalid info when they get too old (#1873)
+            if !updated.last_known_info_is_valid_for_outbound()
+                && updated.last_connection_state.is_never_attempted()
+            {
                 return None;
             }
 
@@ -202,21 +235,6 @@ impl AddressBook {
         }
     }
 
-    /// Compute a cutoff time that can determine whether an entry
-    /// in an address book being updated with peer message timestamps
-    /// represents a likely-dead (or hung) peer, or a potentially-connected peer.
-    ///
-    /// [`constants::LIVE_PEER_DURATION`] represents the time interval in which
-    /// we should receive at least one message from a peer, or close the
-    /// connection. Therefore, if the last-seen timestamp is older than
-    /// [`constants::LIVE_PEER_DURATION`] ago, we know we should have
-    /// disconnected from it. Otherwise, we could potentially be connected to it.
-    fn liveness_cutoff_time() -> DateTime<Utc> {
-        Utc::now()
-            - chrono::Duration::from_std(constants::LIVE_PEER_DURATION)
-                .expect("unexpectedly large constant")
-    }
-
     /// Returns true if the given [`SocketAddr`] has recently sent us a message.
     pub fn recently_live_addr(&self, addr: &SocketAddr) -> bool {
         let _guard = self.span.enter();
@@ -224,8 +242,7 @@ impl AddressBook {
             None => false,
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
-                peer.last_connection_state == PeerAddrState::Responded
-                    && peer.get_last_seen() > AddressBook::liveness_cutoff_time()
+                peer.last_connection_state == PeerAddrState::Responded && peer.was_recently_live()
             }
         }
     }
@@ -238,12 +255,6 @@ impl AddressBook {
             None => false,
             Some(peer) => peer.last_connection_state == PeerAddrState::AttemptPending,
         }
-    }
-
-    /// Returns true if the given [`SocketAddr`] might be connected to a node
-    /// feeding timestamps into this address book.
-    pub fn maybe_connected_addr(&self, addr: &SocketAddr) -> bool {
-        self.recently_live_addr(addr) || self.pending_reconnection_addr(addr)
     }
 
     /// Return an iterator over all peers.
@@ -266,7 +277,7 @@ impl AddressBook {
         // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
         self.by_addr
             .values()
-            .filter(move |peer| !self.maybe_connected_addr(&peer.addr))
+            .filter(|peer| peer.is_ready_for_attempt())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .cloned()
@@ -289,7 +300,7 @@ impl AddressBook {
 
         self.by_addr
             .values()
-            .filter(move |peer| self.maybe_connected_addr(&peer.addr))
+            .filter(|peer| !peer.is_ready_for_attempt())
             .cloned()
     }
 
