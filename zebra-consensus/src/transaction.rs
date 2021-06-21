@@ -198,19 +198,16 @@ where
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => {
-                    Self::verify_v4_transaction(
-                        req,
-                        network,
-                        script_verifier,
-                        inputs,
-                        joinsplit_data,
-                        sapling_shielded_data,
-                    )
-                    .await?
-                }
+                } => Self::verify_v4_transaction(
+                    req,
+                    network,
+                    script_verifier,
+                    inputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                )?,
                 Transaction::V5 { inputs, .. } => {
-                    Self::verify_v5_transaction(req, network, script_verifier, inputs).await?
+                    Self::verify_v5_transaction(req, network, script_verifier, inputs)?
                 }
             };
 
@@ -246,7 +243,7 @@ where
     /// - the transparent `inputs` in the transaction
     /// - the Sprout `joinsplit_data` shielded data in the transaction
     /// - the `sapling_shielded_data` in the transaction
-    async fn verify_v4_transaction(
+    fn verify_v4_transaction(
         request: Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
@@ -293,7 +290,7 @@ where
     /// - the `network` to consider when verifying
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the transparent `inputs` in the transaction
-    async fn verify_v5_transaction(
+    fn verify_v5_transaction(
         request: Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
