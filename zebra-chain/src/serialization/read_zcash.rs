@@ -162,3 +162,20 @@ pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
         Some(_) | None => V6(*v6_addr),
     }
 }
+
+/// Transform a `SocketAddr` into a canonical Zebra `SocketAddr`, converting
+/// IPv6-mapped IPv4 addresses, and removing IPv6 scope IDs and flow information.
+///
+/// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
+pub fn canonical_socket_addr(socket_addr: impl Into<SocketAddr>) -> SocketAddr {
+    use SocketAddr::*;
+
+    let mut socket_addr = socket_addr.into();
+    if let V6(v6_socket_addr) = socket_addr {
+        let canonical_ip = canonical_ip_addr(v6_socket_addr.ip());
+        // creating a new SocketAddr removes scope IDs and flow information
+        socket_addr = SocketAddr::new(canonical_ip, socket_addr.port());
+    }
+
+    socket_addr
+}

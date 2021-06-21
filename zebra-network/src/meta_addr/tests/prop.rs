@@ -21,6 +21,7 @@ use crate::{
     constants::LIVE_PEER_DURATION,
     meta_addr::{arbitrary::MAX_ADDR_CHANGE, MetaAddr, MetaAddrChange, PeerAddrState::*},
     peer_set::candidate_set::CandidateSet,
+    protocol::types::PeerServices,
     AddressBook, Config,
 };
 
@@ -32,12 +33,22 @@ const DEFAULT_VERBOSE_TEST_PROPTEST_CASES: u32 = 256;
 
 proptest! {
     /// Make sure that the sanitize function reduces time and state metadata
-    /// leaks.
+    /// leaks for valid addresses.
+    ///
+    /// Make sure that the sanitize function skips invalid IP addresses, ports,
+    /// and client services.
     #[test]
     fn sanitize_avoids_leaks(addr in MetaAddr::arbitrary()) {
         zebra_test::init();
 
         if let Some(sanitized) = addr.sanitize() {
+            // check that all sanitized addresses are valid for outbound
+            prop_assert!(addr.last_known_info_is_valid_for_outbound());
+            // also check the address, port, and services individually
+            prop_assert!(!addr.addr.ip().is_unspecified());
+            prop_assert_ne!(addr.addr.port(), 0);
+            prop_assert!(addr.services.contains(PeerServices::NODE_NETWORK));
+
             check::sanitize_avoids_leaks(&addr, &sanitized);
         }
     }

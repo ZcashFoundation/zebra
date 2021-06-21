@@ -1,6 +1,6 @@
 //! Arbitrary data generation for serialization proptests
 
-use super::{read_zcash::canonical_ip_addr, DateTime32};
+use super::{read_zcash::canonical_socket_addr, DateTime32};
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
 use std::net::SocketAddr;
@@ -59,10 +59,6 @@ pub fn datetime_u32() -> impl Strategy<Value = chrono::DateTime<Utc>> {
 /// Returns a random canonical Zebra `SocketAddr`.
 ///
 /// See [`canonical_ip_addr`] for details.
-pub fn canonical_socket_addr() -> impl Strategy<Value = SocketAddr> {
-    use SocketAddr::*;
-    any::<SocketAddr>().prop_map(|addr| match addr {
-        V4(_) => addr,
-        V6(v6_addr) => SocketAddr::new(canonical_ip_addr(v6_addr.ip()), v6_addr.port()),
-    })
+pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
+    any::<SocketAddr>().prop_map(canonical_socket_addr)
 }

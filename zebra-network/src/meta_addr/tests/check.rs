@@ -1,5 +1,7 @@
 //! Shared test checks for MetaAddr
 
+use std::net::SocketAddr;
+
 use super::super::MetaAddr;
 
 use crate::{constants::TIMESTAMP_TRUNCATION_SECONDS, types::PeerServices};
@@ -68,8 +70,24 @@ pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
     // Sanitize to the the default state, even though it's not serialized
     assert_eq!(sanitized.last_connection_state, Default::default());
     // Sanitize to known flags
-    assert_eq!(sanitized.services, original.services & PeerServices::all());
+    let sanitized_peer_services = original.services & PeerServices::all();
+    assert_eq!(sanitized.services, sanitized_peer_services);
 
-    // We want the other fields to be unmodified
-    assert_eq!(sanitized.addr, original.addr);
+    // Remove IPv6 scope ID and flow information
+    let sanitized_socket_addr = SocketAddr::new(original.addr.ip(), original.addr.port());
+    assert_eq!(sanitized.addr.ip(), original.addr.ip());
+    assert_eq!(sanitized.addr.port(), original.addr.port());
+    assert_eq!(sanitized.addr, sanitized_socket_addr);
+
+    // We want any other fields to be their defaults
+    assert_eq!(
+        sanitized,
+        &MetaAddr::new_gossiped_meta_addr(
+            sanitized_socket_addr,
+            sanitized_peer_services,
+            sanitized
+                .last_seen()
+                .expect("unexpected missing last seen time in sanitized MetaAddr")
+        ),
+    );
 }

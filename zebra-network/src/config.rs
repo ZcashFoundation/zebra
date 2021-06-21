@@ -7,7 +7,7 @@ use std::{
 
 use serde::{de, Deserialize, Deserializer};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, serialization::canonical_socket_addr};
 
 use crate::BoxError;
 
@@ -131,7 +131,7 @@ impl Config {
         let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
-            Ok(Ok(ips)) => Ok(ips.collect()),
+            Ok(Ok(ips)) => Ok(ips.map(canonical_socket_addr).collect()),
             Ok(Err(e)) => {
                 tracing::info!(?host, ?e, "DNS error resolving peer IP address");
                 Err(e.into())
@@ -237,7 +237,7 @@ impl<'de> Deserialize<'de> for Config {
         }?;
 
         Ok(Config {
-            listen_addr,
+            listen_addr: canonical_socket_addr(listen_addr),
             network: config.network,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,

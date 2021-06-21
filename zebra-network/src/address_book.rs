@@ -10,6 +10,8 @@ use std::{
 
 use tracing::Span;
 
+use zebra_chain::serialization::canonical_socket_addr;
+
 use crate::{meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
 
 /// A database of peer listener addresses, their advertised services, and
@@ -94,7 +96,7 @@ impl AddressBook {
 
         let mut new_book = AddressBook {
             by_addr: HashMap::default(),
-            local_listener: config.listen_addr,
+            local_listener: canonical_socket_addr(config.listen_addr),
             span,
             last_address_log: None,
         };
@@ -118,6 +120,11 @@ impl AddressBook {
 
         let addrs = addrs
             .into_iter()
+            .map(|mut meta_addr| {
+                meta_addr.addr = canonical_socket_addr(meta_addr.addr);
+                meta_addr
+            })
+            .filter(MetaAddr::address_is_valid_for_outbound)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
         new_book.by_addr.extend(addrs);
 
@@ -142,7 +149,8 @@ impl AddressBook {
         let mut peers = self.by_addr.clone();
 
         // Unconditionally add our local listener address to the advertised peers,
-        // to replace any self-connection failures
+        // to replace any self-connection failures. The address book and change
+        // constructors make sure that the SocketAddr is canonical.
         let local_listener = self.get_local_listener();
         peers.insert(local_listener.addr, local_listener);
 
@@ -174,6 +182,9 @@ impl AddressBook {
     ///
     /// All changes should go through `update`, so that the address book
     /// only contains valid outbound addresses.
+    ///
+    /// Change addresses must be canonical `SocketAddr`s. This makes sure that
+    /// each address book entry has a unique IP address.
     ///
     /// # Security
     ///
