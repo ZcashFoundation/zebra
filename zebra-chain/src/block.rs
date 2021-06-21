@@ -88,7 +88,7 @@ impl Block {
         }
     }
 
-    /// Check if the `branch_id` field from the transactions match block height.
+    /// Check if the `network_upgrade` field from the transactions match block height.
     ///
     /// # Consensus rule:
     ///
@@ -97,7 +97,7 @@ impl Block {
     ///
     /// [ZIP-244]: https://zips.z.cash/zip-0244
     /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-    pub fn check_consensus_branch_id_consistency(
+    pub fn check_transaction_network_upgrades(
         &self,
         network: Network,
     ) -> Result<(), error::BlockError> {
