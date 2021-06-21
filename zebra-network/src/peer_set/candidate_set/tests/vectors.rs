@@ -3,6 +3,7 @@ use std::{
     convert::TryInto,
     iter,
     net::{IpAddr, SocketAddr},
+    str::FromStr,
     sync::Arc,
     time::Duration as StdDuration,
 };
@@ -23,7 +24,7 @@ use super::super::{validate_addrs, CandidateSet};
 use crate::{
     constants::{GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
-    AddressBook, Config, Request, Response,
+    AddressBook, Request, Response,
 };
 
 /// Test that offset is applied when all addresses have `last_seen` times in the future.
@@ -144,7 +145,7 @@ fn candidate_set_updates_are_rate_limited() {
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
-    let address_book = AddressBook::new(&Config::default(), Span::none());
+    let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let (peer_service, call_count) = mock_peer_service();
     let mut candidate_set =
         CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
@@ -179,7 +180,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
-    let address_book = AddressBook::new(&Config::default(), Span::none());
+    let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let (peer_service, call_count) = mock_peer_service();
     let mut candidate_set =
         CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);

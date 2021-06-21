@@ -12,7 +12,7 @@ use tracing::Span;
 
 use zebra_chain::serialization::canonical_socket_addr;
 
-use crate::{meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
+use crate::{meta_addr::MetaAddrChange, types::MetaAddr, PeerAddrState};
 
 /// A database of peer listener addresses, their advertised services, and
 /// information on when they were last seen.
@@ -89,14 +89,15 @@ pub struct AddressMetrics {
 
 #[allow(clippy::len_without_is_empty)]
 impl AddressBook {
-    /// Construct an `AddressBook` with the given `config` and [`tracing::Span`].
-    pub fn new(config: &Config, span: Span) -> AddressBook {
+    /// Construct an [`AddressBook`] with the given `local_listener` and
+    /// [`tracing::Span`].
+    pub fn new(local_listener: SocketAddr, span: Span) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
 
         let mut new_book = AddressBook {
             by_addr: HashMap::default(),
-            local_listener: canonical_socket_addr(config.listen_addr),
+            local_listener: canonical_socket_addr(local_listener),
             span,
             last_address_log: None,
         };
@@ -105,18 +106,18 @@ impl AddressBook {
         new_book
     }
 
-    /// Construct an [`AddressBook`] with the given [`Config`],
+    /// Construct an [`AddressBook`] with the given `local_listener`,
     /// [`tracing::Span`], and addresses.
     ///
     /// This constructor can be used to break address book invariants,
     /// so it should only be used in tests.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn new_with_addrs(
-        config: &Config,
+        local_listener: SocketAddr,
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
     ) -> AddressBook {
-        let mut new_book = AddressBook::new(config, span);
+        let mut new_book = AddressBook::new(local_listener, span);
 
         let addrs = addrs
             .into_iter()

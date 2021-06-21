@@ -5,6 +5,7 @@ use std::{
     convert::{TryFrom, TryInto},
     env,
     net::SocketAddr,
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -26,7 +27,7 @@ use crate::{
     },
     peer_set::candidate_set::CandidateSet,
     protocol::types::PeerServices,
-    AddressBook, Config,
+    AddressBook,
 };
 
 /// The number of test cases to use for proptest that have verbose failures.
@@ -275,8 +276,11 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let config = Config { listen_addr: local_listener, ..Config::default() };
-        let address_book = AddressBook::new_with_addrs(&config, Span::none(), address_book_addrs);
+        let address_book = AddressBook::new_with_addrs(
+            local_listener,
+            Span::none(),
+            address_book_addrs
+        );
         let sanitized_addrs = address_book.sanitized();
 
         let expected_local_listener = address_book.get_local_listener();
@@ -339,7 +343,11 @@ proptest! {
             None
         };
 
-        let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(&Config::default(), Span::none(), addrs)));
+        let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
+            SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            Span::none(),
+            addrs,
+        )));
         let peer_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let mut candidate_set = CandidateSet::new(address_book.clone(), peer_service);
 
