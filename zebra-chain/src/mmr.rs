@@ -82,6 +82,7 @@ impl HistoryTree {
         // TODO: trim entries?
         // TODO: rebuild Tree from the peaks? When / how often?
         // (zcashd rebuilds it on every operation)
+        // TODO: implement network upgrade logic: drop previous history, start new history
         Ok(())
     }
 
