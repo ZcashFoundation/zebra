@@ -73,10 +73,6 @@ impl FinalizedState {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
         };
 
-        // Make sure the database returned from the `db_config()` is always the same
-        // as the one returned by the `path()` method of the FinalizedState.
-        assert_eq!(new_state.path(), path);
-
         if let Some(tip_height) = new_state.finalized_tip_height() {
             if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
@@ -404,6 +400,7 @@ impl FinalizedState {
     }
 
     /// Returns the `Path` where the files used by this database are located.
+    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         self.db.path()
     }
