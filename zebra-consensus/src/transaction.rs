@@ -427,12 +427,12 @@ where
         unimplemented!("V5 transaction validation is not yet complete");
     }
 
-    /// Verifies if a V5 `transaction` is supported by the network `upgrade`.
+    /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
     fn verify_v5_transaction_network_upgrade(
         transaction: &Transaction,
-        upgrade: NetworkUpgrade,
+        network_upgrade: NetworkUpgrade,
     ) -> Result<(), TransactionError> {
-        match upgrade {
+        match network_upgrade {
             // Supports V5 transactions
             NetworkUpgrade::Nu5 => Ok(()),
 
@@ -445,7 +445,7 @@ where
             | NetworkUpgrade::Heartwood
             | NetworkUpgrade::Canopy => Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
-                upgrade,
+                network_upgrade,
             )),
         }
     }
