@@ -10,6 +10,8 @@ use std::{
 
 use tracing::Span;
 
+use zebra_chain::serialization::canonical_socket_addr;
+
 use crate::{meta_addr::MetaAddrChange, types::MetaAddr, Config, PeerAddrState};
 
 /// A database of peer listener addresses, their advertised services, and
@@ -94,7 +96,7 @@ impl AddressBook {
 
         let mut new_book = AddressBook {
             by_addr: HashMap::default(),
-            local_listener: config.listen_addr,
+            local_listener: canonical_socket_addr(config.listen_addr),
             span,
             last_address_log: None,
         };
@@ -118,6 +120,11 @@ impl AddressBook {
 
         let addrs = addrs
             .into_iter()
+            .map(|mut meta_addr| {
+                meta_addr.addr = canonical_socket_addr(meta_addr.addr);
+                meta_addr
+            })
+            .filter(MetaAddr::address_is_valid_for_outbound)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
         new_book.by_addr.extend(addrs);
 
@@ -126,32 +133,34 @@ impl AddressBook {
     }
 
     /// Get the local listener address.
-    pub fn get_local_listener(&self) -> MetaAddrChange {
-        MetaAddr::new_local_listener(&self.local_listener)
+    ///
+    /// This address contains minimal state, but it is not sanitized.
+    pub fn get_local_listener(&self) -> MetaAddr {
+        MetaAddr::new_local_listener_change(&self.local_listener)
+            .into_new_meta_addr()
+            .expect("unexpected invalid new local listener addr")
     }
 
     /// Get the contents of `self` in random order with sanitized timestamps.
     pub fn sanitized(&self) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
-        let mut peers = self
-            .peers()
-            .filter_map(|a| MetaAddr::sanitize(&a))
+
+        let mut peers = self.by_addr.clone();
+
+        // Unconditionally add our local listener address to the advertised peers,
+        // to replace any self-connection failures. The address book and change
+        // constructors make sure that the SocketAddr is canonical.
+        let local_listener = self.get_local_listener();
+        peers.insert(local_listener.addr, local_listener);
+
+        // Then sanitize and shuffle
+        let mut peers = peers
+            .values()
+            .filter_map(MetaAddr::sanitize)
             .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
         peers
-    }
-
-    /// Returns true if the address book has an entry for `addr`.
-    pub fn contains_addr(&self, addr: &SocketAddr) -> bool {
-        let _guard = self.span.enter();
-        self.by_addr.contains_key(addr)
-    }
-
-    /// Returns the entry corresponding to `addr`, or `None` if it does not exist.
-    pub fn get_by_addr(&self, addr: SocketAddr) -> Option<MetaAddr> {
-        let _guard = self.span.enter();
-        self.by_addr.get(&addr).cloned()
     }
 
     /// Apply `change` to the address book, returning the updated `MetaAddr`,
@@ -161,6 +170,9 @@ impl AddressBook {
     ///
     /// All changes should go through `update`, so that the address book
     /// only contains valid outbound addresses.
+    ///
+    /// Change addresses must be canonical `SocketAddr`s. This makes sure that
+    /// each address book entry has a unique IP address.
     ///
     /// # Security
     ///
@@ -218,6 +230,7 @@ impl AddressBook {
     ///
     /// All address removals should go through `take`, so that the address
     /// book metrics are accurate.
+    #[allow(dead_code)]
     fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
         trace!(
@@ -312,14 +325,6 @@ impl AddressBook {
             .values()
             .filter(move |peer| self.recently_live_addr(&peer.addr))
             .cloned()
-    }
-
-    /// Returns an iterator that drains entries from the address book.
-    ///
-    /// Removes entries in reconnection attempt then arbitrary order,
-    /// see [`peers`] for details.
-    pub fn drain(&'_ mut self) -> impl Iterator<Item = MetaAddr> + '_ {
-        Drain { book: self }
     }
 
     /// Returns the number of entries in this address book.
@@ -440,18 +445,5 @@ impl Extend<MetaAddrChange> for AddressBook {
         for change in iter.into_iter() {
             self.update(change);
         }
-    }
-}
-
-struct Drain<'a> {
-    book: &'a mut AddressBook,
-}
-
-impl<'a> Iterator for Drain<'a> {
-    type Item = MetaAddr;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next_item_addr = self.book.peers().next()?.addr;
-        self.book.take(next_item_addr)
     }
 }

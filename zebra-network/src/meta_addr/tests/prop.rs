@@ -14,13 +14,18 @@ use tokio::{runtime::Runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
 
-use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use zebra_chain::serialization::{canonical_socket_addr, ZcashDeserialize, ZcashSerialize};
 
 use super::check;
 use crate::{
     constants::LIVE_PEER_DURATION,
-    meta_addr::{arbitrary::MAX_ADDR_CHANGE, MetaAddr, MetaAddrChange, PeerAddrState::*},
+    meta_addr::{
+        arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
+        MetaAddr, MetaAddrChange,
+        PeerAddrState::*,
+    },
     peer_set::candidate_set::CandidateSet,
+    protocol::types::PeerServices,
     AddressBook, Config,
 };
 
@@ -32,12 +37,22 @@ const DEFAULT_VERBOSE_TEST_PROPTEST_CASES: u32 = 256;
 
 proptest! {
     /// Make sure that the sanitize function reduces time and state metadata
-    /// leaks.
+    /// leaks for valid addresses.
+    ///
+    /// Make sure that the sanitize function skips invalid IP addresses, ports,
+    /// and client services.
     #[test]
     fn sanitize_avoids_leaks(addr in MetaAddr::arbitrary()) {
         zebra_test::init();
 
         if let Some(sanitized) = addr.sanitize() {
+            // check that all sanitized addresses are valid for outbound
+            prop_assert!(addr.last_known_info_is_valid_for_outbound());
+            // also check the address, port, and services individually
+            prop_assert!(!addr.addr.ip().is_unspecified());
+            prop_assert_ne!(addr.addr.port(), 0);
+            prop_assert!(addr.services.contains(PeerServices::NODE_NETWORK));
+
             check::sanitize_avoids_leaks(&addr, &sanitized);
         }
     }
@@ -244,6 +259,40 @@ proptest! {
                 addr = changed_addr;
             }
         }
+    }
+
+    /// Make sure that a sanitized [`AddressBook`] contains the local listener
+    /// [`MetaAddr`], regardless of the previous contents of the address book.
+    ///
+    /// If Zebra gossips its own listener address to peers, and gets it back,
+    /// its address book will contain its local listener address. This address
+    /// will likely be in [`PeerAddrState::Failed`], due to failed
+    /// self-connection attempts.
+    #[test]
+    fn sanitized_address_book_contains_local_listener(
+        local_listener in any::<SocketAddr>(),
+        address_book_addrs in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
+    ) {
+        zebra_test::init();
+
+        let config = Config { listen_addr: local_listener, ..Config::default() };
+        let address_book = AddressBook::new_with_addrs(&config, Span::none(), address_book_addrs);
+        let sanitized_addrs = address_book.sanitized();
+
+        let expected_local_listener = address_book.get_local_listener();
+        let canonical_local_listener = canonical_socket_addr(local_listener);
+        let book_sanitized_local_listener = sanitized_addrs.iter().find(|meta_addr| meta_addr.addr == canonical_local_listener );
+
+        // invalid addresses should be removed by sanitization,
+        // regardless of where they have come from
+        prop_assert_eq!(
+            book_sanitized_local_listener.cloned(),
+            expected_local_listener.sanitize(),
+            "address book: {:?}, sanitized_addrs: {:?}, canonical_local_listener: {:?}",
+            address_book,
+            sanitized_addrs,
+            canonical_local_listener,
+        );
     }
 }
 

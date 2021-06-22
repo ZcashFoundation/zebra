@@ -240,11 +240,7 @@ impl Service<zn::Request> for Inbound {
                     // Briefly hold the address book threaded mutex while
                     // cloning the address book. Then sanitize after releasing
                     // the lock.
-                    let mut peers = address_book.lock().unwrap().clone();
-
-                    // Add our local listener address to the advertised peers
-                    let local_listener = address_book.lock().unwrap().get_local_listener();
-                    peers.update(local_listener);
+                    let peers = address_book.lock().unwrap().clone();
 
                     // Send a sanitized response
                     let mut peers = peers.sanitized();
