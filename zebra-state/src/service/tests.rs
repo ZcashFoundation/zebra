@@ -188,6 +188,7 @@ fn state_behaves_when_blocks_are_committed_out_of_order() -> Result<()> {
     Ok(())
 }
 
+/*
 #[test]
 fn legacy_chain() -> Result<()> {
     zebra_test::init();
@@ -221,8 +222,7 @@ fn legacy_chain_for_network(network: Network) -> Result<()> {
             .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
             |(chain in strategy1)| {
                 let response = crate::service::legacy_chain_check(Height(nu5_height.0 + BLOCKS_AFTER_NU5), chain.into_iter(), network);
-                prop_assert_eq!(response.is_err(), false);
-                prop_assert_eq!(response.unwrap(), ());
+                prop_assert_eq!(response, Ok(()));
             }
         );
 
@@ -270,4 +270,89 @@ fn legacy_chain_for_network(network: Network) -> Result<()> {
     }
 
     Ok(())
+}
+*/
+
+const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 2;
+const BLOCKS_AFTER_NU5: u32 = 100;
+
+proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES))
+    )]
+
+    #[test]
+    fn at_least_one_transaction_with_network_upgrade(
+        (network, height, chain) in partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5)
+    ) {
+        let response = crate::service::legacy_chain_check(height, chain.into_iter(), network)
+            .map_err(|error| error.to_string());
+
+        prop_assert_eq!(response, Ok(()));
+    }
+
+    #[test]
+    fn no_transactions_with_network_upgrade(
+        (network, height, chain) in partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5 + 1)
+    ) {
+        let response = crate::service::legacy_chain_check(height, chain.into_iter(), network)
+            .map_err(|error| error.to_string());
+
+        prop_assert_eq!(
+            response,
+            Err("giving up after checking too many blocks".into())
+        );
+    }
+
+    #[test]
+    fn at_least_one_transactions_with_inconsistent_network_upgrade(
+        (network, height, chain) in partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5)
+    ) {
+        let response = crate::service::legacy_chain_check(height, chain.clone().into_iter(), network)
+            .map_err(|error| error.to_string());
+
+        prop_assert_eq!(
+            response,
+            Err("inconsistent network upgrade found in transaction".into())
+        );
+    }
+}
+
+// Utility functions
+
+fn partial_nu5_chain_strategy(
+    transaction_version_override: u32,
+    transaction_has_valid_network_upgrade: bool,
+    blocks_after_nu5_activation: u32,
+) -> impl Strategy<
+    Value = (
+        Network,
+        Height,
+        zebra_chain::fmt::SummaryDebug<Vec<Arc<Block>>>,
+    ),
+> {
+    any::<Network>().prop_flat_map(move |network| {
+        let nu5_height = NetworkUpgrade::Nu5
+            .activation_height(network)
+            .expect("NU5 activation height not set");
+        let height = Height(nu5_height.0 + blocks_after_nu5_activation);
+
+        let mut nu = NetworkUpgrade::Nu5;
+        if !transaction_has_valid_network_upgrade {
+            nu = NetworkUpgrade::Canopy;
+        }
+        zebra_chain::block::LedgerState::height_strategy(
+            height,
+            Some(nu),
+            Some(transaction_version_override),
+            transaction_has_valid_network_upgrade,
+        )
+        .prop_flat_map(move |init| {
+            Block::partial_chain_strategy(init, blocks_after_nu5_activation as usize)
+        })
+        .prop_map(move |partial_chain| (network, height, partial_chain))
+    })
 }
