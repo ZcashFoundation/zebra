@@ -720,12 +720,12 @@ where
                 }
 
                 // If we find at least one transaction with a `network_upgrade` field we are ok.
-                let network_upgrades: Vec<NetworkUpgrade> = block
+                let has_network_upgrade = block
                     .transactions
                     .iter()
-                    .filter_map(|trans| trans.network_upgrade())
-                    .collect();
-                if !network_upgrades.is_empty() {
+                    .find_map(|trans| trans.network_upgrade())
+                    .is_some();
+                if has_network_upgrade {
                     return Ok(());
                 }
             }
