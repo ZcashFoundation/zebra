@@ -60,15 +60,13 @@ impl DateTime32 {
     pub fn checked_duration_since(&self, earlier: DateTime32) -> Option<Duration32> {
         self.timestamp
             .checked_sub(earlier.timestamp)
-            .map(|seconds| Duration32 { seconds })
+            .map(Duration32::from)
     }
 
     /// Returns duration elapsed between `earlier` and this time,
     /// or zero if `earlier` is later than this time.
     pub fn saturating_duration_since(&self, earlier: DateTime32) -> Duration32 {
-        Duration32 {
-            seconds: self.timestamp.saturating_sub(earlier.timestamp),
-        }
+        Duration32::from(self.timestamp.saturating_sub(earlier.timestamp))
     }
 
     /// Returns the duration elapsed since this time,
@@ -94,9 +92,7 @@ impl DateTime32 {
     /// Returns the time that is `duration` after this time.
     /// If the calculation overflows, returns `DateTime32::MAX`.
     pub fn saturating_add(&self, duration: Duration32) -> DateTime32 {
-        DateTime32 {
-            timestamp: self.timestamp.saturating_add(duration.seconds),
-        }
+        DateTime32::from(self.timestamp.saturating_add(duration.seconds))
     }
 
     /// Returns the time that is `duration` before this time.
@@ -104,15 +100,13 @@ impl DateTime32 {
     pub fn checked_sub(&self, duration: Duration32) -> Option<DateTime32> {
         self.timestamp
             .checked_sub(duration.seconds)
-            .map(|timestamp| DateTime32 { timestamp })
+            .map(DateTime32::from)
     }
 
     /// Returns the time that is `duration` before this time.
     /// If the calculation underflows, returns `DateTime32::MIN`.
     pub fn saturating_sub(&self, duration: Duration32) -> DateTime32 {
-        DateTime32 {
-            timestamp: self.timestamp.saturating_sub(duration.seconds),
-        }
+        DateTime32::from(self.timestamp.saturating_sub(duration.seconds))
     }
 }
 
@@ -143,15 +137,13 @@ impl Duration32 {
     pub fn checked_add(&self, duration: Duration32) -> Option<Duration32> {
         self.seconds
             .checked_add(duration.seconds)
-            .map(|seconds| Duration32 { seconds })
+            .map(Duration32::from)
     }
 
     /// Returns a duration that is `duration` longer than this duration.
     /// If the calculation overflows, returns `Duration32::MAX`.
     pub fn saturating_add(&self, duration: Duration32) -> Duration32 {
-        Duration32 {
-            seconds: self.seconds.saturating_add(duration.seconds),
-        }
+        Duration32::from(self.seconds.saturating_add(duration.seconds))
     }
 
     /// Returns a duration that is `duration` shorter than this duration.
@@ -159,15 +151,13 @@ impl Duration32 {
     pub fn checked_sub(&self, duration: Duration32) -> Option<Duration32> {
         self.seconds
             .checked_sub(duration.seconds)
-            .map(|seconds| Duration32 { seconds })
+            .map(Duration32::from)
     }
 
     /// Returns a duration that is `duration` shorter than this duration.
     /// If the calculation underflows, returns `Duration32::MIN`.
     pub fn saturating_sub(&self, duration: Duration32) -> Duration32 {
-        Duration32 {
-            seconds: self.seconds.saturating_sub(duration.seconds),
-        }
+        Duration32::from(self.seconds.saturating_sub(duration.seconds))
     }
 }
 
