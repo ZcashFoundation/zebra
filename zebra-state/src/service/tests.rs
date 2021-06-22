@@ -311,7 +311,7 @@ proptest! {
     fn at_least_one_transactions_with_inconsistent_network_upgrade(
         (network, height, chain) in partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5)
     ) {
-        let response = crate::service::legacy_chain_check(height, chain.clone().into_iter(), network)
+        let response = crate::service::legacy_chain_check(height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
