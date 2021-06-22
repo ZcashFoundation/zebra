@@ -665,15 +665,15 @@ impl Service<Request> for StateService {
                 async move { Ok(Response::BlockHeaders(res)) }.boxed()
             }
             Request::IsLegacyChain => {
-                let mut response = None;
+                let mut legacy_chain_path = None;
                 if let Some(tip) = self.best_tip() {
                     if legacy_chain_check(tip.0, self.any_ancestor_blocks(tip.1), self.network)
                         .is_err()
                     {
-                        response = Some(self.disk.path().to_path_buf());
+                        legacy_chain_path = Some(self.disk.path().to_path_buf());
                     }
                 }
-                async move { Ok(response).map(Response::LegacyChain) }.boxed()
+                async move { Ok(Response::LegacyChain(legacy_chain_path)) }.boxed()
             }
         }
     }
@@ -712,12 +712,9 @@ where
                 }
 
                 // All transaction `network_upgrade` fields must be consistent with the block height.
-                if block
+                block
                     .check_transaction_network_upgrade_consistency(network)
-                    .is_err()
-                {
-                    return Err("inconsistent network upgrade found in transaction".into());
-                }
+                    .map_err(|_| "inconsistent network upgrade found in transaction")?;
 
                 // If we find at least one transaction with a `network_upgrade` field we are ok.
                 let has_network_upgrade = block
