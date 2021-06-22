@@ -323,6 +323,9 @@ impl Transaction {
     /// returning `Spend<PerSpendAnchor>` regardless of the underlying
     /// transaction version.
     ///
+    /// Shared anchors in V5 transactions are copied into each sapling spend.
+    /// This allows the same code to validate spends from V4 and V5 transactions.
+    ///
     /// # Correctness
     ///
     /// Do not use this function for serialization.
