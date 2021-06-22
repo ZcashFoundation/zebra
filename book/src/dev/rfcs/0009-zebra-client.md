@@ -204,6 +204,7 @@ Support for sending tx's via _non-privileged_ RPC endpoints, or via Stolon:
     - can use [cap-std](https://blog.sunfishcode.online/introducing-cap-std/)
       to restrict filesystem and network access for zebra-client.
       See https://github.com/ZcashFoundation/zebra/issues/2340
+    - can use the [tui crate](https://crates.io/crates/tui) to render a terminal UI
 
 ## Task isolation in Tokio
 - TODO: fill in
