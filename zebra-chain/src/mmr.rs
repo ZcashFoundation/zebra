@@ -51,11 +51,14 @@ impl HistoryTree {
     /// Create a new history tree with a single block.
     pub fn new_from_block(
         network: Network,
-        network_upgrade: NetworkUpgrade,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         _orchard_root: Option<&orchard::tree::Root>,
     ) -> Result<Self, io::Error> {
+        let height = block
+            .coinbase_height()
+            .expect("block must have coinbase height during contextual verification");
+        let network_upgrade = NetworkUpgrade::current(network, height);
         // TODO: handle Orchard root
         let (tree, entry) = Tree::new_from_block(network, block, sapling_root)?;
         let mut peaks = HashMap::new();
@@ -135,8 +138,8 @@ impl HistoryTree {
             }
 
             if peak_pos <= self.size {
-                // There is a peak at index `peak_pos`
-                peak_pos_set.insert(peak_pos);
+                // There is a peak at index `peak_pos - 1`
+                peak_pos_set.insert(peak_pos - 1);
 
                 // right sibling
                 peak_pos = peak_pos + (1 << (h + 1)) - 1;
