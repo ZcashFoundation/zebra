@@ -136,7 +136,7 @@ impl AddressBook {
     /// Get the local listener address.
     ///
     /// This address contains minimal state, but it is not sanitized.
-    pub fn get_local_listener(&self) -> MetaAddr {
+    pub fn local_listener_meta_addr(&self) -> MetaAddr {
         MetaAddr::new_local_listener_change(&self.local_listener)
             .into_new_meta_addr()
             .expect("unexpected invalid new local listener addr")
@@ -152,7 +152,7 @@ impl AddressBook {
         // Unconditionally add our local listener address to the advertised peers,
         // to replace any self-connection failures. The address book and change
         // constructors make sure that the SocketAddr is canonical.
-        let local_listener = self.get_local_listener();
+        let local_listener = self.local_listener_meta_addr();
         peers.insert(local_listener.addr, local_listener);
 
         // Then sanitize and shuffle

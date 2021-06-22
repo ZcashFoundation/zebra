@@ -283,7 +283,7 @@ proptest! {
         );
         let sanitized_addrs = address_book.sanitized();
 
-        let expected_local_listener = address_book.get_local_listener();
+        let expected_local_listener = address_book.local_listener_meta_addr();
         let canonical_local_listener = canonical_socket_addr(local_listener);
         let book_sanitized_local_listener = sanitized_addrs.iter().find(|meta_addr| meta_addr.addr == canonical_local_listener );
 
