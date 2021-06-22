@@ -61,13 +61,13 @@ impl StartCmd {
             .await
         {
             Ok(zebra_state::Response::LegacyChain(response)) => {
-                if response.is_some() {
+                if let Some(corrupt_db_path) = response {
                     // we found a legacy chain
                     panic!(
                         "Legacy chain found, database can be corrupted.
                         Delete your database and retry a full sync.
                         Database path: {:?}",
-                        response.expect("the corrupted database path")
+                        corrupt_db_path,
                     );
                 }
             }
