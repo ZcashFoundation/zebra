@@ -219,7 +219,7 @@ where
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
-/// returning the opened `TcpListener`, and the address it is bound to.
+/// returning the opened [`TcpListener`], and the address it is bound to.
 ///
 /// If the listener is configured to use an automatically chosen port (port `0`),
 /// then the returned address will contain the actual port.
@@ -272,7 +272,7 @@ async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
 /// Zcash peer.
 ///
 /// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
-/// the `Client` result over `tx`.
+/// the [`Client`][peer::Client] result over `tx`.
 #[instrument(skip(listener, handshaker, tx), fields(listener_addr = ?listener.local_addr()))]
 async fn accept_inbound_connections<S>(
     listener: TcpListener,
