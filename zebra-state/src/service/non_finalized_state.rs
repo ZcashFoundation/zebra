@@ -124,6 +124,8 @@ impl NonFinalizedState {
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
+    ///
+    /// `history_tree` must contain the history of the finalized tip.
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
