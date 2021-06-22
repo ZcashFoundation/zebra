@@ -5,6 +5,6 @@ use thiserror::Error;
 #[allow(dead_code, missing_docs)]
 #[derive(Error, Debug, PartialEq)]
 pub enum BlockError {
-    #[error("invalid network upgrade")]
-    InvalidNetworkUpgrade,
+    #[error("transaction has wrong consensus branch id for block network upgrade")]
+    WrongTransactionConsensusBranchId,
 }

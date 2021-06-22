@@ -192,7 +192,10 @@ impl Transaction {
         }
     }
 
-    /// Get this transaction's network_upgrade, if any.
+    /// Get this transaction's network upgrade field, if any.
+    /// This field is serialized as `nConsensusBranchId` ([7.1]).
+    ///
+    /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
         match self {
             Transaction::V1 { .. }

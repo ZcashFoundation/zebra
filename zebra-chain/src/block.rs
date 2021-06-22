@@ -88,7 +88,8 @@ impl Block {
         }
     }
 
-    /// Check if the `network_upgrade` field from the transactions match block height.
+    /// Check if the `network_upgrade` fields from each transaction in the block matches
+    /// the network upgrade calculated from the `network` and block height.
     ///
     /// # Consensus rule:
     ///
@@ -97,7 +98,7 @@ impl Block {
     ///
     /// [ZIP-244]: https://zips.z.cash/zip-0244
     /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-    pub fn check_transaction_network_upgrades(
+    pub fn check_transaction_network_upgrade_consistency(
         &self,
         network: Network,
     ) -> Result<(), error::BlockError> {
@@ -110,7 +111,7 @@ impl Block {
             .filter_map(|trans| trans.as_ref().network_upgrade())
             .any(|trans_nu| trans_nu != block_nu)
         {
-            return Err(error::BlockError::InvalidNetworkUpgrade);
+            return Err(error::BlockError::WrongTransactionConsensusBranchId);
         }
 
         Ok(())
