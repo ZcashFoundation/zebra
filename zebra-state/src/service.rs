@@ -14,8 +14,8 @@ use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
     parameters::POW_AVERAGING_WINDOW,
+    parameters::{Network, NetworkUpgrade},
     transaction,
     transaction::Transaction,
     transparent,
@@ -664,6 +664,17 @@ impl Service<Request> for StateService {
                     .collect();
                 async move { Ok(Response::BlockHeaders(res)) }.boxed()
             }
+            Request::IsLegacyChain => {
+                let mut response = None;
+                if let Some(tip) = self.best_tip() {
+                    if legacy_chain_check(tip.0, self.any_ancestor_blocks(tip.1), self.network)
+                        .is_err()
+                    {
+                        response = Some(self.disk.path().to_path_buf());
+                    }
+                }
+                async move { Ok(response).map(Response::LegacyChain) }.boxed()
+            }
         }
     }
 }
@@ -678,4 +689,47 @@ impl Service<Request> for StateService {
 /// probably not what you want.
 pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
     BoxService::new(StateService::new(config, network))
+}
+
+/// Check if zebra is following a legacy chain and return an error if so.
+pub fn legacy_chain_check<I>(
+    tip_height: block::Height,
+    ancestors: I,
+    network: Network,
+) -> Result<(), BoxError>
+where
+    I: Iterator<Item = Arc<Block>>,
+{
+    const MAX_BLOCKS_TO_CHECK: usize = 100;
+
+    // Only do the check if we have an Nu5 activation height.
+    if let Some(nu5_height) = NetworkUpgrade::Nu5.activation_height(network) {
+        // And only do the check if we are above Nu5 activation.
+        if tip_height >= nu5_height {
+            for (count, block) in ancestors.enumerate() {
+                if count >= MAX_BLOCKS_TO_CHECK {
+                    return Err("giving up after checking too many blocks".into());
+                }
+
+                // All transaction `network_upgrade` fields must be consistent with the block height.
+                if block
+                    .check_transaction_network_upgrade_consistency(network)
+                    .is_err()
+                {
+                    return Err("inconsistent network upgrade found in transaction".into());
+                }
+
+                // If we find at least one transaction with a `network_upgrade` field we are ok.
+                let network_upgrades: Vec<NetworkUpgrade> = block
+                    .transactions
+                    .iter()
+                    .filter_map(|trans| trans.network_upgrade())
+                    .collect();
+                if !network_upgrades.is_empty() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    Ok(())
 }

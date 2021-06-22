@@ -316,4 +316,7 @@ pub enum Request {
         /// Optionally, the hash of the last header to request.
         stop: Option<block::Hash>,
     },
+
+    /// Returns `Some(database_path)` if Zebra has followed a legacy chain.
+    IsLegacyChain,
 }

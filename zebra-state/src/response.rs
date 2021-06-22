@@ -41,4 +41,7 @@ pub enum Response {
 
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
+
+    /// The response to a `IsLegacyChain` request.
+    LegacyChain(Option<std::path::PathBuf>),
 }
