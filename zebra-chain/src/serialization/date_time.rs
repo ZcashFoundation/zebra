@@ -84,7 +84,7 @@ impl DateTime32 {
     pub fn checked_add(&self, duration: Duration32) -> Option<DateTime32> {
         self.timestamp
             .checked_add(duration.seconds)
-            .map(|timestamp| DateTime32 { timestamp })
+            .map(DateTime32::from)
     }
 
     /// Returns the time that is `duration` seconds after this time.
