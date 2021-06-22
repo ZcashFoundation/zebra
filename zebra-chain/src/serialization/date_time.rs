@@ -44,14 +44,18 @@ impl DateTime32 {
         self.into()
     }
 
-    /// Returns the current time
+    /// Returns the current time.
+    ///
+    /// # Panics
+    ///
+    /// If the number of seconds since the UNIX epoch is greater than `u32::MAX`.
     pub fn now() -> DateTime32 {
         Utc::now()
             .try_into()
             .expect("unexpected out of range chrono::DateTime")
     }
 
-    /// Returns the number of seconds elapsed between `earlier` and this time,
+    /// Returns the duration elapsed between `earlier` and this time,
     /// or `None` if `earlier` is later than this time.
     pub fn checked_duration_since(&self, earlier: DateTime32) -> Option<Duration32> {
         self.timestamp
@@ -59,7 +63,7 @@ impl DateTime32 {
             .map(|seconds| Duration32 { seconds })
     }
 
-    /// Returns the number of seconds elapsed between `earlier` and this time,
+    /// Returns duration elapsed between `earlier` and this time,
     /// or zero if `earlier` is later than this time.
     pub fn saturating_duration_since(&self, earlier: DateTime32) -> Duration32 {
         Duration32 {
@@ -67,19 +71,19 @@ impl DateTime32 {
         }
     }
 
-    /// Returns the number of seconds elapsed since this time,
+    /// Returns the duration elapsed since this time,
     /// or if this time is in the future, returns `None`.
     pub fn checked_elapsed(&self) -> Option<Duration32> {
         DateTime32::now().checked_duration_since(*self)
     }
 
-    /// Returns the number of seconds elapsed since this time,
+    /// Returns the duration elapsed since this time,
     /// or if this time is in the future, returns zero.
     pub fn saturating_elapsed(&self) -> Duration32 {
         DateTime32::now().saturating_duration_since(*self)
     }
 
-    /// Returns the time that is `duration` seconds after this time.
+    /// Returns the time that is `duration` after this time.
     /// If the calculation overflows, returns `None`.
     pub fn checked_add(&self, duration: Duration32) -> Option<DateTime32> {
         self.timestamp
@@ -87,7 +91,7 @@ impl DateTime32 {
             .map(DateTime32::from)
     }
 
-    /// Returns the time that is `duration` seconds after this time.
+    /// Returns the time that is `duration` after this time.
     /// If the calculation overflows, returns `DateTime32::MAX`.
     pub fn saturating_add(&self, duration: Duration32) -> DateTime32 {
         DateTime32 {
@@ -95,7 +99,7 @@ impl DateTime32 {
         }
     }
 
-    /// Returns the time that is `duration` seconds before this time.
+    /// Returns the time that is `duration` before this time.
     /// If the calculation underflows, returns `None`.
     pub fn checked_sub(&self, duration: Duration32) -> Option<DateTime32> {
         self.timestamp
@@ -103,7 +107,7 @@ impl DateTime32 {
             .map(|timestamp| DateTime32 { timestamp })
     }
 
-    /// Returns the time that is `duration` seconds before this time.
+    /// Returns the time that is `duration` before this time.
     /// If the calculation underflows, returns `DateTime32::MIN`.
     pub fn saturating_sub(&self, duration: Duration32) -> DateTime32 {
         DateTime32 {
@@ -119,7 +123,7 @@ impl Duration32 {
     /// The latest possible `Duration32` value.
     pub const MAX: Duration32 = Duration32 { seconds: u32::MAX };
 
-    /// Returns the number of seconds.
+    /// Returns the number of seconds in this duration.
     pub fn seconds(&self) -> u32 {
         self.seconds
     }
@@ -253,7 +257,7 @@ impl TryFrom<chrono::DateTime<Utc>> for DateTime32 {
 
     /// Convert from a [`chrono::DateTime`] to a [`DateTime32`], discarding any nanoseconds.
     ///
-    /// Conversion fails if the number of seconds is outside the `u32` range.
+    /// Conversion fails if the number of seconds since the UNIX epoch is outside the `u32` range.
     fn try_from(value: chrono::DateTime<Utc>) -> Result<Self, Self::Error> {
         Ok(Self {
             timestamp: value.timestamp().try_into()?,
@@ -266,7 +270,7 @@ impl TryFrom<&chrono::DateTime<Utc>> for DateTime32 {
 
     /// Convert from a [`chrono::DateTime`] to a [`DateTime32`], discarding any nanoseconds.
     ///
-    /// Conversion fails if the number of seconds is outside the `u32` range.
+    /// Conversion fails if the number of seconds since the UNIX epoch is outside the `u32` range.
     fn try_from(value: &chrono::DateTime<Utc>) -> Result<Self, Self::Error> {
         (*value).try_into()
     }
@@ -277,7 +281,7 @@ impl TryFrom<chrono::Duration> for Duration32 {
 
     /// Convert from a [`chrono::Duration`] to a [`Duration32`], discarding any nanoseconds.
     ///
-    /// Conversion fails if the number of seconds is outside the `u32` range.
+    /// Conversion fails if the number of seconds since the UNIX epoch is outside the `u32` range.
     fn try_from(value: chrono::Duration) -> Result<Self, Self::Error> {
         Ok(Self {
             seconds: value.num_seconds().try_into()?,
@@ -290,7 +294,7 @@ impl TryFrom<&chrono::Duration> for Duration32 {
 
     /// Convert from a [`chrono::Duration`] to a [`Duration32`], discarding any nanoseconds.
     ///
-    /// Conversion fails if the number of seconds is outside the `u32` range.
+    /// Conversion fails if the number of seconds in the duration is outside the `u32` range.
     fn try_from(value: &chrono::Duration) -> Result<Self, Self::Error> {
         (*value).try_into()
     }
@@ -301,7 +305,7 @@ impl TryFrom<std::time::Duration> for Duration32 {
 
     /// Convert from a [`std::time::Duration`] to a [`Duration32`], discarding any nanoseconds.
     ///
-    /// Conversion fails if the number of seconds is outside the `u32` range.
+    /// Conversion fails if the number of seconds in the duration is outside the `u32` range.
     fn try_from(value: std::time::Duration) -> Result<Self, Self::Error> {
         Ok(Self {
             seconds: value.as_secs().try_into()?,
@@ -314,7 +318,7 @@ impl TryFrom<&std::time::Duration> for Duration32 {
 
     /// Convert from a [`std::time::Duration`] to a [`Duration32`], discarding any nanoseconds.
     ///
-    /// Conversion fails if the number of seconds is outside the `u32` range.
+    /// Conversion fails if the number of seconds in the duration is outside the `u32` range.
     fn try_from(value: &std::time::Duration) -> Result<Self, Self::Error> {
         (*value).try_into()
     }
