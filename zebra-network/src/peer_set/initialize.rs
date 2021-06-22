@@ -31,6 +31,9 @@ use super::CandidateSet;
 use super::PeerSet;
 use peer::Client;
 
+#[cfg(test)]
+mod tests;
+
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
 /// Initialize a peer set.

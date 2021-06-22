@@ -38,6 +38,7 @@ pub fn init() {
             EnvFilter::try_new("warn")
                 .unwrap()
                 .add_directive("zebra_consensus=error".parse().unwrap())
+                .add_directive("zebra_network=error".parse().unwrap())
                 .add_directive("zebrad=error".parse().unwrap())
         });
 
