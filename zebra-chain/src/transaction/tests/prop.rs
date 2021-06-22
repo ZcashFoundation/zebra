@@ -97,13 +97,7 @@ fn transaction_valid_network_upgrade_strategy() -> Result<()> {
     });
 
     proptest!(|((network, block) in strategy)| {
-        // TODO: replace with check_transaction_network_upgrade from #2343
-        let block_network_upgrade = NetworkUpgrade::current(network, block.coinbase_height().unwrap());
-        for transaction in block.transactions {
-            if let Transaction::V5 { network_upgrade, .. } = transaction.as_ref() {
-                prop_assert_eq!(network_upgrade, &block_network_upgrade);
-            }
-        }
+        block.check_transaction_network_upgrade_consistency(network)?;
     });
 
     Ok(())

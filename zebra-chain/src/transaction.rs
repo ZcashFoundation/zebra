@@ -192,6 +192,22 @@ impl Transaction {
         }
     }
 
+    /// Get this transaction's network upgrade field, if any.
+    /// This field is serialized as `nConsensusBranchId` ([7.1]).
+    ///
+    /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+    pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+            Transaction::V5 {
+                network_upgrade, ..
+            } => Some(*network_upgrade),
+        }
+    }
+
     // transparent
 
     /// Access the transparent inputs of this transaction, regardless of version.
