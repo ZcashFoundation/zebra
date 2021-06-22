@@ -260,7 +260,7 @@ fn legacy_chain_for_network(network: Network) -> Result<()> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
             |(chain in strategy3)| {
-                let response = crate::service::legacy_chain_check(Height(nu5_height.0 + BLOCKS_AFTER_NU5 - 1), chain.clone().into_iter(), network);
+                let response = crate::service::legacy_chain_check(Height(nu5_height.0 + BLOCKS_AFTER_NU5 - 1), chain.into_iter(), network);
                 if response.is_err() {
                     prop_assert_eq!(response.is_err(), true);
                     prop_assert_eq!(response.err().unwrap().to_string(), "inconsistent network upgrade found in transaction");
