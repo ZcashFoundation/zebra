@@ -19,6 +19,7 @@ use std::sync::Once;
 
 #[allow(missing_docs)]
 pub mod command;
+pub mod net;
 pub mod prelude;
 pub mod transcript;
 pub mod vectors;
