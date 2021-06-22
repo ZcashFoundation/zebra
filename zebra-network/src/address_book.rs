@@ -136,7 +136,7 @@ impl AddressBook {
     ///
     /// This address contains minimal state, but it is not sanitized.
     pub fn get_local_listener(&self) -> MetaAddr {
-        MetaAddr::new_local_listener(&self.local_listener)
+        MetaAddr::new_local_listener_change(&self.local_listener)
             .into_new_meta_addr()
             .expect("unexpected invalid new local listener addr")
     }

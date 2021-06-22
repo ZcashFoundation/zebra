@@ -318,7 +318,7 @@ impl MetaAddr {
     }
 
     /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
-    pub fn new_local_listener(addr: &SocketAddr) -> MetaAddrChange {
+    pub fn new_local_listener_change(addr: &SocketAddr) -> MetaAddrChange {
         NewLocal {
             addr: canonical_socket_addr(*addr),
         }
