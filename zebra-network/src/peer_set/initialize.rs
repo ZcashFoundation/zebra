@@ -31,6 +31,9 @@ use super::CandidateSet;
 use super::PeerSet;
 use peer::Client;
 
+#[cfg(test)]
+mod tests;
+
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
 /// Initialize a peer set.
@@ -64,7 +67,9 @@ where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    let (address_book, timestamp_collector) = TimestampCollector::spawn(&config);
+    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+
+    let (address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
     let (inv_sender, inv_receiver) = broadcast::channel(100);
 
     // Construct services that handle inbound handshakes and perform outbound
@@ -115,24 +120,8 @@ where
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
     // 1. Incoming peer connections, via a listener.
-
-    // Warn if we're configured using the wrong network port.
-    use Network::*;
-    let wrong_net = match config.network {
-        Mainnet => Testnet,
-        Testnet => Mainnet,
-    };
-    if config.listen_addr.port() == wrong_net.default_port() {
-        warn!(
-            "We are configured with port {} for {:?}, but that port is the default port for {:?}",
-            config.listen_addr.port(),
-            config.network,
-            wrong_net
-        );
-    }
-
     let listen_guard = tokio::spawn(
-        listen(config.listen_addr, listen_handshaker, peerset_tx.clone())
+        accept_inbound_connections(tcp_listener, listen_handshaker, peerset_tx.clone())
             .instrument(Span::current()),
     );
 
@@ -232,23 +221,37 @@ where
     Ok(())
 }
 
-/// Listens for peer connections on `addr`, then sets up each connection as a
-/// Zcash peer.
+/// Open a peer connection listener on `config.listen_addr`,
+/// returning the opened [`TcpListener`], and the address it is bound to.
 ///
-/// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
-/// the `Client` result over `tx`.
-#[instrument(skip(tx, handshaker))]
-async fn listen<S>(
-    addr: SocketAddr,
-    mut handshaker: S,
-    tx: mpsc::Sender<PeerChange>,
-) -> Result<(), BoxError>
-where
-    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
-    S::Future: Send + 'static,
-{
-    info!("Trying to open Zcash protocol endpoint at {}...", addr);
-    let listener_result = TcpListener::bind(addr).await;
+/// If the listener is configured to use an automatically chosen port (port `0`),
+/// then the returned address will contain the actual port.
+///
+/// # Panics
+///
+/// If opening the listener fails.
+#[instrument(skip(config), fields(addr = ?config.listen_addr))]
+async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
+    // Warn if we're configured using the wrong network port.
+    use Network::*;
+    let wrong_net = match config.network {
+        Mainnet => Testnet,
+        Testnet => Mainnet,
+    };
+    if config.listen_addr.port() == wrong_net.default_port() {
+        warn!(
+            "We are configured with port {} for {:?}, but that port is the default port for {:?}",
+            config.listen_addr.port(),
+            config.network,
+            wrong_net
+        );
+    }
+
+    info!(
+        "Trying to open Zcash protocol endpoint at {}...",
+        config.listen_addr
+    );
+    let listener_result = TcpListener::bind(config.listen_addr).await;
 
     let listener = match listener_result {
         Ok(l) => l,
@@ -256,12 +259,33 @@ where
             "Opening Zcash network protocol listener {:?} failed: {:?}. \
              Hint: Check if another zebrad or zcashd process is running. \
              Try changing the network listen_addr in the Zebra config.",
-            addr, e,
+            config.listen_addr, e,
         ),
     };
 
-    let local_addr = listener.local_addr()?;
+    let local_addr = listener
+        .local_addr()
+        .expect("unexpected missing local addr for open listener");
     info!("Opened Zcash protocol endpoint at {}", local_addr);
+
+    (listener, local_addr)
+}
+
+/// Listens for peer connections on `addr`, then sets up each connection as a
+/// Zcash peer.
+///
+/// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
+/// the [`Client`][peer::Client] result over `tx`.
+#[instrument(skip(listener, handshaker, tx), fields(listener_addr = ?listener.local_addr()))]
+async fn accept_inbound_connections<S>(
+    listener: TcpListener,
+    mut handshaker: S,
+    tx: mpsc::Sender<PeerChange>,
+) -> Result<(), BoxError>
+where
+    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
+    S::Future: Send + 'static,
+{
     loop {
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);

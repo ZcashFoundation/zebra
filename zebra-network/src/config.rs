@@ -68,7 +68,11 @@ impl Config {
         use futures::stream::StreamExt;
 
         if peers.is_empty() {
-            error!("no initial peers in the network config. Hint: you must configure at least one peer or DNS seeder to run Zebra");
+            warn!(
+                "no initial peers in the network config. \
+                 Hint: you must configure at least one peer IP or DNS seeder to run Zebra, \
+                 or make sure Zebra's listener port gets inbound connections."
+            );
             return HashSet::new();
         }
 
