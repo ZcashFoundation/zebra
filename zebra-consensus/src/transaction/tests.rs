@@ -512,6 +512,58 @@ async fn v4_with_signed_sprout_transfer_is_accepted() {
     assert_eq!(result, Ok(expected_hash));
 }
 
+/// Test if an unsigned V4 transaction with a dummy [`sprout::JoinSplit`] is rejected.
+///
+/// This test verifies if the transaction verifier correctly rejects the transaction because of the
+/// invalid signature.
+#[tokio::test]
+async fn v4_with_unsigned_sprout_transfer_is_rejected() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Canopy;
+
+    let canopy_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("Canopy activation height is not set");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("Canopy activation height is too large");
+
+    // Create a fake Sprout join split
+    let (joinsplit_data, _) = mock_sprout_join_split_data();
+
+    let transaction = Transaction::V4 {
+        inputs: vec![],
+        outputs: vec![],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: Some(joinsplit_data),
+        sapling_shielded_data: None,
+    };
+
+    // Test the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(HashMap::new()),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        // TODO: Fix error downcast
+        // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
+        Err(TransactionError::InternalDowncastError(
+            "downcast to redjubjub::Error failed, original error: InvalidSignature".to_string()
+        ))
+    );
+}
+
 // Utility functions
 
 /// Create a mock transparent transfer to be included in a transaction.
