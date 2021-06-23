@@ -161,7 +161,10 @@ impl NoteCommitment {
 
         Some((
             rcm,
-            NoteCommitment::from(sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)),
+            NoteCommitment::from(
+                sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
+                    .expect("valid orchard note commitment, not ⊥ "),
+            ),
         ))
     }
 

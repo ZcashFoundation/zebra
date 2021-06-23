@@ -37,23 +37,34 @@ const MERKLE_DEPTH: usize = 32;
 ///
 /// Used to hash incremental Merkle tree hash values for Orchard.
 ///
+/// MerkleCRH^Orchard: {0..MerkleDepth^Orchard − 1} × P𝑥 ∪ {⊥} × P𝑥 ∪ {⊥} → P𝑥 ∪ {⊥}
+///
 /// MerkleCRH^Orchard(layer, left, right) := SinsemillaHash("z.cash:Orchard-MerkleCRH", l || left || right),
 ///
 /// where l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer),  and left, right, and
 /// the output are the x-coordinates of Pallas affine points.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#merklecrh
-/// https://zips.z.cash/protocol/nu5.pdf#constants
-fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
-    let mut s = bitvec![Lsb0, u8;];
+/// https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh
+/// https://zips.z.cash/protocol/protocol.pdf#constants
+fn merkle_crh_orchard(
+    layer: u8,
+    maybe_left: Option<pallas::Base>,
+    maybe_right: Option<pallas::Base>,
+) -> Option<pallas::Base> {
+    match (maybe_left, maybe_right) {
+        (None, _) | (_, None) => None,
+        (Some(left), Some(right)) => {
+            let mut s = bitvec![Lsb0, u8;];
 
-    // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
-    let l = MERKLE_DEPTH - 1 - layer as usize;
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_bytes())[0..255]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_bytes())[0..255]);
+            // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
+            let l = MERKLE_DEPTH - 1 - layer as usize;
+            s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
+            s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_bytes())[0..255]);
+            s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_bytes())[0..255]);
 
-    sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s)
+            sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s)
+        }
+    }
 }
 
 lazy_static! {
@@ -65,7 +76,7 @@ lazy_static! {
         let mut v = vec![NoteCommitmentTree::uncommitted()];
 
         for d in 0..MERKLE_DEPTH {
-            let next = merkle_crh_orchard(d as u8, v[d], v[d]);
+            let next = merkle_crh_orchard(d as u8, Some(v[d]), Some(v[d])).unwrap();
             v.push(next);
         }
 
@@ -78,7 +89,6 @@ lazy_static! {
 /// `NoteCommitmentTree`.
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#merkletree
-// XXX: dedupe with sapling?
 pub struct Position(pub(crate) u64);
 
 /// Orchard note commitment tree root node hash.
@@ -182,7 +192,7 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
                 } else {
                     right = current_layer.pop_front().unwrap();
                 }
-                next_layer_up.push(merkle_crh_orchard(height, left, right));
+                next_layer_up.push(merkle_crh_orchard(height, Some(left), Some(right)).unwrap());
             }
 
             height += 1;
@@ -254,7 +264,7 @@ mod tests {
         println!("{:x?}", v[0].to_bytes());
 
         for d in 0..MERKLE_DEPTH {
-            let next = merkle_crh_orchard(d as u8, v[d], v[d]);
+            let next = merkle_crh_orchard(d as u8, Some(v[d]), Some(v[d])).unwrap();
             println!("{:x?}", next.to_bytes());
             v.push(next);
         }

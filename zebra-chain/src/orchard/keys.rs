@@ -562,7 +562,8 @@ impl From<FullViewingKey> for IncomingViewingKey {
             fvk.ivk_commit_randomness.into(),
             b"z.cash:Orchard-CommitIvk",
             &M,
-        );
+        )
+        .expect("deriving orchard commit^ivk should not output ⊥ ");
 
         Self {
             network: fvk.network,
