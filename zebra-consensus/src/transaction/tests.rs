@@ -1,15 +1,18 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, sync::Arc};
 
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
-    orchard,
+    amount::Amount,
+    block, orchard,
     parameters::{Network, NetworkUpgrade},
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
-        Transaction,
+        Hash, LockTime, Transaction,
     },
+    transparent,
 };
+use zebra_state::Utxo;
 
 use super::{check, Request, Verifier};
 
@@ -240,4 +243,284 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
 
         assert_eq!(result, Ok(expected_hash));
     }
+}
+
+/// Test if V4 transaction with transparent funds is accepted.
+#[tokio::test]
+async fn v4_transaction_with_transparent_transfer_is_accepted() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
+/// Test if V4 transaction with transparent funds is rejected if the source script prevents it.
+///
+/// This test simulates the case where the script verifier rejects the transaction because the
+/// script prevents spending the source UTXO.
+#[tokio::test]
+async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should not succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::InternalDowncastError(
+            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+        ))
+    );
+}
+
+/// Test if V5 transaction with transparent funds is accepted.
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_transaction_with_transparent_transfer_is_accepted() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let nu5_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V5 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
+/// Test if V5 transaction with transparent funds is rejected if the source script prevents it.
+///
+/// This test simulates the case where the script verifier rejects the transaction because the
+/// script prevents spending the source UTXO.
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let nu5_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should not succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+
+    // Create a V5 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::InternalDowncastError(
+            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+        ))
+    );
+}
+
+// Utility functions
+
+/// Create a mock transparent transfer to be included in a transaction.
+///
+/// First, this creates a fake unspent transaction output from a fake transaction included in the
+/// specified `previous_utxo_height` block height. This fake [`Utxo`] also contains a simple script
+/// that can either accept or reject any spend attempt, depending on if `script_should_succeed` is
+/// `true` or `false`.
+///
+/// Then, a [`transparent::Input`] is created that attempts to spends the previously created fake
+/// UTXO. A new UTXO is created with the [`transparent::Output`] resulting from the spend.
+///
+/// Finally, the initial fake UTXO is placed in a `known_utxos` [`HashMap`] so that it can be
+/// retrieved during verification.
+///
+/// The function then returns the generated transparent input and output, as well as the
+/// `known_utxos` map.
+fn mock_transparent_transfer(
+    previous_utxo_height: block::Height,
+    script_should_succeed: bool,
+) -> (
+    transparent::Input,
+    transparent::Output,
+    HashMap<transparent::OutPoint, Utxo>,
+) {
+    // A script with a single opcode that accepts the transaction (pushes true on the stack)
+    let accepting_script = transparent::Script::new(&[1, 1]);
+    // A script with a single opcode that rejects the transaction (OP_FALSE)
+    let rejecting_script = transparent::Script::new(&[0]);
+
+    // Mock an unspent transaction output
+    let previous_outpoint = transparent::OutPoint {
+        hash: Hash([1u8; 32]),
+        index: 0,
+    };
+
+    let lock_script = if script_should_succeed {
+        accepting_script.clone()
+    } else {
+        rejecting_script.clone()
+    };
+
+    let previous_output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script,
+    };
+
+    let previous_utxo = Utxo {
+        output: previous_output,
+        height: previous_utxo_height,
+        from_coinbase: false,
+    };
+
+    // Use the `previous_outpoint` as input
+    let input = transparent::Input::PrevOut {
+        outpoint: previous_outpoint,
+        unlock_script: accepting_script,
+        sequence: 0,
+    };
+
+    // The output resulting from the transfer
+    // Using the rejecting script pretends the amount is burned because it can't be spent again
+    let output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script: rejecting_script,
+    };
+
+    // Cache the source of the fund so that it can be used during verification
+    let mut known_utxos = HashMap::new();
+    known_utxos.insert(previous_outpoint, previous_utxo);
+
+    (input, output, known_utxos)
 }
