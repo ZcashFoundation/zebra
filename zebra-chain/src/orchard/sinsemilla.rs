@@ -56,7 +56,7 @@ fn S(j: &BitSlice<Lsb0, u8>) -> pallas::Point {
     // value.
     assert_eq!(j.len(), 10);
 
-    pallas_group_hash(b"z.cash:SinsemillaS", j.as_slice())
+    pallas_group_hash(b"z.cash:SinsemillaS", j.as_raw_slice())
 }
 
 /// "...an algebraic hash function with collision resistance (for fixed input
@@ -88,8 +88,9 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
         let mut store = [0u8; 2];
-        let bits = store.bits_mut::<Lsb0>();
-        bits[..chunk.len()].copy_from_slice(chunk);
+        let bits =
+            BitSlice::<Lsb0, _>::from_slice_mut(&mut store).expect("must work for small slices");
+        bits[..chunk.len()].copy_from_bitslice(chunk);
 
         acc = acc + acc + S(&bits[..k]);
     }

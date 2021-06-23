@@ -42,9 +42,9 @@ fn merkle_crh_orchard(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut s = bitvec![Lsb0, u8;];
 
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
-    s.extend_from_slice(&layer.bits::<Lsb0>()[0..10]);
-    s.extend_from_slice(&left.bits::<Lsb0>()[0..255]);
-    s.extend_from_slice(&right.bits::<Lsb0>()[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([layer, 0])[0..10]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left)[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right)[0..255]);
 
     sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s).to_bytes()
 }
