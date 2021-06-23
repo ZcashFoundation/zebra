@@ -18,8 +18,11 @@ use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 pub(crate) mod difficulty;
 
-/// Check that `block` is contextually valid for `network`, based on the
-/// `finalized_tip_height` and `relevant_chain`.
+/// Check that the `prepared` block is contextually valid for `network`, based
+/// on the `finalized_tip_height` and `relevant_chain`.
+///
+/// This function performs checks that require a small number of recent blocks,
+/// including previous hash, previous height, and block difficulty.
 ///
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
@@ -82,11 +85,14 @@ where
     Ok(())
 }
 
+/// Check that the `prepared` block is contextually valid for `network`, based
+/// on the `history_root_hash` of the history tree up to and including the
+/// previous block.
 #[tracing::instrument(skip(prepared))]
 pub(crate) fn block_commitment_is_valid_for_chain_history(
     prepared: &PreparedBlock,
     network: Network,
-    mmr_hash: &ChainHistoryMmrRootHash,
+    history_root_hash: &ChainHistoryMmrRootHash,
 ) -> Result<(), ValidateContextError> {
     match prepared.block.commitment(network)? {
         block::Commitment::PreSaplingReserved(_)
@@ -95,13 +101,13 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
             // No contextual checks needed for those.
             Ok(())
         }
-        block::Commitment::ChainHistoryRoot(block_mmr_hash) => {
-            if block_mmr_hash == *mmr_hash {
+        block::Commitment::ChainHistoryRoot(block_history_root_hash) => {
+            if block_history_root_hash == *history_root_hash {
                 Ok(())
             } else {
                 Err(ValidateContextError::InvalidHistoryCommitment {
-                    candidate_commitment: block_mmr_hash,
-                    expected_commitment: *mmr_hash,
+                    candidate_commitment: block_history_root_hash,
+                    expected_commitment: *history_root_hash,
                 })
             }
         }
