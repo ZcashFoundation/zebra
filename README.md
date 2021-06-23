@@ -82,7 +82,18 @@ We usually run `zebrad` on systems with:
 `zebrad` might build and run fine on smaller and slower systems - we haven't
 tested its exact limits yet.
 
-### Network Usage
+### Network Ports and Usage
+
+By default, Zebra uses the following inbound TCP listener ports:
+- 8233 on Mainnet
+- 18233 on Testnet
+
+If Zebra is configured with a specific [`listen_addr`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.listen_addr),
+it will advertise this address to other nodes for inbound connections.
+
+Zebra makes outbound connections to peers on any port.
+But `zcashd` prefers peers on the default ports,
+so that it can't be used for DDoS attacks on other networks.
 
 `zebrad`'s typical network usage is:
 - initial sync: 30 GB download
