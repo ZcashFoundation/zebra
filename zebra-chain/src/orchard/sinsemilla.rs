@@ -142,3 +142,45 @@ pub fn sinsemilla_short_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>
 // TODO: test the above correctness and compatibility with the zcash-hackworks test vectors
 // https://github.com/ZcashFoundation/zebra/issues/2079
 // https://github.com/zcash-hackworks/zcash-test-vectors/pulls
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    fn x_from_str(s: &str) -> pallas::Base {
+        use group::ff::PrimeField;
+
+        pallas::Base::from_str(s).unwrap()
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn single_test_vector() {
+        use group::Curve;
+
+        let D = b"z.cash:test-Sinsemilla";
+        let M = bitvec![
+            Lsb0, u8; 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0,
+            1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0,
+        ];
+
+        let test_vector = pallas::Affine::from_xy(
+            x_from_str(
+                "19681977528872088480295086998934490146368213853811658798708435106473481753752",
+            ),
+            x_from_str(
+                "14670850419772526047574141291705097968771694788047376346841674072293161339903",
+            ),
+        )
+        .unwrap();
+
+        println!("{:?}", sinsemilla_hash_to_point(&D[..], &M).to_affine());
+        println!("{:?}", test_vector);
+
+        assert_eq!(
+            sinsemilla_hash_to_point(&D[..], &M).to_affine(),
+            test_vector
+        )
+    }
+}
