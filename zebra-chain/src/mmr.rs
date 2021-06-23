@@ -22,7 +22,7 @@ use crate::{
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum HistoryTreeError {
-    #[error("error from the underlying library: {inner:?}")]
+    #[error("zcash_history error: {inner:?}")]
     #[non_exhaustive]
     InnerError { inner: zcash_history::Error },
 
@@ -96,7 +96,7 @@ impl HistoryTree {
     }
 
     /// Extend the history tree with the given blocks.
-    pub fn extend<
+    pub fn try_extend<
         'a,
         T: IntoIterator<
             Item = (
