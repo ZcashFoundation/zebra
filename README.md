@@ -128,10 +128,10 @@ Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 ### Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [In rare cases, Zebra panics on shutdown](https://github.com/ZcashFoundation/zebra/issues/1678)
+- [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently
-- [Interrupt handler does not work when a blocking task is running](https://github.com/ZcashFoundation/zebra/issues/1351)
+- [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
 - [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
   - These errors can be ignored, unless they happen frequently
