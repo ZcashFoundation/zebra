@@ -59,7 +59,7 @@ impl Chain {
 
     /// Push a contextually valid non-finalized block into a chain as the new tip.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(&mut self, block: PreparedBlock) -> Result<(), HistoryTreeError> {
+    pub fn push(&mut self, block: PreparedBlock) -> Result<(), ValidateContextError> {
         // update cumulative data members
         self.update_chain_state_with(&block)?;
         tracing::debug!(block = %block.block, "adding block to chain");
@@ -102,7 +102,7 @@ impl Chain {
         &self,
         fork_tip: block::Hash,
         finalized_tip_history_tree: &HistoryTree,
-    ) -> Result<Option<Self>, HistoryTreeError> {
+    ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
         }
@@ -203,7 +203,7 @@ impl Chain {
 trait UpdateWith<T> {
     /// Update `Chain` cumulative data members to add data that are derived from
     /// `T`
-    fn update_chain_state_with(&mut self, _: &T) -> Result<(), HistoryTreeError>;
+    fn update_chain_state_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
 
     /// Update `Chain` cumulative data members to remove data that are derived
     /// from `T`
