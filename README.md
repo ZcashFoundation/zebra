@@ -82,7 +82,7 @@ We usually run `zebrad` on systems with:
 `zebrad` might build and run fine on smaller and slower systems - we haven't
 tested its exact limits yet.
 
-### Network Ports and Usage
+### Network Ports and Data Usage
 
 By default, Zebra uses the following inbound TCP listener ports:
 - 8233 on Mainnet
