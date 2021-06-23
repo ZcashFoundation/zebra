@@ -34,16 +34,14 @@ pub enum HistoryTreeError {
 pub struct HistoryTree {
     network: Network,
     network_upgrade: NetworkUpgrade,
-    // Merkle mountain range tree.
-    // This is a "runtime" structure used to add / remove nodes, and it's not
-    // persistent.
+    /// Merkle mountain range tree.
+    /// This is a "runtime" structure used to add / remove nodes, and it's not
+    /// persistent.
     inner: Tree,
-    // The number of nodes in the tree.
+    /// The number of nodes in the tree.
     size: u32,
-    // The peaks of the tree, indexed by their position in the array representation
-    // of the tree. This can be persisted to save the tree.
-    // TODO: use NodeData instead of Entry to save space? Requires re-deriving
-    // the entry metadata from its position.
+    /// The peaks of the tree, indexed by their position in the array representation
+    /// of the tree. This can be persisted to save the tree.
     peaks: HashMap<u32, Entry>,
 }
 
@@ -89,7 +87,6 @@ impl HistoryTree {
             self.peaks.insert(self.size, entry);
             self.size += 1;
         }
-        // TODO: should we really prune every iteration?
         self.prune()?;
         // TODO: implement network upgrade logic: drop previous history, start new history
         Ok(())
@@ -118,34 +115,70 @@ impl HistoryTree {
     /// Prune tree, removing all non-peak entries.
     fn prune(&mut self) -> Result<(), io::Error> {
         // Go through all the peaks of the tree.
-        // This code is from a librustzcash example.
+        // This code is based on a librustzcash example:
         // https://github.com/zcash/librustzcash/blob/02052526925fba9389f1428d6df254d4dec967e6/zcash_history/examples/long.rs
-        // See also coins.cpp in zcashd for a explanation of how it works.
+        // The explanation of how it works is from zcashd:
         // https://github.com/zcash/zcash/blob/0247c0c682d59184a717a6536edb0d18834be9a7/src/coins.cpp#L351
 
-        // TODO: should we just copy the explanation here?
-
         let mut peak_pos_set = HashSet::new();
-        // integer log2 of (self.size+1), -1
-        let mut h = (32 - ((self.size + 1) as u32).leading_zeros() - 1) - 1;
-        let mut peak_pos = (1 << (h + 1)) - 1;
 
+        // Assume the following example peak layout with 14 leaves, and 25 stored nodes in
+        // total (the "tree length"):
+        //
+        //             P
+        //            /\
+        //           /  \
+        //          / \  \
+        //        /    \  \  Altitude
+        //     _A_      \  \    3
+        //   _/   \_     B  \   2
+        //  / \   / \   / \  C  1
+        // /\ /\ /\ /\ /\ /\ /\ 0
+        //
+        // We start by determining the altitude of the highest peak (A).
+        let mut alt = (32 - ((self.size + 1) as u32).leading_zeros() - 1) - 1;
+
+        // We determine the position of the highest peak (A) by pretending it is the right
+        // sibling in a tree, and its left-most leaf has position 0. Then the left sibling
+        // of (A) has position -1, and so we can "jump" to the peak's position by computing
+        // -1 + 2^(alt + 1) - 1.
+        let mut peak_pos = (1 << (alt + 1)) - 2;
+
+        // Now that we have the position and altitude of the highest peak (A), we collect
+        // the remaining peaks (B, C). We navigate the peaks as if they were nodes in this
+        // Merkle tree (with additional imaginary nodes 1 and 2, that have positions beyond
+        // the MMR's length):
+        //
+        //             / \
+        //            /   \
+        //           /     \
+        //         /         \
+        //       A ==========> 1
+        //      / \          //  \
+        //    _/   \_       B ==> 2
+        //   /\     /\     /\    //
+        //  /  \   /  \   /  \   C
+        // /\  /\ /\  /\ /\  /\ /\
+        //
         loop {
-            if peak_pos > self.size {
-                // left child, -2^h
-                peak_pos -= 1 << h;
-                h -= 1;
+            // If peak_pos is out of bounds of the tree, we compute the position of its left
+            // child, and drop down one level in the tree.
+            if peak_pos >= self.size {
+                // left child, -2^alt
+                peak_pos -= 1 << alt;
+                alt -= 1;
             }
 
-            if peak_pos <= self.size {
-                // There is a peak at index `peak_pos - 1`
-                peak_pos_set.insert(peak_pos - 1);
+            // If the peak exists, we take it and then continue with its right sibling.
+            if peak_pos < self.size {
+                // There is a peak at index `peak_pos`
+                peak_pos_set.insert(peak_pos);
 
                 // right sibling
-                peak_pos = peak_pos + (1 << (h + 1)) - 1;
+                peak_pos = peak_pos + (1 << (alt + 1)) - 1;
             }
 
-            if h == 0 {
+            if alt == 0 {
                 break;
             }
         }

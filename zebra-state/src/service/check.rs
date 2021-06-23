@@ -28,11 +28,8 @@ pub(crate) mod difficulty;
 ///
 /// If the state contains less than 28
 /// (`POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN`) blocks.
-#[tracing::instrument(
-    name = "contextual_validation",
-    skip(prepared, finalized_tip_height, relevant_chain)
-)]
-pub(crate) fn block_is_contextually_valid<C>(
+#[tracing::instrument(skip(prepared, finalized_tip_height, relevant_chain))]
+pub(crate) fn block_is_valid_for_recent_chain<C>(
     prepared: &PreparedBlock,
     network: Network,
     finalized_tip_height: Option<block::Height>,
@@ -86,7 +83,7 @@ where
 }
 
 #[tracing::instrument(skip(prepared))]
-pub(crate) fn block_is_contextually_valid_for_chain(
+pub(crate) fn block_commitment_is_valid_for_chain_history(
     prepared: &PreparedBlock,
     network: Network,
     mmr_hash: &ChainHistoryMmrRootHash,

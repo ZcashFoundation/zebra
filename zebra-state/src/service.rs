@@ -194,7 +194,7 @@ impl StateService {
         assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
                 "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
 
-        check::block_is_contextually_valid(
+        check::block_is_valid_for_recent_chain(
             prepared,
             self.network,
             self.disk.finalized_tip_height(),

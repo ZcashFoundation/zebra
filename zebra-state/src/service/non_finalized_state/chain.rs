@@ -7,7 +7,7 @@ use std::{
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash},
-    mmr::{HistoryTree, HistoryTreeError},
+    mmr::HistoryTree,
     orchard,
     primitives::Groth16Proof,
     sapling, sprout, transaction,
@@ -16,7 +16,7 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{PreparedBlock, Utxo};
+use crate::{PreparedBlock, Utxo, ValidateContextError};
 
 // #[derive(Clone)]
 pub struct Chain {
@@ -116,9 +116,10 @@ impl Chain {
         // Rebuild the history tree starting from the finalized tip tree.
         // TODO: change to a more efficient approach by removing nodes
         // from the tree of the original chain (in `pop_tip()`).
+        // See https://github.com/ZcashFoundation/zebra/issues/2378
         forked
             .history_tree
-            .extend(forked.blocks.values().map(|prepared_block| {
+            .try_extend(forked.blocks.values().map(|prepared_block| {
                 (
                     prepared_block.block.clone(),
                     // TODO: pass Sapling and Orchard roots
@@ -214,7 +215,7 @@ impl UpdateWith<PreparedBlock> for Chain {
     fn update_chain_state_with(
         &mut self,
         prepared: &PreparedBlock,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<(), ValidateContextError> {
         let (block, hash, height, transaction_hashes) = (
             prepared.block.as_ref(),
             prepared.hash,
@@ -324,9 +325,10 @@ impl UpdateWith<PreparedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
 
-        // Note: the MMR is not reverted here.
-        // When popping the root: there is no need to change the MMR.
-        // When popping the tip: the MMR is rebuilt in fork().
+        // Note: the history tree is not modified in this method.
+        // This method is called on two scenarios:
+        // - When popping the root: the history tree does not change.
+        // - When popping the tip: the history tree is rebuilt in fork().
 
         // for each transaction in block
         for (transaction, transaction_hash) in
@@ -386,7 +388,7 @@ impl UpdateWith<HashMap<transparent::OutPoint, Utxo>> for Chain {
     fn update_chain_state_with(
         &mut self,
         utxos: &HashMap<transparent::OutPoint, Utxo>,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<(), ValidateContextError> {
         self.created_utxos
             .extend(utxos.iter().map(|(k, v)| (*k, v.clone())));
         Ok(())
@@ -402,7 +404,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
     fn update_chain_state_with(
         &mut self,
         inputs: &Vec<transparent::Input>,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<(), ValidateContextError> {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut { outpoint, .. } => {
@@ -434,7 +436,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     fn update_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
             for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
                 let span = debug_span!("revert_chain_state_with", ?nullifiers);
@@ -477,7 +479,7 @@ where
     fn update_chain_state_with(
         &mut self,
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for nullifier in sapling_shielded_data.nullifiers() {
                 self.sapling_nullifiers.insert(*nullifier);
@@ -505,7 +507,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     fn update_chain_state_with(
         &mut self,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for nullifier in orchard_shielded_data.nullifiers() {
                 self.orchard_nullifiers.insert(*nullifier);
