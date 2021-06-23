@@ -64,6 +64,7 @@ impl StateService {
 
     pub fn new(config: Config, network: Network) -> Self {
         let disk = FinalizedState::new(&config, network);
+
         let mem = NonFinalizedState {
             network,
             ..Default::default()
@@ -71,14 +72,30 @@ impl StateService {
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
-        Self {
+        let state = Self {
             disk,
             mem,
             queued_blocks,
             pending_utxos,
             network,
             last_prune: Instant::now(),
+        };
+
+        tracing::info!("starting legacy chain check");
+        if let Some(tip) = state.best_tip() {
+            if legacy_chain_check(tip.0, state.any_ancestor_blocks(tip.1), state.network).is_err() {
+                let legacy_chain_path = Some(state.disk.path().to_path_buf());
+                panic!(
+                    "Legacy chain found, database can be corrupted.
+                    Delete your database and retry a full sync.
+                    Database path: {:?}",
+                    legacy_chain_path,
+                );
+            }
         }
+        tracing::info!("no legacy chain found");
+
+        state
     }
 
     /// Queue a non finalized block for verification and check if any queued
@@ -663,17 +680,6 @@ impl Service<Request> for StateService {
                     })
                     .collect();
                 async move { Ok(Response::BlockHeaders(res)) }.boxed()
-            }
-            Request::IsLegacyChain => {
-                let mut legacy_chain_path = None;
-                if let Some(tip) = self.best_tip() {
-                    if legacy_chain_check(tip.0, self.any_ancestor_blocks(tip.1), self.network)
-                        .is_err()
-                    {
-                        legacy_chain_path = Some(self.disk.path().to_path_buf());
-                    }
-                }
-                async move { Ok(Response::LegacyChain(legacy_chain_path)) }.boxed()
             }
         }
     }

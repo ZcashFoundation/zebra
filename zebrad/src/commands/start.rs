@@ -26,7 +26,7 @@
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use tokio::sync::oneshot;
-use tower::{builder::ServiceBuilder, ServiceExt};
+use tower::builder::ServiceBuilder;
 
 use crate::components::{tokio::RuntimeRun, Inbound};
 use crate::config::ZebradConfig;
@@ -53,27 +53,6 @@ impl StartCmd {
             config.state.clone(),
             config.network.network,
         ));
-
-        info!("starting legacy chain check");
-        match state
-            .clone()
-            .oneshot(zebra_state::Request::IsLegacyChain)
-            .await
-        {
-            Ok(zebra_state::Response::LegacyChain(response)) => {
-                if let Some(corrupt_db_path) = response {
-                    // we found a legacy chain
-                    panic!(
-                        "Legacy chain found, database can be corrupted.
-                        Delete your database and retry a full sync.
-                        Database path: {:?}",
-                        corrupt_db_path,
-                    );
-                }
-            }
-            _ => unreachable!("the legacy chain call should always respond"),
-        };
-        info!("no legacy chain found");
 
         info!("initializing verifiers");
         let verifier = zebra_consensus::chain::init(
