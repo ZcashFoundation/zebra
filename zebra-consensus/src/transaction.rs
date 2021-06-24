@@ -163,6 +163,15 @@ where
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
 
+            // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
+            // in non-coinbase transactions MUST also be applied to coinbase transactions."
+            //
+            // This rule is implicitly implemented during sapling and orchard verification,
+            // because they do not distinguish between coinbase and non-coinbase transactions.
+            //
+            // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
+            //
+            // https://zips.z.cash/zip-0213#specification
             let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
