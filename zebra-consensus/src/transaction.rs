@@ -87,6 +87,8 @@ pub enum Request {
         height: block::Height,
     },
     /// Verify the supplied transaction as part of the mempool.
+    ///
+    /// Note: coinbase transactions are invalid in the mempool
     Mempool {
         /// The transaction itself.
         transaction: Arc<Transaction>,
@@ -163,6 +165,19 @@ where
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
 
+            if tx.is_coinbase() {
+                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+            }
+
+            // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
+            // in non-coinbase transactions MUST also be applied to coinbase transactions."
+            //
+            // This rule is implicitly implemented during Sapling and Orchard verification,
+            // because they do not distinguish between coinbase and non-coinbase transactions.
+            //
+            // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
+            //
+            // https://zips.z.cash/zip-0213#specification
             let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
@@ -460,33 +475,27 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
-        if transaction.is_coinbase() {
-            check::coinbase_tx_no_prevout_joinsplit_spend(&transaction)?;
+        // feed all of the inputs to the script and shielded verifiers
+        // the script_verifier also checks transparent sighashes, using its own implementation
+        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+        let known_utxos = request.known_utxos();
+        let upgrade = request.upgrade(network);
 
-            Ok(AsyncChecks::new())
-        } else {
-            // feed all of the inputs to the script and shielded verifiers
-            // the script_verifier also checks transparent sighashes, using its own implementation
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
-            let known_utxos = request.known_utxos();
-            let upgrade = request.upgrade(network);
+        let script_checks = (0..inputs.len())
+            .into_iter()
+            .map(move |input_index| {
+                let request = script::Request {
+                    upgrade,
+                    known_utxos: known_utxos.clone(),
+                    cached_ffi_transaction: cached_ffi_transaction.clone(),
+                    input_index,
+                };
 
-            let script_checks = (0..inputs.len())
-                .into_iter()
-                .map(move |input_index| {
-                    let request = script::Request {
-                        upgrade,
-                        known_utxos: known_utxos.clone(),
-                        cached_ffi_transaction: cached_ffi_transaction.clone(),
-                        input_index,
-                    };
+                script_verifier.clone().oneshot(request).boxed()
+            })
+            .collect();
 
-                    script_verifier.clone().oneshot(request).boxed()
-                })
-                .collect();
-
-            Ok(script_checks)
-        }
+        Ok(script_checks)
     }
 
     /// Await a set of checks that should all succeed.
