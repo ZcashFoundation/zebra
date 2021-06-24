@@ -11,6 +11,7 @@
 //! A root of a note commitment tree is associated with each treestate.
 
 #![allow(clippy::unit_arg)]
+#![allow(clippy::derive_hash_xor_eq)]
 #![allow(dead_code)]
 
 use std::{
