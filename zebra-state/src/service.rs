@@ -86,12 +86,14 @@ impl StateService {
         tracing::info!("starting legacy chain check");
         if let Some(tip) = state.best_tip() {
             if legacy_chain_check(tip.0, state.any_ancestor_blocks(tip.1), state.network).is_err() {
-                let legacy_chain_path = Some(state.disk.path().to_path_buf());
+                let legacy_db_path = Some(state.disk.path().to_path_buf());
                 panic!(
-                    "Legacy chain found, database can be corrupted.
-                    Delete your database and retry a full sync.
+                    "Cached state contains a legacy chain. \
+                    An outdated Zebra version did not know about a recent network upgrade, \
+                    so it followed a legacy chain using outdated rules. \
+                    Hint: Delete your database, and restart Zebra to do a full sync. \
                     Database path: {:?}",
-                    legacy_chain_path,
+                    legacy_db_path,
                 );
             }
         }
