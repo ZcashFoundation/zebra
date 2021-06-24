@@ -458,6 +458,25 @@ impl MetaAddr {
         }
     }
 
+    /// Has this peer been seen recently?
+    ///
+    /// Returns `true` if this peer has responded recently or if the peer was gossiped with a
+    /// recent reported last seen time.
+    ///
+    /// [`constants::MAX_PEER_ACTIVE_FOR_GOSSIP`] represents the maximum time since a peer was seen
+    /// to still be considered reachable.
+    pub fn is_active_for_gossip(&self) -> bool {
+        if let Some(last_seen) = self.last_seen() {
+            // Correctness: `last_seen` shouldn't ever be in the future, either because we set the
+            // time or because another peer's future time was sanitized when it was added to the
+            // address book
+            last_seen.saturating_elapsed() <= constants::MAX_PEER_ACTIVE_FOR_GOSSIP
+        } else {
+            // Peer has never responded and does not have a gossiped last seen time
+            false
+        }
+    }
+
     /// Is this address ready for a new outbound connection attempt?
     pub fn is_ready_for_connection_attempt(&self) -> bool {
         self.last_known_info_is_valid_for_outbound()
