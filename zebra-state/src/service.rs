@@ -699,7 +699,7 @@ pub fn init(config: Config, network: Network) -> BoxService<Request, Response, B
 
 /// Check if zebra is following a legacy chain and return an error if so.
 fn legacy_chain_check<I>(
-    nu_activation_height: block::Height,
+    nu5_activation_height: block::Height,
     ancestors: I,
     network: Network,
 ) -> Result<(), BoxError>
@@ -709,20 +709,34 @@ where
     const MAX_BLOCKS_TO_CHECK: usize = 100;
 
     for (count, block) in ancestors.enumerate() {
-        if block.coinbase_height().expect("a block height") < nu_activation_height {
+        // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
+        // so the rest of our checks are useless.
+        //
+        // If the cached tip is close to NU5 activation, but there aren't any V5 transactions in the
+        // chain yet, we could reach MAX_BLOCKS_TO_CHECK in Canopy, and incorrectly return an error.
+        if block
+            .coinbase_height()
+            .expect("valid blocks have coinbase heights")
+            < nu5_activation_height
+        {
             return Ok(());
         }
 
+        // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
+        // the Zebra instance that verified those blocks had no NU5 activation
         if count >= MAX_BLOCKS_TO_CHECK {
             return Err("giving up after checking too many blocks".into());
         }
 
-        // All transaction `network_upgrade` fields must be consistent with the block height.
+        // If a transaction `network_upgrade` field is different from the network upgrade calculated
+        // using our activation heights, the Zebra instance that verified those blocks had different
+        // network upgrade heights.
         block
             .check_transaction_network_upgrade_consistency(network)
             .map_err(|_| "inconsistent network upgrade found in transaction")?;
 
-        // If we find at least one transaction with a `network_upgrade` field we are ok.
+        // If we find at least one transaction with a valid `network_upgrade` field, the Zebra instance that
+        // verified those blocks used the same network upgrade heights. (Up to this point in the chain.)
         let has_network_upgrade = block
             .transactions
             .iter()
