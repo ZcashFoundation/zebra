@@ -117,6 +117,27 @@ impl Duration32 {
     /// The latest possible `Duration32` value.
     pub const MAX: Duration32 = Duration32 { seconds: u32::MAX };
 
+    /// Creates a new [`Duration32`] to represent the given amount of seconds.
+    pub const fn from_seconds(seconds: u32) -> Self {
+        Duration32 { seconds }
+    }
+
+    /// Creates a new [`Duration32`] to represent the given amount of minutes.
+    ///
+    /// If the resulting number of seconds does not fit in a [`u32`], [`Duration32::MAX`] is
+    /// returned.
+    pub const fn from_minutes(minutes: u32) -> Self {
+        Duration32::from_seconds(minutes.saturating_mul(60))
+    }
+
+    /// Creates a new [`Duration32`] to represent the given amount of hours.
+    ///
+    /// If the resulting number of seconds does not fit in a [`u32`], [`Duration32::MAX`] is
+    /// returned.
+    pub const fn from_hours(hours: u32) -> Self {
+        Duration32::from_minutes(hours.saturating_mul(60))
+    }
+
     /// Returns the number of seconds in this duration.
     pub fn seconds(&self) -> u32 {
         self.seconds
