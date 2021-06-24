@@ -172,7 +172,7 @@ where
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
             //
-            // This rule is implicitly implemented during sapling and orchard verification,
+            // This rule is implicitly implemented during Sapling and Orchard verification,
             // because they do not distinguish between coinbase and non-coinbase transactions.
             //
             // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
