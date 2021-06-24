@@ -2,7 +2,7 @@
 //! the block history as specified in ZIP-221.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     io,
     sync::Arc,
 };
@@ -42,7 +42,7 @@ pub struct HistoryTree {
     size: u32,
     /// The peaks of the tree, indexed by their position in the array representation
     /// of the tree. This can be persisted to save the tree.
-    peaks: HashMap<u32, Entry>,
+    peaks: BTreeMap<u32, Entry>,
 }
 
 impl HistoryTree {
@@ -59,7 +59,7 @@ impl HistoryTree {
         let network_upgrade = NetworkUpgrade::current(network, height);
         // TODO: handle Orchard root
         let (tree, entry) = Tree::new_from_block(network, block, sapling_root)?;
-        let mut peaks = HashMap::new();
+        let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry);
         Ok(HistoryTree {
             network,
@@ -209,7 +209,7 @@ impl Clone for HistoryTree {
             self.network_upgrade,
             self.size,
             &self.peaks,
-            &HashMap::new(),
+            &Default::default(),
         )
         .expect("rebuilding an existing tree should always work");
         HistoryTree {

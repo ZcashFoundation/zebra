@@ -5,7 +5,12 @@ use proptest::{
 };
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, fmt::SummaryDebug, parameters::NetworkUpgrade::Nu5, LedgerState};
+use zebra_chain::{
+    block::Block,
+    fmt::SummaryDebug,
+    parameters::NetworkUpgrade::{Heartwood, Nu5},
+    LedgerState,
+};
 use zebra_test::prelude::*;
 
 use crate::tests::Prepare;
@@ -55,7 +60,19 @@ impl Strategy for PreparedChain {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
-            let ledger_strategy = LedgerState::genesis_strategy(Nu5, None, false);
+
+            // The history tree only works with Heartword onward.
+            // Since the network will be chosen later, we pick the larger
+            // between the mainnet and testnet Heartwood activation heights.
+            let main_height = Heartwood
+                .activation_height(Network::Mainnet)
+                .expect("must have height");
+            let test_height = Heartwood
+                .activation_height(Network::Testnet)
+                .expect("must have height");
+            let height = (std::cmp::max(main_height, test_height) + 1).expect("must be valid");
+
+            let ledger_strategy = LedgerState::height_strategy(height, Nu5, None, false);
 
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {
@@ -78,7 +95,9 @@ impl Strategy for PreparedChain {
         }
 
         let chain = chain.clone().expect("should be generated");
-        let count = (1..chain.1.len()).new_tree(runner)?;
+        // `count` must be 1 less since the first block is used to build the
+        // history tree.
+        let count = (1..chain.1.len() - 1).new_tree(runner)?;
         Ok(PreparedChainTree {
             chain: chain.1,
             count,

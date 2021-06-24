@@ -33,7 +33,7 @@ pub struct Chain {
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
-    history_tree: HistoryTree,
+    pub(crate) history_tree: HistoryTree,
 }
 
 impl Chain {

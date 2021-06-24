@@ -6,7 +6,7 @@
 
 mod tests;
 
-use std::{collections::HashMap, convert::TryInto, io, sync::Arc};
+use std::{collections::BTreeMap, convert::TryInto, io, sync::Arc};
 
 use crate::{
     block::{Block, ChainHistoryMmrRootHash},
@@ -106,8 +106,8 @@ impl Tree {
         network: Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
-        peaks: &HashMap<u32, Entry>,
-        extra: &HashMap<u32, Entry>,
+        peaks: &BTreeMap<u32, Entry>,
+        extra: &BTreeMap<u32, Entry>,
     ) -> Result<Self, io::Error> {
         let branch_id = network_upgrade
             .branch_id()
@@ -143,10 +143,10 @@ impl Tree {
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(network, height);
         let entry0 = Entry::new_leaf(block, network, sapling_root);
-        let mut peaks = HashMap::new();
+        let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry0);
         Ok((
-            Tree::new_from_cache(network, network_upgrade, 1, &peaks, &HashMap::new())?,
+            Tree::new_from_cache(network, network_upgrade, 1, &peaks, &BTreeMap::new())?,
             peaks
                 .remove(&0u32)
                 .expect("must work since it was just added"),
