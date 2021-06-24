@@ -785,7 +785,7 @@ impl PartialEq<[u8; 32]> for OutgoingViewingKey {
 ///
 /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct DiversifierKey([u8; 32]);
 
 impl ConstantTimeEq for DiversifierKey {
