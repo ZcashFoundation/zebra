@@ -56,8 +56,7 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(653_600), Blossom),
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
-    // TODO: Add the correct Nu5 mainnet activation height
-    (block::Height(10_000_000), Nu5),
+    // TODO: Add Nu5 mainnet activation height
 ];
 
 /// Testnet network upgrade activation heights.
@@ -72,8 +71,7 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(584_000), Blossom),
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
-    // TODO: Add the correct Nu5 testnet activation height
-    (block::Height(10_000_000), Nu5),
+    // TODO: Add Nu5 testnet activation height
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a

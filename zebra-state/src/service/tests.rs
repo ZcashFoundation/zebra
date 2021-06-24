@@ -187,7 +187,7 @@ fn state_behaves_when_blocks_are_committed_out_of_order() -> Result<()> {
 }
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 2;
-const BLOCKS_AFTER_NU5: u32 = 100;
+const BLOCKS_AFTER_NU5: u32 = 101;
 
 proptest! {
     #![proptest_config(
@@ -199,9 +199,9 @@ proptest! {
 
     #[test]
     fn at_least_one_transaction_with_network_upgrade(
-        (network, height, chain) in partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5)
     ) {
-        let response = crate::service::legacy_chain_check(height, chain.into_iter(), network)
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -209,9 +209,9 @@ proptest! {
 
     #[test]
     fn no_transactions_with_network_upgrade(
-        (network, height, chain) in partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5 + 1)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5)
     ) {
-        let response = crate::service::legacy_chain_check(height, chain.into_iter(), network)
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -222,9 +222,9 @@ proptest! {
 
     #[test]
     fn at_least_one_transactions_with_inconsistent_network_upgrade(
-        (network, height, chain) in partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5)
     ) {
-        let response = crate::service::legacy_chain_check(height, chain.into_iter(), network)
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -239,7 +239,7 @@ proptest! {
 fn partial_nu5_chain_strategy(
     transaction_version_override: u32,
     transaction_has_valid_network_upgrade: bool,
-    blocks_after_nu5_activation: u32,
+    blocks_after_nu_activation: u32,
 ) -> impl Strategy<
     Value = (
         Network,
@@ -247,25 +247,31 @@ fn partial_nu5_chain_strategy(
         zebra_chain::fmt::SummaryDebug<Vec<Arc<Block>>>,
     ),
 > {
-    any::<Network>().prop_flat_map(move |network| {
-        let nu5_height = NetworkUpgrade::Nu5
-            .activation_height(network)
-            .expect("NU5 activation height not set");
-        let height = Height(nu5_height.0 + blocks_after_nu5_activation);
+    (any::<Network>(), NetworkUpgrade::branch_id_strategy()).prop_flat_map(
+        move |(network, random_nu)| {
+            // We are going to test the legacy chain with Canopy instead as we don't have a
+            // Nu5 activation height yet.
+            // TODO: update this to Nu5 after we have a height #1841
+            let mut nu = NetworkUpgrade::Canopy;
+            let nu_activation = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+            let height = Height(nu_activation.0 + blocks_after_nu_activation);
 
-        let mut nu = NetworkUpgrade::Nu5;
-        if !transaction_has_valid_network_upgrade {
-            nu = NetworkUpgrade::Canopy;
-        }
-        zebra_chain::block::LedgerState::height_strategy(
-            height,
-            Some(nu),
-            Some(transaction_version_override),
-            transaction_has_valid_network_upgrade,
-        )
-        .prop_flat_map(move |init| {
-            Block::partial_chain_strategy(init, blocks_after_nu5_activation as usize)
-        })
-        .prop_map(move |partial_chain| (network, height, partial_chain))
-    })
+            // The `network_upgrade_override` will not be enough as when it is `None`,
+            // current network upgrade will be used (`NetworkUpgrade::Canopy`) which will be valid.
+            if !transaction_has_valid_network_upgrade {
+                nu = random_nu;
+            }
+
+            zebra_chain::block::LedgerState::height_strategy(
+                height,
+                Some(nu),
+                Some(transaction_version_override),
+                transaction_has_valid_network_upgrade,
+            )
+            .prop_flat_map(move |init| {
+                Block::partial_chain_strategy(init, blocks_after_nu_activation as usize)
+            })
+            .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
+        },
+    )
 }

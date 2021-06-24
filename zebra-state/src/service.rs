@@ -14,8 +14,8 @@ use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
+    parameters::Network,
     parameters::POW_AVERAGING_WINDOW,
-    parameters::{Network, NetworkUpgrade},
     transaction,
     transaction::Transaction,
     transparent,
@@ -698,8 +698,8 @@ pub fn init(config: Config, network: Network) -> BoxService<Request, Response, B
 }
 
 /// Check if zebra is following a legacy chain and return an error if so.
-pub fn legacy_chain_check<I>(
-    tip_height: block::Height,
+fn legacy_chain_check<I>(
+    nu_activation_height: block::Height,
     ancestors: I,
     network: Network,
 ) -> Result<(), BoxError>
@@ -708,31 +708,30 @@ where
 {
     const MAX_BLOCKS_TO_CHECK: usize = 100;
 
-    // Only do the check if we have an Nu5 activation height.
-    if let Some(nu5_height) = NetworkUpgrade::Nu5.activation_height(network) {
-        // And only do the check if we are above Nu5 activation.
-        if tip_height >= nu5_height {
-            for (count, block) in ancestors.enumerate() {
-                if count >= MAX_BLOCKS_TO_CHECK {
-                    return Err("giving up after checking too many blocks".into());
-                }
+    for (count, block) in ancestors.enumerate() {
+        if block.coinbase_height().expect("a block height") < nu_activation_height {
+            return Ok(());
+        }
 
-                // All transaction `network_upgrade` fields must be consistent with the block height.
-                block
-                    .check_transaction_network_upgrade_consistency(network)
-                    .map_err(|_| "inconsistent network upgrade found in transaction")?;
+        if count >= MAX_BLOCKS_TO_CHECK {
+            return Err("giving up after checking too many blocks".into());
+        }
 
-                // If we find at least one transaction with a `network_upgrade` field we are ok.
-                let has_network_upgrade = block
-                    .transactions
-                    .iter()
-                    .find_map(|trans| trans.network_upgrade())
-                    .is_some();
-                if has_network_upgrade {
-                    return Ok(());
-                }
-            }
+        // All transaction `network_upgrade` fields must be consistent with the block height.
+        block
+            .check_transaction_network_upgrade_consistency(network)
+            .map_err(|_| "inconsistent network upgrade found in transaction")?;
+
+        // If we find at least one transaction with a `network_upgrade` field we are ok.
+        let has_network_upgrade = block
+            .transactions
+            .iter()
+            .find_map(|trans| trans.network_upgrade())
+            .is_some();
+        if has_network_upgrade {
+            return Ok(());
         }
     }
+
     Ok(())
 }
