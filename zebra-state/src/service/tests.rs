@@ -196,8 +196,8 @@ proptest! {
     )]
 
     #[test]
-    fn at_least_one_transaction_with_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5)
+    fn some_block_less_than_network_upgrade(
+        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5/2)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
@@ -206,7 +206,7 @@ proptest! {
     }
 
     #[test]
-    fn no_transactions_with_network_upgrade(
+    fn no_transaction_with_network_upgrade(
         (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
@@ -219,7 +219,7 @@ proptest! {
     }
 
     #[test]
-    fn at_least_one_transactions_with_inconsistent_network_upgrade(
+    fn at_least_one_transaction_with_inconsistent_network_upgrade(
         (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
@@ -229,5 +229,15 @@ proptest! {
             response,
             Err("inconsistent network upgrade found in transaction".into())
         );
+    }
+
+    #[test]
+    fn at_least_one_transaction_with_valid_network_upgrade(
+        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5/2)
+    ) {
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
+            .map_err(|error| error.to_string());
+
+        prop_assert_eq!(response, Ok(()));
     }
 }
