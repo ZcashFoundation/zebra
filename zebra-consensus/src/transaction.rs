@@ -87,6 +87,8 @@ pub enum Request {
         height: block::Height,
     },
     /// Verify the supplied transaction as part of the mempool.
+    ///
+    /// Note: coinbase transactions are invalid in the mempool
     Mempool {
         /// The transaction itself.
         transaction: Arc<Transaction>,
