@@ -34,7 +34,7 @@ pub fn extract_p(point: pallas::Point) -> pallas::Base {
 /// <https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas>
 pub fn extract_p_bottom(maybe_point: Option<pallas::Point>) -> Option<pallas::Base> {
     // Maps an Option<T> to Option<U> by applying a function to a contained value.
-    maybe_point.map(|point| extract_p(point))
+    maybe_point.map(extract_p)
 }
 
 /// GroupHash into Pallas, aka _GroupHash^P_

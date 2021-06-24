@@ -182,8 +182,7 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
 
         let count = values.len() as u32;
         let mut height = 0u8;
-        let mut current_layer: VecDeque<pallas::Base> =
-            values.into_iter().map(|cm_x| cm_x).collect();
+        let mut current_layer: VecDeque<pallas::Base> = values.into_iter().collect();
 
         while usize::from(height) < MERKLE_DEPTH {
             let mut next_layer_up = vec![];
