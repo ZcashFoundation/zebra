@@ -26,6 +26,8 @@ use crate::{
     Request, Response, Utxo, ValidateContextError,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
 mod check;
 mod finalized_state;
 mod non_finalized_state;
