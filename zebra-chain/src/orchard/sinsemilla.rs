@@ -70,7 +70,11 @@ fn S(j: &BitSlice<Lsb0, u8>) -> pallas::Point {
     // value.
     assert_eq!(j.len(), 10);
 
-    pallas_group_hash(b"z.cash:SinsemillaS", j.as_raw_slice())
+    // I2LEOSP_32(𝑗)
+    let mut leosp_32_j = [0u8; 4];
+    leosp_32_j[..2].copy_from_slice(j.as_raw_slice());
+
+    pallas_group_hash(b"z.cash:SinsemillaS", &leosp_32_j)
 }
 
 /// Incomplete addition on the Pallas curve.
@@ -103,7 +107,7 @@ fn incomplete_addition(
 /// the Sinsemilla hash for the Orchard incremental Merkle tree (§ 5.4.1.3
 /// ‘MerkleCRH^Orchard Hash Function’).
 ///
-/// SinsemillaHashToPointt(𝐷: B^Y^[N] , 𝑀 : B ^[{0 .. 𝑘·𝑐}] ) → P ∪ {⊥}
+/// SinsemillaHashToPoint(𝐷: B^Y^[N] , 𝑀 : B ^[{0 .. 𝑘·𝑐}] ) → P ∪ {⊥}
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 ///
@@ -224,12 +228,6 @@ mod tests {
             ),
         )
         .unwrap();
-
-        println!(
-            "{:?}",
-            sinsemilla_hash_to_point(&D[..], &M).expect("").to_affine()
-        );
-        println!("{:?}", test_vector);
 
         assert_eq!(
             sinsemilla_hash_to_point(&D[..], &M).expect("").to_affine(),

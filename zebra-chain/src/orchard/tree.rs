@@ -72,11 +72,15 @@ lazy_static! {
     ///
     /// https://zips.z.cash/protocol/nu5.pdf#constants
     static ref EMPTY_ROOTS: Vec<pallas::Base> = {
-        // Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(2)
+
+        // The empty leaf node, Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(2)
         let mut v = vec![NoteCommitmentTree::uncommitted()];
 
-        for d in 0..MERKLE_DEPTH {
-            let next = merkle_crh_orchard(d as u8, Some(v[d]), Some(v[d])).unwrap();
+        // Starting with layer 31 (the first internal layer, after the leaves),
+        // generate the empty roots up to layer 0, the root.
+        for d in 0..MERKLE_DEPTH
+        {
+            let next = merkle_crh_orchard((MERKLE_DEPTH - 1  - d) as u8, Some(v[d]), Some(v[d])).unwrap();
             v.push(next);
         }
 
@@ -228,45 +232,18 @@ impl NoteCommitmentTree {
 
 // TODO: check empty roots, incremental roots, as part of https://github.com/ZcashFoundation/zebra/issues/1287
 
+#[cfg(test)]
 mod tests {
 
     use super::*;
-
-    fn x_from_hex<T: AsRef<[u8]>>(element_in_hex: T) -> pallas::Base {
-        let mut bytes = [0u8; 32];
-        let _ = hex::decode_to_slice(element_in_hex, &mut bytes);
-
-        pallas::Base::from_bytes(&bytes).unwrap()
-    }
-
-    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/f59d31132c505063f045addb7719eb92ce9cee10/orchard_merkle_tree.py
-    // THESE VALUES MAY BE BAD.
-    // #[test]
-    // fn check_parent() {
-    //     let left = x_from_hex("87a086ae7d2252d58729b30263fb7b66308bf94ef59a76c9c86e7ea016536505");
-    //     let right = x_from_hex("a75b84a125b2353da7e8d96ee2a15efe4de23df9601b9d9564ba59de57130406");
-
-    //     let layer = 25u8;
-    //     let wrong_layer = 26u8;
-
-    //     // parent = merkle_crh_orchard(MERKLE_DEPTH - 1 - 25, left, right)
-    //     let parent = x_from_hex(
-    //         "626278560043615083774572461435172561667439770708282630516615972307985967801",
-    //     );
-
-    //     assert_eq!(merkle_crh_orchard(32 - 1 - layer, left, right), parent);
-    // }
+    use crate::orchard::tests::test_vectors;
 
     #[test]
-    fn compute_empty_roots() {
-        let mut v = vec![NoteCommitmentTree::uncommitted()];
+    fn empty_roots() {
+        zebra_test::init();
 
-        println!("{:x?}", v[0].to_bytes());
-
-        for d in 0..MERKLE_DEPTH {
-            let next = merkle_crh_orchard(d as u8, Some(v[d]), Some(v[d])).unwrap();
-            println!("{:x?}", next.to_bytes());
-            v.push(next);
+        for i in 0..EMPTY_ROOTS.len() {
+            assert_eq!(EMPTY_ROOTS[i].to_bytes(), test_vectors::EMPTY_ROOTS[i]);
         }
     }
 }
