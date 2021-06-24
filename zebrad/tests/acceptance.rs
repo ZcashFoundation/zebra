@@ -368,6 +368,10 @@ fn start_no_args() -> Result<()> {
 
     output.stdout_line_contains("Starting zebrad")?;
 
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
     // Make sure the command was killed
     output.assert_was_killed()?;
 
@@ -860,6 +864,10 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
     child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
+
+    child.expect_stdout_line_matches("starting legacy chain check")?;
+    child.expect_stdout_line_matches("no legacy chain found")?;
+
     child.kill()?;
 
     Ok(())
@@ -1324,31 +1332,6 @@ where
         .assert_was_not_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
         .context_from(&output1)?;
-
-    Ok(())
-}
-
-#[test]
-fn legacy_chain() -> Result<()> {
-    zebra_test::init();
-
-    // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
-
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
-
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_line_contains("starting legacy chain check")?;
-    output.stdout_line_contains("no legacy chain found")?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
 
     Ok(())
 }
