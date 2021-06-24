@@ -104,13 +104,16 @@ pub(crate) fn partial_nu5_chain_strategy(
         zebra_chain::fmt::SummaryDebug<Vec<Arc<Block>>>,
     ),
 > {
-    (any::<Network>(), NetworkUpgrade::branch_id_strategy()).prop_flat_map(
-        move |(network, random_nu)| {
+    (
+        any::<Network>(),
+        NetworkUpgrade::reduced_branch_id_strategy(),
+    )
+        .prop_flat_map(move |(network, random_nu)| {
             // We are going to test the legacy chain with Canopy instead as we don't have a
             // Nu5 activation height yet.
             // TODO: update this to Nu5 after we have a height #1841
             let mut nu = NetworkUpgrade::Canopy;
-            let nu_activation = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+            let nu_activation = nu.activation_height(network).unwrap();
             let height = Height(nu_activation.0 + blocks_after_nu_activation);
 
             // The `network_upgrade_override` will not be enough as when it is `None`,
@@ -129,6 +132,5 @@ pub(crate) fn partial_nu5_chain_strategy(
                 Block::partial_chain_strategy(init, blocks_after_nu_activation as usize)
             })
             .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
-        },
-    )
+        })
 }
