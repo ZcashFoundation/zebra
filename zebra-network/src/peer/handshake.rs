@@ -487,7 +487,7 @@ pub async fn negotiate_version(
     };
 
     let our_version = Message::Version {
-        version: constants::CURRENT_VERSION,
+        version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
         services: our_services,
         timestamp,
         address_recv: (PeerServices::NODE_NETWORK, their_addr),
@@ -552,29 +552,17 @@ pub async fn negotiate_version(
         Err(HandshakeError::NonceReuse)?;
     }
 
-    // XXX in zcashd remote peer can only send one version message and
-    // we would disconnect here if it received a second one. Is it even possible
-    // for that to happen to us here?
-
-    // TODO: Reject incoming connections from nodes that don't know about the current epoch.
-    // zcashd does this:
-    //  const Consensus::Params& consensusParams = chainparams.GetConsensus();
-    //  auto currentEpoch = CurrentEpoch(GetHeight(), consensusParams);
-    //  if (pfrom->nVersion < consensusParams.vUpgrades[currentEpoch].nProtocolVersion)
-    //
-    // For approximately 1.5 days before a network upgrade, zcashd also:
-    //  - avoids old peers, and
-    //  - prefers updated peers.
-    // We haven't decided if we need this behaviour in Zebra yet (see #706).
-    //
-    // At the network upgrade, we also need to disconnect from old peers (see #1334).
-    //
-    // TODO: replace min_for_upgrade(network, MIN_NETWORK_UPGRADE) with
-    //       current_min(network, height) where network is the
-    //       configured network, and height is the best tip's block
-    //       height.
-
-    if remote_version < Version::min_for_upgrade(config.network, constants::MIN_NETWORK_UPGRADE) {
+    // TODO: Reject connections with nodes that don't know about the current network upgrade (#1334)
+    //       Use the latest non-finalized block height, rather than the minimum
+    if remote_version
+        < Version::min_remote_for_height(
+            config.network,
+            // This code will be replaced in #1334
+            constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
+                .activation_height(config.network)
+                .expect("minimum network protocol network upgrade has an activation height"),
+        )
+    {
         // Disconnect if peer is using an obsolete version.
         Err(HandshakeError::ObsoleteVersion(remote_version))?;
     }
@@ -680,7 +668,8 @@ where
             }
 
             // Set the connection's version to the minimum of the received version or our own.
-            let negotiated_version = std::cmp::min(remote_version, constants::CURRENT_VERSION);
+            let negotiated_version =
+                std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
             // Reconfigure the codec to use the negotiated version.
             //
