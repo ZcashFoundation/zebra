@@ -16,7 +16,7 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
-    mmr::HistoryTree,
+    history_tree::HistoryTree,
     parameters::Network,
     transaction::{self, Transaction},
     transparent,

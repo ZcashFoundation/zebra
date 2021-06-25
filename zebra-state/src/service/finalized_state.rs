@@ -7,7 +7,7 @@ mod tests;
 
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
-use zebra_chain::mmr::HistoryTree;
+use zebra_chain::history_tree::HistoryTree;
 use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},

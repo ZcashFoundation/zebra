@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::Block,
-    mmr::{HistoryTree, HistoryTreeError},
+    history_tree::{HistoryTree, HistoryTreeError},
     parameters::Network,
     serialization::ZcashDeserializeInto,
 };

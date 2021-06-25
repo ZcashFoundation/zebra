@@ -1,6 +1,6 @@
 use std::env;
 
-use zebra_chain::{mmr::HistoryTree, sapling};
+use zebra_chain::{history_tree::HistoryTree, sapling};
 use zebra_test::prelude::*;
 
 use crate::service::non_finalized_state::{arbitrary::PreparedChain, Chain};

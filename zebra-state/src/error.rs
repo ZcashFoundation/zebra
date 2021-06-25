@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash, CommitmentError},
-    mmr::HistoryTreeError,
+    history_tree::HistoryTreeError,
     work::difficulty::CompactDifficulty,
 };
 

@@ -21,7 +21,7 @@ extern crate bitflags;
 pub mod amount;
 pub mod block;
 pub mod fmt;
-pub mod mmr;
+pub mod history_tree;
 pub mod orchard;
 pub mod parameters;
 pub mod primitives;

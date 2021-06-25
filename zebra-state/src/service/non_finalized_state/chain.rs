@@ -7,7 +7,7 @@ use std::{
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
     block::{self, ChainHistoryMmrRootHash},
-    mmr::HistoryTree,
+    history_tree::HistoryTree,
     orchard,
     primitives::Groth16Proof,
     sapling, sprout, transaction,
