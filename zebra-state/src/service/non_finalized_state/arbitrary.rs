@@ -6,7 +6,7 @@ use proptest::{
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::Block,
+    block::{Block, Height},
     fmt::SummaryDebug,
     parameters::NetworkUpgrade::{Heartwood, Nu5},
     LedgerState,
@@ -50,6 +50,29 @@ impl ValueTree for PreparedChainTree {
 pub struct PreparedChain {
     // the proptests are threaded (not async), so we want to use a threaded mutex here
     chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>)>>,
+    // the height from which to start the chain. If None, starts at the genesis block
+    start_height: Option<Height>,
+}
+
+impl PreparedChain {
+    /// Create a PreparedChain strategy with Heartwood-onward blocks.
+    pub(super) fn new_heartwood() -> Self {
+        // The history tree only works with Heartwood onward.
+        // Since the network will be chosen later, we pick the larger
+        // between the mainnet and testnet Heartwood activation heights.
+        let main_height = Heartwood
+            .activation_height(Network::Mainnet)
+            .expect("must have height");
+        let test_height = Heartwood
+            .activation_height(Network::Testnet)
+            .expect("must have height");
+        let height = (std::cmp::max(main_height, test_height) + 1).expect("must be valid");
+
+        PreparedChain {
+            start_height: Some(height),
+            ..Default::default()
+        }
+    }
 }
 
 impl Strategy for PreparedChain {
@@ -60,19 +83,10 @@ impl Strategy for PreparedChain {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
-
-            // The history tree only works with Heartword onward.
-            // Since the network will be chosen later, we pick the larger
-            // between the mainnet and testnet Heartwood activation heights.
-            let main_height = Heartwood
-                .activation_height(Network::Mainnet)
-                .expect("must have height");
-            let test_height = Heartwood
-                .activation_height(Network::Testnet)
-                .expect("must have height");
-            let height = (std::cmp::max(main_height, test_height) + 1).expect("must be valid");
-
-            let ledger_strategy = LedgerState::height_strategy(height, Nu5, None, false);
+            let ledger_strategy = match self.start_height {
+                Some(start_height) => LedgerState::height_strategy(start_height, Nu5, None, false),
+                None => LedgerState::genesis_strategy(Nu5, None, false),
+            };
 
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {

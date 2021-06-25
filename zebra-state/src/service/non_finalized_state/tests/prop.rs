@@ -15,7 +15,7 @@ fn forked_equals_pushed() -> Result<()> {
                                           .ok()
                                           .and_then(|v| v.parse().ok())
                                           .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, count, network) in PreparedChain::default())| {
+        |((chain, count, network) in PreparedChain::new_heartwood())| {
             // Build a history tree with the first block to simulate the tree of
             // the finalized state.
             let finalized_tree = HistoryTree::new_from_block(network, chain[0].block.clone(), &sapling::tree::Root::default(), None).unwrap();
@@ -47,13 +47,13 @@ fn finalized_equals_pushed() -> Result<()> {
                                       .ok()
                                       .and_then(|v| v.parse().ok())
                                       .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-    |((chain, end_count, network) in PreparedChain::default())| {
+    |((chain, end_count, network) in PreparedChain::new_heartwood())| {
         // Build a history tree with the first block to simulate the tree of
         // the finalized state.
         let finalized_tree = HistoryTree::new_from_block(network, chain[0].block.clone(), &sapling::tree::Root::default(), None).unwrap();
         let chain = &chain[1..];
         let finalized_count = chain.len() - end_count;
-        let mut full_chain = Chain::new(finalized_tree.clone());
+        let mut full_chain = Chain::new(finalized_tree);
 
         for block in chain.iter().take(finalized_count) {
             full_chain.push(block.clone())?;
