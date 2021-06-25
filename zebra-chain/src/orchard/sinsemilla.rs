@@ -181,7 +181,7 @@ pub fn sinsemilla_commit(
     )
 }
 
-/// SinsemillaShortCommit_r(D, M) := Extract_P(SinsemillaCommit_r(D, M))
+/// SinsemillaShortCommit_r(D, M) := Extract⊥ P(SinsemillaCommit_r(D, M))
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
 #[allow(non_snake_case)]
