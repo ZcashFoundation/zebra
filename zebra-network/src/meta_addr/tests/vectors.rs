@@ -2,10 +2,16 @@
 
 use std::net::SocketAddr;
 
-use zebra_chain::serialization::Duration32;
+use zebra_chain::serialization::{DateTime32, Duration32};
 
 use super::{super::MetaAddr, check};
-use crate::protocol::types::PeerServices;
+use crate::{constants::MAX_PEER_ACTIVE_FOR_GOSSIP, protocol::types::PeerServices};
+
+/// Margin of error for time-based tests.
+///
+/// This is a short duration to consider as error due to a test's execution time when comparing
+/// [`DateTime32`]s.
+const TEST_TIME_ERROR_MARGIN: Duration32 = Duration32::from_seconds(1);
 
 /// Make sure that the sanitize function handles minimum and maximum times.
 #[test]
@@ -69,4 +75,24 @@ fn new_alternate_peer_address_is_not_gossipable() {
         .expect("MetaAddrChange can't create a new MetaAddr");
 
     assert!(!peer.is_active_for_gossip());
+}
+
+/// Test if recently received gossiped peer is gossipable.
+#[test]
+fn gossiped_peer_reportedly_to_be_seen_recently_is_gossipable() {
+    zebra_test::init();
+
+    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+
+    // Report last seen within the reachable interval.
+    let offset = MAX_PEER_ACTIVE_FOR_GOSSIP
+        .checked_sub(TEST_TIME_ERROR_MARGIN)
+        .expect("Test margin is too large");
+    let last_seen = DateTime32::now()
+        .checked_sub(offset)
+        .expect("Offset is too large");
+
+    let peer = MetaAddr::new_gossiped_meta_addr(address, PeerServices::NODE_NETWORK, last_seen);
+
+    assert!(peer.is_active_for_gossip());
 }
