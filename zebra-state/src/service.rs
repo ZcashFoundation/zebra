@@ -14,8 +14,8 @@ use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
     parameters::POW_AVERAGING_WINDOW,
+    parameters::{Network, NetworkUpgrade},
     transaction,
     transaction::Transaction,
     transparent,
@@ -85,16 +85,24 @@ impl StateService {
 
         tracing::info!("starting legacy chain check");
         if let Some(tip) = state.best_tip() {
-            if legacy_chain_check(tip.0, state.any_ancestor_blocks(tip.1), state.network).is_err() {
-                let legacy_db_path = Some(state.disk.path().to_path_buf());
-                panic!(
-                    "Cached state contains a legacy chain. \
-                    An outdated Zebra version did not know about a recent network upgrade, \
-                    so it followed a legacy chain using outdated rules. \
-                    Hint: Delete your database, and restart Zebra to do a full sync. \
-                    Database path: {:?}",
-                    legacy_db_path,
-                );
+            if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
+                if legacy_chain_check(
+                    nu5_activation_height,
+                    state.any_ancestor_blocks(tip.1),
+                    state.network,
+                )
+                .is_err()
+                {
+                    let legacy_db_path = Some(state.disk.path().to_path_buf());
+                    panic!(
+                        "Cached state contains a legacy chain. \
+                        An outdated Zebra version did not know about a recent network upgrade, \
+                        so it followed a legacy chain using outdated rules. \
+                        Hint: Delete your database, and restart Zebra to do a full sync. \
+                        Database path: {:?}",
+                        legacy_db_path,
+                    );
+                }
             }
         }
         tracing::info!("no legacy chain found");
