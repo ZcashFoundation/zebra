@@ -179,3 +179,31 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
 
     assert!(peer.is_active_for_gossip());
 }
+
+/// Test that peer that responded long ago is not gossipable.
+#[test]
+fn responded_long_ago_peer_is_not_gossipable() {
+    zebra_test::init();
+
+    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+        .into_new_meta_addr()
+        .expect("MetaAddrChange can't create a new MetaAddr");
+
+    // Create a peer that has responded
+    let mut peer = MetaAddr::new_responded(&address, &PeerServices::NODE_NETWORK)
+        .apply_to_meta_addr(peer_seed)
+        .expect("Failed to create MetaAddr for responded peer");
+
+    // Tweak the peer's last response time to be outside the limits of the reachable duration
+    let offset = MAX_PEER_ACTIVE_FOR_GOSSIP
+        .checked_add(TEST_TIME_ERROR_MARGIN)
+        .expect("Test margin is too large");
+    let last_response = DateTime32::now()
+        .checked_sub(offset)
+        .expect("Offset is too large");
+
+    peer.set_last_response(last_response);
+
+    assert!(!peer.is_active_for_gossip());
+}
