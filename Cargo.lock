@@ -4550,6 +4550,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
+ "rand 0.7.3",
  "rand 0.8.4",
  "serde",
  "spandoc",

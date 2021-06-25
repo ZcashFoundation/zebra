@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryFrom, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, convert::TryInto, sync::Arc};
 
 use tower::{service_fn, ServiceExt};
 
@@ -6,9 +6,12 @@ use zebra_chain::{
     amount::Amount,
     block, orchard,
     parameters::{Network, NetworkUpgrade},
+    primitives::{ed25519, x25519, Groth16Proof},
+    serialization::ZcashDeserialize,
+    sprout,
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
-        Hash, LockTime, Transaction,
+        Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent,
 };
@@ -451,6 +454,86 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     );
 }
 
+/// Tests transactions with Sprout transfers.
+///
+/// This is actually two tests:
+/// - Test if signed V4 transaction with a dummy [`sprout::JoinSplit`] is accepted.
+/// - Test if an unsigned V4 transaction with a dummy [`sprout::JoinSplit`] is rejected.
+///
+/// The first test verifies if the transaction verifier correctly accepts a signed transaction. The
+/// second test verifies if the transaction verifier correctly rejects the transaction because of
+/// the invalid signature.
+///
+/// These tests are grouped together because of a limitation to test shared [`tower_batch::Batch`]
+/// services. Such services spawn a Tokio task in the runtime, and `#[tokio::test]` can create a
+/// separate runtime for each test. This means that the worker task is created for one test and
+/// destroyed before the other gets a chance to use it. (We'll fix this in #2390.)
+#[tokio::test]
+async fn v4_with_sprout_transfers() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Canopy;
+
+    let canopy_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("Canopy activation height is not set");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("Canopy activation height is too large");
+
+    // Initialize the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    for should_sign in [true, false] {
+        // Create a fake Sprout join split
+        let (joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        let mut transaction = Transaction::V4 {
+            inputs: vec![],
+            outputs: vec![],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+            joinsplit_data: Some(joinsplit_data),
+            sapling_shielded_data: None,
+        };
+
+        let expected_result = if should_sign {
+            // Sign the transaction
+            let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+
+            match &mut transaction {
+                Transaction::V4 {
+                    joinsplit_data: Some(joinsplit_data),
+                    ..
+                } => joinsplit_data.sig = signing_key.sign(sighash.as_bytes()),
+                _ => unreachable!("Mock transaction was created incorrectly"),
+            }
+
+            Ok(transaction.hash())
+        } else {
+            // TODO: Fix error downcast
+            // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
+            Err(TransactionError::InternalDowncastError(
+                "downcast to redjubjub::Error failed, original error: InvalidSignature".to_string(),
+            ))
+        };
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: transaction_block_height,
+            })
+            .await;
+
+        assert_eq!(result, expected_result);
+    }
+}
+
 // Utility functions
 
 /// Create a mock transparent transfer to be included in a transaction.
@@ -523,4 +606,57 @@ fn mock_transparent_transfer(
     known_utxos.insert(previous_outpoint, previous_utxo);
 
     (input, output, known_utxos)
+}
+
+/// Create a mock [`sprout::JoinSplit`] and include it in a [`transaction::JoinSplitData`].
+///
+/// This creates a dummy join split. By itself it is invalid, but it is useful for including in a
+/// transaction to check the signatures.
+///
+/// The [`transaction::JoinSplitData`] with the dummy [`sprout::JoinSplit`] is returned together
+/// with the [`ed25519::SigningKey`] that can be used to create a signature to later add to the
+/// returned join split data.
+fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::SigningKey) {
+    // Prepare dummy inputs for the join split
+    let zero_amount = 0_i32
+        .try_into()
+        .expect("Invalid JoinSplit transparent input");
+    let anchor = sprout::tree::Root::default();
+    let nullifier = sprout::note::Nullifier([0u8; 32]);
+    let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
+    let ephemeral_key =
+        x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand07::thread_rng()));
+    let random_seed = [0u8; 32];
+    let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
+        .expect("Failure to deserialize dummy MAC");
+    let zkproof = Groth16Proof([0u8; 192]);
+    let encrypted_note = sprout::note::EncryptedNote([0u8; 601]);
+
+    // Create an dummy join split
+    let joinsplit = sprout::JoinSplit {
+        vpub_old: zero_amount,
+        vpub_new: zero_amount,
+        anchor,
+        nullifiers: [nullifier; 2],
+        commitments: [commitment; 2],
+        ephemeral_key,
+        random_seed,
+        vmacs: [mac.clone(), mac],
+        zkproof,
+        enc_ciphertexts: [encrypted_note; 2],
+    };
+
+    // Create a usable signing key
+    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let verification_key = ed25519::VerificationKey::from(&signing_key);
+
+    // Populate join split data with the dummy join split.
+    let joinsplit_data = JoinSplitData {
+        first: joinsplit,
+        rest: vec![],
+        pub_key: verification_key.into(),
+        sig: [0u8; 64].into(),
+    };
+
+    (joinsplit_data, signing_key)
 }
