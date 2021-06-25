@@ -113,3 +113,23 @@ fn gossiped_peer_reportedly_seen_in_the_future_is_gossipable() {
 
     assert!(peer.is_active_for_gossip());
 }
+
+/// Test if gossiped peer that was reported last seen a long time ago is not gossipable.
+#[test]
+fn gossiped_peer_reportedly_seen_long_ago_is_not_gossipable() {
+    zebra_test::init();
+
+    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+
+    // Report last seen just outside the reachable interval.
+    let offset = MAX_PEER_ACTIVE_FOR_GOSSIP
+        .checked_add(TEST_TIME_ERROR_MARGIN)
+        .expect("Test margin is too large");
+    let last_seen = DateTime32::now()
+        .checked_sub(offset)
+        .expect("Offset is too large");
+
+    let peer = MetaAddr::new_gossiped_meta_addr(address, PeerServices::NODE_NETWORK, last_seen);
+
+    assert!(!peer.is_active_for_gossip());
+}
