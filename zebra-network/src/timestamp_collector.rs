@@ -1,21 +1,23 @@
 //! The timestamp collector collects liveness information from peers.
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, prelude::*};
 
-use crate::{meta_addr::MetaAddrChange, AddressBook, Config};
+use crate::{meta_addr::MetaAddrChange, AddressBook};
 
 /// The timestamp collector hooks into incoming message streams for each peer and
 /// records per-connection last-seen timestamps into an [`AddressBook`].
 pub struct TimestampCollector {}
 
 impl TimestampCollector {
-    /// Spawn a new [`TimestampCollector`] task, and return handles for the
-    /// transmission channel for timestamp events and for the [`AddressBook`] it
-    /// updates.
+    /// Spawn a new [`TimestampCollector`] task, updating a new [`AddressBook`]
+    /// configured with a `local_listener`.
+    ///
+    /// Returns handles for the transmission channel for timestamp events, and
+    /// the address book.
     pub fn spawn(
-        config: &Config,
+        local_listener: SocketAddr,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
         mpsc::Sender<MetaAddrChange>,
@@ -24,7 +26,7 @@ impl TimestampCollector {
         const TIMESTAMP_WORKER_BUFFER_SIZE: usize = 100;
         let (worker_tx, mut worker_rx) = mpsc::channel(TIMESTAMP_WORKER_BUFFER_SIZE);
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
-            config,
+            local_listener,
             span!(Level::TRACE, "timestamp collector"),
         )));
         let worker_address_book = address_book.clone();

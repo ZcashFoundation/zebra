@@ -7,12 +7,12 @@ use std::{
 
 use serde::{de, Deserialize, Deserializer};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, serialization::canonical_socket_addr};
 
 use crate::BoxError;
 
-/// The number of times Zebra will retry each initial peer, before checking if
-/// any other initial peers have returned addresses.
+/// The number of times Zebra will retry each initial peer's DNS resolution,
+/// before checking if any other initial peers have returned addresses.
 const MAX_SINGLE_PEER_RETRIES: usize = 2;
 
 /// Configuration for networking code.
@@ -22,12 +22,21 @@ pub struct Config {
     ///
     /// Can be `address:port` or just `address`. If there is no configured
     /// port, Zebra will use the default port for the configured `network`.
+    ///
     /// `address` can be an IP address or a DNS name. DNS names are
     /// only resolved once, when Zebra starts up.
     ///
-    /// Zebra will also advertise this address to other nodes. Advertising a
-    /// different external IP address is currently not supported, see #1890
-    /// for details.
+    /// If a specific listener address is configured, Zebra will advertise
+    /// it to other nodes. But by default, Zebra uses an unspecified address
+    /// ("0.0.0.0" or "[::]"), which is not advertised to other nodes.
+    ///
+    /// Zebra does not currently support:
+    /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
+    /// - [Auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
+    ///
+    /// However, other Zebra instances compensate for unspecified or incorrect
+    /// listener addresses by adding the external IP addresses of peers to
+    /// their address books.
     pub listen_addr: SocketAddr,
 
     /// The network to connect to.
@@ -68,7 +77,11 @@ impl Config {
         use futures::stream::StreamExt;
 
         if peers.is_empty() {
-            error!("no initial peers in the network config. Hint: you must configure at least one peer or DNS seeder to run Zebra");
+            warn!(
+                "no initial peers in the network config. \
+                 Hint: you must configure at least one peer IP or DNS seeder to run Zebra, \
+                 or make sure Zebra's listener port gets inbound connections."
+            );
             return HashSet::new();
         }
 
@@ -131,7 +144,7 @@ impl Config {
         let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
-            Ok(Ok(ips)) => Ok(ips.collect()),
+            Ok(Ok(ips)) => Ok(ips.map(canonical_socket_addr).collect()),
             Ok(Err(e)) => {
                 tracing::info!(?host, ?e, "DNS error resolving peer IP address");
                 Err(e.into())
@@ -237,7 +250,7 @@ impl<'de> Deserialize<'de> for Config {
         }?;
 
         Ok(Config {
-            listen_addr,
+            listen_addr: canonical_socket_addr(listen_addr),
             network: config.network,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,

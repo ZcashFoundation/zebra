@@ -151,17 +151,20 @@ impl NoteCommitment {
         let psi_bytes: [u8; 32] = psi.into();
 
         // g*d || pk*d || I2LEBSP_64(v) || I2LEBSP_l^Orchard_Base(ρ) || I2LEBSP_l^Orchard_base(ψ)
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&rho_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&psi_bytes[..]));
+        s.extend(g_d_bytes);
+        s.extend(pk_d_bytes);
+        s.extend(v_bytes);
+        s.extend(rho_bytes);
+        s.extend(psi_bytes);
 
         let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 
         Some((
             rcm,
-            NoteCommitment::from(sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)),
+            NoteCommitment::from(
+                sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
+                    .expect("valid orchard note commitment, not ⊥ "),
+            ),
         ))
     }
 

@@ -1,15 +1,18 @@
 //! Sinsemilla hash functions and helpers.
 
 use bitvec::prelude::*;
-
+use group::Group;
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, CurveExt},
     pasta::pallas,
 };
 
-/// [Hash Extractor for Pallas][concreteextractorpallas]
+/// [Coordinate Extractor for Pallas][concreteextractorpallas]
 ///
-/// P → B^[l^Orchard_Merkle]
+/// ExtractP: P → P𝑥 such that ExtractP(𝑃) = 𝑥(𝑃) mod 𝑞P.
+///
+/// ExtractP returns the type P𝑥 which is precise for its range, unlike
+/// ExtractJ(𝑟) which returns a bit sequence.
 ///
 /// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
 pub fn extract_p(point: pallas::Point) -> pallas::Base {
@@ -23,13 +26,24 @@ pub fn extract_p(point: pallas::Point) -> pallas::Base {
     }
 }
 
+/// Extract⊥ P: P ∪ {⊥} → P𝑥 ∪ {⊥} such that
+///
+///  Extract⊥ P(︀⊥)︀ = ⊥
+///  Extract⊥ P(︀𝑃: P)︀ = ExtractP(𝑃).
+///
+/// <https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas>
+pub fn extract_p_bottom(maybe_point: Option<pallas::Point>) -> Option<pallas::Base> {
+    // Maps an Option<T> to Option<U> by applying a function to a contained value.
+    maybe_point.map(extract_p)
+}
+
 /// GroupHash into Pallas, aka _GroupHash^P_
 ///
 /// Produces a random point in the Pallas curve.  The first input element acts
 /// as a domain separator to distinguish uses of the group hash for different
 /// purposes; the second input element is the message.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretegrouphashpallasandvesta
+/// <https://zips.z.cash/protocol/nu5.pdf#concretegrouphashpallasandvesta>
 #[allow(non_snake_case)]
 pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
     let domain_separator = std::str::from_utf8(D).unwrap();
@@ -39,7 +53,7 @@ pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
 
 /// Q(D) := GroupHash^P(︀“z.cash:SinsemillaQ”, D)
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
+/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 #[allow(non_snake_case)]
 fn Q(D: &[u8]) -> pallas::Point {
     pallas_group_hash(b"z.cash:SinsemillaQ", D)
@@ -49,14 +63,40 @@ fn Q(D: &[u8]) -> pallas::Point {
 ///
 /// S: {0 .. 2^k - 1} -> P^*, aka 10 bits hashed into the group
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
+/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 #[allow(non_snake_case)]
 fn S(j: &BitSlice<Lsb0, u8>) -> pallas::Point {
     // The value of j is a 10-bit value, therefore must never exceed 2^10 in
     // value.
     assert_eq!(j.len(), 10);
 
-    pallas_group_hash(b"z.cash:SinsemillaS", j.as_slice())
+    // I2LEOSP_32(𝑗)
+    let mut leosp_32_j = [0u8; 4];
+    leosp_32_j[..2].copy_from_slice(j.as_raw_slice());
+
+    pallas_group_hash(b"z.cash:SinsemillaS", &leosp_32_j)
+}
+
+/// Incomplete addition on the Pallas curve.
+///
+/// P ∪ {⊥} × P ∪ {⊥} → P ∪ {⊥}
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash>
+fn incomplete_addition(
+    left: Option<pallas::Point>,
+    right: Option<pallas::Point>,
+) -> Option<pallas::Point> {
+    let identity = pallas::Point::identity();
+
+    match (left, right) {
+        (None, _) | (_, None) => None,
+        (Some(l), _) if l == identity => None,
+        (_, Some(r)) if r == identity => None,
+        (Some(l), Some(r)) if l == r => None,
+        // The inverse of l, (x, -y)
+        (Some(l), Some(r)) if l == -r => None,
+        (Some(l), Some(r)) => Some(l + r),
+    }
 }
 
 /// "...an algebraic hash function with collision resistance (for fixed input
@@ -67,19 +107,21 @@ fn S(j: &BitSlice<Lsb0, u8>) -> pallas::Point {
 /// the Sinsemilla hash for the Orchard incremental Merkle tree (§ 5.4.1.3
 /// ‘MerkleCRH^Orchard Hash Function’).
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
+/// SinsemillaHashToPoint(𝐷: B^Y^[N] , 𝑀 : B ^[{0 .. 𝑘·𝑐}] ) → P ∪ {⊥}
+///
+/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 ///
 /// # Panics
 ///
 /// If `M` is greater than `k*c = 2530` bits.
 #[allow(non_snake_case)]
-pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point {
+pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas::Point> {
     let k = 10;
     let c = 253;
 
     assert!(M.len() <= k * c);
 
-    let mut acc = Q(D);
+    let mut acc = Some(Q(D));
 
     // Split M into n segments of k bits, where k = 10 and c = 253, padding
     // the last segment with zeros.
@@ -88,10 +130,11 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
         let mut store = [0u8; 2];
-        let bits = store.bits_mut::<Lsb0>();
-        bits[..chunk.len()].copy_from_slice(chunk);
+        let bits =
+            BitSlice::<Lsb0, _>::from_slice_mut(&mut store).expect("must work for small slices");
+        bits[..chunk.len()].copy_from_bitslice(chunk);
 
-        acc = acc + acc + S(&bits[..k]);
+        acc = incomplete_addition(incomplete_addition(acc, Some(S(&bits[..k]))), acc);
     }
 
     acc
@@ -106,14 +149,16 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point
 /// PedersenHash) is to make efcient use of the lookups available in recent
 /// proof systems including Halo 2."
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
+/// SinsemillaHash: B^Y^[N] × B[{0 .. 𝑘·𝑐}] → P_𝑥 ∪ {⊥}
+///
+/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 ///
 /// # Panics
 ///
 /// If `M` is greater than `k*c = 2530` bits in `sinsemilla_hash_to_point`.
 #[allow(non_snake_case)]
-pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
-    extract_p(sinsemilla_hash_to_point(D, M))
+pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas::Base> {
+    extract_p_bottom(sinsemilla_hash_to_point(D, M))
 }
 
 /// Sinsemilla commit
@@ -125,19 +170,68 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
 #[allow(non_snake_case)]
-pub fn sinsemilla_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Point {
-    sinsemilla_hash_to_point(&[D, b"-M"].concat(), M)
-        + pallas_group_hash(&[D, b"-r"].concat(), b"") * r
+pub fn sinsemilla_commit(
+    r: pallas::Scalar,
+    D: &[u8],
+    M: &BitVec<Lsb0, u8>,
+) -> Option<pallas::Point> {
+    incomplete_addition(
+        sinsemilla_hash_to_point(&[D, b"-M"].concat(), M),
+        Some(pallas_group_hash(&[D, b"-r"].concat(), b"") * r),
+    )
 }
 
-/// SinsemillaShortCommit_r(D, M) := Extract_P(SinsemillaCommit_r(D, M))
+/// SinsemillaShortCommit_r(D, M) := Extract⊥ P(SinsemillaCommit_r(D, M))
 ///
 /// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
 #[allow(non_snake_case)]
-pub fn sinsemilla_short_commit(r: pallas::Scalar, D: &[u8], M: &BitVec<Lsb0, u8>) -> pallas::Base {
-    extract_p(sinsemilla_commit(r, D, M))
+pub fn sinsemilla_short_commit(
+    r: pallas::Scalar,
+    D: &[u8],
+    M: &BitVec<Lsb0, u8>,
+) -> Option<pallas::Base> {
+    extract_p_bottom(sinsemilla_commit(r, D, M))
 }
 
 // TODO: test the above correctness and compatibility with the zcash-hackworks test vectors
 // https://github.com/ZcashFoundation/zebra/issues/2079
 // https://github.com/zcash-hackworks/zcash-test-vectors/pulls
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    fn x_from_str(s: &str) -> pallas::Base {
+        use group::ff::PrimeField;
+
+        pallas::Base::from_str(s).unwrap()
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn single_test_vector() {
+        use group::Curve;
+
+        let D = b"z.cash:test-Sinsemilla";
+        let M = bitvec![
+            Lsb0, u8; 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0,
+            1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0,
+        ];
+
+        let test_vector = pallas::Affine::from_xy(
+            x_from_str(
+                "19681977528872088480295086998934490146368213853811658798708435106473481753752",
+            ),
+            x_from_str(
+                "14670850419772526047574141291705097968771694788047376346841674072293161339903",
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sinsemilla_hash_to_point(&D[..], &M).expect("").to_affine(),
+            test_vector
+        )
+    }
+}

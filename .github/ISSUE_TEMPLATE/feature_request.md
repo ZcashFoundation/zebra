@@ -30,18 +30,6 @@ If this change is part of a Zebra design, quote and link to the RFC:
 https://github.com/ZcashFoundation/zebra/tree/main/book/src/dev/rfcs/
 -->
 
-## Solution
-
-<!--
-Summarize the changes that you want to happen
--->
-
-### Alternatives
-
-<!--
-Are there any alternative solutions?
--->
-
 ## Related Work
 
 <!--

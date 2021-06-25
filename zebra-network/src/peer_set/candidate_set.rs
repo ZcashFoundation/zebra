@@ -379,33 +379,32 @@ fn validate_addrs(
 /// This will consider all addresses as invalid if trying to offset their
 /// `last_seen` times to be before the limit causes an underflow.
 fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
-    let (oldest_reported_seen_timestamp, newest_reported_seen_timestamp) =
-        addrs
-            .iter()
-            .fold((u32::MAX, u32::MIN), |(oldest, newest), addr| {
-                let last_seen = addr
-                    .untrusted_last_seen()
-                    .expect("unexpected missing last seen")
-                    .timestamp();
-                (oldest.min(last_seen), newest.max(last_seen))
-            });
+    let last_seen_times = addrs.iter().map(|meta_addr| {
+        meta_addr
+            .untrusted_last_seen()
+            .expect("unexpected missing last seen: should be provided by deserialization")
+    });
+    let oldest_seen = last_seen_times.clone().min().unwrap_or(DateTime32::MIN);
+    let newest_seen = last_seen_times.max().unwrap_or(DateTime32::MAX);
 
     // If any time is in the future, adjust all times, to compensate for clock skew on honest peers
-    if newest_reported_seen_timestamp > last_seen_limit.timestamp() {
-        let offset = newest_reported_seen_timestamp - last_seen_limit.timestamp();
+    if newest_seen > last_seen_limit {
+        let offset = newest_seen
+            .checked_duration_since(last_seen_limit)
+            .expect("unexpected underflow: just checked newest_seen is greater");
 
-        // Apply offset to oldest timestamp to check for underflow
-        let oldest_resulting_timestamp = oldest_reported_seen_timestamp as i64 - offset as i64;
-        if oldest_resulting_timestamp >= 0 {
+        // Check for underflow
+        if oldest_seen.checked_sub(offset).is_some() {
             // No underflow is possible, so apply offset to all addresses
             for addr in addrs {
-                let old_last_seen = addr
+                let last_seen = addr
                     .untrusted_last_seen()
-                    .expect("unexpected missing last seen")
-                    .timestamp();
-                let new_last_seen = old_last_seen - offset;
+                    .expect("unexpected missing last seen: should be provided by deserialization");
+                let last_seen = last_seen
+                    .checked_sub(offset)
+                    .expect("unexpected underflow: just checked oldest_seen");
 
-                addr.set_untrusted_last_seen(new_last_seen.into());
+                addr.set_untrusted_last_seen(last_seen);
             }
         } else {
             // An underflow will occur, so reject all gossiped peers

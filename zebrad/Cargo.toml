@@ -20,13 +20,12 @@ gumdrop = "0.7"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
 chrono = "0.4"
-rand = "0.8"
 
 hyper = { version = "0.14.0-dev", features = ["full"] }
 futures = "0.3"
 tokio = { version = "0.3.6", features = ["time", "rt-multi-thread", "stream", "macros", "tracing", "signal"] }
 tower = { version = "0.4", features = ["hedge", "limit"] }
-pin-project = "0.4.23"
+pin-project = "1.0.7"
 
 color-eyre = { version = "0.5.11", features = ["issue-url"] }
 thiserror = "1"

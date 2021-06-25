@@ -82,7 +82,18 @@ We usually run `zebrad` on systems with:
 `zebrad` might build and run fine on smaller and slower systems - we haven't
 tested its exact limits yet.
 
-### Network Usage
+### Network Ports and Data Usage
+
+By default, Zebra uses the following inbound TCP listener ports:
+- 8233 on Mainnet
+- 18233 on Testnet
+
+If Zebra is configured with a specific [`listen_addr`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.listen_addr),
+it will advertise this address to other nodes for inbound connections.
+
+Zebra makes outbound connections to peers on any port.
+But `zcashd` prefers peers on the default ports,
+so that it can't be used for DDoS attacks on other networks.
 
 `zebrad`'s typical network usage is:
 - initial sync: 30 GB download
@@ -128,11 +139,16 @@ Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 ### Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [Peer connections sometimes fail permanently #1435](https://github.com/ZcashFoundation/zebra/issues/1435)
-  - these permanent failures can happen after a network disconnection, sleep, or individual peer disconnections
-  - workaround: use `Control-C` to exit `zebrad`, and then restart `zebrad`
+- [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
+  - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
+  - These panics can be ignored, unless they happen frequently
+- [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
+  - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
 - [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-  - these errors can be ignored, unless they happen frequently
+  - These errors can be ignored, unless they happen frequently
+
+Zebra's state commits changes using database transactions.
+If you forcibly terminate it, or it panics, any incomplete changes will be rolled back the next time it starts.
 
 ## Future Work
 

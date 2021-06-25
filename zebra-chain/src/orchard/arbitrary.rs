@@ -4,7 +4,7 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKeyBytes};
 
-use super::{keys, note, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
+use super::{keys, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
 
 use std::{
     convert::{TryFrom, TryInto},
@@ -92,6 +92,24 @@ impl Arbitrary for Flags {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (any::<u8>()).prop_map(Self::from_bits_truncate).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for tree::Root {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use halo2::arithmetic::FieldExt;
+
+        (vec(any::<u8>(), 64))
+            .prop_map(|bytes| {
+                let bytes = bytes.try_into().expect("vec is the correct length");
+                Self::try_from(pallas::Base::from_bytes_wide(&bytes).to_bytes())
+                    .expect("a valid generated Orchard note commitment tree root")
+            })
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

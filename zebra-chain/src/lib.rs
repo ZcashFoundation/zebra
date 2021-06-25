@@ -11,6 +11,8 @@
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
+// Required by bitvec! macro
+#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate serde;

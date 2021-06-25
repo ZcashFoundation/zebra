@@ -31,6 +31,9 @@ mod check;
 #[cfg(test)]
 mod tests;
 
+/// An alias for a set of asynchronous checks that should succeed.
+type AsyncChecks = FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send>>>;
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -84,6 +87,8 @@ pub enum Request {
         height: block::Height,
     },
     /// Verify the supplied transaction as part of the mempool.
+    ///
+    /// Note: coinbase transactions are invalid in the mempool
     Mempool {
         /// The transaction itself.
         transaction: Arc<Transaction>,
@@ -96,6 +101,7 @@ pub enum Request {
 }
 
 impl Request {
+    /// The transaction to verify that's in this request.
     pub fn transaction(&self) -> Arc<Transaction> {
         match self {
             Request::Block { transaction, .. } => transaction.clone(),
@@ -103,6 +109,7 @@ impl Request {
         }
     }
 
+    /// The set of additional known unspent transaction outputs that's in this request.
     pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
@@ -110,6 +117,9 @@ impl Request {
         }
     }
 
+    /// The network upgrade to consider for the verification.
+    ///
+    /// This is based on the block height from the request, and the supplied `network`.
     pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
         match self {
             Request::Block { height, .. } => NetworkUpgrade::current(network, *height),
@@ -151,10 +161,27 @@ where
 
         async move {
             tracing::trace!(?tx);
-            match tx.as_ref() {
+
+            // Do basic checks first
+            check::has_inputs_and_outputs(&tx)?;
+
+            if tx.is_coinbase() {
+                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+            }
+
+            // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
+            // in non-coinbase transactions MUST also be applied to coinbase transactions."
+            //
+            // This rule is implicitly implemented during Sapling and Orchard verification,
+            // because they do not distinguish between coinbase and non-coinbase transactions.
+            //
+            // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
+            //
+            // https://zips.z.cash/zip-0213#specification
+            let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
-                    Err(TransactionError::WrongVersion)
+                    return Err(TransactionError::WrongVersion);
                 }
                 Transaction::V4 {
                     inputs,
@@ -173,10 +200,16 @@ where
                         joinsplit_data,
                         sapling_shielded_data,
                     )
-                    .await
+                    .await?
                 }
-                Transaction::V5 { .. } => Self::verify_v5_transaction(req, network).await,
-            }
+                Transaction::V5 { inputs, .. } => {
+                    Self::verify_v5_transaction(req, network, script_verifier, inputs).await?
+                }
+            };
+
+            Self::wait_for_checks(async_checks).await?;
+
+            Ok(tx.hash())
         }
         .instrument(span)
         .boxed()
@@ -188,82 +221,58 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
+    /// Verify a V4 transaction.
+    ///
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transparent transfers
+    /// - sprout shielded data
+    /// - sapling shielded data
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the transparent `inputs` in the transaction
+    /// - the Sprout `joinsplit_data` shielded data in the transaction
+    /// - the `sapling_shielded_data` in the transaction
     async fn verify_v4_transaction(
         request: Request,
         network: Network,
-        mut script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
-    ) -> Result<transaction::Hash, TransactionError> {
+    ) -> Result<AsyncChecks, TransactionError> {
         let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
         let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
 
-        let mut ed25519_verifier = primitives::ed25519::VERIFIER.clone();
         let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
 
         // A set of asynchronous checks which must all succeed.
         // We finish by waiting on these below.
-        let mut async_checks = FuturesUnordered::new();
+        let mut async_checks = AsyncChecks::new();
 
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
 
-        // Do basic checks first
-        check::has_inputs_and_outputs(&tx)?;
-
-        // Handle transparent inputs and outputs.
-        if tx.is_coinbase() {
-            check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-        } else {
-            // feed all of the inputs to the script and shielded verifiers
-            // the script_verifier also checks transparent sighashes, using its own implementation
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(tx.clone()));
-
-            for input_index in 0..inputs.len() {
-                let rsp = script_verifier.ready_and().await?.call(script::Request {
-                    upgrade,
-                    known_utxos: request.known_utxos(),
-                    cached_ffi_transaction: cached_ffi_transaction.clone(),
-                    input_index,
-                });
-
-                async_checks.push(rsp);
-            }
-        }
+        // Add asynchronous checks of the transparent inputs and outputs
+        async_checks.extend(Self::verify_transparent_inputs_and_outputs(
+            &request,
+            network,
+            inputs,
+            script_verifier,
+        )?);
 
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
-        if let Some(joinsplit_data) = joinsplit_data {
-            // XXX create a method on JoinSplitData
-            // that prepares groth16::Items with the correct proofs
-            // and proof inputs, handling interstitial treestates
-            // correctly.
-
-            // Then, pass those items to self.joinsplit to verify them.
-
-            // Consensus rule: The joinSplitSig MUST represent a
-            // valid signature, under joinSplitPubKey, of the
-            // sighash.
-            //
-            // Queue the validation of the JoinSplit signature while
-            // adding the resulting future to our collection of
-            // async checks that (at a minimum) must pass for the
-            // transaction to verify.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
-            // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-            let rsp = ed25519_verifier.ready_and().await?.call(
-                (
-                    joinsplit_data.pub_key,
-                    joinsplit_data.sig,
-                    &shielded_sighash,
-                )
-                    .into(),
-            );
-
-            async_checks.push(rsp.boxed());
-        }
+        async_checks.extend(Self::verify_sprout_shielded_data(
+            joinsplit_data,
+            &shielded_sighash,
+        ));
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for spend in sapling_shielded_data.spends_per_anchor() {
@@ -359,27 +368,45 @@ where
             // async_checks.push(rsp);
         }
 
-        // Finally, wait for all asynchronous checks to complete
-        // successfully, or fail verification if they error.
-        while let Some(check) = async_checks.next().await {
-            tracing::trace!(?check, remaining = async_checks.len());
-            check?;
-        }
-
-        Ok(tx.hash())
+        Ok(async_checks)
     }
 
+    /// Verify a V5 transaction.
+    ///
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transaction support by the considered network upgrade (see [`Request::upgrade`])
+    /// - transparent transfers
+    /// - sapling shielded data (TODO)
+    /// - orchard shielded data (TODO)
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the transparent `inputs` in the transaction
     async fn verify_v5_transaction(
         request: Request,
         network: Network,
-    ) -> Result<transaction::Hash, TransactionError> {
+        script_verifier: script::Verifier<ZS>,
+        inputs: &[transparent::Input],
+    ) -> Result<AsyncChecks, TransactionError> {
         Self::verify_v5_transaction_network_upgrade(
             &request.transaction(),
             request.upgrade(network),
         )?;
 
+        let _async_checks = Self::verify_transparent_inputs_and_outputs(
+            &request,
+            network,
+            inputs,
+            script_verifier,
+        )?;
+
         // TODO:
-        // - verify transparent pool (#1981)
         // - verify sapling shielded pool (#1981)
         // - verify orchard shielded pool (ZIP-224) (#2105)
         // - ZIP-216 (#1798)
@@ -388,11 +415,12 @@ where
         unimplemented!("V5 transaction validation is not yet complete");
     }
 
+    /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
     fn verify_v5_transaction_network_upgrade(
         transaction: &Transaction,
-        upgrade: NetworkUpgrade,
+        network_upgrade: NetworkUpgrade,
     ) -> Result<(), TransactionError> {
-        match upgrade {
+        match network_upgrade {
             // Supports V5 transactions
             NetworkUpgrade::Nu5 => Ok(()),
 
@@ -405,8 +433,92 @@ where
             | NetworkUpgrade::Heartwood
             | NetworkUpgrade::Canopy => Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
-                upgrade,
+                network_upgrade,
             )),
         }
+    }
+
+    /// Verifies if a transaction's transparent `inputs` are valid using the provided
+    /// `script_verifier`.
+    fn verify_transparent_inputs_and_outputs(
+        request: &Request,
+        network: Network,
+        inputs: &[transparent::Input],
+        script_verifier: script::Verifier<ZS>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let transaction = request.transaction();
+
+        // feed all of the inputs to the script and shielded verifiers
+        // the script_verifier also checks transparent sighashes, using its own implementation
+        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+        let known_utxos = request.known_utxos();
+        let upgrade = request.upgrade(network);
+
+        let script_checks = (0..inputs.len())
+            .into_iter()
+            .map(move |input_index| {
+                let request = script::Request {
+                    upgrade,
+                    known_utxos: known_utxos.clone(),
+                    cached_ffi_transaction: cached_ffi_transaction.clone(),
+                    input_index,
+                };
+
+                script_verifier.clone().oneshot(request).boxed()
+            })
+            .collect();
+
+        Ok(script_checks)
+    }
+
+    /// Verifies a transaction's Sprout shielded join split data.
+    fn verify_sprout_shielded_data(
+        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        shielded_sighash: &blake2b_simd::Hash,
+    ) -> AsyncChecks {
+        let checks = AsyncChecks::new();
+
+        if let Some(joinsplit_data) = joinsplit_data {
+            // XXX create a method on JoinSplitData
+            // that prepares groth16::Items with the correct proofs
+            // and proof inputs, handling interstitial treestates
+            // correctly.
+
+            // Then, pass those items to self.joinsplit to verify them.
+
+            // Consensus rule: The joinSplitSig MUST represent a
+            // valid signature, under joinSplitPubKey, of the
+            // sighash.
+            //
+            // Queue the validation of the JoinSplit signature while
+            // adding the resulting future to our collection of
+            // async checks that (at a minimum) must pass for the
+            // transaction to verify.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
+            // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+            let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
+            let ed25519_item =
+                (joinsplit_data.pub_key, joinsplit_data.sig, shielded_sighash).into();
+
+            checks.push(ed25519_verifier.oneshot(ed25519_item).boxed());
+        }
+
+        checks
+    }
+
+    /// Await a set of checks that should all succeed.
+    ///
+    /// If any of the checks fail, this method immediately returns the error and cancels all other
+    /// checks by dropping them.
+    async fn wait_for_checks(mut checks: AsyncChecks) -> Result<(), TransactionError> {
+        // Wait for all asynchronous checks to complete
+        // successfully, or fail verification if they error.
+        while let Some(check) = checks.next().await {
+            tracing::trace!(?check, remaining = checks.len());
+            check?;
+        }
+
+        Ok(())
     }
 }

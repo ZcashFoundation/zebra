@@ -25,39 +25,29 @@ where
     let mut async_checks = FuturesUnordered::new();
 
     for tx in transactions {
-        match &*tx {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V5 { .. } => (),
-            Transaction::V4 {
-                sapling_shielded_data,
-                ..
-            } => {
-                if let Some(sapling_shielded_data) = sapling_shielded_data {
-                    for spend in sapling_shielded_data.spends_per_anchor() {
-                        tracing::trace!(?spend);
+        let spends = tx.sapling_spends_per_anchor();
+        let outputs = tx.sapling_outputs();
 
-                        let spend_rsp = spend_verifier
-                            .ready_and()
-                            .await?
-                            .call(groth16::ItemWrapper::from(&spend).into());
+        for spend in spends {
+            tracing::trace!(?spend);
 
-                        async_checks.push(spend_rsp);
-                    }
+            let spend_rsp = spend_verifier
+                .ready_and()
+                .await?
+                .call(groth16::ItemWrapper::from(&spend).into());
 
-                    for output in sapling_shielded_data.outputs() {
-                        tracing::trace!(?output);
+            async_checks.push(spend_rsp);
+        }
 
-                        let output_rsp = output_verifier
-                            .ready_and()
-                            .await?
-                            .call(groth16::ItemWrapper::from(output).into());
+        for output in outputs {
+            tracing::trace!(?output);
 
-                        async_checks.push(output_rsp);
-                    }
-                }
-            }
+            let output_rsp = output_verifier
+                .ready_and()
+                .await?
+                .call(groth16::ItemWrapper::from(output).into());
+
+            async_checks.push(output_rsp);
         }
 
         while let Some(result) = async_checks.next().await {
@@ -108,33 +98,22 @@ where
     let mut async_checks = FuturesUnordered::new();
 
     for tx in transactions {
-        match &*tx {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V5 { .. } => (),
-            Transaction::V4 {
-                sapling_shielded_data,
-                ..
-            } => {
-                if let Some(sapling_shielded_data) = sapling_shielded_data {
-                    for output in sapling_shielded_data.outputs() {
-                        // This changes the primary inputs to the proof
-                        // verification, causing it to fail for this proof.
-                        let mut modified_output = output.clone();
-                        modified_output.cm_u = jubjub::Fq::zero();
+        let outputs = tx.sapling_outputs();
 
-                        tracing::trace!(?modified_output);
+        for output in outputs {
+            // This changes the primary inputs to the proof
+            // verification, causing it to fail for this proof.
+            let mut modified_output = output.clone();
+            modified_output.cm_u = jubjub::Fq::zero();
 
-                        let output_rsp = output_verifier
-                            .ready_and()
-                            .await?
-                            .call(groth16::ItemWrapper::from(&modified_output).into());
+            tracing::trace!(?modified_output);
 
-                        async_checks.push(output_rsp);
-                    }
-                }
-            }
+            let output_rsp = output_verifier
+                .ready_and()
+                .await?
+                .call(groth16::ItemWrapper::from(&modified_output).into());
+
+            async_checks.push(output_rsp);
         }
 
         while let Some(result) = async_checks.next().await {

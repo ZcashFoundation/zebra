@@ -126,9 +126,9 @@ impl NoteCommitment {
         let pk_d_bytes = <[u8; 32]>::from(transmission_key);
         let v_bytes = value.to_bytes();
 
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&g_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&pk_d_bytes[..]));
-        s.append(&mut BitVec::<Lsb0, u8>::from_slice(&v_bytes[..]));
+        s.extend(g_d_bytes);
+        s.extend(pk_d_bytes);
+        s.extend(v_bytes);
 
         let rcm = CommitmentRandomness(generate_trapdoor(csprng));
 

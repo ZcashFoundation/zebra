@@ -5,7 +5,7 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::history_tree::HistoryTree;
 use zebra_chain::transparent;
@@ -403,6 +403,12 @@ impl FinalizedState {
             // (The OS will delete them eventually anyway.)
             let _res = std::fs::remove_dir_all(path);
         }
+    }
+
+    /// Returns the `Path` where the files used by this database are located.
+    #[allow(dead_code)]
+    pub fn path(&self) -> &Path {
+        self.db.path()
     }
 }
 

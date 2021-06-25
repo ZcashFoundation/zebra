@@ -554,19 +554,16 @@ impl From<FullViewingKey> for IncomingViewingKey {
     fn from(fvk: FullViewingKey) -> Self {
         let mut M: BitVec<Lsb0, u8> = BitVec::new();
 
-        M.append(&mut BitVec::<Lsb0, u8>::from_slice(
-            &<[u8; 32]>::from(fvk.spend_validating_key)[..],
-        ));
-        M.append(&mut BitVec::<Lsb0, u8>::from_slice(
-            &<[u8; 32]>::from(fvk.nullifier_deriving_key)[..],
-        ));
+        M.extend(<[u8; 32]>::from(fvk.spend_validating_key));
+        M.extend(<[u8; 32]>::from(fvk.nullifier_deriving_key));
 
         // Commit^ivk_rivk
         let commit_x = sinsemilla_short_commit(
             fvk.ivk_commit_randomness.into(),
             b"z.cash:Orchard-CommitIvk",
             &M,
-        );
+        )
+        .expect("deriving orchard commit^ivk should not output ⊥ ");
 
         Self {
             network: fvk.network,
@@ -970,8 +967,6 @@ impl Eq for TransmissionKey {}
 impl From<[u8; 32]> for TransmissionKey {
     /// Attempts to interpret a byte representation of an affine point, failing
     /// if the element is not on the curve or non-canonical.
-    ///
-    /// <https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411>
     fn from(bytes: [u8; 32]) -> Self {
         Self(pallas::Affine::from_bytes(&bytes).unwrap())
     }

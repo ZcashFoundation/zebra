@@ -26,7 +26,7 @@ fn M_i(segment: &BitSlice<Lsb0, u8>) -> jubjub::Fr {
     for (j, chunk) in segment.chunks(3).enumerate() {
         // Pad each chunk with zeros.
         let mut store = 0u8;
-        let bits = store.bits_mut::<Lsb0>();
+        let bits = BitSlice::<Lsb0, _>::from_element_mut(&mut store);
         chunk
             .iter()
             .enumerate()

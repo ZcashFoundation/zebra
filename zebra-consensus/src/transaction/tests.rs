@@ -1,15 +1,21 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, convert::TryInto, sync::Arc};
 
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
-    orchard,
+    amount::Amount,
+    block, orchard,
     parameters::{Network, NetworkUpgrade},
+    primitives::{ed25519, x25519, Groth16Proof},
+    serialization::ZcashDeserialize,
+    sprout,
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
-        Transaction,
+        Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
+    transparent,
 };
+use zebra_state::Utxo;
 
 use super::{check, Request, Verifier};
 
@@ -240,4 +246,417 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
 
         assert_eq!(result, Ok(expected_hash));
     }
+}
+
+/// Test if V4 transaction with transparent funds is accepted.
+#[tokio::test]
+async fn v4_transaction_with_transparent_transfer_is_accepted() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
+/// Test if V4 transaction with transparent funds is rejected if the source script prevents it.
+///
+/// This test simulates the case where the script verifier rejects the transaction because the
+/// script prevents spending the source UTXO.
+#[tokio::test]
+async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should not succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::InternalDowncastError(
+            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+        ))
+    );
+}
+
+/// Test if V5 transaction with transparent funds is accepted.
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_transaction_with_transparent_transfer_is_accepted() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let nu5_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V5 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
+/// Test if V5 transaction with transparent funds is rejected if the source script prevents it.
+///
+/// This test simulates the case where the script verifier rejects the transaction because the
+/// script prevents spending the source UTXO.
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let nu5_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should not succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+
+    // Create a V5 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::InternalDowncastError(
+            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+        ))
+    );
+}
+
+/// Tests transactions with Sprout transfers.
+///
+/// This is actually two tests:
+/// - Test if signed V4 transaction with a dummy [`sprout::JoinSplit`] is accepted.
+/// - Test if an unsigned V4 transaction with a dummy [`sprout::JoinSplit`] is rejected.
+///
+/// The first test verifies if the transaction verifier correctly accepts a signed transaction. The
+/// second test verifies if the transaction verifier correctly rejects the transaction because of
+/// the invalid signature.
+///
+/// These tests are grouped together because of a limitation to test shared [`tower_batch::Batch`]
+/// services. Such services spawn a Tokio task in the runtime, and `#[tokio::test]` can create a
+/// separate runtime for each test. This means that the worker task is created for one test and
+/// destroyed before the other gets a chance to use it. (We'll fix this in #2390.)
+#[tokio::test]
+async fn v4_with_sprout_transfers() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Canopy;
+
+    let canopy_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("Canopy activation height is not set");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("Canopy activation height is too large");
+
+    // Initialize the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    for should_sign in [true, false] {
+        // Create a fake Sprout join split
+        let (joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        let mut transaction = Transaction::V4 {
+            inputs: vec![],
+            outputs: vec![],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+            joinsplit_data: Some(joinsplit_data),
+            sapling_shielded_data: None,
+        };
+
+        let expected_result = if should_sign {
+            // Sign the transaction
+            let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+
+            match &mut transaction {
+                Transaction::V4 {
+                    joinsplit_data: Some(joinsplit_data),
+                    ..
+                } => joinsplit_data.sig = signing_key.sign(sighash.as_bytes()),
+                _ => unreachable!("Mock transaction was created incorrectly"),
+            }
+
+            Ok(transaction.hash())
+        } else {
+            // TODO: Fix error downcast
+            // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
+            Err(TransactionError::InternalDowncastError(
+                "downcast to redjubjub::Error failed, original error: InvalidSignature".to_string(),
+            ))
+        };
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: transaction_block_height,
+            })
+            .await;
+
+        assert_eq!(result, expected_result);
+    }
+}
+
+// Utility functions
+
+/// Create a mock transparent transfer to be included in a transaction.
+///
+/// First, this creates a fake unspent transaction output from a fake transaction included in the
+/// specified `previous_utxo_height` block height. This fake [`Utxo`] also contains a simple script
+/// that can either accept or reject any spend attempt, depending on if `script_should_succeed` is
+/// `true` or `false`.
+///
+/// Then, a [`transparent::Input`] is created that attempts to spends the previously created fake
+/// UTXO. A new UTXO is created with the [`transparent::Output`] resulting from the spend.
+///
+/// Finally, the initial fake UTXO is placed in a `known_utxos` [`HashMap`] so that it can be
+/// retrieved during verification.
+///
+/// The function then returns the generated transparent input and output, as well as the
+/// `known_utxos` map.
+fn mock_transparent_transfer(
+    previous_utxo_height: block::Height,
+    script_should_succeed: bool,
+) -> (
+    transparent::Input,
+    transparent::Output,
+    HashMap<transparent::OutPoint, Utxo>,
+) {
+    // A script with a single opcode that accepts the transaction (pushes true on the stack)
+    let accepting_script = transparent::Script::new(&[1, 1]);
+    // A script with a single opcode that rejects the transaction (OP_FALSE)
+    let rejecting_script = transparent::Script::new(&[0]);
+
+    // Mock an unspent transaction output
+    let previous_outpoint = transparent::OutPoint {
+        hash: Hash([1u8; 32]),
+        index: 0,
+    };
+
+    let lock_script = if script_should_succeed {
+        accepting_script.clone()
+    } else {
+        rejecting_script.clone()
+    };
+
+    let previous_output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script,
+    };
+
+    let previous_utxo = Utxo {
+        output: previous_output,
+        height: previous_utxo_height,
+        from_coinbase: false,
+    };
+
+    // Use the `previous_outpoint` as input
+    let input = transparent::Input::PrevOut {
+        outpoint: previous_outpoint,
+        unlock_script: accepting_script,
+        sequence: 0,
+    };
+
+    // The output resulting from the transfer
+    // Using the rejecting script pretends the amount is burned because it can't be spent again
+    let output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script: rejecting_script,
+    };
+
+    // Cache the source of the fund so that it can be used during verification
+    let mut known_utxos = HashMap::new();
+    known_utxos.insert(previous_outpoint, previous_utxo);
+
+    (input, output, known_utxos)
+}
+
+/// Create a mock [`sprout::JoinSplit`] and include it in a [`transaction::JoinSplitData`].
+///
+/// This creates a dummy join split. By itself it is invalid, but it is useful for including in a
+/// transaction to check the signatures.
+///
+/// The [`transaction::JoinSplitData`] with the dummy [`sprout::JoinSplit`] is returned together
+/// with the [`ed25519::SigningKey`] that can be used to create a signature to later add to the
+/// returned join split data.
+fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::SigningKey) {
+    // Prepare dummy inputs for the join split
+    let zero_amount = 0_i32
+        .try_into()
+        .expect("Invalid JoinSplit transparent input");
+    let anchor = sprout::tree::Root::default();
+    let nullifier = sprout::note::Nullifier([0u8; 32]);
+    let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
+    let ephemeral_key =
+        x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand07::thread_rng()));
+    let random_seed = [0u8; 32];
+    let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
+        .expect("Failure to deserialize dummy MAC");
+    let zkproof = Groth16Proof([0u8; 192]);
+    let encrypted_note = sprout::note::EncryptedNote([0u8; 601]);
+
+    // Create an dummy join split
+    let joinsplit = sprout::JoinSplit {
+        vpub_old: zero_amount,
+        vpub_new: zero_amount,
+        anchor,
+        nullifiers: [nullifier; 2],
+        commitments: [commitment; 2],
+        ephemeral_key,
+        random_seed,
+        vmacs: [mac.clone(), mac],
+        zkproof,
+        enc_ciphertexts: [encrypted_note; 2],
+    };
+
+    // Create a usable signing key
+    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let verification_key = ed25519::VerificationKey::from(&signing_key);
+
+    // Populate join split data with the dummy join split.
+    let joinsplit_data = JoinSplitData {
+        first: joinsplit,
+        rest: vec![],
+        pub_key: verification_key.into(),
+        sig: [0u8; 64].into(),
+    };
+
+    (joinsplit_data, signing_key)
 }
