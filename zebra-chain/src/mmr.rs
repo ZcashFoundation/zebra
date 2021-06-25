@@ -10,7 +10,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    block::{Block, ChainHistoryMmrRootHash},
+    block::{Block, ChainHistoryMmrRootHash, Height},
     orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::{Entry, Tree},
@@ -43,6 +43,8 @@ pub struct HistoryTree {
     /// The peaks of the tree, indexed by their position in the array representation
     /// of the tree. This can be persisted to save the tree.
     peaks: BTreeMap<u32, Entry>,
+    /// The height of the most recent block added to the tree.
+    current_height: Height,
 }
 
 impl HistoryTree {
@@ -67,16 +69,34 @@ impl HistoryTree {
             inner: tree,
             size: 1,
             peaks,
+            current_height: height,
         })
     }
 
     /// Add block data to the tree.
+    ///
+    /// # Panics
+    ///
+    /// If the block height is not one more than the previously pushed block.
     pub fn push(
         &mut self,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         _orchard_root: Option<&orchard::tree::Root>,
     ) -> Result<(), HistoryTreeError> {
+        // Check if the block has the expected height.
+        // librustzcash assumes the heights are correct and corrupts the tree if they are wrong,
+        // resulting in a confusing error, which we prevent here.
+        let height = block
+            .coinbase_height()
+            .expect("block must have coinbase height during contextual verification");
+        if height - self.current_height != 1 {
+            panic!(
+                "added block with height {:?} but it must be {:?}+1",
+                height, self.current_height
+            );
+        }
+
         // TODO: handle orchard root
         let new_entries = self
             .inner
@@ -89,6 +109,7 @@ impl HistoryTree {
         }
         self.prune()?;
         // TODO: implement network upgrade logic: drop previous history, start new history
+        self.current_height = height;
         Ok(())
     }
 
@@ -218,6 +239,7 @@ impl Clone for HistoryTree {
             inner: tree,
             size: self.size,
             peaks: self.peaks.clone(),
+            current_height: self.current_height,
         }
     }
 }

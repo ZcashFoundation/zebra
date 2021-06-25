@@ -116,9 +116,9 @@ impl NonFinalizedState {
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
-        history_tree: HistoryTree,
+        finalized_tip_history_tree: HistoryTree,
     ) -> Result<(), ValidateContextError> {
-        let mut chain = Chain::new(history_tree);
+        let mut chain = Chain::new(finalized_tip_history_tree);
         let (height, hash) = (prepared.height, prepared.hash);
         check::block_commitment_is_valid_for_chain_history(
             &prepared,

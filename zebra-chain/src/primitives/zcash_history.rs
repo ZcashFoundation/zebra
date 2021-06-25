@@ -174,7 +174,7 @@ impl Tree {
         let network_upgrade = NetworkUpgrade::current(self.network, height);
         if self.network_upgrade != network_upgrade {
             panic!(
-                "added block from network upgrade {:?} but MMR tree is restricted to {:?}",
+                "added block from network upgrade {:?} but history tree is restricted to {:?}",
                 network_upgrade, self.network_upgrade
             );
         }
