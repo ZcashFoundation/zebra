@@ -1,6 +1,11 @@
 //! Test vectors for MetaAddr.
 
+use std::net::SocketAddr;
+
+use zebra_chain::serialization::Duration32;
+
 use super::{super::MetaAddr, check};
+use crate::protocol::types::PeerServices;
 
 /// Make sure that the sanitize function handles minimum and maximum times.
 #[test]
@@ -33,4 +38,20 @@ fn sanitize_extremes() {
     if let Some(max_sanitized) = max_time_entry.sanitize() {
         check::sanitize_avoids_leaks(&max_time_entry, &max_sanitized);
     }
+}
+
+/// Test if a recently received alternate peer address is not gossipable.
+///
+/// Such [`MetaAddr`] is only considered gossipable after Zebra has tried to connect to it and
+/// confirmed that the address is reachable.
+#[test]
+fn new_alternate_peer_address_is_not_gossipable() {
+    zebra_test::init();
+
+    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+        .into_new_meta_addr()
+        .expect("MetaAddrChange can't create a new MetaAddr");
+
+    assert!(!peer.is_active_for_gossip());
 }
