@@ -95,8 +95,8 @@ impl Strategy for PreparedChain {
 /// Generate a chain that allows us to make tests for the legacy chain rules.
 ///
 /// Arguments:
-/// - `transaction_version_override`: See `LedgerState::height_strategy`.
-/// - `transaction_has_valid_network_upgrade`: See `LedgerState::height_strategy`.
+/// - `transaction_version_override`: See `LedgerState::height_strategy` for details.
+/// - `transaction_has_valid_network_upgrade`: See `LedgerState::height_strategy` for details.
 /// - `blocks_after_nu_activation`: The number of blocks the strategy will generate
 /// after the provided `network_upgrade`.
 /// - `network_upgrade` - The height at which the strategy will start generating blocks.
