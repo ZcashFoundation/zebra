@@ -28,7 +28,7 @@ use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 use zebra_chain::serialization::arbitrary::canonical_socket_addr_strategy;
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
+pub(crate) mod arbitrary;
 
 #[cfg(test)]
 mod tests;

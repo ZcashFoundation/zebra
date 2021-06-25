@@ -14,6 +14,9 @@ use zebra_chain::serialization::canonical_socket_addr;
 
 use crate::{meta_addr::MetaAddrChange, types::MetaAddr, PeerAddrState};
 
+#[cfg(test)]
+mod tests;
+
 /// A database of peer listener addresses, their advertised services, and
 /// information on when they were last seen.
 ///
