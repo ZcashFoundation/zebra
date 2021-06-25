@@ -539,6 +539,16 @@ impl MetaAddr {
     }
 }
 
+#[cfg(test)]
+impl MetaAddr {
+    /// Forcefully change the time this peer last responded.
+    ///
+    /// This method is for test-purposes only.
+    pub(crate) fn set_last_response(&mut self, last_response: DateTime32) {
+        self.last_response = Some(last_response);
+    }
+}
+
 impl MetaAddrChange {
     /// Return the address for this change.
     pub fn addr(&self) -> SocketAddr {
