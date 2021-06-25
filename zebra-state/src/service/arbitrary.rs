@@ -97,6 +97,8 @@ pub(crate) fn partial_nu5_chain_strategy(
     transaction_version_override: u32,
     transaction_has_valid_network_upgrade: bool,
     blocks_after_nu_activation: u32,
+    // TODO: This argument can be removed and just use Nu5 after we have an activation height #1841
+    network_upgrade: NetworkUpgrade,
 ) -> impl Strategy<
     Value = (
         Network,
@@ -109,10 +111,8 @@ pub(crate) fn partial_nu5_chain_strategy(
         NetworkUpgrade::reduced_branch_id_strategy(),
     )
         .prop_flat_map(move |(network, random_nu)| {
-            // We are going to test the legacy chain with Canopy instead as we don't have a
-            // Nu5 activation height yet.
             // TODO: update this to Nu5 after we have a height #1841
-            let mut nu = NetworkUpgrade::Canopy;
+            let mut nu = network_upgrade;
             let nu_activation = nu.activation_height(network).unwrap();
             let height = Height(nu_activation.0 + blocks_after_nu_activation);
 

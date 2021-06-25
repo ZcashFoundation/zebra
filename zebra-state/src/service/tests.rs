@@ -3,8 +3,10 @@ use std::{env, sync::Arc};
 use futures::stream::FuturesUnordered;
 use tower::{util::BoxService, Service, ServiceExt};
 use zebra_chain::{
-    block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction,
-    transparent,
+    block::Block,
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
+    transaction, transparent,
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
@@ -198,7 +200,7 @@ proptest! {
     /// Test blocks that are less than the NU5 activation height.
     #[test]
     fn some_block_less_than_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5/2)
+        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
@@ -209,7 +211,7 @@ proptest! {
     /// Test the maximum amount of blocks to check before chain is declared to be legacy.
     #[test]
     fn no_transaction_with_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5)
+        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
@@ -223,7 +225,7 @@ proptest! {
     /// Test the `Block.check_transaction_network_upgrade()` error inside the legacy check.
     #[test]
     fn at_least_one_transaction_with_inconsistent_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5)
+        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
@@ -237,7 +239,7 @@ proptest! {
     /// Test there is at least one transaction with a valid `network_upgrade` in the legacy check.
     #[test]
     fn at_least_one_transaction_with_valid_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5/2)
+        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
             .map_err(|error| error.to_string());
