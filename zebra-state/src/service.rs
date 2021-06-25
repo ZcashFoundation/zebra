@@ -727,7 +727,7 @@ where
         }
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
-        // the Zebra instance that verified those blocks had no NU5 activation
+        // the Zebra instance that verified those blocks had no NU5 activation height.
         if count >= MAX_BLOCKS_TO_CHECK {
             return Err("giving up after checking too many blocks".into());
         }

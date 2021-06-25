@@ -830,6 +830,7 @@ fn sync_until(
 
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
+
     child.expect_stdout_line_matches(stop_regex)?;
     child.kill()?;
 
@@ -863,10 +864,11 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
 
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
-    child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
 
     child.expect_stdout_line_matches("starting legacy chain check")?;
     child.expect_stdout_line_matches("no legacy chain found")?;
+
+    child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
 
     child.kill()?;
 
