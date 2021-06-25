@@ -467,7 +467,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 /// These tests are grouped together because of a limitation to test shared [`tower_batch::Batch`]
 /// services. Such services spawn a Tokio task in the runtime, and `#[tokio::test]` can create a
 /// separate runtime for each test. This means that the worker task is created for one test and
-/// destroyed before the other gets a chance to use it.
+/// destroyed before the other gets a chance to use it. (We'll fix this in #2390.)
 #[tokio::test]
 async fn v4_with_sprout_transfers() {
     let network = Network::Mainnet;
