@@ -5,11 +5,9 @@ use std::fmt;
 #[cfg(test)]
 use proptest::prelude::*;
 
-use crate::parameters::Network;
-
 use super::keys;
 
-/// A Orchard _shielded payment address_.
+/// A raw **Orchard** _shielded payment address_.
 ///
 /// Also known as a _diversified payment address_ for Orchard, as
 /// defined in [§5.6.4.1 of the Zcash Specification][orchardpaymentaddrencoding].
@@ -17,15 +15,13 @@ use super::keys;
 /// [orchardpaymentaddrencoding]: https://zips.z.cash/protocol/nu5.pdf#orchardpaymentaddrencoding
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Address {
-    network: Network,
-    diversifier: keys::Diversifier,
-    transmission_key: keys::TransmissionKey,
+    pub(crate) diversifier: keys::Diversifier,
+    pub(crate) transmission_key: keys::TransmissionKey,
 }
 
 impl fmt::Debug for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("OrchardAddress")
-            .field("network", &self.network)
             .field("diversifier", &self.diversifier)
             .field("transmission_key", &self.transmission_key)
             .finish()
@@ -37,13 +33,8 @@ impl Arbitrary for Address {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<Network>(),
-            any::<keys::Diversifier>(),
-            any::<keys::TransmissionKey>(),
-        )
-            .prop_map(|(network, diversifier, transmission_key)| Self {
-                network,
+        (any::<keys::Diversifier>(), any::<keys::TransmissionKey>())
+            .prop_map(|(diversifier, transmission_key)| Self {
                 diversifier,
                 transmission_key,
             })
@@ -57,6 +48,8 @@ impl Arbitrary for Address {
 mod tests {
 
     use rand_core::OsRng;
+
+    use crate::parameters::Network;
 
     use super::*;
 
@@ -79,7 +72,6 @@ mod tests {
         let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
 
         let _orchard_shielded_address = Address {
-            network,
             diversifier,
             transmission_key,
         };

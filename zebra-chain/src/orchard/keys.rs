@@ -9,8 +9,7 @@ mod tests;
 
 use std::{
     convert::{From, Into, TryFrom, TryInto},
-    fmt,
-    io::{self, Write},
+    fmt, io,
 };
 
 use aes::Aes256;
@@ -244,6 +243,8 @@ impl fmt::Debug for SpendAuthorizingKey {
     }
 }
 
+impl Eq for SpendAuthorizingKey {}
+
 impl From<SpendAuthorizingKey> for [u8; 32] {
     fn from(sk: SpendAuthorizingKey) -> Self {
         sk.0.to_bytes()
@@ -259,14 +260,20 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
     fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
-        let hash_bytes = prf_expand(spending_key.bytes, vec![&[6]]);
-
         // Handles ToScalar^Orchard
-        Self(pallas::Scalar::from_bytes_wide(&hash_bytes))
+        let ask = pallas::Scalar::from_bytes_wide(&prf_expand(spending_key.bytes, vec![&[6]]));
+
+        // let ak^P = SpendAuthSig^Orchard.DerivePublic(ask)...
+        let ak_bytes: [u8; 32] = SpendValidatingKey::from(SpendAuthorizingKey(ask)).into();
+
+        // if the last bit (that is, the 𝑦˜ bit) of repr_P (ak^P ) is 1:
+        //   set ask ← −ask
+        match (ak_bytes[31] >> 7) == 0b0000_0001 {
+            true => Self(-ask),
+            false => Self(ask),
+        }
     }
 }
-
-impl Eq for SpendAuthorizingKey {}
 
 impl PartialEq for SpendAuthorizingKey {
     fn eq(&self, other: &Self) -> bool {
@@ -282,9 +289,6 @@ impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
 
 /// A Spend validating key, as described in [protocol specification
 /// §4.2.3][orchardkeycomponents].
-///
-/// Used to validate Orchard _Spend Authorization Signatures_, proving ownership
-/// of notes.
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 #[derive(Copy, Clone, Debug)]
@@ -475,138 +479,14 @@ impl TryFrom<[u8; 32]> for IvkCommitRandomness {
     }
 }
 
-/// Magic human-readable strings used to identify what networks Orchard incoming
-/// viewing keys are associated with when encoded/decoded with bech32.
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#orchardinviewingkeyencoding>
-mod ivk_hrp {
-    pub const MAINNET: &str = "zivko";
-    pub const TESTNET: &str = "zivktestorchard";
-}
-
-/// An incoming viewing key, as described in [protocol specification
-/// §4.2.3][ps].
-///
-/// Used to decrypt incoming notes without spending them.
-///
-/// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone)]
-pub struct IncomingViewingKey {
-    network: Network,
-    scalar: pallas::Scalar,
-}
-
-impl IncomingViewingKey {
-    /// Generate an _IncomingViewingKey_ from existing bytes and a network variant.
-    fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
-        Self {
-            network,
-            scalar: pallas::Scalar::from_bytes(&bytes).unwrap(),
-        }
-    }
-}
-
-impl ConstantTimeEq for IncomingViewingKey {
-    /// Check whether two `IncomingViewingKey`s are equal, runtime independent
-    /// of the value of the secret.
-    ///
-    /// # Note
-    ///
-    /// This function short-circuits if the networks of the keys are different.
-    /// Otherwise, it should execute in time independent of the `bytes` value.
-    fn ct_eq(&self, other: &Self) -> Choice {
-        if self.network != other.network {
-            return Choice::from(0);
-        }
-
-        self.scalar.to_bytes().ct_eq(&other.scalar.to_bytes())
-    }
-}
-
-impl fmt::Debug for IncomingViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("IncomingViewingKey")
-            .field(&hex::encode(self.scalar.to_bytes()))
-            .finish()
-    }
-}
-
-impl fmt::Display for IncomingViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let hrp = match self.network {
-            Network::Mainnet => ivk_hrp::MAINNET,
-            Network::Testnet => ivk_hrp::TESTNET,
-        };
-
-        bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32(), Variant::Bech32).unwrap()
-    }
-}
-
-impl Eq for IncomingViewingKey {}
-
-impl From<FullViewingKey> for IncomingViewingKey {
-    /// Commit^ivk_rivk(ak, nk) :=
-    ///    SinsemillaShortCommit_rcm (︁"z.cash:Orchard-CommitIvk", I2LEBSP_l(ak) || I2LEBSP_l(nk)︁) mod r_P
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
-    #[allow(non_snake_case)]
-    fn from(fvk: FullViewingKey) -> Self {
-        let mut M: BitVec<Lsb0, u8> = BitVec::new();
-
-        M.extend(<[u8; 32]>::from(fvk.spend_validating_key));
-        M.extend(<[u8; 32]>::from(fvk.nullifier_deriving_key));
-
-        // Commit^ivk_rivk
-        let commit_x = sinsemilla_short_commit(
-            fvk.ivk_commit_randomness.into(),
-            b"z.cash:Orchard-CommitIvk",
-            &M,
-        )
-        .expect("deriving orchard commit^ivk should not output ⊥ ");
-
-        Self {
-            network: fvk.network,
-            // mod r_P
-            scalar: pallas::Scalar::from_bytes(&commit_x.into()).unwrap(),
-        }
-    }
-}
-
-impl PartialEq for IncomingViewingKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1u8
-    }
-}
-
-impl PartialEq<[u8; 32]> for IncomingViewingKey {
-    fn eq(&self, other: &[u8; 32]) -> bool {
-        self.scalar.to_bytes().ct_eq(other).unwrap_u8() == 1u8
-    }
-}
-
-/// Magic human-readable strings used to identify what networks Orchard full
-/// viewing keys are associated with when encoded/decoded with bech32.
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
-mod fvk_hrp {
-    pub const MAINNET: &str = "zviewo";
-    pub const TESTNET: &str = "zviewtestorchard";
-}
-
-/// Full Viewing Keys
+/// _Full viewing keys_
 ///
 /// Allows recognizing both incoming and outgoing notes without having
 /// spend authority.
 ///
-/// For incoming viewing keys on the production network, the
-/// Human-Readable Part is “zviewo”. For incoming viewing keys on the
-/// test network, the Human-Readable Part is “zviewtestorchard”.
-///
 /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
 #[derive(Copy, Clone)]
 pub struct FullViewingKey {
-    network: Network,
     spend_validating_key: SpendValidatingKey,
     nullifier_deriving_key: NullifierDerivingKey,
     ivk_commit_randomness: IvkCommitRandomness,
@@ -631,7 +511,7 @@ impl FullViewingKey {
         prf_expand(K, t)
     }
 
-    /// Derive a full viewing key from a existing spending key and its network.
+    /// Derive a _full viewing key_ from a existing _spending key_.
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#addressesandkeys>
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
@@ -639,7 +519,6 @@ impl FullViewingKey {
         let spend_authorizing_key = SpendAuthorizingKey::from(sk);
 
         Self {
-            network: sk.network,
             spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
             nullifier_deriving_key: NullifierDerivingKey::from(sk),
             ivk_commit_randomness: IvkCommitRandomness::from(sk),
@@ -653,12 +532,11 @@ impl ConstantTimeEq for FullViewingKey {
     ///
     /// # Note
     ///
-    /// This function short-circuits if the networks or spend validating keys
+    /// This function short-circuits if the spend validating keys
     /// are different.  Otherwise, it should execute in time independent of the
     /// secret component values.
     fn ct_eq(&self, other: &Self) -> Choice {
-        if self.network != other.network || self.spend_validating_key != other.spend_validating_key
-        {
+        if self.spend_validating_key != other.spend_validating_key {
             return Choice::from(0);
         }
 
@@ -674,7 +552,6 @@ impl ConstantTimeEq for FullViewingKey {
 impl fmt::Debug for FullViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("FullViewingKey")
-            .field("network", &self.network)
             .field("spend_validating_key", &self.spend_validating_key)
             .field("nullifier_deriving_key", &self.nullifier_deriving_key)
             .field("ivk_commit_randomness", &self.ivk_commit_randomness)
@@ -683,23 +560,118 @@ impl fmt::Debug for FullViewingKey {
 }
 
 impl fmt::Display for FullViewingKey {
+    /// The _raw encoding_ of an **Orchard** _full viewing key_.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding>
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut bytes = io::Cursor::new(Vec::new());
+        f.write_str(&hex::encode(<[u8; 96]>::from(*self)))
+    }
+}
 
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.spend_validating_key));
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.nullifier_deriving_key));
-        let _ = bytes.write_all(&<[u8; 32]>::from(self.ivk_commit_randomness));
+impl From<FullViewingKey> for [u8; 96] {
+    fn from(fvk: FullViewingKey) -> [u8; 96] {
+        let mut bytes = [0u8; 96];
 
-        let hrp = match self.network {
-            Network::Mainnet => fvk_hrp::MAINNET,
-            Network::Testnet => fvk_hrp::TESTNET,
-        };
+        bytes[..32].copy_from_slice(&<[u8; 32]>::from(fvk.spend_validating_key));
+        bytes[32..64].copy_from_slice(&<[u8; 32]>::from(fvk.nullifier_deriving_key));
+        bytes[64..].copy_from_slice(&<[u8; 32]>::from(fvk.ivk_commit_randomness));
 
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
+        bytes
     }
 }
 
 impl PartialEq for FullViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
+/// An _incoming viewing key_, as described in [protocol specification
+/// §4.2.3][ps].
+///
+/// Used to decrypt incoming notes without spending them.
+///
+/// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
+#[derive(Copy, Clone)]
+pub struct IncomingViewingKey {
+    dk: DiversifierKey,
+    // TODO: refine type
+    ivk: pallas::Scalar,
+}
+
+impl ConstantTimeEq for IncomingViewingKey {
+    /// Check whether two `IncomingViewingKey`s are equal, runtime independent
+    /// of the value of the secret.
+    ///
+    /// # Note
+    ///
+    /// This function should execute in time independent of the `dk` and `ivk` values.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        <[u8; 64]>::from(*self).ct_eq(&<[u8; 64]>::from(*other))
+    }
+}
+
+impl fmt::Debug for IncomingViewingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("IncomingViewingKey")
+            .field("dk", &self.dk)
+            .field("ivk", &self.ivk)
+            .finish()
+    }
+}
+
+impl fmt::Display for IncomingViewingKey {
+    /// The _raw encoding_ of an **Orchard** _incoming viewing key_.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding>
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&hex::encode(<[u8; 64]>::from(*self)))
+    }
+}
+
+impl Eq for IncomingViewingKey {}
+
+impl From<IncomingViewingKey> for [u8; 64] {
+    fn from(ivk: IncomingViewingKey) -> [u8; 64] {
+        let mut bytes = [0u8; 64];
+
+        bytes[..32].copy_from_slice(&<[u8; 32]>::from(ivk.dk));
+        bytes[32..].copy_from_slice(&<[u8; 32]>::from(ivk.ivk));
+
+        bytes
+    }
+}
+
+impl From<FullViewingKey> for IncomingViewingKey {
+    /// Commit^ivk_rivk(ak, nk) :=
+    ///    SinsemillaShortCommit_rcm (︁"z.cash:Orchard-CommitIvk", I2LEBSP_l(ak) || I2LEBSP_l(nk)︁) mod r_P
+    ///
+    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
+    /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
+    #[allow(non_snake_case)]
+    fn from(fvk: FullViewingKey) -> Self {
+        let mut M: BitVec<Lsb0, u8> = BitVec::new();
+
+        M.extend(<[u8; 32]>::from(fvk.spend_validating_key));
+        M.extend(<[u8; 32]>::from(fvk.nullifier_deriving_key));
+
+        // Commit^ivk_rivk
+        let commit_x = sinsemilla_short_commit(
+            fvk.ivk_commit_randomness.into(),
+            b"z.cash:Orchard-CommitIvk",
+            &M,
+        )
+        .expect("deriving orchard commit^ivk should not output ⊥ ");
+
+        Self {
+            dk: fvk.into(),
+            // mod r_P
+            ivk: pallas::Scalar::from_bytes(&commit_x.into()).unwrap(),
+        }
+    }
+}
+
+impl PartialEq for IncomingViewingKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).unwrap_u8() == 1u8
     }
@@ -840,9 +812,6 @@ impl PartialEq<[u8; 32]> for DiversifierKey {
 }
 
 /// A _diversifier_, as described in [protocol specification §4.2.3][ps].
-///
-/// Combined with an `IncomingViewingKey`, produces a _diversified
-/// payment address_.
 ///
 /// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -989,7 +958,7 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
     fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
         let g_d = pallas::Point::from(d);
 
-        Self(pallas::Affine::from(g_d * ivk.scalar))
+        Self(pallas::Affine::from(g_d * ivk.ivk))
     }
 }
 
@@ -999,8 +968,63 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
     }
 }
 
-// TODO: implement EphemeralPrivateKey: #2192
+/// An _outgoing cipher key_ for Orchard note encryption/decryption.
+///
+/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
+// TODO: derive `OutgoingCipherKey`: https://github.com/ZcashFoundation/zebra/issues/2041
+#[derive(Copy, Clone, PartialEq)]
+pub struct OutgoingCipherKey([u8; 32]);
 
+impl fmt::Debug for OutgoingCipherKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("OutgoingCipherKey")
+            .field(&hex::encode(self.0))
+            .finish()
+    }
+}
+
+impl From<&OutgoingCipherKey> for [u8; 32] {
+    fn from(ock: &OutgoingCipherKey) -> [u8; 32] {
+        ock.0
+    }
+}
+
+// TODO: implement PrivateKey: #2192
+
+/// An ephemeral private key for Orchard key agreement.
+///
+/// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
+/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
+#[derive(Copy, Clone, Debug)]
+pub struct EphemeralPrivateKey(pub(crate) pallas::Scalar);
+
+impl ConstantTimeEq for EphemeralPrivateKey {
+    /// Check whether two `EphemeralPrivateKey`s are equal, runtime independent
+    /// of the value of the secret.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+    }
+}
+
+impl Eq for EphemeralPrivateKey {}
+
+impl From<EphemeralPrivateKey> for [u8; 32] {
+    fn from(esk: EphemeralPrivateKey) -> Self {
+        esk.0.to_bytes()
+    }
+}
+
+impl PartialEq for EphemeralPrivateKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).unwrap_u8() == 1u8
+    }
+}
+
+impl PartialEq<[u8; 32]> for EphemeralPrivateKey {
+    fn eq(&self, other: &[u8; 32]) -> bool {
+        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
+    }
+}
 /// An ephemeral public key for Orchard key agreement.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
@@ -1050,7 +1074,7 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
         } else {
-            Err("Invalid pallas::Affine value")
+            Err("Invalid pallas::Affine value for Orchard EphemeralPublicKey")
         }
     }
 }
@@ -1067,25 +1091,3 @@ impl ZcashDeserialize for EphemeralPublicKey {
         Self::try_from(reader.read_32_bytes()?).map_err(|e| SerializationError::Parse(e))
     }
 }
-
-/// An _outgoing cipher key_ for Orchard note encryption/decryption.
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
-#[derive(Copy, Clone, PartialEq)]
-pub struct OutgoingCipherKey([u8; 32]);
-
-impl fmt::Debug for OutgoingCipherKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("OutgoingCipherKey")
-            .field(&hex::encode(self.0))
-            .finish()
-    }
-}
-
-impl From<&OutgoingCipherKey> for [u8; 32] {
-    fn from(ock: &OutgoingCipherKey) -> [u8; 32] {
-        ock.0
-    }
-}
-
-// TODO: derive `OutgoingCipherKey`: https://github.com/ZcashFoundation/zebra/issues/2041
