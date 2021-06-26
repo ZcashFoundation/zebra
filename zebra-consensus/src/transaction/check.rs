@@ -13,12 +13,14 @@ use crate::error::TransactionError;
 /// Checks that the transaction has inputs and outputs.
 ///
 /// For `Transaction::V4`:
-/// * at least one of `tx_in_count`, `nSpendsSapling`, and `nJoinSplit` MUST be non-zero.
-/// * at least one of `tx_out_count`, `nOutputsSapling`, and `nJoinSplit` MUST be non-zero.
+/// * At least one of `tx_in_count`, `nSpendsSapling`, and `nJoinSplit` MUST be non-zero.
+/// * At least one of `tx_out_count`, `nOutputsSapling`, and `nJoinSplit` MUST be non-zero.
 ///
 /// For `Transaction::V5`:
-/// * at least one of `tx_in_count`, `nSpendsSapling`, and `nActionsOrchard` MUST be non-zero.
-/// * at least one of `tx_out_count`, `nOutputsSapling`, and `nActionsOrchard` MUST be non-zero.
+/// * This condition must hold: `tx_in_count` > 0 or `nSpendsSapling` > 0 or
+/// (`nActionsOrchard` > 0 and `enableSpendsOrchard` = 1)
+/// * This condition must hold: `tx_out_count` > 0 or `nOutputsSapling` > 0 or
+/// (`nActionsOrchard` > 0 and `enableOutputsOrchard` = 1)
 ///
 /// This check counts both `Coinbase` and `PrevOut` transparent inputs.
 ///
@@ -30,10 +32,21 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     let n_spends_sapling = tx.sapling_spends_per_anchor().count();
     let n_outputs_sapling = tx.sapling_outputs().count();
     let n_actions_orchard = tx.orchard_actions().count();
+    let flags_orchard = tx.orchard_flags().unwrap_or(Flags::empty());
 
-    if tx_in_count + n_spends_sapling + n_joinsplit + n_actions_orchard == 0 {
+    if tx_in_count
+        + n_spends_sapling
+        + n_joinsplit
+        + (n_actions_orchard > 0 && flags_orchard.contains(Flags::ENABLE_SPENDS)) as usize
+        == 0
+    {
         Err(TransactionError::NoInputs)
-    } else if tx_out_count + n_outputs_sapling + n_joinsplit + n_actions_orchard == 0 {
+    } else if tx_out_count
+        + n_outputs_sapling
+        + n_joinsplit
+        + (n_actions_orchard > 0 && flags_orchard.contains(Flags::ENABLE_OUTPUTS)) as usize
+        == 0
+    {
         Err(TransactionError::NoOutputs)
     } else {
         Ok(())
