@@ -32,7 +32,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     let n_spends_sapling = tx.sapling_spends_per_anchor().count();
     let n_outputs_sapling = tx.sapling_outputs().count();
     let n_actions_orchard = tx.orchard_actions().count();
-    let flags_orchard = tx.orchard_flags().unwrap_or(Flags::empty());
+    let flags_orchard = tx.orchard_flags().unwrap_or_else(Flags::empty);
 
     if tx_in_count
         + n_spends_sapling
