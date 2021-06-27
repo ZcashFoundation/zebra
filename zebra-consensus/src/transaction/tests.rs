@@ -660,3 +660,24 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
 
     (joinsplit_data, signing_key)
 }
+
+#[test]
+fn empty_sprout_pool_after_nu() {
+    zebra_test::init();
+
+    // get a block that we know it haves a transaction with `vpub_old` field greater than 0.
+    let block: Arc<_> = zebra_chain::block::Block::zcash_deserialize(
+        &zebra_test::vectors::BLOCK_MAINNET_419199_BYTES[..],
+    )
+    .unwrap()
+    .into();
+
+    // we know the 4th transaction of this block has the`vpub_old` field greater than 0.
+    assert_eq!(
+        check::disabled_sprout_pool(&block.transactions[3]),
+        Err(TransactionError::DisabledSproutPool)
+    );
+
+    // we know the in the 1st transaction of the same block, the `vpub_old` field is 0.
+    assert_eq!(check::disabled_sprout_pool(&block.transactions[0]), Ok(()));
+}

@@ -22,7 +22,7 @@ pub use sapling::FieldNotPresent;
 pub use sighash::HashType;
 
 use crate::{
-    block, orchard,
+    amount, block, orchard,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout, transparent,
@@ -291,6 +291,51 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => 0,
+        }
+    }
+
+    /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction, regardless of version.
+    pub fn sprout_pool(
+        &self,
+    ) -> Box<dyn Iterator<Item = &amount::Amount<amount::NonNegative>> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_old),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_old),
+            ),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
         }
     }
 

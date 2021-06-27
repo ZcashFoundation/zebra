@@ -3,12 +3,15 @@
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     orchard::Flags,
     sapling::{Output, PerSpendAnchor, Spend},
     transaction::Transaction,
 };
 
 use crate::error::TransactionError;
+
+use std::convert::TryFrom;
 
 /// Checks that the transaction has inputs and outputs.
 ///
@@ -104,4 +107,25 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
     } else {
         Ok(())
     }
+}
+
+/// Check if a transaction is using the diabled sprout pool.
+///
+/// This check should be made only if the transaction block is above certain
+/// height where the sprout pool is disabled by consensus rules. This is after
+/// Canopy activation height.
+///
+/// https://zips.z.cash/zip-0211
+/// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+pub fn disabled_sprout_pool(tx: &Transaction) -> Result<(), TransactionError> {
+    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0");
+
+    let tx_sprout_pool = tx.sprout_pool();
+    for vpub_old in tx_sprout_pool {
+        if *vpub_old != zero {
+            return Err(TransactionError::DisabledSproutPool);
+        }
+    }
+
+    Ok(())
 }

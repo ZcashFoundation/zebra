@@ -81,6 +81,9 @@ pub enum TransactionError {
     // temporary error type until #1186 is fixed
     #[error("Downcast from BoxError to redjubjub::Error failed")]
     InternalDowncastError(String),
+
+    #[error("sprout pool can't be used after Canopy")]
+    DisabledSproutPool,
 }
 
 impl From<BoxError> for TransactionError {

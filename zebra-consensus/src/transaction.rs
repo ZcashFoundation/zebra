@@ -169,6 +169,12 @@ where
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
             }
 
+            // [Canopy onward]: `vpub_old` MUST be zero.
+            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+            if req.upgrade(network) >= NetworkUpgrade::Canopy {
+                check::disabled_sprout_pool(&tx)?;
+            }
+
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
             //
