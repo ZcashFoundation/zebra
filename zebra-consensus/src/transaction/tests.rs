@@ -86,13 +86,14 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     // guaranteed structurally by `orchard::ShieldedData`)
     insert_fake_orchard_shielded_data(&mut transaction);
 
-    // The check will fail if it haves no flags
+    // The check will fail if the transaction has no flags
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
         Err(TransactionError::NoInputs)
     );
 
     // If we add ENABLE_SPENDS flag it will pass the inputs check but fails with the outputs
+    // TODO: Avoid new calls to `insert_fake_orchard_shielded_data` for each check #2409.
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
     shielded_data.flags = orchard::Flags::ENABLE_SPENDS;
 

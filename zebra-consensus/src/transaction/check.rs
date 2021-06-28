@@ -34,6 +34,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     let n_actions_orchard = tx.orchard_actions().count();
     let flags_orchard = tx.orchard_flags().unwrap_or_else(Flags::empty);
 
+    // TODO: Improve the code to express the spec rules better #2410.
     if tx_in_count
         + n_spends_sapling
         + n_joinsplit
