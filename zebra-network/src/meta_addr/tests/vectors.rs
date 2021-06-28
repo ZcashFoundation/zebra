@@ -133,3 +133,21 @@ fn gossiped_peer_reportedly_seen_long_ago_is_not_gossipable() {
 
     assert!(!peer.is_active_for_gossip());
 }
+
+/// Test that peer that has just responded is gossipable.
+#[test]
+fn recently_responded_peer_is_gossipable() {
+    zebra_test::init();
+
+    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+        .into_new_meta_addr()
+        .expect("MetaAddrChange can't create a new MetaAddr");
+
+    // Create a peer that has responded
+    let peer = MetaAddr::new_responded(&address, &PeerServices::NODE_NETWORK)
+        .apply_to_meta_addr(peer_seed)
+        .expect("Failed to create MetaAddr for responded peer");
+
+    assert!(peer.is_active_for_gossip());
+}
