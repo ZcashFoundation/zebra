@@ -69,7 +69,7 @@ jobs:
           cd zebra/;
           docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test .;
           docker run -i zebrad-test cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored;
-          docker run -i --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_canopy_mainnet;
+          docker run -i --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet;
           "
       # Clean up
       - name: Delete test instance
