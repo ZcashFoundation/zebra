@@ -31,9 +31,17 @@ fn forked_equals_pushed() -> Result<()> {
                 full_chain.push(block.clone())?;
             }
 
-            let forked = full_chain.fork(fork_tip_hash, &finalized_tree).expect("fork must work").expect("hash is present");
+            let mut forked = full_chain.fork(fork_tip_hash, &finalized_tree).expect("fork must work").expect("hash is present");
 
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
+            prop_assert!(forked.is_identical(&partial_chain));
+
+            for block in chain.iter().skip(count) {
+                forked.push(block.clone())?;
+            }
+
+            prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
+            prop_assert!(forked.is_identical(&full_chain));
         });
 
     Ok(())
@@ -72,6 +80,7 @@ fn finalized_equals_pushed() -> Result<()> {
         }
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
+        prop_assert!(full_chain.is_identical(&partial_chain));
     });
 
     Ok(())
