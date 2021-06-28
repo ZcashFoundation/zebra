@@ -13,9 +13,9 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::{collections::VecDeque, fmt};
+use std::fmt;
 
-use super::commitment::{pedersen_hashes::pedersen_hash, NoteCommitment};
+use super::commitment::pedersen_hashes::pedersen_hash;
 use bitvec::prelude::*;
 use lazy_static::lazy_static;
 
@@ -104,71 +104,134 @@ impl From<&Root> for [u8; 32] {
     }
 }
 
-/// Sapling Note Commitment Tree
+/// Sapling Incremental Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct NoteCommitmentTree {
-    /// The root node of the tree (often used as an anchor).
-    root: Root,
-    /// The height of the tree (maximum height for Sapling is 32).
-    height: u8,
-    /// The number of leaves (note commitments) in this tree.
-    count: u32,
+    left: Option<[u8; 32]>,
+    right: Option<[u8; 32]>,
+    parents: Vec<Option<[u8; 32]>>,
 }
 
-impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
-    fn from(_values: Vec<NoteCommitment>) -> Self {
-        unimplemented!();
+impl NoteCommitmentTree {
+    /// Adds a note commitment u-coordinate to the tree.
+    ///
+    /// The leaves of the tree are actually a base field element, the
+    /// u-coordinate of the commitment, the data that is actually stored on the
+    /// chain and input into the proof.
+    ///
+    /// Returns an error if the tree is full.
+    pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), ()> {
+        if self.is_complete() {
+            // Tree is full
+            return Err(());
+        }
+
+        let cm_bytes = cm_u.into();
+
+        match (self.left, self.right) {
+            (None, _) => self.left = Some(cm_bytes),
+            (_, None) => self.right = Some(cm_bytes),
+            (Some(l), Some(r)) => {
+                let mut combined = merkle_crh_sapling(0, l, r);
+                self.left = Some(cm_bytes);
+                self.right = None;
+
+                for i in 0..MERKLE_DEPTH {
+                    if i < self.parents.len() {
+                        if let Some(p) = self.parents[i] {
+                            combined = merkle_crh_sapling((i + 1) as u8, p, combined);
+                            self.parents[i] = None;
+                        } else {
+                            self.parents[i] = Some(combined);
+                            break;
+                        }
+                    } else {
+                        self.parents.push(Some(combined));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns the current root of the tree, used as an anchor in Sapling
+    /// shielded transactions.
+    pub fn root(&self) -> Root {
+        // Hash left and right together, filling in empty leaves as needed.
+        let leaf_root = merkle_crh_sapling(
+            0,
+            self.left.unwrap_or_else(|| EMPTY_ROOTS[0]),
+            self.right.unwrap_or_else(|| EMPTY_ROOTS[0]),
+        );
+
+        // Hash in parents up to the currently-filled depth, roots of the empty
+        // subtrees are used as needed.
+        let mid_root = self
+            .parents
+            .iter()
+            .enumerate()
+            .fold(leaf_root, |root, (i, p)| match p {
+                Some(node) => merkle_crh_sapling((i + 1) as u8, *node, root),
+                None => merkle_crh_sapling((i + 1) as u8, root, EMPTY_ROOTS[i + 1]),
+            });
+
+        // Hash in roots of the empty subtrees up to the final depth.
+        ((self.parents.len() + 1)..MERKLE_DEPTH)
+            .fold(mid_root, |root, d| {
+                merkle_crh_sapling(d as u8, root, EMPTY_ROOTS[d])
+            })
+            .into()
+    }
+
+    /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
+    /// note commitments.
+    pub fn hash(&self) -> [u8; 32] {
+        self.root().into()
+    }
+
+    /// Count of note commitments added to the tree.
+    ///
+    /// For Sapling, the tree is capped at 2^32.
+    pub fn count(&self) -> u32 {
+        self.parents.iter().enumerate().fold(
+            match (self.left, self.right) {
+                (None, None) => 0,
+                (Some(_), None) => 1,
+                (Some(_), Some(_)) => 2,
+                (None, Some(_)) => unreachable!(),
+            },
+            |acc, (i, p)| {
+                // Treat occupation of parents array as a binary number
+                // (right-shifted by 1)
+                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
+            },
+        )
+    }
+
+    fn is_complete(&self) -> bool {
+        self.left.is_some()
+            && self.right.is_some()
+            && self.parents.len() == MERKLE_DEPTH - 1
+            && self.parents.iter().all(|p| p.is_some())
     }
 }
 
 impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
+    /// Compute the tree from a whole bunch of note commitments at once.
     fn from(values: Vec<jubjub::Fq>) -> Self {
+        let mut tree = Self::default();
+
         if values.is_empty() {
-            return NoteCommitmentTree {
-                root: Root::default(),
-                height: 0,
-                count: 0,
-            };
+            return tree;
         }
 
-        let count = values.len() as u32;
-        let mut height = 0u8;
-        let mut current_layer: VecDeque<[u8; 32]> =
-            values.into_iter().map(|cm_u| cm_u.to_bytes()).collect();
-
-        while usize::from(height) < MERKLE_DEPTH {
-            let mut next_layer_up = vec![];
-
-            while !current_layer.is_empty() {
-                let left = current_layer.pop_front().unwrap();
-                let right;
-                if current_layer.is_empty() {
-                    right = EMPTY_ROOTS[height as usize];
-                } else {
-                    right = current_layer.pop_front().unwrap();
-                }
-                next_layer_up.push(merkle_crh_sapling(height, left, right));
-            }
-
-            height += 1;
-            current_layer = next_layer_up.into();
+        for cm_u in values {
+            let _ = tree.append(cm_u);
         }
 
-        assert!(current_layer.len() == 1);
-
-        NoteCommitmentTree {
-            root: Root(current_layer.pop_front().unwrap()),
-            height,
-            count,
-        }
-    }
-}
-
-impl NoteCommitmentTree {
-    /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
-    /// commitment notes.
-    pub fn hash(&self) -> [u8; 32] {
-        self.root.0
+        tree
     }
 }
 
@@ -273,14 +336,23 @@ mod tests {
 
         let mut leaves = vec![];
 
+        let mut incremental_tree = NoteCommitmentTree::default();
+
         for (i, cm_u) in commitments.iter().enumerate() {
             let bytes = <[u8; 32]>::from_hex(cm_u).unwrap();
 
-            leaves.push(jubjub::Fq::from_bytes(&bytes).unwrap());
+            let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
 
-            let tree = NoteCommitmentTree::from(leaves.clone());
+            leaves.push(cm_u);
 
-            assert_eq!(hex::encode(tree.hash()), roots[i]);
+            let _ = incremental_tree.append(cm_u);
+
+            assert_eq!(hex::encode(incremental_tree.hash()), roots[i]);
+
+            assert_eq!(
+                hex::encode((NoteCommitmentTree::from(leaves.clone())).hash()),
+                roots[i]
+            );
         }
     }
 }
