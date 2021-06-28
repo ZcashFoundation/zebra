@@ -169,13 +169,12 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
+    #[allow(clippy::identity_op)]
     pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), ()> {
         if self.is_complete() {
             // Tree is full
             return Err(());
         }
-
-        // let cm_bytes = cm_x.into();
 
         match (self.left, self.right) {
             (None, _) => self.left = Some(cm_x),
@@ -212,6 +211,7 @@ impl NoteCommitmentTree {
 
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
+    #[allow(clippy::identity_op)]
     pub fn root(&self) -> Root {
         // Hash left and right together, filling in empty leaves as needed.
         let leaf_root = merkle_crh_orchard(
