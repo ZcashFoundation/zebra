@@ -40,6 +40,21 @@ fn sanitize_extremes() {
     }
 }
 
+/// Test if a newly created local listening address is gossipable.
+///
+/// The local listener [`MetaAddr`] is always considered gossipable.
+#[test]
+fn new_local_listener_is_gossipable() {
+    zebra_test::init();
+
+    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer = MetaAddr::new_local_listener_change(&address)
+        .into_new_meta_addr()
+        .expect("MetaAddrChange can't create a new MetaAddr");
+
+    assert!(peer.is_active_for_gossip());
+}
+
 /// Test if a recently received alternate peer address is not gossipable.
 ///
 /// Such [`MetaAddr`] is only considered gossipable after Zebra has tried to connect to it and
