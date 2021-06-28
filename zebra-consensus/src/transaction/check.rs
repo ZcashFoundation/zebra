@@ -123,7 +123,7 @@ pub fn disabled_sprout_pool(tx: &Transaction) -> Result<(), TransactionError> {
     let tx_sprout_pool = tx.sprout_pool_added_values();
     for vpub_old in tx_sprout_pool {
         if *vpub_old != zero {
-            return Err(TransactionError::DisabledSproutPool);
+            return Err(TransactionError::DisabledAddToSproutPool);
         }
     }
 

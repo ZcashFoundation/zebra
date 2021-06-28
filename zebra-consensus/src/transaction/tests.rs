@@ -675,7 +675,7 @@ fn empty_sprout_pool_after_nu() {
     // we know the 4th transaction of this block has the`vpub_old` field greater than 0.
     assert_eq!(
         check::disabled_sprout_pool(&block.transactions[3]),
-        Err(TransactionError::DisabledSproutPool)
+        Err(TransactionError::DisabledAddToSproutPool)
     );
 
     // we know the in the 1st transaction of the same block, the `vpub_old` field is 0.
