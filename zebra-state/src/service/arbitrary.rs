@@ -99,7 +99,8 @@ impl Strategy for PreparedChain {
 /// - `transaction_has_valid_network_upgrade`: See `LedgerState::height_strategy` for details.
 /// - `blocks_after_nu_activation`: The number of blocks the strategy will generate
 /// after the provided `network_upgrade`.
-/// - `network_upgrade` - The height at which the strategy will start generating blocks.
+/// - `network_upgrade` - The network upgrade that we are using to simulate from where the
+/// legacy chain checks should start to apply.
 ///
 /// Returns:
 /// A generated arbitrary strategy for the provided arguments.
