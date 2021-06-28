@@ -64,13 +64,19 @@ impl Version {
     }
 
     /// Returns the minimum supported network protocol version for `network`.
-    /// This is the minimum peer version during initial block download.
+    ///
+    /// This is the minimum peer version when Zebra is significantly behind current tip:
+    /// - during the initial block download,
+    /// - after Zebra restarts, and
+    /// - after Zebra's local network is slow or shut down.
     fn initial_min_for_network(network: Network) -> Version {
         Version::min_specified_for_upgrade(network, constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION)
     }
 
     /// Returns the minimum specified network protocol version for `network` and
-    /// `height`. This is the minimum peer version after initial block download.
+    /// `height`.
+    ///
+    /// This is the minimum peer version when Zebra is close to the current tip.
     fn min_specified_for_height(network: Network, height: block::Height) -> Version {
         let network_upgrade = NetworkUpgrade::current(network, height);
         Version::min_specified_for_upgrade(network, network_upgrade)
