@@ -14,7 +14,7 @@ use chrono::{DateTime, Duration, Utc};
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
 /// incompatible ways.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
     ///

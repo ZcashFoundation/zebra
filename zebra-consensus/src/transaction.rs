@@ -176,7 +176,11 @@ where
 
             // [Canopy onward]: `vpub_old` MUST be zero.
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-            if req.upgrade(network) >= NetworkUpgrade::Canopy {
+            if req.height()
+                >= NetworkUpgrade::Canopy
+                    .activation_height(network)
+                    .expect("Canopy activation height must be present for both networks")
+            {
                 check::disabled_sprout_pool(&tx)?;
             }
 
