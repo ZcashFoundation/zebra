@@ -120,7 +120,7 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
 pub fn disabled_sprout_pool(tx: &Transaction) -> Result<(), TransactionError> {
     let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0");
 
-    let tx_sprout_pool = tx.sprout_pool();
+    let tx_sprout_pool = tx.sprout_pool_added_values();
     for vpub_old in tx_sprout_pool {
         if *vpub_old != zero {
             return Err(TransactionError::DisabledSproutPool);

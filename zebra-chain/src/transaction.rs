@@ -295,7 +295,10 @@ impl Transaction {
     }
 
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction, regardless of version.
-    pub fn sprout_pool(
+    ///
+    /// This value is removed from the transparent value pool of this transaction, and added to the
+    /// sprout value pool.
+    pub fn sprout_pool_added_values(
         &self,
     ) -> Box<dyn Iterator<Item = &amount::Amount<amount::NonNegative>> + '_> {
         match self {
