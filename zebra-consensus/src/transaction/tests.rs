@@ -308,7 +308,6 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     // Create a fake transparent coinbase that should succeed
     let (input, output) = mock_coinbase_transparent_output(transaction_block_height);
-    let known_utxos = HashMap::new();
 
     // Create a V4 coinbase transaction
     let transaction = Transaction::V4 {
@@ -330,7 +329,7 @@ async fn v4_coinbase_transaction_is_accepted() {
     let result = verifier
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
-            known_utxos: Arc::new(known_utxos),
+            known_utxos: Arc::new(HashMap::new()),
             height: transaction_block_height,
         })
         .await;
