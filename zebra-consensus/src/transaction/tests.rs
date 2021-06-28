@@ -678,6 +678,8 @@ fn empty_sprout_pool_after_nu() {
         Err(TransactionError::DisabledAddToSproutPool)
     );
 
-    // we know the in the 1st transaction of the same block, the `vpub_old` field is 0.
-    assert_eq!(check::disabled_sprout_pool(&block.transactions[0]), Ok(()));
+    // we know the in the 2nd transaction of the same block, the `vpub_old` field is 0.
+    // we don't use the 1st transaction as coinbase transactions are not allowed to have
+    // any sprout joinsplits.
+    assert_eq!(check::disabled_sprout_pool(&block.transactions[1]), Ok(()));
 }
