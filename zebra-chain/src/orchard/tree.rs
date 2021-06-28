@@ -1,7 +1,7 @@
 //! Note Commitment Trees.
 //!
 //! A note commitment tree is an incremental Merkle tree of fixed depth
-//! used to store note commitments that JoinSplit transfers or Spend
+//! used to store note commitments that Action
 //! transfers produce. Just as the unspent transaction output set (UTXO
 //! set) used in Bitcoin, it is used to express the existence of value and
 //! the capability to spend it. However, unlike the UTXO set, it is not
@@ -15,7 +15,6 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::VecDeque,
     convert::TryFrom,
     fmt,
     hash::{Hash, Hasher},
@@ -26,7 +25,7 @@ use bitvec::prelude::*;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use lazy_static::lazy_static;
 
-use super::{commitment::NoteCommitment, sinsemilla::*};
+use super::sinsemilla::*;
 
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
@@ -154,70 +153,104 @@ impl ZcashDeserialize for Root {
     }
 }
 
-/// Orchard Note Commitment Tree
+/// Orchard Incremental Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct NoteCommitmentTree {
-    /// The root node of the tree (often used as an anchor).
-    root: Root,
-    /// The height of the tree (maximum height for Orchard is 32).
-    height: u8,
-    /// The number of leaves (note commitments) in this tree.
-    count: u32,
-}
-
-impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
-    fn from(_values: Vec<NoteCommitment>) -> Self {
-        unimplemented!();
-    }
-}
-
-impl From<Vec<pallas::Base>> for NoteCommitmentTree {
-    fn from(values: Vec<pallas::Base>) -> Self {
-        if values.is_empty() {
-            return NoteCommitmentTree {
-                root: Root::default(),
-                height: 0,
-                count: 0,
-            };
-        }
-
-        let count = values.len() as u32;
-        let mut height = 0u8;
-        let mut current_layer: VecDeque<pallas::Base> = values.into_iter().collect();
-
-        while usize::from(height) < MERKLE_DEPTH {
-            let mut next_layer_up = vec![];
-
-            while !current_layer.is_empty() {
-                let left = current_layer.pop_front().unwrap();
-                let right;
-                if current_layer.is_empty() {
-                    right = EMPTY_ROOTS[height as usize];
-                } else {
-                    right = current_layer.pop_front().unwrap();
-                }
-                next_layer_up.push(merkle_crh_orchard(height, Some(left), Some(right)).unwrap());
-            }
-
-            height += 1;
-            current_layer = next_layer_up.into();
-        }
-
-        assert!(current_layer.len() == 1);
-
-        NoteCommitmentTree {
-            root: Root(current_layer.pop_front().unwrap()),
-            height,
-            count,
-        }
-    }
+    left: Option<pallas::Base>,
+    right: Option<pallas::Base>,
+    parents: Vec<Option<pallas::Base>>,
 }
 
 impl NoteCommitmentTree {
-    /// Get the Pallas-based Sinsemilla hash of root node of this merkle tree of
+    /// Adds a note commitment x-coordinate to the tree.
+    ///
+    /// The leaves of the tree are actually a base field element, the
+    /// x-coordinate of the commitment, the data that is actually stored on the
+    /// chain and input into the proof.
+    ///
+    /// Returns an error if the tree is full.
+    pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), ()> {
+        if self.is_complete() {
+            // Tree is full
+            return Err(());
+        }
+
+        // let cm_bytes = cm_x.into();
+
+        match (self.left, self.right) {
+            (None, _) => self.left = Some(cm_x),
+            (_, None) => self.right = Some(cm_x),
+            (Some(l), Some(r)) => {
+                let mut combined =
+                    merkle_crh_orchard((MERKLE_DEPTH - 1 - 0) as u8, Some(l), Some(r));
+                self.left = Some(cm_x);
+                self.right = None;
+
+                for i in 0..MERKLE_DEPTH {
+                    if i < self.parents.len() {
+                        if let Some(p) = self.parents[i] {
+                            combined = merkle_crh_orchard(
+                                (MERKLE_DEPTH - 1 - (i + 1)) as u8,
+                                Some(p),
+                                combined,
+                            );
+                            self.parents[i] = None;
+                        } else {
+                            self.parents[i] = combined;
+                            break;
+                        }
+                    } else {
+                        self.parents.push(combined);
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns the current root of the tree, used as an anchor in Orchard
+    /// shielded transactions.
+    pub fn root(&self) -> Root {
+        // Hash left and right together, filling in empty leaves as needed.
+        let leaf_root = merkle_crh_orchard(
+            (MERKLE_DEPTH - 1 - 0) as u8,
+            Some(self.left.unwrap_or_else(|| EMPTY_ROOTS[0])),
+            Some(self.right.unwrap_or_else(|| EMPTY_ROOTS[0])),
+        );
+
+        // Hash in parents up to the currently-filled depth, roots of the empty
+        // subtrees are used as needed.
+        let mid_root = self
+            .parents
+            .iter()
+            .enumerate()
+            .fold(leaf_root, |root, (i, p)| match p {
+                Some(node) => {
+                    merkle_crh_orchard((MERKLE_DEPTH - 1 - (i + 1)) as u8, Some(*node), root)
+                }
+                None => merkle_crh_orchard(
+                    (MERKLE_DEPTH - 1 - (i + 1)) as u8,
+                    root,
+                    Some(EMPTY_ROOTS[i + 1]),
+                ),
+            });
+
+        // Hash in roots of the empty subtrees up to the final depth.
+        Root(
+            ((self.parents.len() + 1)..MERKLE_DEPTH)
+                .fold(mid_root, |root, d| {
+                    merkle_crh_orchard((MERKLE_DEPTH - 1 - d) as u8, root, Some(EMPTY_ROOTS[d]))
+                })
+                .unwrap(),
+        )
+    }
+
+    /// Get the Pallas-based Sinsemilla hash / root node of this merkle tree of
     /// note commitments.
     pub fn hash(&self) -> [u8; 32] {
-        self.root.into()
+        self.root().into()
     }
 
     /// An as-yet unused Orchard note commitment tree leaf node.
@@ -227,6 +260,49 @@ impl NoteCommitmentTree {
     /// Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(2)
     pub fn uncommitted() -> pallas::Base {
         pallas::Base::one().double()
+    }
+
+    /// Count of note commitments added to the tree.
+    ///
+    /// For Orchard, the tree is capped at 2^32.
+    pub fn count(&self) -> u32 {
+        self.parents.iter().enumerate().fold(
+            match (self.left, self.right) {
+                (None, None) => 0,
+                (Some(_), None) => 1,
+                (Some(_), Some(_)) => 2,
+                (None, Some(_)) => unreachable!(),
+            },
+            |acc, (i, p)| {
+                // Treat occupation of parents array as a binary number
+                // (right-shifted by 1)
+                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
+            },
+        )
+    }
+
+    fn is_complete(&self) -> bool {
+        self.left.is_some()
+            && self.right.is_some()
+            && self.parents.len() == MERKLE_DEPTH - 1
+            && self.parents.iter().all(|p| p.is_some())
+    }
+}
+
+impl From<Vec<pallas::Base>> for NoteCommitmentTree {
+    /// Compute the tree from a whole bunch of note commitments at once.
+    fn from(values: Vec<pallas::Base>) -> Self {
+        let mut tree = Self::default();
+
+        if values.is_empty() {
+            return tree;
+        }
+
+        for cm_x in values {
+            let _ = tree.append(cm_x);
+        }
+
+        tree
     }
 }
 
