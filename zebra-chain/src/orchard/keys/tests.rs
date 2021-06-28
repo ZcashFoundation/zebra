@@ -1,7 +1,7 @@
 #![allow(clippy::module_inception)]
 
 use super::*;
-use crate::orchard::test_vectors;
+use crate::orchard::tests::test_vectors;
 
 use proptest::prelude::*;
 
@@ -11,7 +11,7 @@ impl Arbitrary for TransmissionKey {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (any::<SpendingKey>())
             .prop_map(|spending_key| {
-                let full_viewing_key = FullViewingKey::from_spending_key(spending_key);
+                let full_viewing_key = FullViewingKey::from(spending_key);
 
                 let diversifier_key = DiversifierKey::from(full_viewing_key);
 
@@ -28,8 +28,6 @@ impl Arbitrary for TransmissionKey {
 
 #[test]
 fn generate_keys_from_test_vectors() {
-    use std::panic;
-
     zebra_test::init();
 
     for (i, test_vector) in test_vectors::TEST_VECTORS.iter().enumerate() {

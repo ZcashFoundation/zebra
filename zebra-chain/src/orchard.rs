@@ -10,8 +10,6 @@ mod commitment;
 mod note;
 mod sinsemilla;
 #[cfg(test)]
-mod test_vectors;
-#[cfg(test)]
 mod tests;
 
 pub mod keys;

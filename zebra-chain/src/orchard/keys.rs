@@ -212,7 +212,7 @@ impl SpendingKey {
     }
 
     /// Generate a `SpendingKey` from existing bytes.
-    fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
+    pub fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
         Self { network, bytes }
     }
 }
@@ -510,20 +510,6 @@ impl FullViewingKey {
         // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
         prf_expand(K, t)
     }
-
-    /// Derive a _full viewing key_ from a existing _spending key_.
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#addressesandkeys>
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
-    pub fn from_spending_key(sk: SpendingKey) -> FullViewingKey {
-        let spend_authorizing_key = SpendAuthorizingKey::from(sk);
-
-        Self {
-            spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
-            nullifier_deriving_key: NullifierDerivingKey::from(sk),
-            ivk_commit_randomness: IvkCommitRandomness::from(sk),
-        }
-    }
 }
 
 impl ConstantTimeEq for FullViewingKey {
@@ -577,6 +563,22 @@ impl From<FullViewingKey> for [u8; 96] {
         bytes[64..].copy_from_slice(&<[u8; 32]>::from(fvk.ivk_commit_randomness));
 
         bytes
+    }
+}
+
+impl From<SpendingKey> for FullViewingKey {
+    /// Derive a _full viewing key_ from a existing _spending key_.
+    ///
+    /// <https://zips.z.cash/protocol/nu5.pdf#addressesandkeys>
+    /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
+    fn from(sk: SpendingKey) -> FullViewingKey {
+        let spend_authorizing_key = SpendAuthorizingKey::from(sk);
+
+        Self {
+            spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
+            nullifier_deriving_key: NullifierDerivingKey::from(sk),
+            ivk_commit_randomness: IvkCommitRandomness::from(sk),
+        }
     }
 }
 
