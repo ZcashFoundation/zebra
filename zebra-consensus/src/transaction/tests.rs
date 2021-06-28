@@ -662,7 +662,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
 }
 
 #[test]
-fn empty_sprout_pool_after_nu() {
+fn add_to_sprout_pool_after_nu() {
     zebra_test::init();
 
     // get a block that we know it haves a transaction with `vpub_old` field greater than 0.
@@ -672,14 +672,21 @@ fn empty_sprout_pool_after_nu() {
     .unwrap()
     .into();
 
+    // create a block height at canopy activation
+    let network = Network::Mainnet;
+    let block_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+
     // we know the 4th transaction of this block has the`vpub_old` field greater than 0.
     assert_eq!(
-        check::disabled_sprout_pool(&block.transactions[3]),
+        check::disabled_add_to_sprout_pool(&block.transactions[3], block_height, network),
         Err(TransactionError::DisabledAddToSproutPool)
     );
 
     // we know the in the 2nd transaction of the same block, the `vpub_old` field is 0.
     // we don't use the 1st transaction as coinbase transactions are not allowed to have
     // any sprout joinsplits.
-    assert_eq!(check::disabled_sprout_pool(&block.transactions[1]), Ok(()));
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[1], block_height, network),
+        Ok(())
+    );
 }

@@ -4,7 +4,9 @@
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
+    block::Height,
     orchard::Flags,
+    parameters::{Network, NetworkUpgrade},
     sapling::{Output, PerSpendAnchor, Spend},
     transaction::Transaction,
 };
@@ -109,21 +111,30 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
     }
 }
 
-/// Check if a transaction is using the diabled sprout pool.
-///
-/// This check should be made only if the transaction block is above certain
-/// height where the sprout pool is disabled by consensus rules. This is after
-/// Canopy activation height.
+/// Check if a transaction is adding to the sprout pool after Canopy
+/// network upgrade given a block height and a network.
 ///
 /// https://zips.z.cash/zip-0211
 /// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-pub fn disabled_sprout_pool(tx: &Transaction) -> Result<(), TransactionError> {
-    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+pub fn disabled_add_to_sprout_pool(
+    tx: &Transaction,
+    height: Height,
+    network: Network,
+) -> Result<(), TransactionError> {
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height must be present for both networks");
 
-    let tx_sprout_pool = tx.sprout_pool_added_values();
-    for vpub_old in tx_sprout_pool {
-        if *vpub_old != zero {
-            return Err(TransactionError::DisabledAddToSproutPool);
+    // [Canopy onward]: `vpub_old` MUST be zero.
+    // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+    if height >= canopy_activation_height {
+        let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+
+        let tx_sprout_pool = tx.sprout_pool_added_values();
+        for vpub_old in tx_sprout_pool {
+            if *vpub_old != zero {
+                return Err(TransactionError::DisabledAddToSproutPool);
+            }
         }
     }
 
