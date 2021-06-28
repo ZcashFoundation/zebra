@@ -192,7 +192,7 @@ impl Chain {
         }
     }
 
-    /// Return of two Chains are identical.
+    /// Return if two Chains are identical.
     #[cfg(test)]
     pub(crate) fn is_identical(&self, other: &Self) -> bool {
         self.blocks == other.blocks
