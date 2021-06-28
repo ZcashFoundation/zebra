@@ -118,7 +118,7 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
 /// https://zips.z.cash/zip-0211
 /// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
 pub fn disabled_sprout_pool(tx: &Transaction) -> Result<(), TransactionError> {
-    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0");
+    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
 
     let tx_sprout_pool = tx.sprout_pool_added_values();
     for vpub_old in tx_sprout_pool {
