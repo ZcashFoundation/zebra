@@ -34,6 +34,16 @@ pub struct CoinbaseData(
     pub(super) Vec<u8>,
 );
 
+#[cfg(any(test, feature = "proptest-impl"))]
+impl CoinbaseData {
+    /// Create a new `CoinbaseData` containing `data`.
+    ///
+    /// Only for use in tests.
+    pub fn new(data: Vec<u8>) -> CoinbaseData {
+        CoinbaseData(data)
+    }
+}
+
 impl AsRef<[u8]> for CoinbaseData {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
