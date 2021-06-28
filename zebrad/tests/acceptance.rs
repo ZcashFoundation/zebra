@@ -1,7 +1,7 @@
 //! Acceptance test: runs zebrad as a subprocess and asserts its
 //! output for given argument combinations matches what is expected.
 //!
-//! ### Note on port conflict
+//! ## Note on port conflict
 //!
 //! If the test child has a cache or port conflict with another test, or a
 //! running zebrad or zcashd, then it will panic. But the acceptance tests
@@ -11,6 +11,15 @@
 //!   - run the tests in an isolated environment,
 //!   - run zebrad on a custom cache path and port,
 //!   - run zcashd on a custom port.
+//!
+//! ## Failures due to Configured Network Interfaces
+//!
+//! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
+//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//!
+//! If it does not have any IPv4 interfaces, IPv4 localhost is not on `127.0.0.1`,
+//! or you have poor network connectivity,
+//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
 // Standard lints
 #![warn(missing_docs)]
