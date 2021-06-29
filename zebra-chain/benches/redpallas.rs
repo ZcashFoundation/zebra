@@ -1,3 +1,5 @@
+//! Benchmarks for batch verifiication of RedPallas signatures.
+
 use std::convert::TryFrom;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -5,6 +7,12 @@ use rand::{thread_rng, Rng};
 
 use zebra_chain::primitives::redpallas::*;
 
+/// A batch verification item of a RedPallas signature variant.
+///
+/// This struct exists to allow batch processing to be decoupled from the
+/// lifetime of the message. This is useful when using the batch verification
+/// API in an async context. The different enum variants are for the different
+/// signature types which use different Pallas basepoints for computation.
 enum Item {
     SpendAuth {
         vk_bytes: VerificationKeyBytes<SpendAuth>,
@@ -16,6 +24,10 @@ enum Item {
     },
 }
 
+/// Generates an iterator of random [Item]s
+///
+/// Each [Item] has a unique [SigningKey], randomly choosen [SigType] variant,
+/// and signature over the empty message, "".
 fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
     std::iter::repeat_with(|| {
         let mut rng = thread_rng();
@@ -38,6 +50,9 @@ fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
     })
 }
 
+/// Benchmarks batched vs unbatched RedPallas signature verification.
+///
+/// Includes heterogeneous groups across [SigType], [SigningKey]s, and messages.
 fn bench_batch_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("Batch Verification");
     for &n in [8usize, 16, 24, 32, 40, 48, 56, 64].iter() {
