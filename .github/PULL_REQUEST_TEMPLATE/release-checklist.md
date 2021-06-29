@@ -67,11 +67,13 @@ Merge all these version increments as one commit, by squashing and rebasing the 
 
 You can use `fastmod` to interactively find and replace versions.
 
-For example, for `zebra-1.0.0-alpha-3`, we did:
+For example, for `zebra-1.0.0-alpha-12`, we did:
 ```
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.3' '1.0.0-alpha.4'
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.2' '1.0.0-alpha.3'
-fastmod --extensions rs,toml,md --fixed-strings '0.2.0' '0.2.1' tower-batch
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13'
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.11' '1.0.0-alpha.12'
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.10' '1.0.0-alpha.11'
+fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch
+fastmod --extensions rs,toml,md --fixed-strings '0.2.8' '0.2.9' tower-fallback
 ```
 
 We skipped `tower-fallback`, because it hadn't changed since the last tag.
