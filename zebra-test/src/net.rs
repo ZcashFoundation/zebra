@@ -1,5 +1,7 @@
 //! Network testing utility functions for Zebra.
 
+use std::env;
+
 use rand::Rng;
 
 /// The name of the env var that skips Zebra tests which need reliable,
@@ -14,6 +16,35 @@ pub const ZEBRA_SKIP_NETWORK_TESTS: &str = "ZEBRA_SKIP_NETWORK_TESTS";
 ///
 /// We use a constant so that the compiler detects typos.
 pub const ZEBRA_SKIP_IPV6_TESTS: &str = "ZEBRA_SKIP_IPV6_TESTS";
+
+/// Should we skip Zebra tests which need reliable, fast network connectivity?
+//
+// TODO: separate "good and reliable" from "any network"?
+pub fn zebra_skip_network_tests() -> bool {
+    if env::var_os(ZEBRA_SKIP_NETWORK_TESTS).is_some() {
+        // This message is captured by the test runner, use
+        // `cargo test -- --nocapture` to see it.
+        eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
+        return true;
+    }
+
+    false
+}
+
+/// Should we skip Zebra tests which need a local IPv6 network stack and
+/// IPv6 interface addresses?
+///
+/// If we are skipping network tests, we also skip IPv6 tests.
+pub fn zebra_skip_ipv6_tests() -> bool {
+    if env::var_os(ZEBRA_SKIP_IPV6_TESTS).is_some() {
+        eprintln!("Skipping IPv6 network test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
+        return true;
+    }
+
+    // TODO: if we separate "good and reliable" from "any network",
+    //       also skip IPv6 tests when we're skipping all network tests.
+    false
+}
 
 /// Returns a random port number from the ephemeral port range.
 ///
