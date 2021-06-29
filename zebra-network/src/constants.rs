@@ -47,7 +47,7 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 
 
 /// The maximum duration since a peer was last seen to consider it reachable.
 ///
-/// This is used to prevent Zebra from gossiping networks that are likely unreachable. Peers that
+/// This is used to prevent Zebra from gossiping addresses that are likely unreachable. Peers that
 /// have last been seen more than this duration ago will not be gossiped.
 ///
 /// This is determined as a tradeoff between network health and network view leakage. From the
