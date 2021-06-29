@@ -70,12 +70,14 @@ fn bench_batch_verify(c: &mut Criterion) {
                     for item in sigs.iter() {
                         match item {
                             Item::SpendAuth { vk_bytes, sig } => {
-                                let _ = VerificationKey::try_from(*vk_bytes)
-                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig));
+                                assert!(VerificationKey::try_from(*vk_bytes)
+                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
+                                    .is_ok());
                             }
                             Item::Binding { vk_bytes, sig } => {
-                                let _ = VerificationKey::try_from(*vk_bytes)
-                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig));
+                                assert!(VerificationKey::try_from(*vk_bytes)
+                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
+                                    .is_ok());
                             }
                         }
                     }
@@ -99,7 +101,7 @@ fn bench_batch_verify(c: &mut Criterion) {
                             }
                         }
                     }
-                    batch.verify(thread_rng())
+                    assert!(batch.verify(thread_rng()).is_ok())
                 })
             },
         );
