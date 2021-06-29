@@ -813,7 +813,7 @@ fn sync_until(
 ) -> Result<TempDir> {
     zebra_test::init();
 
-    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_NETWORK_TESTS).is_some() {
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");

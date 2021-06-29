@@ -34,7 +34,7 @@ use Network::*;
 async fn local_listener_unspecified_port_unspecified_addr() {
     zebra_test::init();
 
-    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_NETWORK_TESTS).is_some() {
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
@@ -46,7 +46,7 @@ async fn local_listener_unspecified_port_unspecified_addr() {
     local_listener_port_with("0.0.0.0:0".parse().unwrap(), Mainnet).await;
     local_listener_port_with("0.0.0.0:0".parse().unwrap(), Testnet).await;
 
-    if env::var_os("ZEBRA_SKIP_IPV6_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_IPV6_TESTS).is_some() {
         eprintln!("Skipping IPv6 test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
         return;
     }
@@ -62,7 +62,7 @@ async fn local_listener_unspecified_port_unspecified_addr() {
 async fn local_listener_unspecified_port_localhost_addr() {
     zebra_test::init();
 
-    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_NETWORK_TESTS).is_some() {
         eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
         return;
     }
@@ -71,7 +71,7 @@ async fn local_listener_unspecified_port_localhost_addr() {
     local_listener_port_with("127.0.0.1:0".parse().unwrap(), Mainnet).await;
     local_listener_port_with("127.0.0.1:0".parse().unwrap(), Testnet).await;
 
-    if env::var_os("ZEBRA_SKIP_IPV6_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_IPV6_TESTS).is_some() {
         eprintln!("Skipping IPv6 test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
         return;
     }
@@ -89,7 +89,7 @@ async fn local_listener_fixed_port_localhost_addr() {
     let localhost_v4 = "127.0.0.1".parse().unwrap();
     let localhost_v6 = "::1".parse().unwrap();
 
-    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_NETWORK_TESTS).is_some() {
         eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
         return;
     }
@@ -97,7 +97,7 @@ async fn local_listener_fixed_port_localhost_addr() {
     local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), Mainnet).await;
     local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), Testnet).await;
 
-    if env::var_os("ZEBRA_SKIP_IPV6_TESTS").is_some() {
+    if env::var_os(zebra_test::net::ZEBRA_SKIP_IPV6_TESTS).is_some() {
         eprintln!("Skipping IPv6 test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
         return;
     }
