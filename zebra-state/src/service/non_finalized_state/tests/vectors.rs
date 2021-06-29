@@ -23,7 +23,7 @@ fn construct_single() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
     let mut chain = Chain::default();
-    chain.push(block.prepare());
+    chain.push(block.prepare())?;
 
     assert_eq!(1, chain.blocks.len());
 
@@ -47,7 +47,7 @@ fn construct_many() -> Result<()> {
     let mut chain = Chain::default();
 
     for block in blocks {
-        chain.push(block.prepare());
+        chain.push(block.prepare())?;
     }
 
     assert_eq!(100, chain.blocks.len());
@@ -64,10 +64,10 @@ fn ord_matches_work() -> Result<()> {
     let more_block = less_block.clone().set_work(10);
 
     let mut lesser_chain = Chain::default();
-    lesser_chain.push(less_block.prepare());
+    lesser_chain.push(less_block.prepare())?;
 
     let mut bigger_chain = Chain::default();
-    bigger_chain.push(more_block.prepare());
+    bigger_chain.push(more_block.prepare())?;
 
     assert!(bigger_chain > lesser_chain);
 
@@ -100,8 +100,8 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
     let expected_hash = block2.hash();
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block2.prepare());
-    state.commit_new_chain(child.prepare());
+    state.commit_new_chain(block2.prepare())?;
+    state.commit_new_chain(child.prepare())?;
 
     let best_chain = state.best_chain().unwrap();
     assert!(best_chain.height_by_hash.contains_key(&expected_hash));
@@ -133,9 +133,9 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let child = block1.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.clone().prepare());
-    state.commit_block(block2.clone().prepare());
-    state.commit_block(child.prepare());
+    state.commit_new_chain(block1.clone().prepare())?;
+    state.commit_block(block2.clone().prepare())?;
+    state.commit_block(child.prepare())?;
 
     let finalized = state.finalize();
     assert_eq!(block1, finalized.block);
@@ -177,13 +177,13 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
 
     let mut state = NonFinalizedState::default();
     assert_eq!(0, state.chain_set.len());
-    state.commit_new_chain(block1.prepare());
+    state.commit_new_chain(block1.prepare())?;
     assert_eq!(1, state.chain_set.len());
-    state.commit_block(block2.prepare());
+    state.commit_block(block2.prepare())?;
     assert_eq!(1, state.chain_set.len());
-    state.commit_block(child1.prepare());
+    state.commit_block(child1.prepare())?;
     assert_eq!(2, state.chain_set.len());
-    state.commit_block(child2.prepare());
+    state.commit_block(child2.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     Ok(())
@@ -215,10 +215,10 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.prepare());
-    state.commit_block(long_chain_block1.prepare());
-    state.commit_block(long_chain_block2.prepare());
-    state.commit_block(short_chain_block.prepare());
+    state.commit_new_chain(block1.prepare())?;
+    state.commit_block(long_chain_block1.prepare())?;
+    state.commit_block(long_chain_block2.prepare())?;
+    state.commit_block(short_chain_block.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     assert_eq!(2, state.best_chain_len());
@@ -254,12 +254,12 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.prepare());
-    state.commit_block(long_chain_block1.prepare());
-    state.commit_block(long_chain_block2.prepare());
-    state.commit_block(long_chain_block3.prepare());
-    state.commit_block(long_chain_block4.prepare());
-    state.commit_block(short_chain_block.prepare());
+    state.commit_new_chain(block1.prepare())?;
+    state.commit_block(long_chain_block1.prepare())?;
+    state.commit_block(long_chain_block2.prepare())?;
+    state.commit_block(long_chain_block3.prepare())?;
+    state.commit_block(long_chain_block4.prepare())?;
+    state.commit_block(short_chain_block.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     assert_eq!(5, state.best_chain_len());
@@ -291,9 +291,9 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let expected_hash = more_work_child.hash();
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.prepare());
-    state.commit_block(less_work_child.prepare());
-    state.commit_block(more_work_child.prepare());
+    state.commit_new_chain(block1.prepare())?;
+    state.commit_block(less_work_child.prepare())?;
+    state.commit_block(more_work_child.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     let tip_hash = state.best_tip().unwrap().1;

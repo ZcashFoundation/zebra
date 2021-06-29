@@ -19,7 +19,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo};
+use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo, ValidateContextError};
 
 use self::chain::Chain;
 
@@ -74,7 +74,7 @@ impl NonFinalizedState {
     }
 
     /// Commit block to the non-finalized state.
-    pub fn commit_block(&mut self, prepared: PreparedBlock) {
+    pub fn commit_block(&mut self, prepared: PreparedBlock) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -85,29 +85,26 @@ impl NonFinalizedState {
             );
         }
 
-        let mut parent_chain = self
-            .take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash)
-            .or_else(|| {
-                self.chain_set
-                    .iter()
-                    .find_map(|chain| chain.fork(parent_hash))
-                    .map(Box::new)
-            })
-            .expect("commit_block is only called with blocks that are ready to be commited");
+        let mut parent_chain = self.parent_chain(parent_hash)?;
 
-        parent_chain.push(prepared);
+        parent_chain.push(prepared)?;
         self.chain_set.insert(parent_chain);
         self.update_metrics_for_committed_block(height, hash);
+        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
-    pub fn commit_new_chain(&mut self, prepared: PreparedBlock) {
+    pub fn commit_new_chain(
+        &mut self,
+        prepared: PreparedBlock,
+    ) -> Result<(), ValidateContextError> {
         let mut chain = Chain::default();
         let (height, hash) = (prepared.height, prepared.hash);
-        chain.push(prepared);
+        chain.push(prepared)?;
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
+        Ok(())
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -243,6 +240,29 @@ impl NonFinalizedState {
             .iter()
             .next_back()
             .map(|box_chain| box_chain.deref())
+    }
+
+    /// Return the chain whose tip block hash is `parent_hash`.
+    ///
+    /// The chain can be an existing chain in the non-finalized state or a freshly
+    /// created fork, if needed.
+    fn parent_chain(
+        &mut self,
+        parent_hash: block::Hash,
+    ) -> Result<Box<Chain>, ValidateContextError> {
+        match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
+            // An existing chain in the non-finalized state
+            Some(chain) => Ok(chain),
+            // Create a new fork
+            None => Ok(Box::new(
+                self.chain_set
+                    .iter()
+                    .find_map(|chain| chain.fork(parent_hash).transpose())
+                    .expect(
+                        "commit_block is only called with blocks that are ready to be commited",
+                    )?,
+            )),
+        }
     }
 
     /// Update the metrics after `block` is committed
