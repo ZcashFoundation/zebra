@@ -7,7 +7,7 @@ use zebra_chain::{
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
-    serialization::ZcashDeserialize,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
     sprout,
     transaction::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
@@ -693,6 +693,58 @@ fn v4_with_unsigned_sprout_transfer_is_rejected() {
                 )
             )
         );
+    });
+}
+
+/// Test if a V4 transaction with Sapling spends is accepted by the verifier.
+#[test]
+fn v4_with_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+        let blocks = zebra_test::vectors::MAINNET_BLOCKS.iter();
+
+        let transactions = blocks.flat_map(|(_, block_bytes)| {
+            let block = block_bytes
+                .zcash_deserialize_into::<block::Block>()
+                .expect("block is structurally valid");
+
+            block.transactions
+        });
+
+        let transaction = transactions
+            .rev()
+            .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
+            .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+            .expect("No transaction found with Sapling spends");
+
+        let expected_hash = transaction.hash();
+
+        // Mock a block height after Canopy activation
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(network)
+            .expect("Canopy activation height is not set");
+
+        let transaction_block_height =
+            (canopy_activation_height + 10).expect("Canopy activation height is too large");
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height: transaction_block_height,
+            })
+            .await;
+
+        assert_eq!(result, Ok(expected_hash));
     });
 }
 
