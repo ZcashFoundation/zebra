@@ -256,7 +256,8 @@ impl AddressBook {
             None => false,
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
-                peer.last_connection_state == PeerAddrState::Responded && peer.was_recently_live()
+                peer.last_connection_state == PeerAddrState::Responded
+                    && peer.has_connection_recently_responded()
             }
         }
     }
@@ -291,7 +292,7 @@ impl AddressBook {
         // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
         self.by_addr
             .values()
-            .filter(|peer| peer.is_ready_for_attempt())
+            .filter(|peer| peer.is_ready_for_connection_attempt())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .cloned()
@@ -314,7 +315,7 @@ impl AddressBook {
 
         self.by_addr
             .values()
-            .filter(|peer| !peer.is_ready_for_attempt())
+            .filter(|peer| !peer.is_ready_for_connection_attempt())
             .cloned()
     }
 

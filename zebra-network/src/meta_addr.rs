@@ -411,16 +411,16 @@ impl MetaAddr {
     /// Returns `true` if the peer is likely connected and responsive in the peer
     /// set.
     ///
-    /// [`constants::LIVE_PEER_DURATION`] represents the time interval in which
+    /// [`constants::MIN_PEER_RECONNECTION_DELAY`] represents the time interval in which
     /// we should receive at least one message from a peer, or close the
     /// connection. Therefore, if the last-seen timestamp is older than
-    /// [`constants::LIVE_PEER_DURATION`] ago, we know we should have
+    /// [`constants::MIN_PEER_RECONNECTION_DELAY`] ago, we know we should have
     /// disconnected from it. Otherwise, we could potentially be connected to it.
-    pub fn was_recently_live(&self) -> bool {
+    pub fn has_connection_recently_responded(&self) -> bool {
         if let Some(last_response) = self.last_response {
             // Recent times and future times are considered live
             last_response.saturating_elapsed()
-                <= constants::LIVE_PEER_DURATION
+                <= constants::MIN_PEER_RECONNECTION_DELAY
                     .try_into()
                     .expect("unexpectedly large constant")
         } else {
@@ -433,12 +433,13 @@ impl MetaAddr {
     ///
     /// Returns `true` if this peer was recently attempted, or has a connection
     /// attempt in progress.
-    pub fn was_recently_attempted(&self) -> bool {
+    pub fn was_connection_recently_attempted(&self) -> bool {
         if let Some(last_attempt) = self.last_attempt {
             // Recent times and future times are considered live.
             // Instants are monotonic, so `now` should always be later than `last_attempt`,
             // except for synthetic data in tests.
-            Instant::now().saturating_duration_since(last_attempt) <= constants::LIVE_PEER_DURATION
+            Instant::now().saturating_duration_since(last_attempt)
+                <= constants::MIN_PEER_RECONNECTION_DELAY
         } else {
             // If there has never been any attempt, it can't possibly be live
             false
@@ -448,10 +449,11 @@ impl MetaAddr {
     /// Have we recently had a failed connection to this peer?
     ///
     /// Returns `true` if this peer has recently failed.
-    pub fn was_recently_failed(&self) -> bool {
+    pub fn has_connection_recently_failed(&self) -> bool {
         if let Some(last_failure) = self.last_failure {
             // Recent times and future times are considered live
-            Instant::now().saturating_duration_since(last_failure) <= constants::LIVE_PEER_DURATION
+            Instant::now().saturating_duration_since(last_failure)
+                <= constants::MIN_PEER_RECONNECTION_DELAY
         } else {
             // If there has never been any failure, it can't possibly be recent
             false
@@ -459,11 +461,11 @@ impl MetaAddr {
     }
 
     /// Is this address ready for a new outbound connection attempt?
-    pub fn is_ready_for_attempt(&self) -> bool {
+    pub fn is_ready_for_connection_attempt(&self) -> bool {
         self.last_known_info_is_valid_for_outbound()
-            && !self.was_recently_live()
-            && !self.was_recently_attempted()
-            && !self.was_recently_failed()
+            && !self.has_connection_recently_responded()
+            && !self.was_connection_recently_attempted()
+            && !self.has_connection_recently_failed()
     }
 
     /// Is the [`SocketAddr`] we have for this peer valid for outbound

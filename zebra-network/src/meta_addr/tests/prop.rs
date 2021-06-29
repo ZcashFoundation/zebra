@@ -19,7 +19,7 @@ use zebra_chain::serialization::{canonical_socket_addr, ZcashDeserialize, ZcashS
 
 use super::check;
 use crate::{
-    constants::LIVE_PEER_DURATION,
+    constants::MIN_PEER_RECONNECTION_DELAY,
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -228,7 +228,7 @@ proptest! {
     }
 
     /// Make sure that [`MetaAddr`]s do not get retried more than once per
-    /// [`LIVE_PEER_DURATION`], regardless of the [`MetaAddrChange`]s that are
+    /// [`MIN_PEER_RECONNECTION_DELAY`], regardless of the [`MetaAddrChange`]s that are
     /// applied to them.
     ///
     /// This is the simple version of the test, which checks [`MetaAddr`]s by
@@ -243,9 +243,9 @@ proptest! {
         let mut attempt_count: usize = 0;
 
         for change in changes {
-            while addr.is_ready_for_attempt() {
+            while addr.is_ready_for_connection_attempt() {
                 attempt_count += 1;
-                // Assume that this test doesn't last longer than LIVE_PEER_DURATION
+                // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
                 prop_assert!(attempt_count <= 1);
 
                 // Simulate an attempt
@@ -309,7 +309,7 @@ proptest! {
                                           .unwrap_or(DEFAULT_VERBOSE_TEST_PROPTEST_CASES)))]
 
     /// Make sure that [`MetaAddr`]s do not get retried more than once per
-    /// [`LIVE_PEER_DURATION`], regardless of the [`MetaAddrChange`]s that are
+    /// [`MIN_PEER_RECONNECTION_DELAY`], regardless of the [`MetaAddrChange`]s that are
     /// applied to a single peer's entries in the [`AddressBook`].
     ///
     /// This is the complex version of the test, which checks [`MetaAddr`],
@@ -323,7 +323,7 @@ proptest! {
         // Run the test for this many simulated live peer durations
         const LIVE_PEER_INTERVALS: u32 = 3;
         // Run the test for this much simulated time
-        let overall_test_time: Duration = LIVE_PEER_DURATION * LIVE_PEER_INTERVALS;
+        let overall_test_time: Duration = MIN_PEER_RECONNECTION_DELAY * LIVE_PEER_INTERVALS;
         // Advance the clock by this much for every peer change
         let peer_change_interval: Duration = overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
 
@@ -355,9 +355,9 @@ proptest! {
             tokio::time::pause();
 
             // The earliest time we can have a valid next attempt for this peer
-            let earliest_next_attempt = Instant::now() + LIVE_PEER_DURATION;
+            let earliest_next_attempt = Instant::now() + MIN_PEER_RECONNECTION_DELAY;
 
-            // The number of attempts for this peer in the last LIVE_PEER_DURATION
+            // The number of attempts for this peer in the last MIN_PEER_RECONNECTION_DELAY
             let mut attempt_count: usize = 0;
 
             for (i, change) in changes.into_iter().enumerate() {
@@ -415,7 +415,7 @@ proptest! {
         // Run the test for this many simulated live peer durations
         const LIVE_PEER_INTERVALS: u32 = 3;
         // Run the test for this much simulated time
-        let overall_test_time: Duration = LIVE_PEER_DURATION * LIVE_PEER_INTERVALS;
+        let overall_test_time: Duration = MIN_PEER_RECONNECTION_DELAY * LIVE_PEER_INTERVALS;
         // Advance the clock by this much for every peer change
         let peer_change_interval: Duration = overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
 
@@ -441,7 +441,7 @@ proptest! {
                     let addr = addrs.entry(addr.addr).or_insert(*addr);
                     let change = changes.get(change_index);
 
-                    while addr.is_ready_for_attempt() {
+                    while addr.is_ready_for_connection_attempt() {
                         *attempt_counts.entry(addr.addr).or_default() += 1;
                         assert!(*attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1);
 
