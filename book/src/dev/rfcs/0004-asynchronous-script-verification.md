@@ -173,7 +173,7 @@ We don't mistakenly accept or reject spends to the transparent pool:
 We don't mistakenly accept or reject mature spends:
 - across all chains, the set of coinbase transaction hashes is disjoint from
   the set of non-coinbase transaction hashes; and
-- across all chains, duplicate coinbase transaction hashes only occur at
+- across all chains, duplicate coinbase transaction hashes can only occur at
   exactly the same height.
 
 These properties are implied by the following consensus rules:
