@@ -395,7 +395,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 // defined.
 #[should_panic]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
-    let network = Network::Mainnet;
+    let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -446,7 +446,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 // defined.
 #[should_panic]
 async fn v5_coinbase_transaction_is_accepted() {
-    let network = Network::Mainnet;
+    let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -498,7 +498,7 @@ async fn v5_coinbase_transaction_is_accepted() {
 // defined.
 #[should_panic]
 async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
-    let network = Network::Mainnet;
+    let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
