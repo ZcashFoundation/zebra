@@ -378,6 +378,10 @@ fn start_no_args() -> Result<()> {
 
     output.stdout_line_contains("Starting zebrad")?;
 
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
     // Make sure the command was killed
     output.assert_was_killed()?;
 
@@ -709,6 +713,7 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -724,6 +729,7 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -746,6 +752,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -756,6 +763,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),
+        false,
     )?;
 
     Ok(())
@@ -775,6 +783,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -783,6 +792,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         "previous state height is greater than the stop height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),
+        false,
     )?;
 
     Ok(())
@@ -810,6 +820,7 @@ fn sync_until(
     stop_regex: &str,
     timeout: Duration,
     reuse_tempdir: Option<TempDir>,
+    check_legacy_chain: bool,
 ) -> Result<TempDir> {
     zebra_test::init();
 
@@ -833,6 +844,12 @@ fn sync_until(
 
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
+
+    if check_legacy_chain {
+        child.expect_stdout_line_matches("starting legacy chain check")?;
+        child.expect_stdout_line_matches("no legacy chain found")?;
+    }
+
     child.expect_stdout_line_matches(stop_regex)?;
     child.kill()?;
 
@@ -866,7 +883,12 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
 
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
+
+    child.expect_stdout_line_matches("starting legacy chain check")?;
+    child.expect_stdout_line_matches("no legacy chain found")?;
+
     child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
+
     child.kill()?;
 
     Ok(())

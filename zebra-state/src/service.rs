@@ -14,8 +14,8 @@ use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
     parameters::POW_AVERAGING_WINDOW,
+    parameters::{Network, NetworkUpgrade},
     transaction,
     transaction::Transaction,
     transparent,
@@ -26,6 +26,8 @@ use crate::{
     Request, Response, Utxo, ValidateContextError,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
 mod check;
 mod finalized_state;
 mod non_finalized_state;
@@ -64,6 +66,7 @@ impl StateService {
 
     pub fn new(config: Config, network: Network) -> Self {
         let disk = FinalizedState::new(&config, network);
+
         let mem = NonFinalizedState {
             network,
             ..Default::default()
@@ -71,14 +74,40 @@ impl StateService {
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
-        Self {
+        let state = Self {
             disk,
             mem,
             queued_blocks,
             pending_utxos,
             network,
             last_prune: Instant::now(),
+        };
+
+        tracing::info!("starting legacy chain check");
+        if let Some(tip) = state.best_tip() {
+            if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
+                if legacy_chain_check(
+                    nu5_activation_height,
+                    state.any_ancestor_blocks(tip.1),
+                    state.network,
+                )
+                .is_err()
+                {
+                    let legacy_db_path = Some(state.disk.path().to_path_buf());
+                    panic!(
+                        "Cached state contains a legacy chain. \
+                        An outdated Zebra version did not know about a recent network upgrade, \
+                        so it followed a legacy chain using outdated rules. \
+                        Hint: Delete your database, and restart Zebra to do a full sync. \
+                        Database path: {:?}",
+                        legacy_db_path,
+                    );
+                }
+            }
         }
+        tracing::info!("no legacy chain found");
+
+        state
     }
 
     /// Queue a non finalized block for verification and check if any queued
@@ -678,4 +707,57 @@ impl Service<Request> for StateService {
 /// probably not what you want.
 pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
     BoxService::new(StateService::new(config, network))
+}
+
+/// Check if zebra is following a legacy chain and return an error if so.
+fn legacy_chain_check<I>(
+    nu5_activation_height: block::Height,
+    ancestors: I,
+    network: Network,
+) -> Result<(), BoxError>
+where
+    I: Iterator<Item = Arc<Block>>,
+{
+    const MAX_BLOCKS_TO_CHECK: usize = 100;
+
+    for (count, block) in ancestors.enumerate() {
+        // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
+        // so the rest of our checks are useless.
+        //
+        // If the cached tip is close to NU5 activation, but there aren't any V5 transactions in the
+        // chain yet, we could reach MAX_BLOCKS_TO_CHECK in Canopy, and incorrectly return an error.
+        if block
+            .coinbase_height()
+            .expect("valid blocks have coinbase heights")
+            < nu5_activation_height
+        {
+            return Ok(());
+        }
+
+        // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
+        // the Zebra instance that verified those blocks had no NU5 activation height.
+        if count >= MAX_BLOCKS_TO_CHECK {
+            return Err("giving up after checking too many blocks".into());
+        }
+
+        // If a transaction `network_upgrade` field is different from the network upgrade calculated
+        // using our activation heights, the Zebra instance that verified those blocks had different
+        // network upgrade heights.
+        block
+            .check_transaction_network_upgrade_consistency(network)
+            .map_err(|_| "inconsistent network upgrade found in transaction")?;
+
+        // If we find at least one transaction with a valid `network_upgrade` field, the Zebra instance that
+        // verified those blocks used the same network upgrade heights. (Up to this point in the chain.)
+        let has_network_upgrade = block
+            .transactions
+            .iter()
+            .find_map(|trans| trans.network_upgrade())
+            .is_some();
+        if has_network_upgrade {
+            return Ok(());
+        }
+    }
+
+    Ok(())
 }
