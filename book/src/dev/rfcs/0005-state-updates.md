@@ -606,7 +606,7 @@ We use the following rocksdb column families:
 | `height_by_hash`     | `block::Hash`         | `BE32(height)`                      |
 | `block_by_height`    | `BE32(height)`        | `Block`                             |
 | `tx_by_hash`         | `transaction::Hash`   | `(BE32(height) \|\| BE32(tx_index))`|
-| `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
+| `utxo_by_outpoint`   | `OutPoint`            | `transparent::Output`               |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
 | `orchard_nullifiers` | `orchard::Nullifier`  | `()`                                |
@@ -707,8 +707,7 @@ fields in the `Commit*Block` requests.
 
 Due to the coinbase maturity rules, the Sprout root is the empty root
 for the first 100 blocks. (These rules are already implemented in contextual
-validation and the anchor calculations.) Therefore, `zcashd`'s genesis bug is
-irrelevant for the mainnet and testnet chains.
+validation and the anchor calculations.)
 
 Hypothetically, if Sapling were activated from genesis, the specification requires
 a Sapling anchor, but `zcashd` would ignore that anchor.
@@ -900,7 +899,7 @@ Implemented by querying:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
     the `block_by_height` tree (to get the block data), if the block is not in any non-finalized chain
 
-### `Request::AwaitUtxo(OutPoint)`
+### `Request::AwaitSpendableUtxo { outpoint: OutPoint, spend_height: Height, spend_pools: SpendPools }`
 
 Returns
 
@@ -909,10 +908,13 @@ Returns
 Implemented by querying:
 
 - (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`
-  get the `transparent::Output` from `OutPoint`'s transaction
-- (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the
-  associated `transparent::Output`.
-- else wait for `OutPoint` to be created as described in [RFC0004]
+  get the `transparent::Output` from `OutPoint`'s transaction,
+  and the `height` for `OutPoint.hash`;
+- (finalized) else if `OutPoint` is in `utxos_by_outpoint`,
+  return the associated `transparent::Output`,
+  and the `height` for `OutPoint.hash`;
+- else wait for `OutPoint` to be created as described in [RFC0004];
+- then perform the coinbase validation specified in [RFC0004].
 
 [RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 
