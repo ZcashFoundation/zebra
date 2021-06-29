@@ -70,7 +70,7 @@ mod tests;
 /// ││        ▼                                                      ││
 /// ││        Λ                                                      ││
 /// ││       ╱ ╲              filter by                              ││
-/// ││      ▕   ▏        is_ready_for_attempt                        ││
+/// ││      ▕   ▏        is_ready_for_connection_attempt             ││
 /// ││       ╲ ╱    to remove recent `Responded`,                    ││
 /// ││        V  `AttemptPending`, and `Failed` peers                ││
 /// ││        │                                                      ││

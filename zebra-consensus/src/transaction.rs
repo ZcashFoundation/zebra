@@ -82,21 +82,22 @@ pub enum Request {
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
         known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
-        /// The height of the block containing this transaction, used to
-        /// determine the applicable network upgrade.
+        /// The height of the block containing this transaction.
         height: block::Height,
     },
     /// Verify the supplied transaction as part of the mempool.
+    ///
+    /// Mempool transactions do not have any additional UTXOs.
     ///
     /// Note: coinbase transactions are invalid in the mempool
     Mempool {
         /// The transaction itself.
         transaction: Arc<Transaction>,
-        /// Additional UTXOs which are known at the time of verification.
-        known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
-        /// Bug: this field should be the next block height, because some
-        /// consensus rules depend on the exact height. See #1683.
-        upgrade: NetworkUpgrade,
+        /// The height of the next block.
+        ///
+        /// The next block is the first block that could possibly contain a
+        /// mempool transaction.
+        height: block::Height,
     },
 }
 
@@ -113,7 +114,14 @@ impl Request {
     pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
-            Request::Mempool { known_utxos, .. } => known_utxos.clone(),
+            Request::Mempool { .. } => HashMap::new().into(),
+        }
+    }
+
+    /// The height used to select the consensus rules for verifying this transaction.
+    pub fn height(&self) -> block::Height {
+        match self {
+            Request::Block { height, .. } | Request::Mempool { height, .. } => *height,
         }
     }
 
@@ -121,10 +129,7 @@ impl Request {
     ///
     /// This is based on the block height from the request, and the supplied `network`.
     pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
-        match self {
-            Request::Block { height, .. } => NetworkUpgrade::current(network, *height),
-            Request::Mempool { upgrade, .. } => *upgrade,
-        }
+        NetworkUpgrade::current(network, self.height())
     }
 }
 
@@ -448,27 +453,33 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
-        // feed all of the inputs to the script and shielded verifiers
-        // the script_verifier also checks transparent sighashes, using its own implementation
-        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
-        let known_utxos = request.known_utxos();
-        let upgrade = request.upgrade(network);
+        if transaction.is_coinbase() {
+            // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
+            // Coinbase transactions don't have any PrevOut inputs.
+            Ok(AsyncChecks::new())
+        } else {
+            // feed all of the inputs to the script and shielded verifiers
+            // the script_verifier also checks transparent sighashes, using its own implementation
+            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+            let known_utxos = request.known_utxos();
+            let upgrade = request.upgrade(network);
 
-        let script_checks = (0..inputs.len())
-            .into_iter()
-            .map(move |input_index| {
-                let request = script::Request {
-                    upgrade,
-                    known_utxos: known_utxos.clone(),
-                    cached_ffi_transaction: cached_ffi_transaction.clone(),
-                    input_index,
-                };
+            let script_checks = (0..inputs.len())
+                .into_iter()
+                .map(move |input_index| {
+                    let request = script::Request {
+                        upgrade,
+                        known_utxos: known_utxos.clone(),
+                        cached_ffi_transaction: cached_ffi_transaction.clone(),
+                        input_index,
+                    };
 
-                script_verifier.clone().oneshot(request).boxed()
-            })
-            .collect();
+                    script_verifier.clone().oneshot(request).boxed()
+                })
+                .collect();
 
-        Ok(script_checks)
+            Ok(script_checks)
+        }
     }
 
     /// Verifies a transaction's Sprout shielded join split data.

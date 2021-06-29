@@ -483,4 +483,11 @@ impl Transaction {
             .map(orchard::ShieldedData::nullifiers)
             .flatten()
     }
+
+    /// Access the [`orchard::Flags`] in this transaction, if there is any,
+    /// regardless of version.
+    pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
+        self.orchard_shielded_data()
+            .map(|orchard_shielded_data| orchard_shielded_data.flags)
+    }
 }

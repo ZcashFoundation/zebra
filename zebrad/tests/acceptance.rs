@@ -1,7 +1,7 @@
 //! Acceptance test: runs zebrad as a subprocess and asserts its
 //! output for given argument combinations matches what is expected.
 //!
-//! ### Note on port conflict
+//! ## Note on port conflict
 //!
 //! If the test child has a cache or port conflict with another test, or a
 //! running zebrad or zcashd, then it will panic. But the acceptance tests
@@ -11,6 +11,15 @@
 //!   - run the tests in an isolated environment,
 //!   - run zebrad on a custom cache path and port,
 //!   - run zcashd on a custom port.
+//!
+//! ## Failures due to Configured Network Interfaces or Network Connectivity
+//!
+//! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
+//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//!
+//! If it does not have any IPv4 interfaces, IPv4 localhost is not on `127.0.0.1`,
+//! or you have poor network connectivity,
+//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
 // Standard lints
 #![warn(missing_docs)]
@@ -24,7 +33,7 @@ use color_eyre::{
 };
 use tempdir::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -369,6 +378,10 @@ fn start_no_args() -> Result<()> {
 
     output.stdout_line_contains("Starting zebrad")?;
 
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
     // Make sure the command was killed
     output.assert_was_killed()?;
 
@@ -700,6 +713,7 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -715,6 +729,7 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -737,6 +752,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         STOP_AT_HEIGHT_REGEX,
         SMALL_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -747,6 +763,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),
+        false,
     )?;
 
     Ok(())
@@ -766,6 +783,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
+        true,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -774,6 +792,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         "previous state height is greater than the stop height",
         STOP_ON_LOAD_TIMEOUT,
         Some(reuse_tempdir),
+        false,
     )?;
 
     Ok(())
@@ -801,13 +820,11 @@ fn sync_until(
     stop_regex: &str,
     timeout: Duration,
     reuse_tempdir: Option<TempDir>,
+    check_legacy_chain: bool,
 ) -> Result<TempDir> {
     zebra_test::init();
 
-    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
-        // This message is captured by the test runner, use
-        // `cargo test -- --nocapture` to see it.
-        eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
+    if zebra_test::net::zebra_skip_network_tests() {
         return testdir();
     }
 
@@ -827,6 +844,12 @@ fn sync_until(
 
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
+
+    if check_legacy_chain {
+        child.expect_stdout_line_matches("starting legacy chain check")?;
+        child.expect_stdout_line_matches("no legacy chain found")?;
+    }
+
     child.expect_stdout_line_matches(stop_regex)?;
     child.kill()?;
 
@@ -860,7 +883,12 @@ fn create_cached_database_height(network: Network, height: Height) -> Result<()>
 
     let network = format!("network: {},", network);
     child.expect_stdout_line_matches(&network)?;
+
+    child.expect_stdout_line_matches("starting legacy chain check")?;
+    child.expect_stdout_line_matches("no legacy chain found")?;
+
     child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
+
     child.kill()?;
 
     Ok(())

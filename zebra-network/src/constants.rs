@@ -8,7 +8,7 @@ use regex::Regex;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
-use zebra_chain::parameters::NetworkUpgrade;
+use zebra_chain::{parameters::NetworkUpgrade, serialization::Duration32};
 
 /// The buffer size for the peer set.
 ///
@@ -43,7 +43,19 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// This avoids explicit synchronization, but relies on the peer
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
-pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 20 + 20 + 20);
+pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 20 + 20);
+
+/// The maximum duration since a peer was last seen to consider it reachable.
+///
+/// This is used to prevent Zebra from gossiping addresses that are likely unreachable. Peers that
+/// have last been seen more than this duration ago will not be gossiped.
+///
+/// This is determined as a tradeoff between network health and network view leakage. From the
+/// [Bitcoin protocol documentation](https://en.bitcoin.it/wiki/Protocol_documentation#getaddr):
+///
+/// "The typical presumption is that a node is likely to be active if it has been sending a message
+/// within the last three hours."
+pub const MAX_PEER_ACTIVE_FOR_GOSSIP: Duration32 = Duration32::from_hours(3);
 
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
@@ -100,19 +112,25 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.11/";
 /// during connection setup.
 ///
 /// The current protocol version is checked by our peers. If it is too old,
-/// newer peers will refuse to connect to us.
+/// newer peers will disconnect from us.
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_VERSION: Version = Version(170_013);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_013);
 
-/// The most recent bilateral consensus upgrade implemented by this crate.
+/// The minimum network protocol version accepted by this crate for each network,
+/// represented as a network upgrade.
 ///
-/// The minimum network upgrade is used to check the protocol versions of our
-/// peers. If their versions are too old, we will disconnect from them.
-//
-// TODO: replace with NetworkUpgrade::current(network, height). (#1334)
-pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Canopy;
+/// The minimum protocol version is used to check the protocol versions of our
+/// peers during the initial block download. After the intial block download,
+/// we use the current block height to select the minimum network protocol
+/// version.
+///
+/// If peer versions are too old, we will disconnect from them.
+///
+/// The minimum network protocol version typically changes after Mainnet network
+/// upgrades.
+pub const INITIAL_MIN_NETWORK_PROTOCOL_VERSION: NetworkUpgrade = NetworkUpgrade::Canopy;
 
 /// The default RTT estimate for peer responses.
 ///
@@ -164,7 +182,7 @@ mod tests {
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
-    /// LIVE_PEER_DURATION actually matches the other const values it
+    /// MIN_PEER_RECONNECTION_DELAY actually matches the other const values it
     /// relies on.
     #[test]
     fn ensure_live_peer_duration_value_matches_others() {
@@ -173,7 +191,7 @@ mod tests {
         let constructed_live_peer_duration =
             HEARTBEAT_INTERVAL + REQUEST_TIMEOUT + REQUEST_TIMEOUT + REQUEST_TIMEOUT;
 
-        assert_eq!(LIVE_PEER_DURATION, constructed_live_peer_duration);
+        assert_eq!(MIN_PEER_RECONNECTION_DELAY, constructed_live_peer_duration);
     }
 
     /// Make sure that the timeout values are consistent with each other.

@@ -53,6 +53,8 @@ pub struct Request {
     /// A cached transaction, in the format required by the script verifier FFI interface.
     pub cached_ffi_transaction: Arc<CachedFfiTransaction>,
     /// The index of an input in `cached_ffi_transaction`, used for verifying this request
+    ///
+    /// Coinbase inputs are rejected by the script verifier, because they do not spend a UTXO.
     pub input_index: usize,
     /// A set of additional UTXOs known in the context of this verification request.
     ///

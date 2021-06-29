@@ -6,8 +6,8 @@ use zebra_test::prelude::*;
 use crate::{
     config::Config,
     service::{
+        arbitrary::PreparedChain,
         finalized_state::{FinalizedBlock, FinalizedState},
-        non_finalized_state::arbitrary::PreparedChain,
     },
 };
 

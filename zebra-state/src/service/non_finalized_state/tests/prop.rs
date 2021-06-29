@@ -3,7 +3,7 @@ use std::env;
 use zebra_chain::{history_tree::HistoryTree, sapling};
 use zebra_test::prelude::*;
 
-use crate::service::non_finalized_state::{arbitrary::PreparedChain, Chain};
+use crate::service::{arbitrary::PreparedChain, non_finalized_state::Chain};
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 32;
 
