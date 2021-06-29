@@ -19,14 +19,20 @@ and in parallel on a thread pool.
 # Definitions
 [definitions]: #definitions
 
-- *UTXO*: unspent transparent output. Transparent transaction outputs are modeled in `zebra-chain` by the [`transparent::Output`][transout] structure.
+- *UTXO*: unspent transparent transaction output.
+  Transparent transaction outputs are modeled in `zebra-chain` by the [`transparent::Output`][transout] structure.
+- outpoint: a reference to an unspent transparent transaction output, including a transaction hash and output index.
+  Outpoints are modeled in `zebra-chain` by the [`transparent::OutPoint`][outpoint] structure.  
 - transparent input: a previous transparent output consumed by a later transaction (the one it is an input to).
   Modeled in `zebra-chain` by the [`transparent::Input::PrevOut`][transin] enum variant.
 - coinbase transaction: the first transaction in each block, which creates new coins.
-- lock script: the script that defines the conditions under which some UTXO can be spent.  Stored in the [`transparent::Output::lock_script`][lock_script] field.
-- unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.  Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
+- lock script: the script that defines the conditions under which some UTXO can be spent.
+  Stored in the [`transparent::Output::lock_script`][lock_script] field.
+- unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.
+  Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
 
 [transout]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html
+[outpoint]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.OutPoint.html
 [lock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html#structfield.lock_script
 [transin]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html
 [unlock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html#variant.PrevOut.field.unlock_script
@@ -36,7 +42,7 @@ and in parallel on a thread pool.
 [guide-level-explanation]: #guide-level-explanation
 
 Zcash's transparent address system is inherited from Bitcoin. Transactions
-spend unspent transaction outputs (UTXOs) from previous transactions. These
+spend unspent transparent transaction outputs (UTXOs) from previous transactions. These
 UTXOs are encumbered by *locking scripts* that define the conditions under
 which they can be spent, e.g., requiring a signature from a certain key.
 Transactions wishing to spend UTXOs supply an *unlocking script* that should
