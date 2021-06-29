@@ -8,7 +8,7 @@ use regex::Regex;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
-use zebra_chain::parameters::NetworkUpgrade;
+use zebra_chain::{parameters::NetworkUpgrade, serialization::Duration32};
 
 /// The buffer size for the peer set.
 ///
@@ -43,7 +43,19 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// This avoids explicit synchronization, but relies on the peer
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
-pub const LIVE_PEER_DURATION: Duration = Duration::from_secs(60 + 20 + 20 + 20);
+pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 20 + 20);
+
+/// The maximum duration since a peer was last seen to consider it reachable.
+///
+/// This is used to prevent Zebra from gossiping addresses that are likely unreachable. Peers that
+/// have last been seen more than this duration ago will not be gossiped.
+///
+/// This is determined as a tradeoff between network health and network view leakage. From the
+/// [Bitcoin protocol documentation](https://en.bitcoin.it/wiki/Protocol_documentation#getaddr):
+///
+/// "The typical presumption is that a node is likely to be active if it has been sending a message
+/// within the last three hours."
+pub const MAX_PEER_ACTIVE_FOR_GOSSIP: Duration32 = Duration32::from_hours(3);
 
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
@@ -170,7 +182,7 @@ mod tests {
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
-    /// LIVE_PEER_DURATION actually matches the other const values it
+    /// MIN_PEER_RECONNECTION_DELAY actually matches the other const values it
     /// relies on.
     #[test]
     fn ensure_live_peer_duration_value_matches_others() {
@@ -179,7 +191,7 @@ mod tests {
         let constructed_live_peer_duration =
             HEARTBEAT_INTERVAL + REQUEST_TIMEOUT + REQUEST_TIMEOUT + REQUEST_TIMEOUT;
 
-        assert_eq!(LIVE_PEER_DURATION, constructed_live_peer_duration);
+        assert_eq!(MIN_PEER_RECONNECTION_DELAY, constructed_live_peer_duration);
     }
 
     /// Make sure that the timeout values are consistent with each other.

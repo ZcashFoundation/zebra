@@ -22,7 +22,7 @@ pub mod sha256d;
 pub mod arbitrary;
 
 pub use constraint::AtLeastOne;
-pub use date_time::DateTime32;
+pub use date_time::{DateTime32, Duration32};
 pub use error::SerializationError;
 pub use read_zcash::{canonical_socket_addr, ReadZcashExt};
 pub use write_zcash::WriteZcashExt;

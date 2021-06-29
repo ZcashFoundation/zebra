@@ -14,6 +14,9 @@ use zebra_chain::serialization::canonical_socket_addr;
 
 use crate::{meta_addr::MetaAddrChange, types::MetaAddr, PeerAddrState};
 
+#[cfg(test)]
+mod tests;
+
 /// A database of peer listener addresses, their advertised services, and
 /// information on when they were last seen.
 ///
@@ -159,6 +162,14 @@ impl AddressBook {
         let mut peers = peers
             .values()
             .filter_map(MetaAddr::sanitize)
+            // Security: remove peers that:
+            //   - last responded more than three hours ago, or
+            //   - haven't responded yet but were reported last seen more than three hours ago
+            //
+            // This prevents Zebra from gossiping nodes that are likely unreachable. Gossiping such
+            // nodes impacts the network health, because connection attempts end up being wasted on
+            // peers that are less likely to respond.
+            .filter(MetaAddr::is_active_for_gossip)
             .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
         peers
@@ -256,7 +267,8 @@ impl AddressBook {
             None => false,
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
-                peer.last_connection_state == PeerAddrState::Responded && peer.was_recently_live()
+                peer.last_connection_state == PeerAddrState::Responded
+                    && peer.has_connection_recently_responded()
             }
         }
     }
@@ -291,7 +303,7 @@ impl AddressBook {
         // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
         self.by_addr
             .values()
-            .filter(|peer| peer.is_ready_for_attempt())
+            .filter(|peer| peer.is_ready_for_connection_attempt())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .cloned()
@@ -314,7 +326,7 @@ impl AddressBook {
 
         self.by_addr
             .values()
-            .filter(|peer| !peer.is_ready_for_attempt())
+            .filter(|peer| !peer.is_ready_for_connection_attempt())
             .cloned()
     }
 
