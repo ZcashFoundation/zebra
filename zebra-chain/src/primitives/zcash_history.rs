@@ -43,7 +43,7 @@ impl From<&zcash_history::NodeData> for NodeData {
 }
 
 /// An encoded entry in the tree.
-/// 
+///
 /// Contains the node data and information about its position in the tree.
 #[derive(Clone)]
 pub struct Entry {
