@@ -453,27 +453,33 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
-        // feed all of the inputs to the script and shielded verifiers
-        // the script_verifier also checks transparent sighashes, using its own implementation
-        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
-        let known_utxos = request.known_utxos();
-        let upgrade = request.upgrade(network);
+        if transaction.is_coinbase() {
+            // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
+            // Coinbase transactions don't have any PrevOut inputs.
+            Ok(AsyncChecks::new())
+        } else {
+            // feed all of the inputs to the script and shielded verifiers
+            // the script_verifier also checks transparent sighashes, using its own implementation
+            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+            let known_utxos = request.known_utxos();
+            let upgrade = request.upgrade(network);
 
-        let script_checks = (0..inputs.len())
-            .into_iter()
-            .map(move |input_index| {
-                let request = script::Request {
-                    upgrade,
-                    known_utxos: known_utxos.clone(),
-                    cached_ffi_transaction: cached_ffi_transaction.clone(),
-                    input_index,
-                };
+            let script_checks = (0..inputs.len())
+                .into_iter()
+                .map(move |input_index| {
+                    let request = script::Request {
+                        upgrade,
+                        known_utxos: known_utxos.clone(),
+                        cached_ffi_transaction: cached_ffi_transaction.clone(),
+                        input_index,
+                    };
 
-                script_verifier.clone().oneshot(request).boxed()
-            })
-            .collect();
+                    script_verifier.clone().oneshot(request).boxed()
+                })
+                .collect();
 
-        Ok(script_checks)
+            Ok(script_checks)
+        }
     }
 
     /// Verifies a transaction's Sprout shielded join split data.
