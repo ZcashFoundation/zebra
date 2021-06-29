@@ -33,7 +33,7 @@ use color_eyre::{
 };
 use tempdir::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -814,9 +814,6 @@ fn sync_until(
     zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
-        // This message is captured by the test runner, use
-        // `cargo test -- --nocapture` to see it.
-        eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
         return testdir();
     }
 

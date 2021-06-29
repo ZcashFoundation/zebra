@@ -8,14 +8,12 @@ use rand::Rng;
 /// fast network connectivity.
 ///
 /// We use a constant so that the compiler detects typos.
-//
-// TODO: separate "good and reliable" from "any network"?
-pub const ZEBRA_SKIP_NETWORK_TESTS: &str = "ZEBRA_SKIP_NETWORK_TESTS";
+const ZEBRA_SKIP_NETWORK_TESTS: &str = "ZEBRA_SKIP_NETWORK_TESTS";
 
 /// The name of the env var that skips Zebra's IPv6 tests.
 ///
 /// We use a constant so that the compiler detects typos.
-pub const ZEBRA_SKIP_IPV6_TESTS: &str = "ZEBRA_SKIP_IPV6_TESTS";
+const ZEBRA_SKIP_IPV6_TESTS: &str = "ZEBRA_SKIP_IPV6_TESTS";
 
 /// Should we skip Zebra tests which need reliable, fast network connectivity?
 //
