@@ -32,7 +32,8 @@ pub fn zebra_skip_network_tests() -> bool {
 /// Should we skip Zebra tests which need a local IPv6 network stack and
 /// IPv6 interface addresses?
 ///
-/// If we are skipping network tests, we also skip IPv6 tests.
+/// Since `zebra_skip_network_tests` only disables tests which need reliable network connectivity,
+/// we allow IPv6 tests even when `ZEBRA_SKIP_NETWORK_TESTS` is set.
 pub fn zebra_skip_ipv6_tests() -> bool {
     if env::var_os(ZEBRA_SKIP_IPV6_TESTS).is_some() {
         eprintln!("Skipping IPv6 network test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
