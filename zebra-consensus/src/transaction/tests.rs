@@ -7,10 +7,12 @@ use zebra_chain::{
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::ZcashDeserialize,
     sprout,
     transaction::{
-        arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
+        arbitrary::{
+            fake_v5_transactions_for_network, insert_fake_orchard_shielded_data, test_transactions,
+        },
         Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent::{self, CoinbaseData},
@@ -704,29 +706,17 @@ fn v4_with_sapling_spends() {
         let network = Network::Mainnet;
         let blocks = zebra_test::vectors::MAINNET_BLOCKS.iter();
 
-        let transactions = blocks.flat_map(|(_, block_bytes)| {
-            let block = block_bytes
-                .zcash_deserialize_into::<block::Block>()
-                .expect("block is structurally valid");
+        let network = Network::Mainnet;
 
-            block.transactions
-        });
-
-        let transaction = transactions
+        let (height, transaction) = test_transactions(network)
             .rev()
-            .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
-            .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
             .expect("No transaction found with Sapling spends");
 
         let expected_hash = transaction.hash();
-
-        // Mock a block height after Canopy activation
-        let canopy_activation_height = NetworkUpgrade::Canopy
-            .activation_height(network)
-            .expect("Canopy activation height is not set");
-
-        let transaction_block_height =
-            (canopy_activation_height + 10).expect("Canopy activation height is too large");
 
         // Initialize the verifier
         let state_service =
@@ -740,7 +730,7 @@ fn v4_with_sapling_spends() {
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
-                height: transaction_block_height,
+                height,
             })
             .await;
 
