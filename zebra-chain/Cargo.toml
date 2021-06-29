@@ -9,7 +9,7 @@ edition = "2018"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "itertools"]
+proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test"]
 bench = ["zebra-test"]
 
 [dependencies]
