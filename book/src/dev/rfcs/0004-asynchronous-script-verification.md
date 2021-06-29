@@ -135,12 +135,11 @@ enum TransparentOutputOrigin {
 }
 ```
 
-The coinbase flag can be derived from the `OutPoint.index`.
-There is exactly one coinbase transaction per block, and it must have an index of `0`.
-
-The coinbase height can be:
+The coinbase flag and height can be derived from the `tx_index` and `height`:
 - looked up from the `OutPoint.hash` in `tx_by_hash`, or
 - retrieved from the newly arrived block.
+
+There is exactly one coinbase transaction per block, and it must have an index of `0`.
 
 ## Transparent coinbase consensus rules
 [transparent-coinbase-consensus-rules]: #transparent-coinbase-consensus-rules
@@ -327,8 +326,9 @@ impl PendingUtxos {
     // if outpoint is a hashmap key, remove the entry and send output on the channel
     pub fn respond(&mut self, outpoint: OutPoint, output: transparent::Output);
 
-    /// check the list of pending UTXO requests against the supplied `utxos` from a block at `height`
-    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>, height: Height);
+    /// check the list of pending UTXO requests against the supplied `utxos`
+    /// from a transaction at `tx_index` in a block at `height`
+    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>, height: Height,  tx_index: u32);
 
     // scans the hashmap and removes any entries with closed senders
     pub fn prune(&mut self);
@@ -355,14 +355,14 @@ The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows
       `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Coinbase { height, .. }`,
     - then return the utxo.
 
-3. In `PendingUtxos::check_against(utxos, height)`, the service should:
-  - return `TransparentOutputOrigin::Coinbase` if `OutPoint.index` is `0`, and
-  - use the block `height` as the `Coinbase { height, .. }`.
+3. In `PendingUtxos::check_against(utxos, height, tx_index)`, the service should:
+  - return `TransparentOutputOrigin::Coinbase` if `tx_index == 0`,
+    using `height` as the coinbase height.
 
 4. In `Service::any_utxo(outpoint)`, the service should:
-  - return `TransparentOutputOrigin::Coinbase` if `outpoint.index` is `0`, and
-  - lookup the height of `OutPoint.hash` in `tx_by_hash`,
-    and use it as the `Coinbase { height, .. }`.
+  - lookup `OutPoint.hash` in `tx_by_hash`;
+  - return `TransparentOutputOrigin::Coinbase` if `tx_index == 0`,
+    using `height` as the coinbase height.
 
 5. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
   - check for double-spends of each UTXO in the block, and
