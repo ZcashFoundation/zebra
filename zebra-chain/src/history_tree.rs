@@ -30,11 +30,12 @@ pub enum HistoryTreeError {
     IOError(#[from] io::Error),
 }
 
-/// History tree structure.
+/// History tree (Merkle mountain range) structure that contains information about
+// the block history, as specified in [ZIP-221][https://zips.z.cash/zip-0221].
 pub struct HistoryTree {
     network: Network,
     network_upgrade: NetworkUpgrade,
-    /// Merkle mountain range tree.
+    /// Merkle mountain range tree from `zcash_history`.
     /// This is a "runtime" structure used to add / remove nodes, and it's not
     /// persistent.
     inner: Tree,
