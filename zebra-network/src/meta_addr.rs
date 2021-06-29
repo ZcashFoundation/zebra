@@ -438,8 +438,7 @@ impl MetaAddr {
             // Recent times and future times are considered live.
             // Instants are monotonic, so `now` should always be later than `last_attempt`,
             // except for synthetic data in tests.
-            Instant::now().saturating_duration_since(last_attempt)
-                <= constants::MIN_PEER_RECONNECTION_DELAY
+            last_attempt.elapsed() <= constants::MIN_PEER_RECONNECTION_DELAY
         } else {
             // If there has never been any attempt, it can't possibly be live
             false
@@ -452,8 +451,7 @@ impl MetaAddr {
     pub fn has_connection_recently_failed(&self) -> bool {
         if let Some(last_failure) = self.last_failure {
             // Recent times and future times are considered live
-            Instant::now().saturating_duration_since(last_failure)
-                <= constants::MIN_PEER_RECONNECTION_DELAY
+            last_failure.elapsed() <= constants::MIN_PEER_RECONNECTION_DELAY
         } else {
             // If there has never been any failure, it can't possibly be recent
             false
