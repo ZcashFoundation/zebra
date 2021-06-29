@@ -7,6 +7,8 @@ use rand::{thread_rng, Rng};
 
 use zebra_chain::primitives::redpallas::*;
 
+const MESSAGE_BYTES: &[u8; 0] = b"";
+
 /// A batch verification item of a RedPallas signature variant.
 ///
 /// This struct exists to allow batch processing to be decoupled from the
@@ -31,18 +33,18 @@ enum Item {
 fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
     std::iter::repeat_with(|| {
         let mut rng = thread_rng();
-        let msg = b"";
+        // let msg = b"";
         match rng.gen::<u8>() % 2 {
             0 => {
                 let sk = SigningKey::<SpendAuth>::new(thread_rng());
                 let vk_bytes = VerificationKey::from(&sk).into();
-                let sig = sk.sign(thread_rng(), &msg[..]);
+                let sig = sk.sign(thread_rng(), &MESSAGE_BYTES[..]);
                 Item::SpendAuth { vk_bytes, sig }
             }
             1 => {
                 let sk = SigningKey::<Binding>::new(thread_rng());
                 let vk_bytes = VerificationKey::from(&sk).into();
-                let sig = sk.sign(thread_rng(), &msg[..]);
+                let sig = sk.sign(thread_rng(), &MESSAGE_BYTES[..]);
                 Item::Binding { vk_bytes, sig }
             }
             _ => panic!(),
@@ -66,15 +68,14 @@ fn bench_batch_verify(c: &mut Criterion) {
             |b, sigs| {
                 b.iter(|| {
                     for item in sigs.iter() {
-                        let msg = b"Bench";
                         match item {
                             Item::SpendAuth { vk_bytes, sig } => {
                                 let _ = VerificationKey::try_from(*vk_bytes)
-                                    .and_then(|vk| vk.verify(msg, sig));
+                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig));
                             }
                             Item::Binding { vk_bytes, sig } => {
                                 let _ = VerificationKey::try_from(*vk_bytes)
-                                    .and_then(|vk| vk.verify(msg, sig));
+                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig));
                             }
                         }
                     }
@@ -89,13 +90,12 @@ fn bench_batch_verify(c: &mut Criterion) {
                 b.iter(|| {
                     let mut batch = batch::Verifier::new();
                     for item in sigs.iter() {
-                        let msg = b"Bench";
                         match item {
                             Item::SpendAuth { vk_bytes, sig } => {
-                                batch.queue((*vk_bytes, *sig, msg));
+                                batch.queue((*vk_bytes, *sig, MESSAGE_BYTES));
                             }
                             Item::Binding { vk_bytes, sig } => {
-                                batch.queue((*vk_bytes, *sig, msg));
+                                batch.queue((*vk_bytes, *sig, MESSAGE_BYTES));
                             }
                         }
                     }
