@@ -78,8 +78,6 @@ fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch
 fastmod --extensions rs,toml,md --fixed-strings '0.2.8' '0.2.9' tower-fallback
 ```
 
-We skipped `tower-fallback`, because it hadn't changed since the last tag.
-
 ### Reviewing Version Bump Pull Requests
 
 Check for missed changes by going to:
