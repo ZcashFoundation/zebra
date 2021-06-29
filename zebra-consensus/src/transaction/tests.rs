@@ -13,7 +13,7 @@ use zebra_chain::{
         arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
         Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent,
+    transparent::{self, CoinbaseData},
 };
 use zebra_state::Utxo;
 
@@ -86,8 +86,35 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     // guaranteed structurally by `orchard::ShieldedData`)
     insert_fake_orchard_shielded_data(&mut transaction);
 
-    // If a transaction has at least one Orchard shielded action, it should be considered to have
-    // inputs and/or outputs
+    // The check will fail if the transaction has no flags
+    assert_eq!(
+        check::has_inputs_and_outputs(&transaction),
+        Err(TransactionError::NoInputs)
+    );
+
+    // If we add ENABLE_SPENDS flag it will pass the inputs check but fails with the outputs
+    // TODO: Avoid new calls to `insert_fake_orchard_shielded_data` for each check #2409.
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+    shielded_data.flags = orchard::Flags::ENABLE_SPENDS;
+
+    assert_eq!(
+        check::has_inputs_and_outputs(&transaction),
+        Err(TransactionError::NoOutputs)
+    );
+
+    // If we add ENABLE_OUTPUTS flag it will pass the outputs check but fails with the inputs
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+    shielded_data.flags = orchard::Flags::ENABLE_OUTPUTS;
+
+    assert_eq!(
+        check::has_inputs_and_outputs(&transaction),
+        Err(TransactionError::NoInputs)
+    );
+
+    // Finally make it valid by adding both required flags
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+    shielded_data.flags = orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS;
+
     assert!(check::has_inputs_and_outputs(&transaction).is_ok());
 }
 
@@ -294,6 +321,49 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
     assert_eq!(result, Ok(transaction_hash));
 }
 
+/// Test if V4 coinbase transaction is accepted.
+#[tokio::test]
+async fn v4_coinbase_transaction_is_accepted() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    // Create a fake transparent coinbase that should succeed
+    let (input, output) = mock_coinbase_transparent_output(transaction_block_height);
+
+    // Create a V4 coinbase transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: transaction_block_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(HashMap::new()),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
 /// Test if V4 transaction with transparent funds is rejected if the source script prevents it.
 ///
 /// This test simulates the case where the script verifier rejects the transaction because the
@@ -352,7 +422,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 // defined.
 #[should_panic]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
-    let network = Network::Mainnet;
+    let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -397,6 +467,55 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
     assert_eq!(result, Ok(transaction_hash));
 }
 
+/// Test if V5 coinbase transaction is accepted.
+#[tokio::test]
+// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// defined.
+#[should_panic]
+async fn v5_coinbase_transaction_is_accepted() {
+    let network = Network::Testnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let nu5_activation_height = network_upgrade
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    // Create a fake transparent coinbase that should succeed
+    let (input, output) = mock_coinbase_transparent_output(transaction_block_height);
+    let known_utxos = HashMap::new();
+
+    // Create a V5 coinbase transaction
+    let transaction = Transaction::V5 {
+        network_upgrade,
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: transaction_block_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let transaction_hash = transaction.hash();
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert_eq!(result, Ok(transaction_hash));
+}
+
 /// Test if V5 transaction with transparent funds is rejected if the source script prevents it.
 ///
 /// This test simulates the case where the script verifier rejects the transaction because the
@@ -406,7 +525,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 // defined.
 #[should_panic]
 async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
-    let network = Network::Mainnet;
+    let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -543,7 +662,7 @@ async fn v4_with_sprout_transfers() {
 /// that can either accept or reject any spend attempt, depending on if `script_should_succeed` is
 /// `true` or `false`.
 ///
-/// Then, a [`transparent::Input`] is created that attempts to spends the previously created fake
+/// Then, a [`transparent::Input::PrevOut`] is created that attempts to spend the previously created fake
 /// UTXO. A new UTXO is created with the [`transparent::Output`] resulting from the spend.
 ///
 /// Finally, the initial fake UTXO is placed in a `known_utxos` [`HashMap`] so that it can be
@@ -606,6 +725,34 @@ fn mock_transparent_transfer(
     known_utxos.insert(previous_outpoint, previous_utxo);
 
     (input, output, known_utxos)
+}
+
+/// Create a mock coinbase input with a transparent output.
+///
+/// Create a [`transparent::Input::Coinbase`] at `coinbase_height`.
+/// Then create UTXO with a [`transparent::Output`] spending some coinbase funds.
+///
+/// Returns the generated coinbase input and transparent output.
+fn mock_coinbase_transparent_output(
+    coinbase_height: block::Height,
+) -> (transparent::Input, transparent::Output) {
+    // A script with a single opcode that rejects the transaction (OP_FALSE)
+    let rejecting_script = transparent::Script::new(&[0]);
+
+    let input = transparent::Input::Coinbase {
+        height: coinbase_height,
+        data: CoinbaseData::new(Vec::new()),
+        sequence: u32::MAX,
+    };
+
+    // The output resulting from the transfer
+    // Using the rejecting script pretends the amount is burned because it can't be spent again
+    let output = transparent::Output {
+        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        lock_script: rejecting_script,
+    };
+
+    (input, output)
 }
 
 /// Create a mock [`sprout::JoinSplit`] and include it in a [`transaction::JoinSplitData`].

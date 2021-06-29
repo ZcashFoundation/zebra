@@ -1,17 +1,17 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
+use std::{
+    convert::TryFrom,
+    hash::{Hash, Hasher},
+};
+
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 
 use crate::serialization::{serde_helpers, SerializationError};
 
 use super::super::{
     commitment::NoteCommitment, keys::NullifierDerivingKey, note::Note, sinsemilla::*,
-};
-
-use std::{
-    convert::TryFrom,
-    hash::{Hash, Hasher},
 };
 
 /// A cryptographic permutation, defined in [poseidonhash].

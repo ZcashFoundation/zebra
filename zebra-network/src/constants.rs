@@ -100,19 +100,25 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.11/";
 /// during connection setup.
 ///
 /// The current protocol version is checked by our peers. If it is too old,
-/// newer peers will refuse to connect to us.
+/// newer peers will disconnect from us.
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_VERSION: Version = Version(170_013);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_013);
 
-/// The most recent bilateral consensus upgrade implemented by this crate.
+/// The minimum network protocol version accepted by this crate for each network,
+/// represented as a network upgrade.
 ///
-/// The minimum network upgrade is used to check the protocol versions of our
-/// peers. If their versions are too old, we will disconnect from them.
-//
-// TODO: replace with NetworkUpgrade::current(network, height). (#1334)
-pub const MIN_NETWORK_UPGRADE: NetworkUpgrade = NetworkUpgrade::Canopy;
+/// The minimum protocol version is used to check the protocol versions of our
+/// peers during the initial block download. After the intial block download,
+/// we use the current block height to select the minimum network protocol
+/// version.
+///
+/// If peer versions are too old, we will disconnect from them.
+///
+/// The minimum network protocol version typically changes after Mainnet network
+/// upgrades.
+pub const INITIAL_MIN_NETWORK_PROTOCOL_VERSION: NetworkUpgrade = NetworkUpgrade::Canopy;
 
 /// The default RTT estimate for peer responses.
 ///

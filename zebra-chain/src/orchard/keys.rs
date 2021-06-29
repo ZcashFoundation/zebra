@@ -562,7 +562,8 @@ impl From<FullViewingKey> for IncomingViewingKey {
             fvk.ivk_commit_randomness.into(),
             b"z.cash:Orchard-CommitIvk",
             &M,
-        );
+        )
+        .expect("deriving orchard commit^ivk should not output ⊥ ");
 
         Self {
             network: fvk.network,
@@ -966,8 +967,6 @@ impl Eq for TransmissionKey {}
 impl From<[u8; 32]> for TransmissionKey {
     /// Attempts to interpret a byte representation of an affine point, failing
     /// if the element is not on the curve or non-canonical.
-    ///
-    /// <https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411>
     fn from(bytes: [u8; 32]) -> Self {
         Self(pallas::Affine::from_bytes(&bytes).unwrap())
     }

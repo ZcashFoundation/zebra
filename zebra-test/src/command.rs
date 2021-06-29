@@ -212,7 +212,7 @@ impl<T> TestChild<T> {
     /// Checks each line of the child's stdout against `regex`, and returns Ok
     /// if a line matches.
     ///
-    /// Kills the child after the configured timeout has elapsed.
+    /// Kills the child on error, or after the configured timeout has elapsed.
     /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
     pub fn expect_stdout_line_matches(&mut self, regex: &str) -> Result<&mut Self> {
@@ -228,7 +228,7 @@ impl<T> TestChild<T> {
         let mut lines = self
             .stdout
             .take()
-            .expect("child must capture stdout to call expect_stdout_line_matches");
+            .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
         match self.expect_line_matching(&mut lines, regex, "stdout") {
             Ok(()) => {
@@ -242,7 +242,7 @@ impl<T> TestChild<T> {
     /// Checks each line of the child's stderr against `regex`, and returns Ok
     /// if a line matches.
     ///
-    /// Kills the child after the configured timeout has elapsed.
+    /// Kills the child on error, or after the configured timeout has elapsed.
     /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
     pub fn expect_stderr_line_matches(&mut self, regex: &str) -> Result<&mut Self> {
@@ -258,7 +258,7 @@ impl<T> TestChild<T> {
         let mut lines = self
             .stderr
             .take()
-            .expect("child must capture stderr to call expect_stderr_line_matches");
+            .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
         match self.expect_line_matching(&mut lines, regex, "stderr") {
             Ok(()) => {
@@ -272,7 +272,7 @@ impl<T> TestChild<T> {
     /// Checks each line in `lines` against `regex`, and returns Ok if a line
     /// matches. Uses `stream_name` as the name for `lines` in error reports.
     ///
-    /// Kills the child after the configured timeout has elapsed.
+    /// Kills the child on error, or after the configured timeout has elapsed.
     /// Note: the timeout is only checked after each full line is received from
     /// the child.
     #[instrument(skip(self, lines))]

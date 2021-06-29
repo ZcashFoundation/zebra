@@ -54,7 +54,7 @@ impl Codec {
     pub fn builder() -> Builder {
         Builder {
             network: Network::Mainnet,
-            version: constants::CURRENT_VERSION,
+            version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
             max_len: MAX_PROTOCOL_MESSAGE_LEN,
             metrics_addr_label: None,
         }
@@ -650,7 +650,7 @@ mod tests {
             let services = PeerServices::NODE_NETWORK;
             let timestamp = Utc.timestamp(1_568_000_000, 0);
             Message::Version {
-                version: crate::constants::CURRENT_VERSION,
+                version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
                 services,
                 timestamp,
                 address_recv: (
