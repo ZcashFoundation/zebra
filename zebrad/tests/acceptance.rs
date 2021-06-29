@@ -12,7 +12,7 @@
 //!   - run zebrad on a custom cache path and port,
 //!   - run zcashd on a custom port.
 //!
-//! ## Failures due to Configured Network Interfaces
+//! ## Failures due to Configured Network Interfaces or Network Connectivity
 //!
 //! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
 //! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
