@@ -1,7 +1,7 @@
 //! Acceptance test: runs zebrad as a subprocess and asserts its
 //! output for given argument combinations matches what is expected.
 //!
-//! ### Note on port conflict
+//! ## Note on port conflict
 //!
 //! If the test child has a cache or port conflict with another test, or a
 //! running zebrad or zcashd, then it will panic. But the acceptance tests
@@ -11,6 +11,15 @@
 //!   - run the tests in an isolated environment,
 //!   - run zebrad on a custom cache path and port,
 //!   - run zcashd on a custom port.
+//!
+//! ## Failures due to Configured Network Interfaces or Network Connectivity
+//!
+//! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
+//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//!
+//! If it does not have any IPv4 interfaces, IPv4 localhost is not on `127.0.0.1`,
+//! or you have poor network connectivity,
+//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
 // Standard lints
 #![warn(missing_docs)]
@@ -24,7 +33,7 @@ use color_eyre::{
 };
 use tempdir::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -804,10 +813,7 @@ fn sync_until(
 ) -> Result<TempDir> {
     zebra_test::init();
 
-    if env::var_os("ZEBRA_SKIP_NETWORK_TESTS").is_some() {
-        // This message is captured by the test runner, use
-        // `cargo test -- --nocapture` to see it.
-        eprintln!("Skipping network test because '$ZEBRA_SKIP_NETWORK_TESTS' is set.");
+    if zebra_test::net::zebra_skip_network_tests() {
         return testdir();
     }
 
