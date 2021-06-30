@@ -205,8 +205,10 @@ Transaction versions 1-4:
 
 https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 
-The version 1-4 transaction identifier hash is undocumented:
-it is the SHA-256d hash of the serialized bytes of the transaction.
+> The transaction ID of a version 4 or earlier transaction is the SHA-256d hash of the transaction encoding in the
+> pre-v5 format described above.
+
+https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
 
 Transaction version 5:
 
