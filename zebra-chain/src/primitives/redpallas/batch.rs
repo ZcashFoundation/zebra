@@ -266,7 +266,7 @@ impl Verifier {
             R_coeffs.push(z);
             Rs.push(R);
 
-            VK_coeffs.push(pallas::Scalar::zero() + (z * c));
+            VK_coeffs.push(z * c);
             VKs.push(VK);
         }
 
