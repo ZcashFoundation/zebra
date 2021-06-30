@@ -105,11 +105,15 @@ We add the following request and response to the state protocol:
 enum Request::AwaitSpendableUtxo {
     outpoint: OutPoint,
     spend_height: Height,
-    spend_pools: SpendPools,
+    spend_restriction: SpendRestriction,
 }
 
-enum SpendPools {
+/// A transaction with one or more transparent inputs from coinbase transactions
+/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0).
+enum SpendRestriction {
+    /// The UTXO is spent in a transaction with transparent outputs
     SomeTransparentOutputs,
+    /// The UTXO is spent in a transaction with all shielded outputs
     AllShieldedOutputs,
 }
 
@@ -119,7 +123,7 @@ enum Response::Utxo(transparent::Output)
 As described above, the request name is intended to indicate the request's behavior.
 The request does not resolve until:
 - the state layer learns of a UTXO described by the request, and
-- the output is spendable at `height`, to `spend_output_pools`.
+- the output is spendable at `height` with `spend_restriction`.
 
 We also add a coinbase flag and height to `transparent::Output`s that we look up in
 the state, or get from newly commited blocks:
@@ -147,7 +151,7 @@ There is exactly one coinbase transaction per block, and it must have an index o
 Specifically, if the UTXO is a transparent coinbase output,
 the service is not required to return a response if:
 - `height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` after the `OutPoint`'s height, or
-- `spend_pools` is `SomeTransparentOutputs`.
+- `spend_restriction` is `SomeTransparentOutputs`.
 
 This implements the following consensus rules:
 
@@ -350,7 +354,7 @@ The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows
   check that the `TransparentOutputOrigin` is spendable before returning it:
   - if the `TransparentOutputOrigin` is `NonCoinbase`, return the utxo;
   - if the `TransparentOutputOrigin` is `Coinbase`, check that:
-    - `spend_pools` is `AllShieldedOutputs`, and
+    - `spend_restriction` is `AllShieldedOutputs`, and
     - `spend_height` is greater than or equal to
       `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Coinbase { height, .. }`,
     - then return the utxo.
