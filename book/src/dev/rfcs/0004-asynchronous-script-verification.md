@@ -131,7 +131,7 @@ the state, or get from newly commited blocks:
 enum TransparentOutputOrigin {
     Coinbase {
         output: transparent::Output,
-        coinbase_height: Height,
+        height: Height,
     },
     NonCoinbase {
         output: transparent::Output,
@@ -150,7 +150,7 @@ There is exactly one coinbase transaction per block, and it must have an index o
 
 Specifically, if the UTXO is a transparent coinbase output,
 the service is not required to return a response if:
-- `height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` after the `OutPoint`'s height, or
+- `spend_height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` after the `Coinbase.height`, or
 - `spend_restriction` is `SomeTransparentOutputs`.
 
 This implements the following consensus rules:
@@ -356,17 +356,17 @@ The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows
   - if the `TransparentOutputOrigin` is `Coinbase`, check that:
     - `spend_restriction` is `AllShieldedOutputs`, and
     - `spend_height` is greater than or equal to
-      `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Coinbase { height, .. }`,
+      `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Coinbase.height`,
     - then return the utxo.
 
 3. In `PendingUtxos::check_against(utxos, height, tx_index)`, the service should:
   - return `TransparentOutputOrigin::Coinbase` if `tx_index == 0`,
-    using `height` as the coinbase height.
+    using `height` as `Coinbase.height`.
 
 4. In `Service::any_utxo(outpoint)`, the service should:
   - lookup `OutPoint.hash` in `tx_by_hash`;
   - return `TransparentOutputOrigin::Coinbase` if `tx_index == 0`,
-    using `height` as the coinbase height.
+    using `height` as `Coinbase.height`.
 
 5. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
   - check for double-spends of each UTXO in the block, and
