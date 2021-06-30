@@ -194,7 +194,7 @@ Transaction versions 1-4:
 > [Sapling onward] If effectiveVersion < 5, then at least one of tx_in_count, nSpendsSapling, and nJoinSplit MUST be nonzero.
 
 > A coinbase transaction for a block at block height greater than 0
-> MUST have a script that, as its first item, encodes the block height height as follows.
+> MUST have a script that, as its first item, encodes the *block height* height as follows.
 >
 > For height in the range {1 .. 16}, the encoding is a single byte of value 0x50 + height.
 >
