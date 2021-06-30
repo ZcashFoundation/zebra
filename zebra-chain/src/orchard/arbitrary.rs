@@ -2,7 +2,7 @@ use group::prime::PrimeCurveAffine;
 use halo2::pasta::pallas;
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
-use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKeyBytes};
+use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKey, VerificationKeyBytes};
 
 use super::{keys, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
 
@@ -17,21 +17,19 @@ impl Arbitrary for Action {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<note::Nullifier>(),
-            array::uniform32(any::<u8>()),
+            any::<VerificationKeyBytes<SpendAuth>>(),
             any::<note::EncryptedNote>(),
             any::<note::WrappedNoteKey>(),
         )
-            .prop_map(
-                |(nullifier, rpk_bytes, enc_ciphertext, out_ciphertext)| Self {
-                    cv: ValueCommitment(pallas::Affine::identity()),
-                    nullifier,
-                    rk: VerificationKeyBytes::from(rpk_bytes),
-                    cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
-                    ephemeral_key: keys::EphemeralPublicKey(pallas::Affine::identity()),
-                    enc_ciphertext,
-                    out_ciphertext,
-                },
-            )
+            .prop_map(|(nullifier, rk, enc_ciphertext, out_ciphertext)| Self {
+                cv: ValueCommitment(pallas::Affine::identity()),
+                nullifier,
+                rk,
+                cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
+                ephemeral_key: keys::EphemeralPublicKey(pallas::Affine::identity()),
+                enc_ciphertext,
+                out_ciphertext,
+            })
             .boxed()
     }
 
@@ -80,6 +78,25 @@ impl Arbitrary for Signature<SpendAuth> {
                 r_bytes,
                 s_bytes,
                 _marker: PhantomData,
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for VerificationKeyBytes<SpendAuth> {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (vec(any::<u8>(), 32))
+            .prop_filter_map("invalid verification key", |bytes| {
+                let bytes: [u8; 32] = bytes.try_into().expect("vec is the correct length");
+                let vkb = Self::try_from(bytes).expect("a valid generated verification key bytes");
+                // Convert to a VerificationKey to make sure it's valid;
+                // but return the underlying bytes if it works.
+                let r = VerificationKey::<SpendAuth>::try_from(vkb);
+                r.ok().map(|_| vkb)
             })
             .boxed()
     }
