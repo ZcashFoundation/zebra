@@ -705,7 +705,7 @@ fn add_to_sprout_pool_after_nu() {
         Err(TransactionError::DisabledAddToSproutPool)
     );
 
-    // the 8th transaction of the same block has joinsplits and `vpub_old` is 0,
+    // the 8th transaction has joinsplits and the `vpub_old` cumulative is 0,
     // should pass the check.
     assert!(block.transactions[7].joinsplit_count() > 0);
     let vpub_old: Amount<NonNegative> = block.transactions[7]
