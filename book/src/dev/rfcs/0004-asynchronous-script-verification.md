@@ -150,7 +150,7 @@ There is exactly one coinbase transaction per block, and it must have an index o
 
 Specifically, if the UTXO is a transparent coinbase output,
 the service is not required to return a response if:
-- `spend_height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` after the `Coinbase.height`, or
+- `spend_height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` (100) blocks after the `Coinbase.height`, or
 - `spend_restriction` is `SomeTransparentOutputs`.
 
 This implements the following consensus rules:
