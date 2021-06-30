@@ -10,11 +10,15 @@
 // - Henry de Valence <hdevalence@hdevalence.ca>
 // - Deirdre Connolly <deirdre@zfnd.org>
 
+//! Traits and types that support variable-time multiscalar multiplication with
+//! the [Pallas][pallas] curve.
+
 use std::{borrow::Borrow, fmt::Debug};
 
 use group::Group;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 
+/// A trait to support getting the Non-Adjacent form of a scalar.
 pub trait NonAdjacentForm {
     fn non_adjacent_form(&self, w: usize) -> [i8; 256];
 }
