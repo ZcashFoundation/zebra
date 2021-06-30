@@ -36,13 +36,39 @@ fn gen_128_bits<R: RngCore + CryptoRng>(mut rng: R) -> [u64; 4] {
     bytes
 }
 
+/// Inner type of a batch verification item.
+///
+/// This struct exists to allow batch processing to be decoupled from the
+/// lifetime of the message. This is useful when using the batch verification
+/// API in an async context
+///
+/// The different enum variants are for the different signature types which use
+/// different Pallas basepoints for computation: SpendAuth and Binding sigantures.
 #[derive(Clone, Debug)]
 enum Inner {
+    /// A RedPallas signature using the SpendAuth generator group element.
+    ///
+    /// Used in Orchard to prove knowledge of the `spending key` authorizing
+    /// spending of an input note. There is a separate signature, vs just
+    /// verifying inside the proof, to allow resource-limited devices to
+    /// authorize a shielded transaction without needing to construct a proof
+    /// themselves.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#spendauthsig>
     SpendAuth {
         vk_bytes: VerificationKeyBytes<SpendAuth>,
         sig: Signature<SpendAuth>,
         c: pallas::Scalar,
     },
+    /// A RedPallas signature using the Binding generator group element.
+    ///
+    /// Verifying this signature ensures that the Orchard Action transfers in
+    /// the transaction balance are valid, without their individual net values
+    /// being revealed. In addition, this proves that the signer, knowing the
+    /// sum of the Orchard value commitment randomnesses, authorized a
+    /// transaction with the given SIGHASH transaction hash by signing `SigHash`.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
     Binding {
         vk_bytes: VerificationKeyBytes<Binding>,
         sig: Signature<Binding>,
