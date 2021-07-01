@@ -202,7 +202,7 @@ proptest! {
     fn some_block_less_than_network_upgrade(
         (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -213,7 +213,7 @@ proptest! {
     fn no_transaction_with_network_upgrade(
         (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -235,6 +235,7 @@ proptest! {
         // we must check at least one block, and the first checked block must be invalid
         let first_checked_block = chain
             .iter()
+            .rev()
             .take_while(|block| block.coinbase_height().unwrap() >= nu_activation_height)
             .take(100)
             .next();
@@ -248,7 +249,7 @@ proptest! {
 
         let response = crate::service::legacy_chain_check(
             nu_activation_height,
-            chain.clone().into_iter(),
+            chain.clone().into_iter().rev(),
             network
         ).map_err(|error| error.to_string());
 
@@ -266,7 +267,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
+        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));

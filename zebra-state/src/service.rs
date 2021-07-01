@@ -315,7 +315,7 @@ impl StateService {
     }
 
     /// Return an iterator over the relevant chain of the block identified by
-    /// `hash`.
+    /// `hash`, in order from the largest height to the genesis block.
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
     /// by the iterator. `hash` can come from any chain.
