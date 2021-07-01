@@ -15,7 +15,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Add a verification height to mempool transaction verification requests (#2400)
 - Improved error messages by adding database path method to the Finalized State (#2349)
 - Add property test strategies for V5 transactions (#2347)
-- Re-use a shared Tokio runtime for Zebra tests (#2397)
+- Re-use a shared Tokio runtime for some Zebra tests (#2397)
 
 #### Documentation
 
