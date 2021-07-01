@@ -18,7 +18,7 @@ fn forked_equals_pushed() -> Result<()> {
         |((chain, count, network) in PreparedChain::new_heartwood())| {
             // Build a history tree with the first block to simulate the tree of
             // the finalized state.
-            let finalized_tree = HistoryTree::new_from_block(network, chain[0].block.clone(), &sapling::tree::Root::default(), None).unwrap();
+            let finalized_tree = HistoryTree::from_block(network, chain[0].block.clone(), &sapling::tree::Root::default(), None).unwrap();
             let chain = &chain[1..];
             let fork_tip_hash = chain[count - 1].hash;
             let mut full_chain = Chain::new(finalized_tree.clone());
@@ -58,7 +58,7 @@ fn finalized_equals_pushed() -> Result<()> {
     |((chain, end_count, network) in PreparedChain::new_heartwood())| {
         // Build a history tree with the first block to simulate the tree of
         // the finalized state.
-        let finalized_tree = HistoryTree::new_from_block(network, chain[0].block.clone(), &sapling::tree::Root::default(), None).unwrap();
+        let finalized_tree = HistoryTree::from_block(network, chain[0].block.clone(), &sapling::tree::Root::default(), None).unwrap();
         let chain = &chain[1..];
         let finalized_count = chain.len() - end_count;
         let mut full_chain = Chain::new(finalized_tree);

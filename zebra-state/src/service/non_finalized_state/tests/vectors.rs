@@ -32,7 +32,7 @@ fn construct_single() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
     let finalized_tree =
-        HistoryTree::new_from_block(Network::Mainnet, block0.clone(), &Default::default(), None)
+        HistoryTree::from_block(Network::Mainnet, block0.clone(), &Default::default(), None)
             .unwrap();
 
     let block1 = block0
@@ -54,7 +54,7 @@ fn construct_many() -> Result<()> {
     let mut block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
     let finalized_tree =
-        HistoryTree::new_from_block(Network::Mainnet, block.clone(), &Default::default(), None)
+        HistoryTree::from_block(Network::Mainnet, block.clone(), &Default::default(), None)
             .unwrap();
     let mut blocks = vec![];
 
@@ -83,7 +83,7 @@ fn ord_matches_work() -> Result<()> {
     let block =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
     let finalized_tree =
-        HistoryTree::new_from_block(Network::Mainnet, block.clone(), &Default::default(), None)
+        HistoryTree::from_block(Network::Mainnet, block.clone(), &Default::default(), None)
             .unwrap();
 
     let less_block = block
@@ -126,7 +126,7 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
         }
     };
     let finalized_tree =
-        HistoryTree::new_from_block(network, block1.clone(), &Default::default(), None).unwrap();
+        HistoryTree::from_block(network, block1.clone(), &Default::default(), None).unwrap();
 
     let block2 = block1
         .make_fake_child()
@@ -169,7 +169,7 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
         }
     };
     let finalized_tree =
-        HistoryTree::new_from_block(network, block0.clone(), &Default::default(), None).unwrap();
+        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
     let block1 = block0
         .make_fake_child()
@@ -224,7 +224,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
         }
     };
     let finalized_tree =
-        HistoryTree::new_from_block(network, block0.clone(), &Default::default(), None).unwrap();
+        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
     let block1 = block0
         .make_fake_child()
@@ -279,7 +279,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
         }
     };
     let finalized_tree =
-        HistoryTree::new_from_block(network, block0.clone(), &Default::default(), None).unwrap();
+        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
     let block1 = block0
         .make_fake_child()
@@ -333,7 +333,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
         }
     };
     let finalized_tree =
-        HistoryTree::new_from_block(network, block0.clone(), &Default::default(), None).unwrap();
+        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
     let block1 = block0
         .make_fake_child()
@@ -398,7 +398,7 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
         }
     };
     let finalized_tree =
-        HistoryTree::new_from_block(network, block0.clone(), &Default::default(), None).unwrap();
+        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
     let block1 = block0
         .make_fake_child()
