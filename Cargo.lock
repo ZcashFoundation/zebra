@@ -1526,9 +1526,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.9.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7afe4a420e3fe79967a00898cc1f4db7c8a49a9333a29f8a4bd76a253d5cd04"
+checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
 
 [[package]]
 name = "hdrhistogram"
@@ -1734,9 +1734,9 @@ checksum = "e0bd112d44d9d870a6819eb505d04dd92b5e4d94bb8c304924a0872ae7016fb5"
 
 [[package]]
 name = "indexmap"
-version = "1.6.2"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824845a0bf897a9042383849b02c1bc219c2383772efcd5c6f9766fa4b81aef3"
+checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg",
  "hashbrown",
@@ -3746,7 +3746,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -3766,7 +3766,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "futures-core",
  "pin-project 0.4.28",
@@ -3955,9 +3955,9 @@ checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
 
 [[package]]
 name = "uint"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e11fe9a9348741cf134085ad57c249508345fe16411b3d7fb4ff2da2f1d6382e"
+checksum = "6470ab50f482bde894a037a57064480a246dbfdd5960bd65a44824693f08da5f"
 dependencies = [
  "byteorder",
  "crunchy 0.2.2",
@@ -4074,9 +4074,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.9"
+version = "5.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f989a8a6dca13ecebbd7b892b69069f4321d19999f1a7e15a308f05ef4f5dbcd"
+checksum = "1cadc93a5cf745b643d29e6ec4612acdcd8fe7e73995050fff3fa812ed6d0312"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -4482,7 +4482,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 dependencies = [
  "aes",
  "bech32",
@@ -4536,7 +4536,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4572,7 +4572,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4607,7 +4607,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.12"
+version = "1.0.0-alpha.13"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4620,7 +4620,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 dependencies = [
  "chrono",
  "color-eyre",
@@ -4649,12 +4649,13 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-alpha.10"
+version = "1.0.0-alpha.11"
 dependencies = [
  "color-eyre",
  "futures 0.3.15",
  "hex",
  "lazy_static",
+ "once_cell",
  "owo-colors 2.0.0",
  "pretty_assertions",
  "proptest",
@@ -4672,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4687,7 +4688,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 dependencies = [
  "abscissa_core",
  "atty",

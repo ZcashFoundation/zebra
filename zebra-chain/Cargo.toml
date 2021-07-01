@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -9,7 +9,7 @@ edition = "2018"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "itertools"]
+proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test"]
 bench = ["zebra-test"]
 
 [dependencies]
@@ -44,7 +44,7 @@ x25519-dalek = { version = "1.1", features = ["serde"] }
 zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
 bigint = "4"
-uint = "0.9.0"
+uint = "0.9.1"
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
@@ -75,4 +75,8 @@ zebra-test = { path = "../zebra-test/" }
 
 [[bench]]
 name = "block"
+harness = false
+
+[[bench]]
+name = "redpallas"
 harness = false

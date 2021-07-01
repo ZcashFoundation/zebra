@@ -11,6 +11,7 @@
 #![recursion_limit = "256"]
 
 use color_eyre::section::PanicMessage;
+use once_cell::sync::Lazy;
 use owo_colors::OwoColorize;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -23,6 +24,28 @@ pub mod net;
 pub mod prelude;
 pub mod transcript;
 pub mod vectors;
+
+/// A multi-threaded Tokio runtime that can be shared between tests.
+///
+/// This shared runtime should be used in tests that use shared background tasks. An example is
+/// with shared global `Lazy<BatchVerifier>` types, because they spawn a background task when they
+/// are first initialized. This background task is stopped when the runtime is shut down, so having
+/// a runtime per test means that only the first test actually manages to successfully use the
+/// background task. Using the shared runtime allows the background task to keep running for the
+/// other tests that also use it.
+///
+/// A shared runtime should not be used in tests that need to pause and resume the Tokio timer.
+/// This is because multiple tests might be sharing the runtime at the same time, so there could be
+/// conflicts with pausing and resuming the timer at incorrect points. Even if only one test runs
+/// at a time, there's a risk of a test finishing while the timer is paused (due to a test failure,
+/// for example) and that means that the next test will already start with an incorrect timer
+/// state.
+pub static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime")
+});
 
 static INIT: Once = Once::new();
 

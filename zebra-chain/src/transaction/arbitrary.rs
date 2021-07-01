@@ -567,6 +567,27 @@ fn sapling_spend_v4_to_fake_v5(
     }
 }
 
+/// Iterate over V4 transactions in the block test vectors for the specified `network`.
+pub fn test_transactions(
+    network: Network,
+) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> {
+    let blocks = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    blocks.flat_map(|(&block_height, &block_bytes)| {
+        let block = block_bytes
+            .zcash_deserialize_into::<block::Block>()
+            .expect("block is structurally valid");
+
+        block
+            .transactions
+            .into_iter()
+            .map(move |transaction| (block::Height(block_height), transaction))
+    })
+}
+
 /// Generate an iterator over fake V5 transactions.
 ///
 /// These transactions are converted from non-V5 transactions that exist in the provided network

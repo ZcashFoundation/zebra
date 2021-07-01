@@ -252,11 +252,6 @@ where
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
-        let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
-
-        let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
-
         // A set of asynchronous checks which must all succeed.
         // We finish by waiting on these below.
         let mut async_checks = AsyncChecks::new();
@@ -279,99 +274,9 @@ where
             &shielded_sighash,
         ));
 
-        if let Some(sapling_shielded_data) = sapling_shielded_data {
-            for spend in sapling_shielded_data.spends_per_anchor() {
-                // Consensus rule: cv and rk MUST NOT be of small
-                // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
-                // MUST NOT be 𝒪_J.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                check::spend_cv_rk_not_small_order(&spend)?;
-
-                // Consensus rule: The proof π_ZKSpend MUST be valid
-                // given a primary input formed from the other
-                // fields except spendAuthSig.
-                //
-                // Queue the verification of the Groth16 spend proof
-                // for each Spend description while adding the
-                // resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
-                let spend_rsp = spend_verifier
-                    .ready_and()
-                    .await?
-                    .call(primitives::groth16::ItemWrapper::from(&spend).into());
-
-                async_checks.push(spend_rsp.boxed());
-
-                // Consensus rule: The spend authorization signature
-                // MUST be a valid SpendAuthSig signature over
-                // SigHash using rk as the validating key.
-                //
-                // Queue the validation of the RedJubjub spend
-                // authorization signature for each Spend
-                // description while adding the resulting future to
-                // our collection of async checks that (at a
-                // minimum) must pass for the transaction to verify.
-                let rsp = redjubjub_verifier
-                    .ready_and()
-                    .await?
-                    .call((spend.rk, spend.spend_auth_sig, &shielded_sighash).into());
-
-                async_checks.push(rsp.boxed());
-            }
-
-            for output in sapling_shielded_data.outputs() {
-                // Consensus rule: cv and wpk MUST NOT be of small
-                // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]wpk
-                // MUST NOT be 𝒪_J.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
-                check::output_cv_epk_not_small_order(output)?;
-
-                // Consensus rule: The proof π_ZKOutput MUST be
-                // valid given a primary input formed from the other
-                // fields except C^enc and C^out.
-                //
-                // Queue the verification of the Groth16 output
-                // proof for each Output description while adding
-                // the resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
-                let output_rsp = output_verifier
-                    .ready_and()
-                    .await?
-                    .call(primitives::groth16::ItemWrapper::from(output).into());
-
-                async_checks.push(output_rsp.boxed());
-            }
-
-            let bvk = sapling_shielded_data.binding_verification_key();
-
-            // TODO: enable async verification and remove this block - #1939
-            {
-                let item: zebra_chain::primitives::redjubjub::batch::Item =
-                    (bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into();
-                item.verify_single().unwrap_or_else(|binding_sig_error| {
-                    let binding_sig_error = binding_sig_error.to_string();
-                    tracing::warn!(%binding_sig_error, "ignoring");
-                    metrics::counter!("zebra.error.sapling.binding",
-                                                  1,
-                                                  "kind" => binding_sig_error);
-                });
-                // Ignore errors until binding signatures are fixed
-                //.map_err(|e| BoxError::from(Box::new(e)))?;
-            }
-
-            let _rsp = redjubjub_verifier
-                .ready_and()
-                .await?
-                .call((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into())
-                .boxed();
-
-            // TODO: stop ignoring binding signature errors - #1939
-            // async_checks.push(rsp);
-        }
+        async_checks.extend(
+            Self::verify_sapling_shielded_data(sapling_shielded_data, &shielded_sighash).await?,
+        );
 
         Ok(async_checks)
     }
@@ -516,6 +421,114 @@ where
         }
 
         checks
+    }
+
+    /// Verifies a transaction's Sapling shielded data.
+    async fn verify_sapling_shielded_data(
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
+        shielded_sighash: &blake2b_simd::Hash,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let async_checks = AsyncChecks::new();
+
+        if let Some(sapling_shielded_data) = sapling_shielded_data {
+            let mut spend_verifier = primitives::groth16::SPEND_VERIFIER.clone();
+            let mut output_verifier = primitives::groth16::OUTPUT_VERIFIER.clone();
+            let mut redjubjub_verifier = primitives::redjubjub::VERIFIER.clone();
+
+            for spend in sapling_shielded_data.spends_per_anchor() {
+                // Consensus rule: cv and rk MUST NOT be of small
+                // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
+                // MUST NOT be 𝒪_J.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+                check::spend_cv_rk_not_small_order(&spend)?;
+
+                // Consensus rule: The proof π_ZKSpend MUST be valid
+                // given a primary input formed from the other
+                // fields except spendAuthSig.
+                //
+                // Queue the verification of the Groth16 spend proof
+                // for each Spend description while adding the
+                // resulting future to our collection of async
+                // checks that (at a minimum) must pass for the
+                // transaction to verify.
+                let spend_rsp = spend_verifier
+                    .ready_and()
+                    .await?
+                    .call(primitives::groth16::ItemWrapper::from(&spend).into());
+
+                async_checks.push(spend_rsp.boxed());
+
+                // Consensus rule: The spend authorization signature
+                // MUST be a valid SpendAuthSig signature over
+                // SigHash using rk as the validating key.
+                //
+                // Queue the validation of the RedJubjub spend
+                // authorization signature for each Spend
+                // description while adding the resulting future to
+                // our collection of async checks that (at a
+                // minimum) must pass for the transaction to verify.
+                let rsp = redjubjub_verifier
+                    .ready_and()
+                    .await?
+                    .call((spend.rk, spend.spend_auth_sig, &shielded_sighash).into());
+
+                async_checks.push(rsp.boxed());
+            }
+
+            for output in sapling_shielded_data.outputs() {
+                // Consensus rule: cv and wpk MUST NOT be of small
+                // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]wpk
+                // MUST NOT be 𝒪_J.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+                check::output_cv_epk_not_small_order(output)?;
+
+                // Consensus rule: The proof π_ZKOutput MUST be
+                // valid given a primary input formed from the other
+                // fields except C^enc and C^out.
+                //
+                // Queue the verification of the Groth16 output
+                // proof for each Output description while adding
+                // the resulting future to our collection of async
+                // checks that (at a minimum) must pass for the
+                // transaction to verify.
+                let output_rsp = output_verifier
+                    .ready_and()
+                    .await?
+                    .call(primitives::groth16::ItemWrapper::from(output).into());
+
+                async_checks.push(output_rsp.boxed());
+            }
+
+            let bvk = sapling_shielded_data.binding_verification_key();
+
+            // TODO: enable async verification and remove this block - #1939
+            {
+                let item: zebra_chain::primitives::redjubjub::batch::Item =
+                    (bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into();
+                item.verify_single().unwrap_or_else(|binding_sig_error| {
+                    let binding_sig_error = binding_sig_error.to_string();
+                    tracing::warn!(%binding_sig_error, "ignoring");
+                    metrics::counter!("zebra.error.sapling.binding",
+                                                  1,
+                                                  "kind" => binding_sig_error);
+                });
+                // Ignore errors until binding signatures are fixed
+                //.map_err(|e| BoxError::from(Box::new(e)))?;
+            }
+
+            let _rsp = redjubjub_verifier
+                .ready_and()
+                .await?
+                .call((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into())
+                .boxed();
+
+            // TODO: stop ignoring binding signature errors - #1939
+            // async_checks.push(rsp);
+        }
+
+        Ok(async_checks)
     }
 
     /// Await a set of checks that should all succeed.

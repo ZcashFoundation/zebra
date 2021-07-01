@@ -31,7 +31,7 @@ fn forked_equals_pushed() -> Result<()> {
                 full_chain.push(block.clone())?;
             }
 
-            let mut forked = full_chain.fork(fork_tip_hash, &finalized_tree).expect("fork must work").expect("hash is present");
+            let mut forked = full_chain.fork(fork_tip_hash, &finalized_tree).expect("fork works").expect("hash is present");
 
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
             prop_assert!(forked.is_identical(&partial_chain));
