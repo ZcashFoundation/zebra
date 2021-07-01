@@ -1,8 +1,10 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 
 use group::ff::PrimeField;
 use jubjub::AffinePoint;
 use proptest::{arbitrary::any, collection::vec, prelude::*};
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
 
 use crate::primitives::Groth16Proof;
 
@@ -113,15 +115,12 @@ impl Arbitrary for SpendVerificationKeyBytesWrapper {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 32))
-            .prop_filter_map("invalid verification key", |bytes| {
-                let bytes: [u8; 32] = bytes.try_into().expect("vec is the correct length");
-                let vkb = redjubjub::VerificationKeyBytes::<redjubjub::SpendAuth>::try_from(bytes)
-                    .expect("a valid generated verification key bytes");
-                // Convert to a VerificationKey to make sure it's valid;
-                // but return the underlying bytes if it works.
-                let r = redjubjub::VerificationKey::<redjubjub::SpendAuth>::try_from(vkb);
-                r.ok().map(|_| SpendVerificationKeyBytesWrapper(vkb))
+        (prop::array::uniform32(any::<u8>()))
+            .prop_map(|bytes| {
+                let mut rng = ChaChaRng::from_seed(bytes);
+                let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
+                let pk = redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk);
+                SpendVerificationKeyBytesWrapper(pk.into())
             })
             .boxed()
     }
@@ -133,13 +132,10 @@ impl Arbitrary for tree::Root {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 32))
-            .prop_filter_map("invalid Sapling nore commitment tree root", |bytes| {
+        (vec(any::<u8>(), 64))
+            .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                // Convert to a Scalar to make sure it's valid;
-                // but return the underlying bytes if it works.
-                let r = bls12_381::Scalar::from_repr(bytes);
-                r.map(|_| Self(bytes))
+                bls12_381::Scalar::from_bytes_wide(&bytes).to_repr().into()
             })
             .boxed()
     }

@@ -1,8 +1,12 @@
 use group::prime::PrimeCurveAffine;
 use halo2::pasta::pallas;
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
 
-use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKey, VerificationKeyBytes};
+use crate::primitives::redpallas::{
+    Signature, SigningKey, SpendAuth, VerificationKey, VerificationKeyBytes,
+};
 
 use super::{keys, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
 
@@ -89,14 +93,12 @@ impl Arbitrary for VerificationKeyBytes<SpendAuth> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 32))
-            .prop_filter_map("invalid verification key", |bytes| {
-                let bytes: [u8; 32] = bytes.try_into().expect("vec is the correct length");
-                let vkb = Self::try_from(bytes).expect("a valid generated verification key bytes");
-                // Convert to a VerificationKey to make sure it's valid;
-                // but return the underlying bytes if it works.
-                let r = VerificationKey::<SpendAuth>::try_from(vkb);
-                r.ok().map(|_| vkb)
+        (prop::array::uniform32(any::<u8>()))
+            .prop_map(|bytes| {
+                let mut rng = ChaChaRng::from_seed(bytes);
+                let sk = SigningKey::<SpendAuth>::new(&mut rng);
+                let pk = VerificationKey::from(&sk);
+                pk.into()
             })
             .boxed()
     }
