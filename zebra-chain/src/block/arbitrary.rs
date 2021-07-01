@@ -47,7 +47,7 @@ pub struct LedgerState {
 
     /// Every V5 and later transaction has a valid `network_upgrade` field.
     ///
-    /// If `false`, some transactions have invalid network upgrades.
+    /// If `false`, zero or more transactions may have invalid network upgrades.
     transaction_has_valid_network_upgrade: bool,
 
     /// Generate coinbase transactions.
@@ -79,7 +79,7 @@ pub struct LedgerStateOverride {
 
     /// Every V5 and later transaction has a valid `network_upgrade` field.
     ///
-    /// If `false`, some transactions have invalid network upgrades.
+    /// If `false`, zero or more transactions may have invalid network upgrades.
     pub transaction_has_valid_network_upgrade: bool,
 
     /// Every block has exactly one coinbase transaction.
