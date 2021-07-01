@@ -227,12 +227,37 @@ proptest! {
     fn at_least_one_transaction_with_inconsistent_network_upgrade(
         (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter(), network)
-            .map_err(|error| error.to_string());
+        // this test requires that an invalid block is encountered
+        // before a valid block (and before the check gives up),
+        // but setting `transaction_has_valid_network_upgrade` to false
+        // sometimes generates blocks with all valid (or missing) network upgrades
+
+        // we must check at least one block, and the first checked block must be invalid
+        let first_checked_block = chain
+            .iter()
+            .take_while(|block| block.coinbase_height().unwrap() >= nu_activation_height)
+            .take(100)
+            .next();
+        prop_assume!(first_checked_block.is_some());
+        prop_assume!(
+            first_checked_block
+                .unwrap()
+                .check_transaction_network_upgrade_consistency(network)
+                .is_err()
+        );
+
+        let response = crate::service::legacy_chain_check(
+            nu_activation_height,
+            chain.clone().into_iter(),
+            network
+        ).map_err(|error| error.to_string());
 
         prop_assert_eq!(
             response,
-            Err("inconsistent network upgrade found in transaction".into())
+            Err("inconsistent network upgrade found in transaction".into()),
+            "first: {:?}, last: {:?}",
+            chain.first().map(|block| block.coinbase_height()),
+            chain.last().map(|block| block.coinbase_height()),
         );
     }
 

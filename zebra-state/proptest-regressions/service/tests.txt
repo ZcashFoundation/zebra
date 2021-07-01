@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 37aea4b0880d7d9029ea4fad0136bd8553f81eea0435122737ec513f4f6fb73c # shrinks to (network, nu_activation_height, chain) = (Mainnet, Height(1046400), alloc::vec::Vec<alloc::sync::Arc<zebra_chain::block::Block>><alloc::sync::Arc<zebra_chain::block::Block>>, len=101)

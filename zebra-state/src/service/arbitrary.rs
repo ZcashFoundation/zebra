@@ -97,6 +97,7 @@ impl Strategy for PreparedChain {
 /// Arguments:
 /// - `transaction_version_override`: See `LedgerState::height_strategy` for details.
 /// - `transaction_has_valid_network_upgrade`: See `LedgerState::height_strategy` for details.
+///    Note: `false` allows zero or more invalid network upgrades.
 /// - `blocks_after_nu_activation`: The number of blocks the strategy will generate
 /// after the provided `network_upgrade`.
 /// - `network_upgrade` - The network upgrade that we are using to simulate from where the
