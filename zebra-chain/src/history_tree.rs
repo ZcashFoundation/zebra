@@ -13,7 +13,7 @@ use crate::{
     block::{Block, ChainHistoryMmrRootHash, Height},
     orchard,
     parameters::{Network, NetworkUpgrade},
-    primitives::zcash_history::{Entry, Tree},
+    primitives::zcash_history::{Entry, Tree as InnerHistoryTree},
     sapling,
 };
 
@@ -30,14 +30,15 @@ pub enum HistoryTreeError {
     IOError(#[from] io::Error),
 }
 
-/// History tree structure.
+/// History tree (Merkle mountain range) structure that contains information about
+// the block history, as specified in [ZIP-221][https://zips.z.cash/zip-0221].
 pub struct HistoryTree {
     network: Network,
     network_upgrade: NetworkUpgrade,
-    /// Merkle mountain range tree.
+    /// Merkle mountain range tree from `zcash_history`.
     /// This is a "runtime" structure used to add / remove nodes, and it's not
     /// persistent.
-    inner: Tree,
+    inner: InnerHistoryTree,
     /// The number of nodes in the tree.
     size: u32,
     /// The peaks of the tree, indexed by their position in the array representation
@@ -49,7 +50,7 @@ pub struct HistoryTree {
 
 impl HistoryTree {
     /// Create a new history tree with a single block.
-    pub fn new_from_block(
+    pub fn from_block(
         network: Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
@@ -59,8 +60,8 @@ impl HistoryTree {
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(network, height);
-        // TODO: handle Orchard root
-        let (tree, entry) = Tree::new_from_block(network, block, sapling_root)?;
+        // TODO: handle Orchard root, see https://github.com/ZcashFoundation/zebra/issues/2283
+        let (tree, entry) = InnerHistoryTree::new_from_block(network, block, sapling_root)?;
         let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry);
         Ok(HistoryTree {
@@ -207,7 +208,7 @@ impl HistoryTree {
         // Remove all non-peak entries
         self.peaks.retain(|k, _| peak_pos_set.contains(k));
         // Rebuild tree
-        self.inner = Tree::new_from_cache(
+        self.inner = InnerHistoryTree::new_from_cache(
             self.network,
             self.network_upgrade,
             self.size,
@@ -225,7 +226,7 @@ impl HistoryTree {
 
 impl Clone for HistoryTree {
     fn clone(&self) -> Self {
-        let tree = Tree::new_from_cache(
+        let tree = InnerHistoryTree::new_from_cache(
             self.network,
             self.network_upgrade,
             self.size,
