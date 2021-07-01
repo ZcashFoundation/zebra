@@ -61,7 +61,8 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 
 - Zebra no longer gossips unreachable addresses to other nodes (#2392)
   - User Action Required: Update and restart any running Zebra nodes
-- Avoid duplicate peer connections and send local listener to peers (#2276)
+- Avoid duplicate peer connections (#2276)
+- Send local listener address to peers (#2276)
 - Limit reconnection rate to individual peers (#2275)
 
 ## [Zebra 1.0.0-alpha.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.11) - 2021-06-18
