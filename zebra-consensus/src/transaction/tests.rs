@@ -3,7 +3,7 @@ use std::{collections::HashMap, convert::TryFrom, convert::TryInto, sync::Arc};
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, NonNegative},
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
@@ -928,4 +928,62 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     (joinsplit_data, signing_key)
+}
+
+#[test]
+fn add_to_sprout_pool_after_nu() {
+    zebra_test::init();
+
+    // get a block that we know it haves a transaction with `vpub_old` field greater than 0.
+    let block: Arc<_> = zebra_chain::block::Block::zcash_deserialize(
+        &zebra_test::vectors::BLOCK_MAINNET_419199_BYTES[..],
+    )
+    .unwrap()
+    .into();
+
+    // create a block height at canopy activation.
+    let network = Network::Mainnet;
+    let block_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+
+    // create a zero amount.
+    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+
+    // the coinbase transaction should pass the check.
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[0], block_height, network),
+        Ok(())
+    );
+
+    // the 2nd transaction has no joinsplits, should pass the check.
+    assert_eq!(block.transactions[1].joinsplit_count(), 0);
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[1], block_height, network),
+        Ok(())
+    );
+
+    // the 5th transaction has joinsplits and the `vpub_old` cumulative is greater than 0,
+    // should fail the check.
+    assert!(block.transactions[4].joinsplit_count() > 0);
+    let vpub_old: Amount<NonNegative> = block.transactions[4]
+        .sprout_pool_added_values()
+        .fold(zero, |acc, &x| (acc + x).unwrap());
+    assert!(vpub_old > zero);
+
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[3], block_height, network),
+        Err(TransactionError::DisabledAddToSproutPool)
+    );
+
+    // the 8th transaction has joinsplits and the `vpub_old` cumulative is 0,
+    // should pass the check.
+    assert!(block.transactions[7].joinsplit_count() > 0);
+    let vpub_old: Amount<NonNegative> = block.transactions[7]
+        .sprout_pool_added_values()
+        .fold(zero, |acc, &x| (acc + x).unwrap());
+    assert_eq!(vpub_old, zero);
+
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[7], block_height, network),
+        Ok(())
+    );
 }

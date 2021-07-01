@@ -3,12 +3,17 @@
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
+    block::Height,
     orchard::Flags,
+    parameters::{Network, NetworkUpgrade},
     sapling::{Output, PerSpendAnchor, Spend},
     transaction::Transaction,
 };
 
 use crate::error::TransactionError;
+
+use std::convert::TryFrom;
 
 /// Checks that the transaction has inputs and outputs.
 ///
@@ -118,4 +123,34 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
     } else {
         Ok(())
     }
+}
+
+/// Check if a transaction is adding to the sprout pool after Canopy
+/// network upgrade given a block height and a network.
+///
+/// https://zips.z.cash/zip-0211
+/// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+pub fn disabled_add_to_sprout_pool(
+    tx: &Transaction,
+    height: Height,
+    network: Network,
+) -> Result<(), TransactionError> {
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height must be present for both networks");
+
+    // [Canopy onward]: `vpub_old` MUST be zero.
+    // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+    if height >= canopy_activation_height {
+        let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+
+        let tx_sprout_pool = tx.sprout_pool_added_values();
+        for vpub_old in tx_sprout_pool {
+            if *vpub_old != zero {
+                return Err(TransactionError::DisabledAddToSproutPool);
+            }
+        }
+    }
+
+    Ok(())
 }
