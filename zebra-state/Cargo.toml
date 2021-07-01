@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-alpha.11"
+version = "1.0.0-alpha.12"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
