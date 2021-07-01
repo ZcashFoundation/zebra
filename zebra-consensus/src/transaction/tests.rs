@@ -10,7 +10,9 @@ use zebra_chain::{
     serialization::ZcashDeserialize,
     sprout,
     transaction::{
-        arbitrary::{fake_v5_transactions_for_network, insert_fake_orchard_shielded_data},
+        arbitrary::{
+            fake_v5_transactions_for_network, insert_fake_orchard_shielded_data, test_transactions,
+        },
         Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent::{self, CoinbaseData},
@@ -693,6 +695,83 @@ fn v4_with_unsigned_sprout_transfer_is_rejected() {
                 )
             )
         );
+    });
+}
+
+/// Test if a V4 transaction with Sapling spends is accepted by the verifier.
+#[test]
+fn v4_with_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let (height, transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
+            .expect("No transaction found with Sapling spends");
+
+        let expected_hash = transaction.hash();
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(result, Ok(expected_hash));
+    });
+}
+
+/// Test if a V4 transaction with Sapling outputs but no spends is accepted by the verifier.
+#[test]
+fn v4_with_sapling_outputs_and_no_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let (height, transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| {
+                transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_some()
+            })
+            .expect("No transaction found with Sapling spends");
+
+        let expected_hash = transaction.hash();
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(result, Ok(expected_hash));
     });
 }
 
