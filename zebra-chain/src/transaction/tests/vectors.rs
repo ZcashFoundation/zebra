@@ -458,6 +458,23 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
 }
 
 #[test]
+fn zip244_round_trip() -> Result<()> {
+    zebra_test::init();
+
+    for test in zip0244::TEST_VECTORS.iter() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let reencoded = transaction.zcash_serialize_to_vec()?;
+        assert_eq!(test.tx, reencoded);
+
+        let _alt_tx: zcash_primitives::transaction::Transaction = (&transaction)
+            .try_into()
+            .expect("librustzcash deserialization must work for zebra serialized transactions");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn zip244_txid() -> Result<()> {
     zebra_test::init();
 
@@ -942,11 +959,12 @@ fn test_vec243_3() -> Result<()> {
 fn zip244_sighash() -> Result<()> {
     zebra_test::init();
 
-    for test in zip0244::TEST_VECTORS.iter() {
+    for (i, test) in zip0244::TEST_VECTORS.iter().enumerate() {
         let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
         let input = match test.amount {
             Some(amount) => Some((
-                0,
+                test.transparent_input
+                    .expect("test vector must have transparent_input when it has amount"),
                 transparent::Output {
                     value: amount.try_into()?,
                     lock_script: transparent::Script::new(
@@ -958,8 +976,9 @@ fn zip244_sighash() -> Result<()> {
             )),
             None => None,
         };
-        let h = transaction.sighash(NetworkUpgrade::Nu5, HashType::ALL, input);
-        assert_eq!(h.as_ref(), test.sighash_all);
+        let result = hex::encode(transaction.sighash(NetworkUpgrade::Nu5, HashType::ALL, input));
+        let expected = hex::encode(test.sighash_all);
+        assert_eq!(expected, result, "test #{}: sighash does not match", i);
     }
 
     Ok(())
