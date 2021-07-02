@@ -241,7 +241,7 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Res
 
 - Method location is at `zebra-chain/src/block.rs`.
 - Method will make use of `Transaction::value_balance` method created before.
-- Do we want to 
+
 ```rust
 /// utxos must contain the utxos of every input in the block
 /// TODO: what about UTXOs created and spent in the block?
@@ -255,7 +255,7 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Val
 
 ### Pass the value balance for this block from the consensus into the state
 
-- Add a new field into `PreparedBlock` located at `zebra-state/src/request.rs`, this is NonFinalized section of the state.
+- Add a new field into `PreparedBlock` located at `zebra-state/src/request.rs`, this is the `NonFinalized` section of the state.
 
 ```rust
 pub struct PreparedBlock {
