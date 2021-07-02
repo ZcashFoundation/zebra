@@ -46,10 +46,6 @@ where
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_items_test() -> Result<()> {
-    batch_flushes_on_max_items().await
-}
-
 async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
 
@@ -64,10 +60,6 @@ async fn batch_flushes_on_max_items() -> Result<()> {
 }
 
 #[tokio::test]
-async fn batch_flushes_on_max_latency_test() -> Result<()> {
-    batch_flushes_on_max_latency().await
-}
-
 async fn batch_flushes_on_max_latency() -> Result<()> {
     use tokio::time::timeout;
 
