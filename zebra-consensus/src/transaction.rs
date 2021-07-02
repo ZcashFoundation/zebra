@@ -323,7 +323,6 @@ where
         )?);
 
         // TODO:
-        // - verify sapling shielded pool (#1981)
         // - verify orchard shielded pool (ZIP-224) (#2105)
         // - ZIP-216 (#1798)
         // - ZIP-244 (#1874)
