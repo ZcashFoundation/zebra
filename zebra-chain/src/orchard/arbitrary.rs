@@ -1,12 +1,8 @@
 use group::prime::PrimeCurveAffine;
-use halo2::pasta::pallas;
+use halo2::{arithmetic::FieldExt, pasta::pallas};
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
-use rand::SeedableRng;
-use rand_chacha::ChaChaRng;
 
-use crate::primitives::redpallas::{
-    Signature, SigningKey, SpendAuth, VerificationKey, VerificationKeyBytes,
-};
+use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKey, VerificationKeyBytes};
 
 use super::{keys, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
 
@@ -44,8 +40,6 @@ impl Arbitrary for note::Nullifier {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use halo2::arithmetic::FieldExt;
-
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
@@ -93,11 +87,11 @@ impl Arbitrary for VerificationKeyBytes<SpendAuth> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (prop::array::uniform32(any::<u8>()))
+        (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
-                let mut rng = ChaChaRng::from_seed(bytes);
-                let sk = SigningKey::<SpendAuth>::new(&mut rng);
-                let pk = VerificationKey::from(&sk);
+                let bytes = bytes.try_into().expect("vec is the correct length");
+                let sk = pallas::Scalar::from_bytes_wide(&bytes);
+                let pk = VerificationKey::from_scalar(&sk);
                 pk.into()
             })
             .boxed()
@@ -120,8 +114,6 @@ impl Arbitrary for tree::Root {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use halo2::arithmetic::FieldExt;
-
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");

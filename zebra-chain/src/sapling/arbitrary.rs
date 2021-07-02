@@ -1,6 +1,5 @@
 use std::convert::TryInto;
 
-use group::ff::PrimeField;
 use jubjub::AffinePoint;
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 use rand::SeedableRng;
@@ -20,7 +19,7 @@ impl Arbitrary for Spend<PerSpendAnchor> {
         (
             any::<tree::Root>(),
             any::<note::Nullifier>(),
-            any::<SpendVerificationKeyBytesWrapper>(),
+            spendauth_verification_key_bytes(),
             any::<Groth16Proof>(),
             vec(any::<u8>(), 64),
         )
@@ -28,7 +27,7 @@ impl Arbitrary for Spend<PerSpendAnchor> {
                 per_spend_anchor,
                 cv: ValueCommitment(AffinePoint::identity()),
                 nullifier,
-                rk: rk.0,
+                rk,
                 zkproof: proof,
                 spend_auth_sig: redjubjub::Signature::from({
                     let mut b = [0u8; 64];
@@ -48,7 +47,7 @@ impl Arbitrary for Spend<SharedAnchor> {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<note::Nullifier>(),
-            any::<SpendVerificationKeyBytesWrapper>(),
+            spendauth_verification_key_bytes(),
             any::<Groth16Proof>(),
             vec(any::<u8>(), 64),
         )
@@ -56,7 +55,7 @@ impl Arbitrary for Spend<SharedAnchor> {
                 per_spend_anchor: FieldNotPresent,
                 cv: ValueCommitment(AffinePoint::identity()),
                 nullifier,
-                rk: rk.0,
+                rk,
                 zkproof: proof,
                 spend_auth_sig: redjubjub::Signature::from({
                     let mut b = [0u8; 64];
@@ -103,29 +102,15 @@ impl Arbitrary for OutputInTransactionV4 {
     type Strategy = BoxedStrategy<Self>;
 }
 
-/// A wrapper for a RedJubJub spending verification key.
-///
-/// This is used by proptests since we can't implement Arbitrary for the
-/// redjubjub::VerificationKeyBytes (it's in another crate).
-/// We then implement it for the wrapper type instead.
-#[derive(Debug)]
-struct SpendVerificationKeyBytesWrapper(redjubjub::VerificationKeyBytes<redjubjub::SpendAuth>);
-
-impl Arbitrary for SpendVerificationKeyBytesWrapper {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (prop::array::uniform32(any::<u8>()))
-            .prop_map(|bytes| {
-                let mut rng = ChaChaRng::from_seed(bytes);
-                let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
-                let pk = redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk);
-                SpendVerificationKeyBytesWrapper(pk.into())
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
+/// Creates Strategy for generation VerificationKeyBytes, since the `redjubjub`
+/// create does not provide an Arbitrary implementation for it.
+fn spendauth_verification_key_bytes(
+) -> impl Strategy<Value = redjubjub::VerificationKeyBytes<redjubjub::SpendAuth>> {
+    prop::array::uniform32(any::<u8>()).prop_map(|bytes| {
+        let mut rng = ChaChaRng::from_seed(bytes);
+        let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
+        redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk).into()
+    })
 }
 
 impl Arbitrary for tree::Root {
@@ -135,7 +120,7 @@ impl Arbitrary for tree::Root {
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                bls12_381::Scalar::from_bytes_wide(&bytes).to_repr().into()
+                jubjub::Fq::from_bytes_wide(&bytes).to_bytes().into()
             })
             .boxed()
     }
