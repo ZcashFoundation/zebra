@@ -177,11 +177,29 @@ state. The Sprout and Sapling nullifiers revealed in the block will be merged
 with the exising ones in our finalized state (ie, it should strictly grow over
 time).
 
-IMPORTANT: we need to save the incremental merkle tree / serialized nodes for:
+## State Management
 
-Sapling tip block
-~all Sprout blocks
-chains we're tracking in memory within the reorg limit, for both
+### Orchard
+- There is a single copy of the latest Orchard Note Commitment Tree for the finalized tip.
+- When finalizing a block, the finalized tip is updated with a serialization of the latest Orchard Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
+- Each non-finalized chain gets its own copy of the Orchard note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Orchard note commitment tree is updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip... (TODO)
+
+### Sapling
+- There is a single copy of the latest Sapling Note Commitment Tree for the finalized tip.
+- When finalizing a block, the finalized tip is updated with a serialization of the Sapling Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
+- Each non-finalized chain gets its own copy of the Sapling note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Sapling note commitment tree is updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip... (TODO)
+
+### Sprout
+- Every finalized block stores a separate copy of the Sprout note commitment tree (😿), as of that block.
+- When finalizing a block, the Sprout note commitment tree for that block is stored in the state. (The trees for previous blocks also remain in the state.)
+- Every block in each non-finalized chain gets its own copy of the Sprout note commitment tree. The initial tree is cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Sprout note commitment tree is cloned, then updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip, the trees for each block are deleted, along with that block.
+
 We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
 
 # Reference-level explanation
