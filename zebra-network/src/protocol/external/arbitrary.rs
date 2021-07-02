@@ -1,4 +1,6 @@
-use proptest::{arbitrary::any, arbitrary::Arbitrary, prelude::*};
+use std::convert::TryInto;
+
+use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use super::{types::PeerServices, InventoryHash};
 
@@ -36,6 +38,13 @@ impl InventoryHash {
             .boxed()
     }
 
+    /// Generate a proptest strategy for [`InventoryHash::Wtx`] hashes.
+    pub fn wtx_strategy() -> BoxedStrategy<Self> {
+        vec(any::<u8>(), 64)
+            .prop_map(|bytes| InventoryHash::Wtx(bytes.try_into().unwrap()))
+            .boxed()
+    }
+
     /// Generate a proptest strategy for [`InventoryHash`] variants of the smallest serialized size.
     pub fn smallest_types_strategy() -> BoxedStrategy<Self> {
         InventoryHash::arbitrary()
@@ -62,6 +71,7 @@ impl Arbitrary for InventoryHash {
             Self::tx_strategy(),
             Self::block_strategy(),
             Self::filtered_block_strategy(),
+            Self::wtx_strategy(),
         ]
         .boxed()
     }
