@@ -1,24 +1,24 @@
-//! Transaction ID hashing. Contains code for generating the Transaction ID
-//! from the transaction, using hashing.
+//! Transaction ID computation. Contains code for generating the Transaction ID
+//! from the transaction.
 use std::{convert::TryInto, io};
 
 use super::{Hash, Transaction};
 use crate::serialization::{sha256d, ZcashSerialize};
 
-/// A Transaction ID hasher. It computes the transaction ID by hashing
+/// A Transaction ID builder. It computes the transaction ID by hashing
 /// different parts of the transaction, depending on the transaction version.
 /// For V5 transactions, it follows [ZIP-244] and [ZIP-225].
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 /// [ZIP-225]: https://zips.z.cash/zip-0225
-pub(super) struct TxIdHasher<'a> {
+pub(super) struct TxIdBuilder<'a> {
     trans: &'a Transaction,
 }
 
-impl<'a> TxIdHasher<'a> {
-    /// Return a new TxIdHasher for the given transaction.
+impl<'a> TxIdBuilder<'a> {
+    /// Return a new TxIdBuilder for the given transaction.
     pub fn new(trans: &'a Transaction) -> Self {
-        TxIdHasher { trans }
+        TxIdBuilder { trans }
     }
 
     /// Compute the Transaction ID for the previously specified transaction.

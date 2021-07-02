@@ -10,7 +10,7 @@ use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::txidhash::TxIdHasher,
+    transaction::txid::TxIdBuilder,
 };
 
 lazy_static! {
@@ -436,7 +436,7 @@ fn zip244_txid() -> Result<()> {
 
     for test in zip0244::TEST_VECTORS.iter() {
         let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
-        let hasher = TxIdHasher::new(&transaction);
+        let hasher = TxIdBuilder::new(&transaction);
         let txid = hasher.txid()?;
         assert_eq!(txid.0, test.txid);
     }
