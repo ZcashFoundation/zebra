@@ -71,12 +71,15 @@ pub enum TransactionError {
     Groth16,
 
     #[error(
-        "joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
+        "Sprout joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
     )]
     Ed25519(#[from] zebra_chain::primitives::ed25519::Error),
 
-    #[error("bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    #[error("Sapling bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
     RedJubjub(zebra_chain::primitives::redjubjub::Error),
+
+    #[error("Orchard bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    RedPallas(zebra_chain::primitives::redpallas::Error),
 
     // temporary error type until #1186 is fixed
     #[error("Downcast from BoxError to redjubjub::Error failed")]
@@ -88,6 +91,7 @@ pub enum TransactionError {
 
 impl From<BoxError> for TransactionError {
     fn from(err: BoxError) -> Self {
+        // TODO: handle redpallas Error?
         match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
             Ok(e) => TransactionError::RedJubjub(*e),
             Err(e) => TransactionError::InternalDowncastError(format!(

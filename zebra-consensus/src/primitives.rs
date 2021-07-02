@@ -3,6 +3,7 @@
 pub mod ed25519;
 pub mod groth16;
 pub mod redjubjub;
+pub mod redpallas;
 
 /// The maximum batch size for any of the batch verifiers.
 const MAX_BATCH_SIZE: usize = 64;
