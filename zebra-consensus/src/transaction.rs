@@ -206,9 +206,17 @@ where
                     joinsplit_data,
                     sapling_shielded_data,
                 )?,
-                Transaction::V5 { inputs, .. } => {
-                    Self::verify_v5_transaction(req, network, script_verifier, inputs)?
-                }
+                Transaction::V5 {
+                    inputs,
+                    sapling_shielded_data,
+                    ..
+                } => Self::verify_v5_transaction(
+                    req,
+                    network,
+                    script_verifier,
+                    inputs,
+                    sapling_shielded_data,
+                )?,
             };
 
             async_checks.check().await?;
@@ -295,24 +303,32 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction_network_upgrade(
-            &request.transaction(),
-            request.upgrade(network),
-        )?;
+        let transaction = request.transaction();
+        let upgrade = request.upgrade(network);
+        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
+
+        Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
 
         let _async_checks = Self::verify_transparent_inputs_and_outputs(
             &request,
             network,
             inputs,
             script_verifier,
-        )?;
+        )?
+        .and(Self::verify_sapling_shielded_data(
+            sapling_shielded_data,
+            &shielded_sighash,
+        )?);
 
         // TODO:
-        // - verify sapling shielded pool (#1981)
         // - verify orchard shielded pool (ZIP-224) (#2105)
         // - ZIP-216 (#1798)
         // - ZIP-244 (#1874)
+        // - validate bindingSigOrchard (#2103)
+        // - remaining consensus rules (#2379)
+        // - remove `should_panic` from tests
 
         unimplemented!("V5 transaction validation is not yet complete");
     }
@@ -416,10 +432,14 @@ where
     }
 
     /// Verifies a transaction's Sapling shielded data.
-    fn verify_sapling_shielded_data(
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
+    fn verify_sapling_shielded_data<A>(
+        sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
         shielded_sighash: &blake2b_simd::Hash,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<AsyncChecks, TransactionError>
+    where
+        A: sapling::AnchorVariant + Clone,
+        sapling::Spend<sapling::PerSpendAnchor>: From<(sapling::Spend<A>, A::Shared)>,
+    {
         let mut async_checks = AsyncChecks::new();
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
