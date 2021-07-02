@@ -4,7 +4,7 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-alpha.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.12) - TODO: Release date
+## [Zebra 1.0.0-alpha.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.12) - 2021-07-02
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes documentation updates and security fixes. In particular, Zebra no longer gossips unreachable addresses to other nodes and users should update and restart any running Zebra nodes.
 
@@ -25,17 +25,20 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Document required request timeouts due to data dependencies (#2337)
 - Update known issues and add inbound network ports to the README (#2373)
 - Document shared to per-spend anchor conversion (#2363)
+- Document note commitment trees storage (#2259)
 
 #### Network Upgrade 5
 
 - Orchard note commitment tree test vectors (#2384)
 - Enable V5 transaction test vectors in the groth16 tests (#2383)
 - Validate transparent inputs and outputs in V5 transactions (#2302)
-- Batch math & variable-time multiscalar multiplication for redpallas (#2288)
+- Batch math & variable-time multiscalar multiplication for RedPallas (#2288)
+- Implement asynchronous verifier service for RedPallas (#2318)
+- ZIP-211: Validate Disabling Addition of New Value to the Sprout Value Pool (#2399)
 
 ### Changed
 
-- Refactor Sprout Join Split validation by transaction verifier (#2371)
+- Various transaction verifier refactors (#2371, #2432)
 - Remove unicode in Zebra's user agent (#2376)
 - Update multiple crates to ensure bitvec 0.22.3 is being used (#2351)
 - Move transaction consensus branch ID check function to zebra-chain (#2354)
@@ -56,6 +59,8 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Stop failing after the mandatory Canopy checkpoint due to incorrect coinbase script verification (#2404)
 - Improved docs and panic messages for zebra_test::command (#2406)
 - Gossip dynamic local listener ports to peers (#2277)
+- Stop allowing JoinSplits for Halo (#2428)
+- Fix failing legacy chain tests (#2427)
 
 ### Security
 
