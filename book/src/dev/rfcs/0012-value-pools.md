@@ -159,14 +159,67 @@ impl Default for ValueBalance<C> {
 
 ### Create a method in `Transaction` that returns `ValueBalance<NegativeAllowed>` for the transaction
 
-Question: can we also implement a value_balance method on transparent::Input, transparent::Output, JoinSplit, sapling::ShieldedData, and orchard::ShieldedData?
-- the transparent::Input method will need the UTXO referenced by the OutPoint
-  - this information is available in verify_transparent_inputs_and_outputs
-  - we'll need to look up the UTXOs in the transaction verifier, not the script verifier (TODO: open a ticket for this refactor)
-  - if the utxos are not available in the block or state, verification will timeout and return an error
+We first add `value_balance()` methods in all the modules we need and use them to get the value balance for the whole transaction.
 
-- Method location is at `zebra-chain/src/transaction.rs`.
-- Depending on if we implement per-shielded data, the implementations may also go into their respective modules
+#### Create a method in `Input` that returns `ValueBalance<NegativeAllowed>`
+
+- Method location is at `zebra-chain/src/transparent.rs`.
+- Method need `utxos`, this information is available in `verify_transparent_inputs_and_outputs`.
+- If the utxos are not available in the block or state, verification will timeout and return an error
+
+```rust
+impl Input {
+    fn value_balance(&self, utxos: &HashMap<OutPoint, Utxo>) -> ValueBalance<NegativeAllowed> {
+
+    }
+}
+```
+
+#### Create a method in `Output` that returns `ValueBalance<NegativeAllowed>`
+
+- Method location is at `zebra-chain/src/transparent.rs`.
+
+```rust
+impl Output {
+    fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+
+    }
+}
+```
+
+#### Create a method in `JoinSplitData` that returns `ValueBalance<NegativeAllowed>`
+
+- Method location is at `zebra-chain/src/transaction/joinsplit.rs`
+
+```rust
+pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+
+}
+```
+
+#### Create a method in `sapling::ShieldedData` that returns `ValueBalance<NegativeAllowed>`
+
+- Method location is at `zebra-chain/src/transaction/sapling/shielded_data.rs`
+
+```rust
+pub fn value_balance(&self) -> ValueBalance<AllowNegative> {
+
+}
+```
+
+#### Create a method in `orchard::ShieldedData` that returns `ValueBalance<NegativeAllowed>`
+
+- Method location is at `zebra-chain/src/transaction/orchard/shielded_data.rs`
+
+```rust
+pub fn value_balance(&self) -> ValueBalance<AllowNegative> {
+
+}
+```
+
+#### Create the `Transaction` method
+
+- Method location: `zebra-chain/src/transaction.rs`
 
 ```rust
 /// utxos must contain the utxos of every input in the transaction
@@ -183,8 +236,6 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Res
     }
 }
 ```
-
-// May return an Err if we exceed maximum possible balance, for example
 
 ### Create a method in `Block` that returns `ValueBalance<NegativeAllowed>` for the block
 
