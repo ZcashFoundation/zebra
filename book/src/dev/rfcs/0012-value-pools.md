@@ -111,7 +111,7 @@ https://zips.z.cash/protocol/protocol.pdf#orchardbalance
 ### Create a new `ValueBalance` type
 
 - Code will be located in a new file: `zebra-chain/src/value_balance.rs`.
-- We want to have the ability to add and substract the `Amount`s inside the type.
+- Supported operators apply to all the `Amount`s inside the type: `+`, `-`, `+=`, `-=`, `sum()`.
 - We will use `Default` to represent a totally empty `ValueBalance`, this is the state of all pools at the genesis block.
 
 ```rust
@@ -122,19 +122,33 @@ struct ValueBalance<C> {
     orchard: Amount<C>,
 }
 
-/// Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
-///
-/// This rule applies to Block and Mempool transactions
-fn ValueBalance::remaining_transparent_value(&self) -> Result<Amount<NonNegative>, Err> {
-    // This rule checks the sum of the transparent, sprout, sapling, and orchard value balances in a transaction, not `ValueBalance.transparent`.
-    [self.transparent, self.sprout, self.sapling, self.orchard].sum()
+impl ValueBalance {
+    /// Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
+    ///
+    /// This rule applies to Block and Mempool transactions
+    fn remaining_transparent_value(&self) -> Result<Amount<NonNegative>,Err> {
+        // This rule checks the sum of the transparent, sprout, sapling, and orchard value balances in a transaction, not `ValueBalance.transparent`.
+        [self.transparent, self.sprout, self.sapling, self.orchard].sum()
+    }
 }
 
-impl Add(Assign) for ValueBalance<C> {
+impl Add for ValueBalance<C> {
 
 }
 
-impl Sub(Assign) for ValueBalance<C> {
+impl Sub for ValueBalance<C> {
+    
+}
+
+impl AddAssign for ValueBalance<C> {
+
+}
+
+impl SubAssign for ValueBalance<C> {
+    
+}
+
+impl Sum for ValueBalance<C> {
     
 }
 
@@ -142,8 +156,6 @@ impl Default for ValueBalance<C> {
     
 }
 ```
-
-Question: can we implement the `Sum` trait on ValueBalance?
 
 ### Create a method in `Transaction` that returns `ValueBalance<NegativeAllowed>` for the transaction
 
@@ -183,16 +195,10 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Res
 /// utxos must contain the utxos of every input in the block
 /// TODO: what about UTXOs created and spent in the block?
 pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> ValueBalance<NegativeAllowed> {
-    // Idea (not sure if it's better :/) 
-    // self.transactions()
-    //     .map(Transaction::value_balance)
-    //     .sum()
-    //     .unwrap_or_else(ValueBalance::default) 👍
-    let mut block_value_balance = Default::default();
-    for tx in self.transactions(utxos) {
-        block_value_balance += tx.value_balance();
-    }
-    block_value_balance
+    self.transactions()
+        .map(Transaction::value_balance)
+        .sum()
+        .unwrap_or_else(ValueBalance::default)
 }
 ```
 
