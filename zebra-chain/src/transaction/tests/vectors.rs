@@ -1,19 +1,17 @@
+use std::convert::TryInto;
+
+use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
 use zebra_test::zip0244;
 
 use super::super::*;
-
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::txidhash::TxIdHasher,
 };
-
-use color_eyre::eyre::Result;
-
-use std::convert::TryInto;
 
 lazy_static! {
     pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {

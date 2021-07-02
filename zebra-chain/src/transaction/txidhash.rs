@@ -2,15 +2,15 @@
 //! from the transaction, using hashing.
 use std::{convert::TryInto, io};
 
-use super::Transaction;
-
+use super::{Hash, Transaction};
 use crate::serialization::{sha256d, ZcashSerialize};
-
-use super::Hash;
 
 /// A Transaction ID hasher. It computes the transaction ID by hashing
 /// different parts of the transaction, depending on the transaction version.
-/// For V5 transactions, it follows ZIP-244 and ZIP-225.
+/// For V5 transactions, it follows [ZIP-244] and [ZIP-225].
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [ZIP-225]: https://zips.z.cash/zip-0225
 pub(super) struct TxIdHasher<'a> {
     trans: &'a Transaction,
 }
