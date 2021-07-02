@@ -11,9 +11,7 @@ use crate::{
     amount::{Amount, NonNegative},
     parameters::NetworkUpgrade,
     serialization::ZcashSerialize,
-    transaction::HashType,
-    transaction::SignatureHash,
-    transaction::Transaction,
+    transaction::{HashType, SigHash, Transaction},
     transparent::{self, Script},
 };
 
@@ -90,7 +88,7 @@ pub(crate) fn sighash(
     hash_type: HashType,
     network_upgrade: NetworkUpgrade,
     input: Option<(&transparent::Output, &transparent::Input, usize)>,
-) -> SignatureHash {
+) -> SigHash {
     let alt_tx = convert_tx_to_librustzcash(trans, network_upgrade)
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
@@ -116,7 +114,7 @@ pub(crate) fn sighash(
         .deref()
         .digest(zcash_primitives::transaction::txid::TxIdDigester);
 
-    SignatureHash(
+    SigHash(
         *zcash_primitives::transaction::sighash::signature_hash(
             alt_tx.deref(),
             hash_type.bits(),

@@ -54,16 +54,16 @@ impl HashType {
 
 /// A Signature Hash (or SIGHASH) as specified in
 /// https://zips.z.cash/protocol/protocol.pdf#sighash
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Debug)]
-pub struct Hash(pub [u8; 32]);
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct SigHash(pub [u8; 32]);
 
-impl AsRef<[u8; 32]> for Hash {
+impl AsRef<[u8; 32]> for SigHash {
     fn as_ref(&self) -> &[u8; 32] {
         &self.0
     }
 }
 
-impl AsRef<[u8]> for Hash {
+impl AsRef<[u8]> for SigHash {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
@@ -100,7 +100,7 @@ impl<'a> SigHasher<'a> {
         }
     }
 
-    pub(super) fn sighash(self) -> Hash {
+    pub(super) fn sighash(self) -> SigHash {
         use NetworkUpgrade::*;
         let mut hash = blake2b_simd::Params::new()
             .hash_length(32)
@@ -118,7 +118,7 @@ impl<'a> SigHasher<'a> {
             Nu5 => return self.hash_sighash_zip244(),
         }
 
-        Hash(hash.finalize().as_ref().try_into().unwrap())
+        SigHash(hash.finalize().as_ref().try_into().unwrap())
     }
 
     fn consensus_branch_id(&self) -> ConsensusBranchId {
@@ -550,7 +550,7 @@ impl<'a> SigHasher<'a> {
     }
 
     /// Compute a signature hash for V5 transactions according to ZIP-244.
-    fn hash_sighash_zip244(&self) -> Hash {
+    fn hash_sighash_zip244(&self) -> SigHash {
         let input = self
             .input
             .as_ref()
