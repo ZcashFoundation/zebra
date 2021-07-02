@@ -751,7 +751,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
                 transaction.sapling_spends_per_anchor().next().is_none()
                     && transaction.sapling_outputs().next().is_some()
             })
-            .expect("No transaction found with Sapling spends");
+            .expect("No transaction found with Sapling outputs and no Sapling spends");
 
         let expected_hash = transaction.hash();
 
