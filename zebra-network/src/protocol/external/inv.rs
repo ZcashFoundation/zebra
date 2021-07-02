@@ -38,6 +38,15 @@ pub enum InventoryHash {
     /// rather than a block message; this only works if a bloom filter has been
     /// set.
     FilteredBlock(block::Hash),
+    /// A pair with the hash of a V5 transaction and the [Authorizing Data Commitment][auth_digest].
+    ///
+    /// Introduced by [ZIP-239][zip239], which is analogous to Bitcoin's [BIP-339][bip339].
+    ///
+    /// [auth_digest]: https://zips.z.cash/zip-0244#authorizing-data-commitment
+    /// [zip239]: https://zips.z.cash/zip-0239
+    /// [bip339]: https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki
+    // TODO: Actually handle this variant once the mempool is implemented
+    Wtx,
 }
 
 impl From<transaction::Hash> for InventoryHash {
@@ -61,6 +70,7 @@ impl ZcashSerialize for InventoryHash {
             InventoryHash::Tx(hash) => (1, hash.0),
             InventoryHash::Block(hash) => (2, hash.0),
             InventoryHash::FilteredBlock(hash) => (3, hash.0),
+            InventoryHash::Wtx => unimplemented!("V5 transactions are not sent by Zebra yet"),
         };
         writer.write_u32::<LittleEndian>(code)?;
         writer.write_all(&bytes)?;
@@ -77,6 +87,10 @@ impl ZcashDeserialize for InventoryHash {
             1 => Ok(InventoryHash::Tx(transaction::Hash(bytes))),
             2 => Ok(InventoryHash::Block(block::Hash(bytes))),
             3 => Ok(InventoryHash::FilteredBlock(block::Hash(bytes))),
+            5 => {
+                let _auth_digest = reader.read_32_bytes()?;
+                Ok(InventoryHash::Wtx)
+            }
             _ => Err(SerializationError::Parse("invalid inventory code")),
         }
     }
