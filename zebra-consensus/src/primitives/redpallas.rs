@@ -13,11 +13,11 @@ use std::{
 use futures::future::{ready, Ready};
 use once_cell::sync::Lazy;
 use rand::thread_rng;
-
 use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
+
 use zebra_chain::primitives::redpallas::{batch, *};
 
 /// Global batch verification context for RedPallas signatures.
