@@ -328,6 +328,7 @@ where
         // - ZIP-244 (#1874)
         // - validate bindingSigOrchard (#2103)
         // - remaining consensus rules (#2379)
+        // - remove `should_panic` from tests
 
         unimplemented!("V5 transaction validation is not yet complete");
     }
