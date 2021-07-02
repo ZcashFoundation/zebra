@@ -203,9 +203,10 @@ fn empty_v5_librustzcash_round_trip() {
     zebra_test::init();
 
     let tx: &Transaction = &*EMPTY_V5_TX;
-    let _alt_tx: zcash_primitives::transaction::Transaction = tx
-        .try_into()
-        .expect("librustzcash deserialization might work for empty zebra serialized transactions. Hint: if empty transactions fail, but other transactions work, delete this test");
+    let _alt_tx: zcash_primitives::transaction::Transaction = tx.try_into().expect(
+        "librustzcash deserialization might work for empty zebra serialized transactions. \
+        Hint: if empty transactions fail, but other transactions work, delete this test",
+    );
 }
 
 /// Do a round-trip test on fake v5 transactions created from v4 transactions
