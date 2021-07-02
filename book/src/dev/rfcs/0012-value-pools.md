@@ -286,9 +286,9 @@ pub struct Chain {
 }
 ```
 
-### Update `update_chain_state_with() ` for `Chain` struct to calculate Chain.value_pool
+### Update `update_chain_state_with()` for `Chain` struct to calculate Chain.value_pool
 
-- Location of the `Chain` structure where the pool field will be added: `zebra-state/src/service/non_finalized_state/chain.rs`
+- Location: `zebra-state/src/service/non_finalized_state/chain.rs`
 
 ```rust
 fn update_chain_state_with(&mut self, prepared: &PreparedBlock) {        
@@ -300,17 +300,46 @@ fn update_chain_state_with(&mut self, prepared: &PreparedBlock) {
 
 ### Check pool balance consensus rules
 
-- Check that no pool is negative.
-- Do the check in `commit_block` and `commit_new_chain`, located in `zebra-state/src/service/non_finalized_state.rs`. (See PR #2301.)
-  - We might want to add a method that is called from both `commit_block` and `commit_new_chain` with the chain
-  - https://github.com/ZcashFoundation/zebra/pull/2301/files
-- We have the `Chain` and the `PreparedBlock` to apply the consensus rules.
+#### Check that no pool is negative
+
+- Do the check in `commit_block` and `commit_new_chain`, located in `zebra-state/src/service/non_finalized_state.rs`. Both methods will need new a new argument with the value pool saved in the disk.
+- Pass this value to a new method `check_value_pools()` that will make the consensus rules check.
 
 ```rust
-add some code
+pub fn commit_block(
+    &mut self,
+    prepared: PreparedBlock,
+    finalized_tip_history_tree: &HistoryTree,
+    finalized_value_pool: ValueBalance<NonNegative>,
+) -> Result<(), ValidateContextError> {
+    ..
+    check_value_pools(finalized_value_pools, prepared.value_balance)?;
+    ..
+}
+
+pub fn commit_new_chain(
+    &mut self,
+    prepared: PreparedBlock,
+    finalized_tip_history_tree: HistoryTree,
+    finalized_value_pool: ValueBalance<NonNegative>,
+) -> Result<(), ValidateContextError> {
+    ..
+    check_value_pools(finalized_value_pools, prepared.value_balance)?;
+    ..
+}
+
+fn check_value_pools(
+    finalized_value_pools: ValueBalance<NonNegative>,
+    block_value_balance: ValueBalance<NegativeAllowed>
+) -> Result<()> {
+    if finalized_value_pools + block_value_balance < 0 {
+        Err("Value pool can't be negative");
+    }
+    Ok(())
+}
 ```
 
-#### Consensus rules
+##### Consensus rule
 
 The chain value pool balance rules apply to Block transactions, but they are optional for Mempool transactions:
 > Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
@@ -319,29 +348,21 @@ https://zips.z.cash/zip-0209#specification
 
 Since Zebra does chain value pool balance validation in the state, we want to skip verifying the speculative chain balance of Mempool transactions.
 
-### When committing a PreparedBlock (non-finalized block), pass the Chain's pool value balance
+### Changes to finalized state
 
-Explain why..
+The state service is what will call `commit_block()` and `commit_new_chain()`. We need to pass the value pool from the disk into this functions.
 
-In zebra-state/request.rs
+```
+self.mem
+    .commit_block(prepared, self.disk.history_tree(), self.disk.get_pool())?;
+..
+self.mem
+    .commit_new_chain(prepared, self.disk.history_tree(), self.disk.get_pool())?;
+```
 
-Request::CommitBlock(PreparedBlock)
+We now detail what is needed in order to have the `get_pool()` method available.
 
-### When committing a FinalizedBlock, calculate the value balance for that block
-
-Explain why.
-
-In zebra-state/request.rs
-
-Request::CommitFinalizedBlock(FinalizedBlock)
-
-### Calculate block value balances
-
-### Calculate pool value balances
-
-### In `commit_finalized_direct` update the pool value balances in the state as part of each block commit batch
-
-### Serialization of `ValueBalance<C>`
+#### Serialization of `ValueBalance<C>`
 
 In order to save `ValueBalance` into the disk database we must implement `IntoDisk` and `FromDisk` for `ValueBalance` and for `Amount`:
 
@@ -371,9 +392,9 @@ impl FromDisk for Amount {
 }
 ```
 
-### Changes to `zebra-state/src/service/finalized_state.rs`
+#### Changes to `zebra-state/src/service/finalized_state.rs`
 
-First we add a column for all the pools: transparent, sprout, sapling, orchard
+First we add a column for all the pools: transparent, sprout, sapling, orchard:
 
 ```rust
 rocksdb::ColumnFamilyDescriptor::new("value_pools", db_options.clone()),
@@ -388,7 +409,6 @@ let value_pools = self.db.cf_handle("value_pools").unwrap();
 Next we save each value pool into the field for each upcoming block except for the genesis block:
 
 ```rust
-
 // Consensus rule: The block height of the genesis block is 0
 // https://zips.z.cash/protocol/protocol.pdf#blockchain
 if height == block::Height(0) {
