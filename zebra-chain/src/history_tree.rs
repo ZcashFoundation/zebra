@@ -244,3 +244,11 @@ impl Clone for HistoryTree {
         }
     }
 }
+
+impl PartialEq for HistoryTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash() == other.hash()
+    }
+}
+
+impl Eq for HistoryTree {}

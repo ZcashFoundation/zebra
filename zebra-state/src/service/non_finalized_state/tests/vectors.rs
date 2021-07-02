@@ -37,7 +37,7 @@ fn construct_single() -> Result<()> {
 
     let block1 = block0
         .make_fake_child()
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
 
     let mut chain = Chain::new(finalized_tree);
     chain.push(block1.prepare())?;
@@ -60,7 +60,9 @@ fn construct_many() -> Result<()> {
 
     let mut tree = finalized_tree.clone();
     while blocks.len() < 100 {
-        let next_block = block.make_fake_child().set_commitment(tree.hash().into());
+        let next_block = block
+            .make_fake_child()
+            .set_block_commitment(tree.hash().into());
         blocks.push(next_block.clone());
         block = next_block;
         tree = make_tree(block.clone(), &tree)?;
@@ -89,11 +91,11 @@ fn ord_matches_work() -> Result<()> {
     let less_block = block
         .make_fake_child()
         .set_work(1)
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let more_block = block
         .make_fake_child()
         .set_work(10)
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
 
     let mut lesser_chain = Chain::new(finalized_tree.clone());
     lesser_chain.push(less_block.prepare())?;
@@ -131,11 +133,11 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
     let block2 = block1
         .make_fake_child()
         .set_work(10)
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let child = block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
 
     let expected_hash = block2.hash();
 
@@ -173,17 +175,17 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
 
     let block1 = block0
         .make_fake_child()
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
 
     let block2 = block1
         .make_fake_child()
         .set_work(10)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let child = block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
 
     let mut state = NonFinalizedState::default();
     state.commit_new_chain(block1.clone().prepare(), finalized_tree.clone())?;
@@ -228,22 +230,22 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
 
     let block1 = block0
         .make_fake_child()
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
 
     let block2 = block1
         .make_fake_child()
         .set_work(10)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let block2_tree = make_tree(block2.clone(), &block1_tree)?;
     let child1 = block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let child2 = block2
         .make_fake_child()
         .set_work(1)
-        .set_commitment(block2_tree.hash().into());
+        .set_block_commitment(block2_tree.hash().into());
 
     let mut state = NonFinalizedState::default();
     assert_eq!(0, state.chain_set.len());
@@ -283,23 +285,23 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
 
     let block1 = block0
         .make_fake_child()
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
 
     let long_chain_block1 = block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let long_chain_block1_tree = make_tree(long_chain_block1.clone(), &block1_tree)?;
     let long_chain_block2 = long_chain_block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(long_chain_block1_tree.hash().into());
+        .set_block_commitment(long_chain_block1_tree.hash().into());
 
     let short_chain_block = block1
         .make_fake_child()
         .set_work(3)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
 
     let mut state = NonFinalizedState::default();
     state.commit_new_chain(block1.prepare(), finalized_tree.clone())?;
@@ -337,33 +339,33 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
 
     let block1 = block0
         .make_fake_child()
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
 
     let long_chain_block1 = block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let long_chain_block1_tree = make_tree(long_chain_block1.clone(), &block1_tree)?;
     let long_chain_block2 = long_chain_block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(long_chain_block1_tree.hash().into());
+        .set_block_commitment(long_chain_block1_tree.hash().into());
     let long_chain_block2_tree = make_tree(long_chain_block2.clone(), &long_chain_block1_tree)?;
     let long_chain_block3 = long_chain_block2
         .make_fake_child()
         .set_work(1)
-        .set_commitment(long_chain_block2_tree.hash().into());
+        .set_block_commitment(long_chain_block2_tree.hash().into());
     let long_chain_block3_tree = make_tree(long_chain_block3.clone(), &long_chain_block2_tree)?;
     let long_chain_block4 = long_chain_block3
         .make_fake_child()
         .set_work(1)
-        .set_commitment(long_chain_block3_tree.hash().into());
+        .set_block_commitment(long_chain_block3_tree.hash().into());
 
     let short_chain_block = block1
         .make_fake_child()
         .set_work(3)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
 
     let mut state = NonFinalizedState::default();
     state.commit_new_chain(block1.prepare(), finalized_tree.clone())?;
@@ -402,17 +404,17 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 
     let block1 = block0
         .make_fake_child()
-        .set_commitment(finalized_tree.hash().into());
+        .set_block_commitment(finalized_tree.hash().into());
     let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
 
     let less_work_child = block1
         .make_fake_child()
         .set_work(1)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let more_work_child = block1
         .make_fake_child()
         .set_work(3)
-        .set_commitment(block1_tree.hash().into());
+        .set_block_commitment(block1_tree.hash().into());
     let expected_hash = more_work_child.hash();
 
     let mut state = NonFinalizedState::default();

@@ -18,6 +18,7 @@ use zebra_chain::{
 
 use crate::{PreparedBlock, Utxo, ValidateContextError};
 
+#[derive(PartialEq, Eq)]
 pub struct Chain {
     pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,
@@ -190,23 +191,6 @@ impl Chain {
             partial_cumulative_work: self.partial_cumulative_work,
             history_tree,
         }
-    }
-
-    /// Return if two Chains are identical.
-    #[cfg(test)]
-    pub(crate) fn is_identical(&self, other: &Self) -> bool {
-        self.blocks == other.blocks
-            && self.height_by_hash == other.height_by_hash
-            && self.tx_by_hash == other.tx_by_hash
-            && self.created_utxos == other.created_utxos
-            && self.spent_utxos == other.spent_utxos
-            && self.sprout_anchors == other.sprout_anchors
-            && self.sapling_anchors == other.sapling_anchors
-            && self.sprout_nullifiers == other.sprout_nullifiers
-            && self.sapling_nullifiers == other.sapling_nullifiers
-            && self.orchard_nullifiers == other.orchard_nullifiers
-            && self.partial_cumulative_work == other.partial_cumulative_work
-            && self.history_root_hash() == other.history_root_hash()
     }
 }
 
@@ -543,14 +527,6 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         }
     }
 }
-
-impl PartialEq for Chain {
-    fn eq(&self, other: &Self) -> bool {
-        self.partial_cmp(other) == Some(Ordering::Equal)
-    }
-}
-
-impl Eq for Chain {}
 
 impl PartialOrd for Chain {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

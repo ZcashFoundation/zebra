@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    block::{self, ChainHistoryMmrRootHash, CommitmentError},
+    block::{self, ChainHistoryMmrRootHash},
     history_tree::HistoryTreeError,
     work::difficulty::CompactDifficulty,
 };
@@ -80,7 +80,7 @@ pub enum ValidateContextError {
     },
 
     #[error("block contains an invalid commitment")]
-    InvalidCommitment(#[from] CommitmentError),
+    InvalidBlockCommitment(#[from] block::CommitmentError),
 
     #[error("block history commitment {candidate_commitment:?} is different to the expected commitment {expected_commitment:?}")]
     #[non_exhaustive]
