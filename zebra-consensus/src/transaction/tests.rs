@@ -201,6 +201,8 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 }
 
 #[tokio::test]
+// TODO: Remove `should_panic` once V5 transaction sighash is implemened.
+#[should_panic]
 async fn v5_transaction_is_rejected_before_nu5_activation() {
     const V5_TRANSACTION_VERSION: u32 = 5;
 
