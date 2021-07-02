@@ -11,7 +11,7 @@ edition = "2018"
 zcash_script = "0.1.6-alpha.0"
 zebra-chain = { path = "../zebra-chain" }
 thiserror = "1.0.25"
-displaydoc = "0.2.1"
+displaydoc = "0.2.2"
 
 [dev-dependencies]
 hex = "0.4.3"
