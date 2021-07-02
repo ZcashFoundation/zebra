@@ -379,20 +379,20 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    for (height, original_bytes) in block_iter {
+    let overwinter_activation_height = NetworkUpgrade
+        .activation_height(network)
+        .expect("a valid height")
+        .0;
+
+    // skip blocks that are before overwinter as they will not have a valid consensus branch id
+    let blocks_after_overwinter = blocks_iter.skip_while(|(height, _)| {
+        *height < overwinter_activation_height
+    });
+
+    for (height, original_bytes) in blocks_after_overwinter {
         let original_block = original_bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
-
-        // skip blocks that are before overwinter as they will not have a valid consensus branch id
-        if *height
-            < NetworkUpgrade::Overwinter
-                .activation_height(network)
-                .expect("a valid height")
-                .0
-        {
-            continue;
-        }
 
         let mut fake_block = original_block.clone();
         fake_block.transactions = fake_block
