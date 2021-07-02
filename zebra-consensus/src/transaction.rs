@@ -326,6 +326,8 @@ where
         // - verify orchard shielded pool (ZIP-224) (#2105)
         // - ZIP-216 (#1798)
         // - ZIP-244 (#1874)
+        // - validate bindingSigOrchard (#2103)
+        // - remaining consensus rules (#2379)
 
         unimplemented!("V5 transaction validation is not yet complete");
     }
