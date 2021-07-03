@@ -15,7 +15,7 @@ use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    block,
+    block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -209,6 +209,7 @@ where
                 Transaction::V5 {
                     inputs,
                     sapling_shielded_data,
+                    orchard_shielded_data,
                     ..
                 } => Self::verify_v5_transaction(
                     req,
@@ -216,6 +217,7 @@ where
                     script_verifier,
                     inputs,
                     sapling_shielded_data,
+                    orchard_shielded_data,
                 )?,
             };
 
@@ -304,6 +306,7 @@ where
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
@@ -319,6 +322,10 @@ where
         )?
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
+            &shielded_sighash,
+        )?)
+        .and(Self::verify_orchard_shielded_data(
+            orchard_shielded_data,
             &shielded_sighash,
         )?);
 
@@ -529,6 +536,26 @@ where
             //         .clone()
             //         .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
             // );
+        }
+
+        Ok(async_checks)
+    }
+
+    /// Verifies a transaction's Orchard shielded data.
+    fn verify_orchard_shielded_data(
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        shielded_sighash: &blake2b_simd::Hash,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let mut async_checks = AsyncChecks::new();
+
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            let bvk = orchard_shielded_data.binding_verification_key();
+
+            async_checks.push(
+                primitives::redpallas::VERIFIER
+                    .clone()
+                    .oneshot((bvk, orchard_shielded_data.binding_sig, &shielded_sighash).into()),
+            );
         }
 
         Ok(async_checks)

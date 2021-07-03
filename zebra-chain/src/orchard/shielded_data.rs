@@ -3,9 +3,9 @@
 use crate::{
     amount::Amount,
     block::MAX_BLOCK_BYTES,
-    orchard::{tree, Action, Nullifier},
+    orchard::{tree, Action, Nullifier, ValueCommitment},
     primitives::{
-        redpallas::{Binding, Signature, SpendAuth},
+        redpallas::{self, Binding, Signature, SpendAuth},
         Halo2Proof,
     },
     serialization::{
@@ -14,6 +14,8 @@ use crate::{
 };
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
+
+use halo2::pasta::pallas;
 
 use std::{
     cmp::{Eq, PartialEq},
@@ -47,6 +49,37 @@ impl ShieldedData {
     /// Collect the [`Nullifier`]s for this transaction.
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
+    }
+
+    /// Calculate the Action binding verification key.
+    ///
+    /// Getting the binding signature validating key from the Spend and Output
+    /// description value commitments and the balancing value implicitly checks
+    /// that the balancing value is consistent with the value transfered in the
+    /// Spend and Output descriptions but also proves that the signer knew the
+    /// randomness used for the Spend and Output value commitments, which
+    /// prevents replays of Output descriptions.
+    ///
+    /// The net value of Spend transfers minus Output transfers in a transaction
+    /// is called the balancing value, measured in zatoshi as a signed integer
+    /// v_balance.
+    ///
+    /// Consistency of v_balance with the value commitments in Spend
+    /// descriptions and Output descriptions is enforced by the binding
+    /// signature.
+    ///
+    /// Instead of generating a key pair at random, we generate it as a function
+    /// of the value commitments in the Spend descriptions and Output
+    /// descriptions of the transaction, and the balancing value.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+    pub fn binding_verification_key(&self) -> redpallas::VerificationKeyBytes<Binding> {
+        let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
+        let cv_balance: ValueCommitment =
+            ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
+
+        let key_bytes: [u8; 32] = (cv - cv_balance).into();
+        key_bytes.into()
     }
 }
 
