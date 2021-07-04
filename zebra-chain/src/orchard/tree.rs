@@ -236,7 +236,7 @@ impl NoteCommitmentTree {
 mod tests {
 
     use super::*;
-    use crate::orchard::tests::test_vectors;
+    use crate::orchard::tests::vectors;
 
     #[test]
     fn empty_roots() {

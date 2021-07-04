@@ -99,28 +99,6 @@ fn incomplete_addition(
     }
 }
 
-/// Incomplete addition on the Pallas curve.
-///
-/// P ∪ {⊥} × P ∪ {⊥} → P ∪ {⊥}
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#concretesinsemillahash>
-fn incomplete_addition(
-    left: Option<pallas::Point>,
-    right: Option<pallas::Point>,
-) -> Option<pallas::Point> {
-    let identity = pallas::Point::identity();
-
-    match (left, right) {
-        (None, _) | (_, None) => None,
-        (Some(l), _) if l == identity => None,
-        (_, Some(r)) if r == identity => None,
-        (Some(l), Some(r)) if l == r => None,
-        // The inverse of l, (x, -y)
-        (Some(l), Some(r)) if l == -r => None,
-        (Some(l), Some(r)) => Some(l + r),
-    }
-}
-
 /// "...an algebraic hash function with collision resistance (for fixed input
 /// length) derived from assumed hardness of the Discrete Logarithm Problem on
 /// the Pallas curve."
