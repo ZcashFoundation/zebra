@@ -35,6 +35,22 @@ impl InventoryHash {
             .prop_map(InventoryHash::FilteredBlock)
             .boxed()
     }
+
+    /// Generate a proptest strategy for [`InventoryHash`] variants of the smallest serialized size.
+    pub fn smallest_types_strategy() -> BoxedStrategy<Self> {
+        InventoryHash::arbitrary()
+            .prop_filter(
+                "inventory type is not one of the smallest",
+                |inventory_hash| match inventory_hash {
+                    InventoryHash::Error
+                    | InventoryHash::Tx(_)
+                    | InventoryHash::Block(_)
+                    | InventoryHash::FilteredBlock(_) => true,
+                    InventoryHash::Wtx(_) => false,
+                },
+            )
+            .boxed()
+    }
 }
 
 impl Arbitrary for InventoryHash {
