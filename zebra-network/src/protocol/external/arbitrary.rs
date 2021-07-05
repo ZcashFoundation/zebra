@@ -5,12 +5,12 @@ use super::{types::PeerServices, InventoryHash};
 use zebra_chain::{block, transaction};
 
 impl InventoryHash {
-    /// Generate a proptest strategy for Inv Errors
+    /// Generate a proptest strategy for [`InventoryHash::Error`]s.
     pub fn error_strategy() -> BoxedStrategy<Self> {
         Just(InventoryHash::Error).boxed()
     }
 
-    /// Generate a proptest strategy for Inv Tx hashes
+    /// Generate a proptest strategy for [`InventoryHash::Tx`] hashes.
     pub fn tx_strategy() -> BoxedStrategy<Self> {
         // using any::<transaction::Hash> causes a trait impl error
         // when building the zebra-network crate separately
@@ -20,7 +20,7 @@ impl InventoryHash {
             .boxed()
     }
 
-    /// Generate a proptest strategy for Inv Block hashes
+    /// Generate a proptest strategy for [`InventotryHash::Block`] hashes.
     pub fn block_strategy() -> BoxedStrategy<Self> {
         (any::<[u8; 32]>())
             .prop_map(block::Hash)
@@ -28,7 +28,7 @@ impl InventoryHash {
             .boxed()
     }
 
-    /// Generate a proptest strategy for Inv FilteredBlock hashes
+    /// Generate a proptest strategy for [`InventoryHash::FilteredBlock`] hashes.
     pub fn filtered_block_strategy() -> BoxedStrategy<Self> {
         (any::<[u8; 32]>())
             .prop_map(block::Hash)
