@@ -79,7 +79,6 @@ impl Arbitrary for InventoryHash {
     type Strategy = BoxedStrategy<Self>;
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for PeerServices {
     type Parameters = ();
 
