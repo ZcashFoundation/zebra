@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 
-use super::{types::PeerServices, InventoryHash};
+use super::{types::PeerServices, InventoryHash, Message};
 
 use zebra_chain::{block, transaction};
 
@@ -89,4 +89,11 @@ impl Arbitrary for PeerServices {
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+impl Message {
+    /// Create a strategy that only generates [`Message::Inv`] messages.
+    pub fn inv_strategy() -> BoxedStrategy<Self> {
+        any::<Vec<InventoryHash>>().prop_map(Message::Inv).boxed()
+    }
 }
