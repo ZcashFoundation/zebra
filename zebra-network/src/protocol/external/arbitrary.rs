@@ -96,4 +96,11 @@ impl Message {
     pub fn inv_strategy() -> BoxedStrategy<Self> {
         any::<Vec<InventoryHash>>().prop_map(Message::Inv).boxed()
     }
+
+    /// Create a strategy that only generates [`Message::GetData`] messages.
+    pub fn get_data_strategy() -> BoxedStrategy<Self> {
+        any::<Vec<InventoryHash>>()
+            .prop_map(Message::GetData)
+            .boxed()
+    }
 }
