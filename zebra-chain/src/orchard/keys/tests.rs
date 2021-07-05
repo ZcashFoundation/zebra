@@ -1,7 +1,7 @@
 #![allow(clippy::module_inception)]
 
 use super::*;
-use crate::orchard::tests::test_vectors;
+use crate::orchard::tests::vectors::KEY_COMPONENTS;
 
 use proptest::prelude::*;
 
@@ -30,7 +30,7 @@ impl Arbitrary for TransmissionKey {
 fn generate_keys_from_test_vectors() {
     zebra_test::init();
 
-    for (i, test_vector) in test_vectors::TEST_VECTORS.iter().enumerate() {
+    for test_vector in KEY_COMPONENTS.iter() {
         let spending_key = SpendingKey::from_bytes(test_vector.sk, Network::Mainnet);
 
         let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);

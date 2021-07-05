@@ -243,7 +243,7 @@ mod tests {
         zebra_test::init();
 
         for i in 0..EMPTY_ROOTS.len() {
-            assert_eq!(EMPTY_ROOTS[i].to_bytes(), test_vectors::EMPTY_ROOTS[i]);
+            assert_eq!(EMPTY_ROOTS[i].to_bytes(), vectors::EMPTY_ROOTS[i]);
         }
     }
 }
