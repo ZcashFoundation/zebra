@@ -1,6 +1,6 @@
 //! Tests for trusted preallocation during deserialization.
 
-use super::super::inv::{InventoryHash, INV_HASH_SIZE};
+use super::super::inv::{InventoryHash, MIN_INV_HASH_SIZE};
 
 use zebra_chain::serialization::{TrustedPreallocate, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN};
 
@@ -15,7 +15,7 @@ proptest! {
         let serialized_inv = inv
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
-        assert!(serialized_inv.len() == INV_HASH_SIZE);
+        assert!(serialized_inv.len() == MIN_INV_HASH_SIZE);
     }
 
     /// Verifies that...

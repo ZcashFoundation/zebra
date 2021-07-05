@@ -82,13 +82,14 @@ impl ZcashDeserialize for InventoryHash {
     }
 }
 
-/// The serialized size of an [`InventoryHash`].
-pub(crate) const INV_HASH_SIZE: usize = 36;
+/// The minimum serialized size of an [`InventoryHash`].
+pub(crate) const MIN_INV_HASH_SIZE: usize = 36;
 
 impl TrustedPreallocate for InventoryHash {
     fn max_allocation() -> u64 {
-        // An Inventory hash takes 36 bytes, and we reserve at least one byte for the Vector length
-        // so we can never receive more than ((MAX_PROTOCOL_MESSAGE_LEN - 1) / 36) in a single message
-        ((MAX_PROTOCOL_MESSAGE_LEN - 1) / INV_HASH_SIZE) as u64
+        // An Inventory hash takes at least 36 bytes, and we reserve at least one byte for the
+        // Vector length so we can never receive more than ((MAX_PROTOCOL_MESSAGE_LEN - 1) / 36) in
+        // a single message
+        ((MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_INV_HASH_SIZE) as u64
     }
 }
