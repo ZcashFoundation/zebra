@@ -201,6 +201,7 @@ pub fn sinsemilla_short_commit(
 mod tests {
 
     use super::*;
+    use crate::orchard::tests::vectors;
 
     fn x_from_str(s: &str) -> pallas::Base {
         use group::ff::PrimeField;
@@ -233,5 +234,33 @@ mod tests {
             sinsemilla_hash_to_point(&D[..], &M).expect("").to_affine(),
             test_vector
         )
+    }
+
+    // Checks Sinsemilla hashes to point and to bytes (aka the x-coordinate
+    // bytes of a point) with:
+    // - One of two domains.
+    // - Random message lengths between 0 and 255 bytes.
+    // - Random message bits.
+    #[test]
+    #[allow(non_snake_case)]
+    fn hackworks_test_vectors() {
+        use group::GroupEncoding;
+        use halo2::arithmetic::FieldExt;
+        use std::iter::FromIterator;
+
+        for tv in tests::vectors::SINSEMILLA.iter() {
+            let D = tv.domain.as_slice();
+            let M = &<BitVec<Lsb0, u8> as FromIterator<bool>>::from_iter(tv.msg.clone());
+
+            assert_eq!(
+                sinsemilla_hash_to_point(D, M).expect(""),
+                pallas::Point::from_bytes(&tv.point).unwrap()
+            );
+
+            assert_eq!(
+                sinsemilla_hash(D, M).expect(""),
+                pallas::Base::from_bytes(&tv.hash).unwrap()
+            )
+        }
     }
 }
