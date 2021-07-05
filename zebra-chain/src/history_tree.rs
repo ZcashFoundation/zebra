@@ -32,6 +32,7 @@ pub enum HistoryTreeError {
 
 /// History tree (Merkle mountain range) structure that contains information about
 // the block history, as specified in [ZIP-221][https://zips.z.cash/zip-0221].
+#[derive(Debug)]
 pub struct HistoryTree {
     network: Network,
     network_upgrade: NetworkUpgrade,

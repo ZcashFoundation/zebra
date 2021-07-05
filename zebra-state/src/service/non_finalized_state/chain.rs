@@ -18,7 +18,7 @@ use zebra_chain::{
 
 use crate::{PreparedBlock, Utxo, ValidateContextError};
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct Chain {
     pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,

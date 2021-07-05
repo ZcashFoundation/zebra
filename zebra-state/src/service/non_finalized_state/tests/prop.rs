@@ -34,14 +34,14 @@ fn forked_equals_pushed() -> Result<()> {
             let mut forked = full_chain.fork(fork_tip_hash, &finalized_tree).expect("fork works").expect("hash is present");
 
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
-            prop_assert!(forked == partial_chain);
+            prop_assert_eq!(&forked, &partial_chain);
 
             for block in chain.iter().skip(count) {
                 forked.push(block.clone())?;
             }
 
             prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
-            prop_assert!(forked == full_chain);
+            prop_assert_eq!(&forked, &full_chain);
         });
 
     Ok(())
@@ -80,7 +80,7 @@ fn finalized_equals_pushed() -> Result<()> {
         }
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
-        prop_assert!(full_chain == partial_chain);
+        prop_assert_eq!(&full_chain, &partial_chain);
     });
 
     Ok(())
