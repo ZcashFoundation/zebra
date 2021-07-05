@@ -1,8 +1,12 @@
+use bytes::BytesMut;
 use proptest::{collection::vec, prelude::*};
+use tokio_util::codec::{Decoder, Encoder};
 
-use zebra_chain::serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize};
+use zebra_chain::serialization::{
+    SerializationError, ZcashDeserializeInto, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
+};
 
-use super::super::InventoryHash;
+use super::super::{Codec, InventoryHash, Message};
 
 /// Maximum number of random input bytes to try to deserialize an [`InventoryHash`] from.
 ///
@@ -65,5 +69,24 @@ proptest! {
             prop_assert!(bytes.len() <= input.len());
             prop_assert_eq!(&bytes, &input[..bytes.len()]);
         }
+    }
+
+    /// Test if a [`Message::{Inv, GetData}`] is not changed after encoding and decoding it.
+    // TODO: Update this test to cover all `Message` variants.
+    #[test]
+    fn inv_and_getdata_message_roundtrip(
+        message in prop_oneof!(Message::inv_strategy(), Message::get_data_strategy()),
+    ) {
+        let mut codec = Codec::builder().finish();
+        let mut bytes = BytesMut::with_capacity(MAX_PROTOCOL_MESSAGE_LEN);
+
+        let encoding_result = codec.encode(message.clone(), &mut bytes);
+
+        prop_assert!(encoding_result.is_ok());
+
+        let decoded: Result<Option<Message>, _> = codec.decode(&mut bytes);
+
+        prop_assert!(decoded.is_ok());
+        prop_assert_eq!(decoded.unwrap(), Some(message));
     }
 }
