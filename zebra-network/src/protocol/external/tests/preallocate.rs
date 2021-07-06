@@ -22,7 +22,7 @@ proptest! {
     /// 1. The smallest disallowed vector of `InventoryHash`s is too large to fit in a legal Zcash message
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
     #[test]
-    fn inv_hash_max_allocation_is_correct(inv in InventoryHash::arbitrary()) {
+    fn inv_hash_max_allocation_is_correct(inv in InventoryHash::smallest_types_strategy()) {
         let max_allocation: usize = InventoryHash::max_allocation().try_into().unwrap();
         let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
         for _ in 0..(InventoryHash::max_allocation() + 1) {
