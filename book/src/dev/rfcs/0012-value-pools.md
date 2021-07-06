@@ -298,6 +298,7 @@ let prepared_block = zs::PreparedBlock {
 ```rust
 pub struct Chain {
     ..
+    /// The chain value pool balance at the tip of this chain.
     value_pool: ValueBalance<NonNegative>,
 }
 ```
