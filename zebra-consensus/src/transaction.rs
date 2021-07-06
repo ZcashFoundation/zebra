@@ -15,7 +15,7 @@ use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    block,
+    block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -209,6 +209,7 @@ where
                 Transaction::V5 {
                     inputs,
                     sapling_shielded_data,
+                    orchard_shielded_data,
                     ..
                 } => Self::verify_v5_transaction(
                     req,
@@ -216,6 +217,7 @@ where
                     script_verifier,
                     inputs,
                     sapling_shielded_data,
+                    orchard_shielded_data,
                 )?,
             };
 
@@ -298,12 +300,15 @@ where
     /// - the `network` to consider when verifying
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the transparent `inputs` in the transaction
+    /// - the sapling shielded data of the transaction, if any
+    /// - the orchard shielded data of the transaction, if any
     fn verify_v5_transaction(
         request: Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
@@ -319,6 +324,10 @@ where
         )?
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
+            &shielded_sighash,
+        )?)
+        .and(Self::verify_orchard_shielded_data(
+            orchard_shielded_data,
             &shielded_sighash,
         )?);
 
@@ -529,6 +538,36 @@ where
             //         .clone()
             //         .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
             // );
+        }
+
+        Ok(async_checks)
+    }
+
+    /// Verifies a transaction's Orchard shielded data.
+    fn verify_orchard_shielded_data(
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        shielded_sighash: &blake2b_simd::Hash,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let mut async_checks = AsyncChecks::new();
+
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for authorized_action in orchard_shielded_data.actions.iter().cloned() {
+                let (action, spend_auth_sig) = authorized_action.into_parts();
+                // Consensus rule: The spend authorization signature
+                // MUST be a valid SpendAuthSig signature over
+                // SigHash using rk as the validating key.
+                //
+                // Queue the validation of the RedPallas spend
+                // authorization signature for each Action
+                // description while adding the resulting future to
+                // our collection of async checks that (at a
+                // minimum) must pass for the transaction to verify.
+                async_checks.push(
+                    primitives::redpallas::VERIFIER
+                        .clone()
+                        .oneshot((action.rk, spend_auth_sig, &shielded_sighash).into()),
+                );
+            }
         }
 
         Ok(async_checks)
