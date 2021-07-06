@@ -131,8 +131,9 @@ impl ValueBalance {
     ///
     /// This rule applies to Block and Mempool transactions
     fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Err> {
-        // This rule checks the sum of the transparent, sprout, sapling, and orchard value balances in a transaction, not `ValueBalance.transparent`.
-        [self.transparent, self.sprout, self.sapling, self.orchard].sum()
+        // This rule checks the transparent value balance minus the sum of the sprout, sapling, and orchard
+        // value balances in a transaction is nonnegative
+        self.transparent - [self.sprout + self.sapling + self.orchard].sum()
     }
 }
 
