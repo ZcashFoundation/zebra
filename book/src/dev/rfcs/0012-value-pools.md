@@ -25,7 +25,7 @@ Checking the coins created by coinbase transactions and funding streams is out o
 [definitions]: #definitions
 
 - `value balance` - The total change in value caused by a subset of the blockchain.
-- `transparent value balance` - The change in the value of the transparent pool. The sum of the outputs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields. In coinbase transactions, add the coins newly created by the block.
+- `transparent value balance` - The change in the value of the transparent pool. The sum of the outputs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields.
 - `coinbase transparent value balance` - The change in the value of the transparent pool due to a coinbase transaction. The coins newly created by the block, minus the sum of newly created outputs in `tx_out` fields. In this design, we temporarily assume that all coinbase outputs are valid, to avoid checking the created coins.
 - `sprout value balance` - The change in the sprout value pool. The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
 - `sapling value balance` - The change in the sapling value pool. The negation of the sum of all `valueBalanceSapling` fields.
