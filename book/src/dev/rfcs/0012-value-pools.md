@@ -386,13 +386,25 @@ We now detail what is needed in order to have the `get_pool()` method available.
 In order to save `ValueBalance` into the disk database we must implement `IntoDisk` and `FromDisk` for `ValueBalance` and for `Amount`:
 
 ```rust
-
 impl IntoDisk for ValueBalance<C> {
-    ..
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        [self.transparent.to_bytes(), self.sprout.to_bytes(),
+        self.sapling.to_bytes(), self.orchard.to_bytes()].concat()
+    }
 }
 
 impl FromDisk for ValueBalance<C> {
-    ..
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array = bytes.as_ref().try_into().unwrap();
+        ValueBalance {
+            transparent: i64::from_be_bytes(array[0..8]).try_into().unwrap()
+            sprout: i64::from_be_bytes(array[8..16]).try_into().unwrap()
+            sapling: i64::from_be_bytes(array[16..24]).try_into().unwrap()
+            orchard: i64::from_be_bytes(array[24..32]).try_into().unwrap()
+        }
+    }
 }
 
 impl IntoDisk for Amount {
@@ -436,7 +448,6 @@ if height == block::Height(0) {
     let current_pool = self.get_pool();
     batch.zs_insert(value_pools, height, (current_pool + block.value_pool())?);
 }
-
 ```
 
 The `get_pool()` function will get the value of the pool at the tip as follows:
