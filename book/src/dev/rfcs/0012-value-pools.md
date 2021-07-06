@@ -24,14 +24,16 @@ Checking the coins created by coinbase transactions and funding streams is out o
 # Definitions
 [definitions]: #definitions
 
-- `value balance` - the total value represented by a subset of the blockchain.
-- `transparent value balance` - the sum of the outputs spent by all transparent `tx_in` fields, minus the sum of all `tx_out` fields.
-- `sprout value balance` - the sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
-- `sapling value balance` - the negation of the sum of all `valueBalanceSapling` fields.
-- `orchard value balance` - the negation of the sum of all `valueBalanceOrchard` fields.
-- `transaction value pool balance` - the sum of all the value balances in each transaction.
-- `block value pool balance` - the sum of all the value balances in each block.
-- `chain value pool balance` - the sum of all the value balances in a valid blockchain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
+- `value balance` - The total change in value caused by a subset of the blockchain.
+- `transparent value balance` - The change in the value of the transparent pool. The sum of the outputs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields. In coinbase transactions, add the coins newly created by the block.
+- `coinbase transparent value balance` - The change in the value of the transparent pool due to a coinbase transaction. The coins newly created by the block, minus the sum of newly created outputs in `tx_out` fields. In this design, we temporarily assume that all coinbase outputs are valid, to avoid checking the created coins.
+- `sprout value balance` - The change in the sprout value pool. The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
+- `sapling value balance` - The change in the sapling value pool. The negation of the sum of all `valueBalanceSapling` fields.
+- `orchard value balance` - The change in the orchard value pool. The negation of the sum of all `valueBalanceOrchard` fields.
+- `remaining transaction value` - The leftover value in each transaction, collected by miners as a fee. This value must be non-negative. In Zebra, calculated by subtracting the sprout, sapling, and orchard value balances from the transparent value balance. In the spec, defined as the sum of transparent inputs, minus transparent outputs, plus `v_sprout_new`, minus `v_sprout_old`, plus `vbalanceSapling`, plus `vbalanceOrchard`.
+- `transaction value pool balance` - The sum of all the value balances in each transaction. There is a separate value for each transparent and shielded pool.
+- `block value pool balance` - The sum of all the value balances in each block. There is a separate value for each transparent and shielded pool.
+- `chain value pool balance` - The sum of all the value balances in a valid blockchain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
