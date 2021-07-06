@@ -264,7 +264,7 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Val
     self.transactions()
         .map(Transaction::value_balance)
         .sum()
-        .unwrap_or_else(ValueBalance::default)
+        .expect("Each block should have at least one coinbase transaction")
 }
 ```
 
