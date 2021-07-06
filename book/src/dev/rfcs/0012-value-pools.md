@@ -301,6 +301,14 @@ pub struct Chain {
     value_pool: ValueBalance<NonNegative>,
 }
 ```
+- Add a new argument `finalized_tip_value_balance` to the `commit_new_chain()` method located in the same file.
+- Pass the new argument to the Chain in:
+
+```rust
+let mut chain = Chain::new(finalized_tip_history_tree, finalized_tip_value_balance);
+```
+
+Note: We don't need to pass the finalized tip value balance into the `commit_block()` method.
 
 ### Update value pools when chain is updated or reversed
 
