@@ -103,7 +103,7 @@ impl Arbitrary for OutputInTransactionV4 {
 }
 
 /// Creates Strategy for generation VerificationKeyBytes, since the `redjubjub`
-/// create does not provide an Arbitrary implementation for it.
+/// crate does not provide an Arbitrary implementation for it.
 fn spendauth_verification_key_bytes(
 ) -> impl Strategy<Value = redjubjub::VerificationKeyBytes<redjubjub::SpendAuth>> {
     prop::array::uniform32(any::<u8>()).prop_map(|bytes| {
