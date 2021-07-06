@@ -21,6 +21,7 @@ pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
 pub use sighash::HashType;
+pub use sighash::SigHash;
 
 use crate::{
     amount, block, orchard,
@@ -146,7 +147,7 @@ impl Transaction {
         network_upgrade: NetworkUpgrade,
         hash_type: sighash::HashType,
         input: Option<(u32, transparent::Output)>,
-    ) -> blake2b_simd::Hash {
+    ) -> SigHash {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
 

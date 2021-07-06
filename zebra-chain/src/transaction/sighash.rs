@@ -12,10 +12,14 @@ use crate::{
     transparent,
 };
 
-use blake2b_simd::Hash;
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use std::io::{self, Write};
+use std::{
+    convert::TryInto,
+    io::{self, Write},
+};
+
+use crate::primitives::zcash_primitives::sighash;
 
 static ZIP143_EXPLANATION: &str = "Invalid transaction version: after Overwinter activation transaction versions 1 and 2 are rejected";
 static ZIP243_EXPLANATION: &str = "Invalid transaction version: after Sapling activation transaction versions 1, 2, and 3 are rejected";
@@ -45,6 +49,23 @@ bitflags::bitflags! {
 impl HashType {
     fn masked(self) -> Self {
         Self::from_bits_truncate(self.bits & 0b0001_1111)
+    }
+}
+
+/// A Signature Hash (or SIGHASH) as specified in
+/// https://zips.z.cash/protocol/protocol.pdf#sighash
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct SigHash(pub [u8; 32]);
+
+impl AsRef<[u8; 32]> for SigHash {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for SigHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -79,7 +100,7 @@ impl<'a> SigHasher<'a> {
         }
     }
 
-    pub(super) fn sighash(self) -> Hash {
+    pub(super) fn sighash(self) -> SigHash {
         use NetworkUpgrade::*;
         let mut hash = blake2b_simd::Params::new()
             .hash_length(32)
@@ -94,12 +115,10 @@ impl<'a> SigHasher<'a> {
             Sapling | Blossom | Heartwood | Canopy => self
                 .hash_sighash_zip243(&mut hash)
                 .expect("serialization into hasher never fails"),
-            Nu5 => unimplemented!(
-                "Nu5 upgrade uses a new transaction digest algorithm, as specified in ZIP-244"
-            ),
+            Nu5 => return self.hash_sighash_zip244(),
         }
 
-        hash.finalize()
+        SigHash(hash.finalize().as_ref().try_into().unwrap())
     }
 
     fn consensus_branch_id(&self) -> ConsensusBranchId {
@@ -107,7 +126,7 @@ impl<'a> SigHasher<'a> {
     }
 
     /// Sighash implementation for the overwinter network upgrade
-    fn hash_sighash_zip143<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_sighash_zip143<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.hash_header(&mut writer)?;
         self.hash_groupid(&mut writer)?;
         self.hash_prevouts(&mut writer)?;
@@ -131,7 +150,7 @@ impl<'a> SigHasher<'a> {
         personal
     }
 
-    fn hash_header<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_header<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let overwintered_flag = 1 << 31;
 
         writer.write_u32::<LittleEndian>(match &self.trans {
@@ -142,7 +161,7 @@ impl<'a> SigHasher<'a> {
         })
     }
 
-    fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_groupid<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(match &self.trans {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { .. } => OVERWINTER_VERSION_GROUP_ID,
@@ -151,7 +170,7 @@ impl<'a> SigHasher<'a> {
         })
     }
 
-    fn hash_prevouts<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_prevouts<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.hash_type.contains(HashType::ANYONECANPAY) {
             return writer.write_all(&[0; 32]);
         }
@@ -173,7 +192,7 @@ impl<'a> SigHasher<'a> {
         writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_sequence<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_sequence<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.hash_type.contains(HashType::ANYONECANPAY)
             || self.hash_type.masked() == HashType::SINGLE
             || self.hash_type.masked() == HashType::NONE
@@ -199,7 +218,7 @@ impl<'a> SigHasher<'a> {
     }
 
     /// Writes the u256 hash of the transactions outputs to the provided Writer
-    fn hash_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.hash_type.masked() != HashType::SINGLE && self.hash_type.masked() != HashType::NONE
         {
             self.outputs_hash(writer)
@@ -249,7 +268,7 @@ impl<'a> SigHasher<'a> {
         writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_joinsplits<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_joinsplits<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let has_joinsplits = match self.trans {
             Transaction::V1 { .. } | Transaction::V2 { .. } => unreachable!(ZIP143_EXPLANATION),
             Transaction::V3 { joinsplit_data, .. } => joinsplit_data.is_some(),
@@ -318,19 +337,19 @@ impl<'a> SigHasher<'a> {
         writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_lock_time<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_lock_time<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.trans.lock_time().zcash_serialize(&mut writer)
     }
 
-    fn hash_expiry_height<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_expiry_height<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.trans.expiry_height().expect(ZIP143_EXPLANATION).0)
     }
 
-    fn hash_hash_type<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_hash_type<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.hash_type.bits())
     }
 
-    fn hash_input<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_input<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         if self.input.is_some() {
             self.hash_input_prevout(&mut writer)?;
             self.hash_input_script_code(&mut writer)?;
@@ -341,7 +360,7 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_input_prevout<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_input_prevout<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let (_, input, _) = self
             .input
             .as_ref()
@@ -359,7 +378,10 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_input_script_code<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_input_script_code<W: io::Write>(
+        &self,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
         let (transparent::Output { lock_script, .. }, _, _) = self
             .input
             .as_ref()
@@ -370,7 +392,7 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_input_amount<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_input_amount<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let (transparent::Output { value, .. }, _, _) = self
             .input
             .as_ref()
@@ -381,7 +403,7 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_input_sequence<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_input_sequence<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let (_, input, _) = self
             .input
             .as_ref()
@@ -405,7 +427,7 @@ impl<'a> SigHasher<'a> {
 
     /// Sighash implementation for the sapling network upgrade and every
     /// subsequent network upgrade
-    fn hash_sighash_zip243<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_sighash_zip243<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.hash_header(&mut writer)?;
         self.hash_groupid(&mut writer)?;
         self.hash_prevouts(&mut writer)?;
@@ -423,7 +445,10 @@ impl<'a> SigHasher<'a> {
         Ok(())
     }
 
-    fn hash_shielded_spends<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_shielded_spends<W: io::Write>(
+        &self,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
         use Transaction::*;
 
         let sapling_shielded_data = match self.trans {
@@ -462,7 +487,10 @@ impl<'a> SigHasher<'a> {
         writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_shielded_outputs<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_shielded_outputs<W: io::Write>(
+        &self,
+        mut writer: W,
+    ) -> Result<(), io::Error> {
         use Transaction::*;
 
         let sapling_shielded_data = match self.trans {
@@ -499,7 +527,7 @@ impl<'a> SigHasher<'a> {
         writer.write_all(hash.finalize().as_ref())
     }
 
-    fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    pub(super) fn hash_value_balance<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         use crate::amount::Amount;
         use std::convert::TryFrom;
         use Transaction::*;
@@ -520,466 +548,13 @@ impl<'a> SigHasher<'a> {
 
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::{amount::Amount, serialization::ZcashDeserializeInto, transaction::Transaction};
-    use color_eyre::eyre;
-    use eyre::Result;
-    use transparent::Script;
-    use zebra_test::vectors::{ZIP143_1, ZIP143_2, ZIP243_1, ZIP243_2, ZIP243_3};
-
-    macro_rules! assert_hash_eq {
-        ($expected:literal, $hasher:expr, $f:ident) => {
-            let mut buf = vec![];
-            $hasher
-                .$f(&mut buf)
-                .expect("hashing into a vec never fails");
-            let expected = $expected;
-            let result = hex::encode(buf);
-            let span = tracing::span!(
-                tracing::Level::ERROR,
-                "compare_vecs",
-                expected.len = expected.len(),
-                result.len = result.len(),
-                hash_fn = stringify!($f)
-            );
-            let guard = span.enter();
-            assert_eq!(expected, result);
-            drop(guard);
-        };
-    }
-
-    #[test]
-    fn test_vec143_1() -> Result<()> {
-        zebra_test::init();
-
-        let transaction = ZIP143_1.zcash_deserialize_into::<Transaction>()?;
-
-        let hasher = SigHasher {
-            trans: &transaction,
-            hash_type: HashType::ALL,
-            network_upgrade: NetworkUpgrade::Overwinter,
-            input: None,
-        };
-
-        assert_hash_eq!("03000080", hasher, hash_header);
-
-        assert_hash_eq!("7082c403", hasher, hash_groupid);
-
-        assert_hash_eq!(
-            "d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136",
-            hasher,
-            hash_prevouts
-        );
-
-        assert_hash_eq!(
-            "a5f25f01959361ee6eb56a7401210ee268226f6ce764a4f10b7f29e54db37272",
-            hasher,
-            hash_sequence
-        );
-
-        assert_hash_eq!(
-            "ab6f7f6c5ad6b56357b5f37e16981723db6c32411753e28c175e15589172194a",
-            hasher,
-            hash_outputs
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_joinsplits
-        );
-
-        assert_hash_eq!("481cdd86", hasher, hash_lock_time);
-
-        assert_hash_eq!("b3cc4318", hasher, hash_expiry_height);
-
-        assert_hash_eq!("01000000", hasher, hash_hash_type);
-
-        assert_hash_eq!(
-            "030000807082c403d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136a5f25f01959361ee6eb56a7401210ee268226f6ce764a4f10b7f29e54db37272ab6f7f6c5ad6b56357b5f37e16981723db6c32411753e28c175e15589172194a0000000000000000000000000000000000000000000000000000000000000000481cdd86b3cc431801000000",
-            hasher,
-            hash_sighash_zip143
-        );
-
-        let hash = hasher.sighash();
-        let expected = "a1f1a4e5cd9bd522322d661edd2af1bf2a7019cfab94ece18f4ba935b0a19073";
-        let result = hex::encode(hash.as_bytes());
-        let span = tracing::span!(
-            tracing::Level::ERROR,
-            "compare_final",
-            expected.len = expected.len(),
-            buf.len = result.len()
-        );
-        let _guard = span.enter();
-        assert_eq!(expected, result);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_vec143_2() -> Result<()> {
-        zebra_test::init();
-
-        let transaction = ZIP143_2.zcash_deserialize_into::<Transaction>()?;
-
-        let value = hex::decode("2f6e04963b4c0100")?.zcash_deserialize_into::<Amount<_>>()?;
-        let lock_script = Script::new(&hex::decode("53")?);
-        let input_ind = 1;
-
-        let hasher = SigHasher::new(
-            &transaction,
-            HashType::SINGLE,
-            NetworkUpgrade::Overwinter,
-            Some((input_ind, transparent::Output { value, lock_script })),
-        );
-
-        assert_hash_eq!("03000080", hasher, hash_header);
-
-        assert_hash_eq!("7082c403", hasher, hash_groupid);
-
-        assert_hash_eq!(
-            "92b8af1f7e12cb8de105af154470a2ae0a11e64a24a514a562ff943ca0f35d7f",
-            hasher,
-            hash_prevouts
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_sequence
-        );
-
-        assert_hash_eq!(
-            "edc32cce530f836f7c31c53656f859f514c3ff8dcae642d3e17700fdc6e829a4",
-            hasher,
-            hash_outputs
-        );
-
-        assert_hash_eq!(
-            "f59e41b40f3a60be90bee2be11b0956dfff06a6d8e22668c4f215bd87b20d514",
-            hasher,
-            hash_joinsplits
-        );
-
-        assert_hash_eq!("97b0e4e4", hasher, hash_lock_time);
-
-        assert_hash_eq!("c705fc05", hasher, hash_expiry_height);
-
-        assert_hash_eq!("03000000", hasher, hash_hash_type);
-
-        assert_hash_eq!(
-            "378af1e40f64e125946f62c2fa7b2fecbcb64b6968912a6381ce3dc166d56a1d62f5a8d7",
-            hasher,
-            hash_input_prevout
-        );
-
-        assert_hash_eq!("0153", hasher, hash_input_script_code);
-
-        assert_hash_eq!("2f6e04963b4c0100", hasher, hash_input_amount);
-
-        assert_hash_eq!("e8c7203d", hasher, hash_input_sequence);
-
-        let hash = hasher.sighash();
-        let expected = "23652e76cb13b85a0e3363bb5fca061fa791c40c533eccee899364e6e60bb4f7";
-        let result = hash.as_bytes();
-        let result = hex::encode(result);
-        let span = tracing::span!(
-            tracing::Level::ERROR,
-            "compare_final",
-            expected.len = expected.len(),
-            buf.len = result.len()
-        );
-        let _guard = span.enter();
-        assert_eq!(expected, result);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_vec243_1() -> Result<()> {
-        zebra_test::init();
-
-        let transaction = ZIP243_1.zcash_deserialize_into::<Transaction>()?;
-
-        let hasher = SigHasher {
-            trans: &transaction,
-            hash_type: HashType::ALL,
-            network_upgrade: NetworkUpgrade::Sapling,
-            input: None,
-        };
-
-        assert_hash_eq!("04000080", hasher, hash_header);
-
-        assert_hash_eq!("85202f89", hasher, hash_groupid);
-
-        assert_hash_eq!(
-            "d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136",
-            hasher,
-            hash_prevouts
-        );
-
-        assert_hash_eq!(
-            "a5f25f01959361ee6eb56a7401210ee268226f6ce764a4f10b7f29e54db37272",
-            hasher,
-            hash_sequence
-        );
-
-        assert_hash_eq!(
-            "ab6f7f6c5ad6b56357b5f37e16981723db6c32411753e28c175e15589172194a",
-            hasher,
-            hash_outputs
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_joinsplits
-        );
-
-        assert_hash_eq!(
-            "3fd9edb96dccf5b9aeb71e3db3710e74be4f1dfb19234c1217af26181f494a36",
-            hasher,
-            hash_shielded_spends
-        );
-
-        assert_hash_eq!(
-            "dafece799f638ba7268bf8fe43f02a5112f0bb32a84c4a8c2f508c41ff1c78b5",
-            hasher,
-            hash_shielded_outputs
-        );
-
-        assert_hash_eq!("481cdd86", hasher, hash_lock_time);
-
-        assert_hash_eq!("b3cc4318", hasher, hash_expiry_height);
-
-        assert_hash_eq!("442117623ceb0500", hasher, hash_value_balance);
-
-        assert_hash_eq!("01000000", hasher, hash_hash_type);
-
-        assert_hash_eq!(
-            "0400008085202f89d53a633bbecf82fe9e9484d8a0e727c73bb9e68c96e72dec30144f6a84afa136a5f25f01959361ee6eb56a7401210ee268226f6ce764a4f10b7f29e54db37272ab6f7f6c5ad6b56357b5f37e16981723db6c32411753e28c175e15589172194a00000000000000000000000000000000000000000000000000000000000000003fd9edb96dccf5b9aeb71e3db3710e74be4f1dfb19234c1217af26181f494a36dafece799f638ba7268bf8fe43f02a5112f0bb32a84c4a8c2f508c41ff1c78b5481cdd86b3cc4318442117623ceb050001000000",
-            hasher,
-            hash_sighash_zip243
-        );
-
-        let hash = hasher.sighash();
-        let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
-        let result = hex::encode(hash.as_bytes());
-        let span = tracing::span!(
-            tracing::Level::ERROR,
-            "compare_final",
-            expected.len = expected.len(),
-            buf.len = result.len()
-        );
-        let _guard = span.enter();
-        assert_eq!(expected, result);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_vec243_2() -> Result<()> {
-        zebra_test::init();
-
-        let transaction = ZIP243_2.zcash_deserialize_into::<Transaction>()?;
-
-        let value = hex::decode("adedf02996510200")?.zcash_deserialize_into::<Amount<_>>()?;
-        let lock_script = Script::new(&[]);
-        let input_ind = 1;
-
-        let hasher = SigHasher::new(
-            &transaction,
-            HashType::NONE,
-            NetworkUpgrade::Sapling,
-            Some((input_ind, transparent::Output { value, lock_script })),
-        );
-
-        assert_hash_eq!("04000080", hasher, hash_header);
-
-        assert_hash_eq!("85202f89", hasher, hash_groupid);
-
-        assert_hash_eq!(
-            "cacf0f5210cce5fa65a59f314292b3111d299e7d9d582753cf61e1e408552ae4",
-            hasher,
-            hash_prevouts
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_sequence
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_outputs
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_joinsplits
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_shielded_spends
-        );
-
-        assert_hash_eq!(
-            "b79530fcec83211d21e3c355db538c138d625784c27370e9d1039a8515a23f87",
-            hasher,
-            hash_shielded_outputs
-        );
-
-        assert_hash_eq!("d7034302", hasher, hash_lock_time);
-
-        assert_hash_eq!("011b9a07", hasher, hash_expiry_height);
-
-        assert_hash_eq!("6620edc067ff0200", hasher, hash_value_balance);
-
-        assert_hash_eq!("02000000", hasher, hash_hash_type);
-
-        assert_hash_eq!(
-            "090f47a068e227433f9e49d3aa09e356d8d66d0c0121e91a3c4aa3f27fa1b63396e2b41d",
-            hasher,
-            hash_input_prevout
-        );
-
-        assert_hash_eq!("00", hasher, hash_input_script_code);
-
-        assert_hash_eq!("adedf02996510200", hasher, hash_input_amount);
-
-        assert_hash_eq!("4e970568", hasher, hash_input_sequence);
-
-        assert_hash_eq!(
-            "0400008085202f89cacf0f5210cce5fa65a59f314292b3111d299e7d9d582753cf61e1e408552ae40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b79530fcec83211d21e3c355db538c138d625784c27370e9d1039a8515a23f87d7034302011b9a076620edc067ff020002000000090f47a068e227433f9e49d3aa09e356d8d66d0c0121e91a3c4aa3f27fa1b63396e2b41d00adedf029965102004e970568",
-            hasher,
-            hash_sighash_zip243
-        );
-
-        let hash = hasher.sighash();
-        let expected = "bbe6d84f57c56b29b914c694baaccb891297e961de3eb46c68e3c89c47b1a1db";
-        let result = hex::encode(hash.as_bytes());
-        let span = tracing::span!(
-            tracing::Level::ERROR,
-            "compare_final",
-            expected.len = expected.len(),
-            buf.len = result.len()
-        );
-        let _guard = span.enter();
-        assert_eq!(expected, result);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_vec243_3() -> Result<()> {
-        zebra_test::init();
-
-        let transaction = ZIP243_3.zcash_deserialize_into::<Transaction>()?;
-
-        let value = hex::decode("80f0fa0200000000")?.zcash_deserialize_into::<Amount<_>>()?;
-        let lock_script = Script::new(&hex::decode(
-            "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
-        )?);
-        let input_ind = 0;
-
-        let hasher = SigHasher::new(
-            &transaction,
-            HashType::ALL,
-            NetworkUpgrade::Sapling,
-            Some((input_ind, transparent::Output { value, lock_script })),
-        );
-
-        assert_hash_eq!("04000080", hasher, hash_header);
-
-        assert_hash_eq!("85202f89", hasher, hash_groupid);
-
-        assert_hash_eq!(
-            "fae31b8dec7b0b77e2c8d6b6eb0e7e4e55abc6574c26dd44464d9408a8e33f11",
-            hasher,
-            hash_prevouts
-        );
-
-        assert_hash_eq!(
-            "6c80d37f12d89b6f17ff198723e7db1247c4811d1a695d74d930f99e98418790",
-            hasher,
-            hash_sequence
-        );
-
-        assert_hash_eq!(
-            "d2b04118469b7810a0d1cc59568320aad25a84f407ecac40b4f605a4e6868454",
-            hasher,
-            hash_outputs
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_joinsplits
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_shielded_spends
-        );
-
-        assert_hash_eq!(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            hasher,
-            hash_shielded_outputs
-        );
-
-        assert_hash_eq!("29b00400", hasher, hash_lock_time);
-
-        assert_hash_eq!("48b00400", hasher, hash_expiry_height);
-
-        assert_hash_eq!("0000000000000000", hasher, hash_value_balance);
-
-        assert_hash_eq!("01000000", hasher, hash_hash_type);
-
-        assert_hash_eq!(
-            "a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5bb6a1d9952104d901000000",
-            hasher,
-            hash_input_prevout
-        );
-
-        assert_hash_eq!(
-            "1976a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
-            hasher,
-            hash_input_script_code
-        );
-
-        assert_hash_eq!("80f0fa0200000000", hasher, hash_input_amount);
-
-        assert_hash_eq!("feffffff", hasher, hash_input_sequence);
-
-        assert_hash_eq!(
-            "0400008085202f89fae31b8dec7b0b77e2c8d6b6eb0e7e4e55abc6574c26dd44464d9408a8e33f116c80d37f12d89b6f17ff198723e7db1247c4811d1a695d74d930f99e98418790d2b04118469b7810a0d1cc59568320aad25a84f407ecac40b4f605a4e686845400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000029b0040048b00400000000000000000001000000a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5bb6a1d9952104d9010000001976a914507173527b4c3318a2aecd793bf1cfed705950cf88ac80f0fa0200000000feffffff",
-            hasher,
-            hash_sighash_zip243
-        );
-
-        let hash = hasher.sighash();
-        let expected = "f3148f80dfab5e573d5edfe7a850f5fd39234f80b5429d3a57edcc11e34c585b";
-        let result = hex::encode(hash.as_bytes());
-        let span = tracing::span!(
-            tracing::Level::ERROR,
-            "compare_final",
-            expected.len = expected.len(),
-            buf.len = result.len()
-        );
-        let _guard = span.enter();
-        assert_eq!(expected, result);
-
-        Ok(())
+    /// Compute a signature hash for V5 transactions according to ZIP-244.
+    fn hash_sighash_zip244(&self) -> SigHash {
+        let input = self
+            .input
+            .as_ref()
+            .map(|(output, input, idx)| (output, *input, *idx));
+        sighash(&self.trans, self.hash_type, self.network_upgrade, input)
     }
 }

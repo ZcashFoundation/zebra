@@ -620,7 +620,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data.sig = signing_key.sign(sighash.as_bytes()),
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
             _ => unreachable!("Mock transaction was created incorrectly"),
         }
 
