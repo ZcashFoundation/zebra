@@ -301,15 +301,19 @@ pub struct Chain {
 }
 ```
 
-### Update `update_chain_state_with()` for `Chain` struct to calculate Chain.value_pool
+### Update value pools when chain is updated or reversed
 
 - Location: `zebra-state/src/service/non_finalized_state/chain.rs`
 
 ```rust
-fn update_chain_state_with(&mut self, prepared: &PreparedBlock) {        
-    ...
-    self.value_pool += prepared.block_value_balance;
-    ...
+impl UpdateWith<PreparedBlock> for ValueBalance<NegativeAllowed> {
+    fn update_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) {
+        self += value_balance;
+    }
+
+    fn revert_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) {
+        self -= value_balance;
+    }
 }
 ```
 
