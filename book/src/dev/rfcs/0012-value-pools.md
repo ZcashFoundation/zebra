@@ -424,6 +424,36 @@ impl FromDisk for Amount {
 }
 ```
 
+#### Changes to `zebra-state/src/request.rs`
+
+Add a new field to `FinalizedState`:
+
+```rust
+pub struct FinalizedBlock {
+    ..
+    /// The value balance for transparent, sprout, sapling and orchard
+    /// inside all the transactions of this block.
+    pub(crate) block_value_balance: ValueBalance<NegativeAllowed>,
+}
+```
+
+Populate it when `PreparedBlock` is converted into `FinalizedBlock`:
+
+```rust
+impl From<PreparedBlock> for FinalizedBlock {
+    fn from(prepared: PreparedBlock) -> Self {
+        let PreparedBlock {
+            ..
+            block_value_balance,
+        } = prepared;
+        Self {
+            ..
+            block_value_balance,
+        }
+    }
+}
+```
+
 #### Changes to `zebra-state/src/service/finalized_state.rs`
 
 First we add a column for all the pools: transparent, sprout, sapling, orchard:
@@ -447,7 +477,7 @@ if height == block::Height(0) {
     batch.zs_insert(value_pools, height, ValueBalance::default());
 } else {
     let current_pool = self.get_pool();
-    batch.zs_insert(value_pools, height, (current_pool + block.value_pool())?);
+    batch.zs_insert(value_pools, height, (current_pool + finalized.block_value_balance)?);
 }
 ```
 
