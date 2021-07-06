@@ -244,8 +244,8 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 - Method location: `zebra-chain/src/transaction.rs`
 
 ```rust
-/// utxos must contain the utxos of every input in the transaction
-/// TODO: what about UTXOs created and spent in the transaction?
+/// utxos must contain the utxos of every input in the transaction,
+/// including UTXOs created by earlier transactions in this block.
 pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Result<ValueBalance<NegativeAllowed>, Err> {
 
 }
@@ -257,8 +257,9 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Res
 - Method will make use of `Transaction::value_balance` method created before.
 
 ```rust
-/// utxos must contain the utxos of every input in the block
-/// TODO: what about UTXOs created and spent in the block?
+/// utxos must contain the utxos of every input in the transaction,
+/// including UTXOs created by a transaction in this block,
+/// then spent by a later transaction that's also in this block.
 pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> ValueBalance<NegativeAllowed> {
     self.transactions()
         .map(Transaction::value_balance)
