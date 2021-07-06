@@ -46,7 +46,7 @@ pub enum InventoryHash {
     /// [zip239]: https://zips.z.cash/zip-0239
     /// [bip339]: https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki
     // TODO: Actually handle this variant once the mempool is implemented
-    Wtx,
+    Wtx([u8; 64]),
 }
 
 impl From<transaction::Hash> for InventoryHash {
@@ -65,15 +65,15 @@ impl From<block::Hash> for InventoryHash {
 
 impl ZcashSerialize for InventoryHash {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        let (code, bytes) = match *self {
-            InventoryHash::Error => (0, [0; 32]),
-            InventoryHash::Tx(hash) => (1, hash.0),
-            InventoryHash::Block(hash) => (2, hash.0),
-            InventoryHash::FilteredBlock(hash) => (3, hash.0),
-            InventoryHash::Wtx => unimplemented!("V5 transactions are not sent by Zebra yet"),
+        let (code, bytes): (_, &[u8]) = match self {
+            InventoryHash::Error => (0, &[0; 32]),
+            InventoryHash::Tx(hash) => (1, &hash.0),
+            InventoryHash::Block(hash) => (2, &hash.0),
+            InventoryHash::FilteredBlock(hash) => (3, &hash.0),
+            InventoryHash::Wtx(bytes) => (5, bytes),
         };
         writer.write_u32::<LittleEndian>(code)?;
-        writer.write_all(&bytes)?;
+        writer.write_all(bytes)?;
         Ok(())
     }
 }
@@ -88,8 +88,13 @@ impl ZcashDeserialize for InventoryHash {
             2 => Ok(InventoryHash::Block(block::Hash(bytes))),
             3 => Ok(InventoryHash::FilteredBlock(block::Hash(bytes))),
             5 => {
-                let _auth_digest = reader.read_32_bytes()?;
-                Ok(InventoryHash::Wtx)
+                let auth_digest = reader.read_32_bytes()?;
+
+                let mut wtx_bytes = [0u8; 64];
+                wtx_bytes[..32].copy_from_slice(&bytes);
+                wtx_bytes[32..].copy_from_slice(&auth_digest);
+
+                Ok(InventoryHash::Wtx(wtx_bytes))
             }
             _ => Err(SerializationError::Parse("invalid inventory code")),
         }
