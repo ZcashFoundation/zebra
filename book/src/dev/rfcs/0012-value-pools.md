@@ -1,6 +1,6 @@
 - Feature Name: value_pools
 - Start Date: 2021-06-29
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+- Design PR: [ZcashFoundation/zebra#2430](https://github.com/ZcashFoundation/zebra/pull/2430)
 - Zebra Issue: [ZcashFoundation/zebra#2152](https://github.com/ZcashFoundation/zebra/issues/2152)
 
 # Summary
