@@ -17,7 +17,7 @@ In the Zcash protocol there are consensus rules that:
 
 These rules make sure that a fixed amount of Zcash is created by each block, even if there are vulnerabilities in some shielded pools.
 
-Checking the coins created by coinbase transactions is out of scope.
+Checking the coins created by coinbase transactions and funding streams is out of scope for this design.
 
 [ZIP-209]: https://zips.z.cash/zip-0209
 
