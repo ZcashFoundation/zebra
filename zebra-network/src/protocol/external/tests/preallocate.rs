@@ -1,6 +1,6 @@
 //! Tests for trusted preallocation during deserialization.
 
-use super::super::inv::{InventoryHash, MIN_INV_HASH_SIZE};
+use super::super::inv::InventoryHash;
 
 use zebra_chain::serialization::{TrustedPreallocate, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN};
 
@@ -8,14 +8,23 @@ use proptest::prelude::*;
 use std::convert::TryInto;
 
 proptest! {
-    /// Confirm that each InventoryHash takes exactly INV_HASH_SIZE bytes when serialized.
-    /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
+    /// Confirm that each InventoryHash takes the expected size in bytes when serialized.
     #[test]
-    fn inv_hash_size_is_correct(inv in InventoryHash::arbitrary()) {
+    fn inv_hash_size_is_correct(inv in any::<InventoryHash>()) {
         let serialized_inv = inv
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
-        assert!(serialized_inv.len() == MIN_INV_HASH_SIZE);
+
+        let expected_size = match inv {
+            InventoryHash::Error
+            | InventoryHash::Tx(_)
+            | InventoryHash::Block(_)
+            | InventoryHash::FilteredBlock(_) => 32 + 4,
+
+            InventoryHash::Wtx(_) => 32 + 32 + 4,
+        };
+
+        assert_eq!(serialized_inv.len(), expected_size);
     }
 
     /// Verifies that...
