@@ -225,15 +225,7 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 /// utxos must contain the utxos of every input in the transaction
 /// TODO: what about UTXOs created and spent in the transaction?
 pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Result<ValueBalance<NegativeAllowed>, Err> {
-    match self {
-        Transaction::V1 { .. } => {},
-        Transaction::V2 { .. } => {},
-        Transaction::V3 { .. } => {},
-        Transaction::V4 { .. } => {},
-        Transaction::V5 { .. } => {
-            
-        },
-    }
+
 }
 ```
 
