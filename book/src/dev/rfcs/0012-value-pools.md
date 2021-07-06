@@ -114,10 +114,12 @@ https://zips.z.cash/protocol/protocol.pdf#orchardbalance
 
 - Code will be located in a new file: `zebra-chain/src/value_balance.rs`.
 - Supported operators apply to all the `Amount`s inside the type: `+`, `-`, `+=`, `-=`, `sum()`.
+- Implementation of the above operators are similar to the ones implemented for `Amount<C>` in `zebra-chain/src/amount.rs`. In particular, we want to return a `Result` on them so we can error when a constraint is violated.
 - We will use `Default` to represent a totally empty `ValueBalance`, this is the state of all pools at the genesis block.
 
 ```rust
-struct ValueBalance<C> {
+#[serde(bound = "C: Constraint")]
+struct ValueBalance<C = NegativeAllowed> {
     transparent: Amount<C>,
     sprout: Amount<C>,
     sapling: Amount<C>,
@@ -134,28 +136,46 @@ impl ValueBalance {
     }
 }
 
-impl Add for ValueBalance<C> {
+impl Add for Result<ValueBalance<C>>
+where
+    C: Constraint,
+{
 
 }
 
-impl Sub for ValueBalance<C> {
-    
+impl Sub for Result<ValueBalance<C>>
+where
+    C: Constraint,
+{
+
 }
 
-impl AddAssign for ValueBalance<C> {
+impl AddAssign for Result<ValueBalance<C>>
+where
+    C: Constraint,
+{
 
 }
 
-impl SubAssign for ValueBalance<C> {
-    
+impl SubAssign for Result<ValueBalance<C>>
+where
+    C: Constraint,
+{
+
 }
 
-impl Sum for ValueBalance<C> {
-    
+impl Sum for Result<ValueBalance<C>>
+where
+    C: Constraint,
+{
+
 }
 
-impl Default for ValueBalance<C> {
-    
+impl Default for ValueBalance<C>
+where
+    C: Constraint,
+{
+
 }
 ```
 
