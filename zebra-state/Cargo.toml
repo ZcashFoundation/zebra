@@ -22,7 +22,7 @@ tower = { version = "0.4", features = ["buffer", "util"] }
 tracing = "0.1"
 thiserror = "1.0.25"
 tokio = { version = "0.3.6", features = ["sync"] }
-displaydoc = "0.2.1"
+displaydoc = "0.2.2"
 rocksdb = "0.16.0"
 tempdir = "0.3.7"
 chrono = "0.4.19"

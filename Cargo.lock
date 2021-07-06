@@ -1052,9 +1052,9 @@ dependencies = [
 
 [[package]]
 name = "displaydoc"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3274a6bc8a6a4521291b53b9dcb8345e963fe931c3fc462a7d3ead71d7ccd30d"
+checksum = "278ef1934318d524612205f69df005eea30ec10edf7913e500b5a527fce55bc0"
 dependencies = [
  "proc-macro2 1.0.24",
  "quote 1.0.7",
@@ -4074,9 +4074,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.11"
+version = "5.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cadc93a5cf745b643d29e6ec4612acdcd8fe7e73995050fff3fa812ed6d0312"
+checksum = "5f710158a7c9449f400cf734e97cb417a09a7b5f0cf54b133718b6b2951c9f79"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -4492,6 +4492,7 @@ dependencies = [
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",
+ "bls12_381",
  "bs58",
  "byteorder",
  "chrono",

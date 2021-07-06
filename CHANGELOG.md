@@ -4,6 +4,72 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.12) - 2021-07-02
+
+Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes documentation updates and security fixes. In particular, Zebra no longer gossips unreachable addresses to other nodes and users should update and restart any running Zebra nodes.
+
+### Added
+
+- Check if a previous version of Zebra followed a different consensus branch (#2366)
+- API for a minimum protocol version during initial block download (#2395)
+- Add a verification height to mempool transaction verification requests (#2400)
+- Improved error messages by adding database path method to the Finalized State (#2349)
+- Add property test strategies for V5 transactions (#2347)
+- Re-use a shared Tokio runtime for some Zebra tests (#2397)
+
+#### Documentation
+
+- Add CHANGELOG.md file to the zebra git repo (#2346)
+- Client RFC updates (#2367, #2341)
+- Explain how Zebra validates shielded coinbase outputs like other shielded outputs (#2382)
+- Document required request timeouts due to data dependencies (#2337)
+- Update known issues and add inbound network ports to the README (#2373)
+- Document shared to per-spend anchor conversion (#2363)
+- Document note commitment trees storage (#2259)
+
+#### Network Upgrade 5
+
+- Orchard note commitment tree test vectors (#2384)
+- Enable V5 transaction test vectors in the groth16 tests (#2383)
+- Validate transparent inputs and outputs in V5 transactions (#2302)
+- Batch math & variable-time multiscalar multiplication for RedPallas (#2288)
+- Implement asynchronous verifier service for RedPallas (#2318)
+- ZIP-211: Validate Disabling Addition of New Value to the Sprout Value Pool (#2399)
+
+### Changed
+
+- Various transaction verifier refactors (#2371, #2432)
+- Remove unicode in Zebra's user agent (#2376)
+- Update multiple crates to ensure bitvec 0.22.3 is being used (#2351)
+- Move transaction consensus branch ID check function to zebra-chain (#2354)
+- Replace primitives_types with uint (#2350)
+- Refactor to return errors from state update methods to prepare for contextual validation (#2417)
+- Refactor of the validation of Sapling shielded data (#2419)
+
+#### Network Upgrade 5
+
+- Update spend and output checks for new Orchard consensus rules (#2398)
+
+### Fixed
+
+- Failed tests in the cached state CI workflow are no longer ignored (#2403)
+- Stop skipping the cached sync tests in CI (#2402)
+- Fix intermittent errors in the groth16 verifier tests (#2412)
+- Skip IPv6 tests when ZEBRA_SKIP_IPV6_TESTS environmental variable is set (#2405)
+- Stop failing after the mandatory Canopy checkpoint due to incorrect coinbase script verification (#2404)
+- Improved docs and panic messages for zebra_test::command (#2406)
+- Gossip dynamic local listener ports to peers (#2277)
+- Stop allowing JoinSplits for Halo (#2428)
+- Fix failing legacy chain tests (#2427)
+
+### Security
+
+- Zebra no longer gossips unreachable addresses to other nodes (#2392)
+  - User Action Required: Update and restart any running Zebra nodes
+- Avoid duplicate peer connections (#2276)
+- Send local listener address to peers (#2276)
+- Limit reconnection rate to individual peers (#2275)
+
 ## [Zebra 1.0.0-alpha.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.11) - 2021-06-18
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes some security fixes.

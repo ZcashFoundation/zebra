@@ -8,6 +8,7 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
+mod txid;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -20,9 +21,10 @@ pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
 pub use sighash::HashType;
+pub use sighash::SigHash;
 
 use crate::{
-    block, orchard,
+    amount, block, orchard,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout, transparent,
@@ -145,7 +147,7 @@ impl Transaction {
         network_upgrade: NetworkUpgrade,
         hash_type: sighash::HashType,
         input: Option<(u32, transparent::Output)>,
-    ) -> blake2b_simd::Hash {
+    ) -> SigHash {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
 
@@ -291,6 +293,54 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => 0,
+        }
+    }
+
+    /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction, regardless of version.
+    ///
+    /// This value is removed from the transparent value pool of this transaction, and added to the
+    /// sprout value pool.
+    pub fn sprout_pool_added_values(
+        &self,
+    ) -> Box<dyn Iterator<Item = &amount::Amount<amount::NonNegative>> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_old),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_old),
+            ),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
         }
     }
 

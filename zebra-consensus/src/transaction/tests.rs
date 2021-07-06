@@ -3,7 +3,7 @@ use std::{collections::HashMap, convert::TryFrom, convert::TryInto, sync::Arc};
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, NonNegative},
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
@@ -201,6 +201,8 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 }
 
 #[tokio::test]
+// TODO: Remove `should_panic` once V5 transaction sighash is implemened by the merge of #2165.
+#[should_panic]
 async fn v5_transaction_is_rejected_before_nu5_activation() {
     const V5_TRANSACTION_VERSION: u32 = 5;
 
@@ -618,7 +620,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data.sig = signing_key.sign(sighash.as_bytes()),
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
             _ => unreachable!("Mock transaction was created incorrectly"),
         }
 
@@ -751,7 +753,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
                 transaction.sapling_spends_per_anchor().next().is_none()
                     && transaction.sapling_outputs().next().is_some()
             })
-            .expect("No transaction found with Sapling spends");
+            .expect("No transaction found with Sapling outputs and no Sapling spends");
 
         let expected_hash = transaction.hash();
 
@@ -766,6 +768,47 @@ fn v4_with_sapling_outputs_and_no_spends() {
             .clone()
             .oneshot(Request::Block {
                 transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(result, Ok(expected_hash));
+    });
+}
+
+/// Test if a V5 transaction with Sapling spends is accepted by the verifier.
+#[test]
+// TODO: Remove `should_panic` once V5 transaction verification is complete.
+#[should_panic]
+fn v5_with_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+                .rev()
+                .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
+                .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+                .expect("No transaction found with Sapling spends");
+
+        let expected_hash = transaction.hash();
+        let height = transaction
+            .expiry_height()
+            .expect("Transaction is missing expiry height");
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height,
             })
@@ -928,4 +971,62 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     (joinsplit_data, signing_key)
+}
+
+#[test]
+fn add_to_sprout_pool_after_nu() {
+    zebra_test::init();
+
+    // get a block that we know it haves a transaction with `vpub_old` field greater than 0.
+    let block: Arc<_> = zebra_chain::block::Block::zcash_deserialize(
+        &zebra_test::vectors::BLOCK_MAINNET_419199_BYTES[..],
+    )
+    .unwrap()
+    .into();
+
+    // create a block height at canopy activation.
+    let network = Network::Mainnet;
+    let block_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+
+    // create a zero amount.
+    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+
+    // the coinbase transaction should pass the check.
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[0], block_height, network),
+        Ok(())
+    );
+
+    // the 2nd transaction has no joinsplits, should pass the check.
+    assert_eq!(block.transactions[1].joinsplit_count(), 0);
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[1], block_height, network),
+        Ok(())
+    );
+
+    // the 5th transaction has joinsplits and the `vpub_old` cumulative is greater than 0,
+    // should fail the check.
+    assert!(block.transactions[4].joinsplit_count() > 0);
+    let vpub_old: Amount<NonNegative> = block.transactions[4]
+        .sprout_pool_added_values()
+        .fold(zero, |acc, &x| (acc + x).unwrap());
+    assert!(vpub_old > zero);
+
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[3], block_height, network),
+        Err(TransactionError::DisabledAddToSproutPool)
+    );
+
+    // the 8th transaction has joinsplits and the `vpub_old` cumulative is 0,
+    // should pass the check.
+    assert!(block.transactions[7].joinsplit_count() > 0);
+    let vpub_old: Amount<NonNegative> = block.transactions[7]
+        .sprout_pool_added_values()
+        .fold(zero, |acc, &x| (acc + x).unwrap());
+    assert_eq!(vpub_old, zero);
+
+    assert_eq!(
+        check::disabled_add_to_sprout_pool(&block.transactions[7], block_height, network),
+        Ok(())
+    );
 }
