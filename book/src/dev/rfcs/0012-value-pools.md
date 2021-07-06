@@ -202,7 +202,7 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 - Method location is at `zebra-chain/src/transaction/sapling/shielded_data.rs`
 
 ```rust
-pub fn value_balance(&self) -> ValueBalance<AllowNegative> {
+pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 
 }
 ```
@@ -212,7 +212,7 @@ pub fn value_balance(&self) -> ValueBalance<AllowNegative> {
 - Method location is at `zebra-chain/src/transaction/orchard/shielded_data.rs`
 
 ```rust
-pub fn value_balance(&self) -> ValueBalance<AllowNegative> {
+pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 
 }
 ```
