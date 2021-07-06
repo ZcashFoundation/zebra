@@ -263,4 +263,25 @@ mod tests {
             )
         }
     }
+
+    // Checks Pallas group hashes with:
+    // - One of two domains.
+    // - Random message lengths between 0 and 255 bytes.
+    // - Random message contents.
+    #[test]
+    #[allow(non_snake_case)]
+    fn hackworks_group_hash_test_vectors() {
+        use group::GroupEncoding;
+        use std::iter::FromIterator;
+
+        for tv in tests::vectors::GROUP_HASHES.iter() {
+            let D = tv.domain.as_slice();
+            let M = tv.msg.as_slice();
+
+            assert_eq!(
+                pallas_group_hash(D, M),
+                pallas::Point::from_bytes(&tv.point).unwrap()
+            );
+        }
+    }
 }
