@@ -128,7 +128,7 @@ impl ValueBalance {
     /// Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
     ///
     /// This rule applies to Block and Mempool transactions
-    fn remaining_transparent_value(&self) -> Result<Amount<NonNegative>,Err> {
+    fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Err> {
         // This rule checks the sum of the transparent, sprout, sapling, and orchard value balances in a transaction, not `ValueBalance.transparent`.
         [self.transparent, self.sprout, self.sapling, self.orchard].sum()
     }
