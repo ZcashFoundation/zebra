@@ -12,7 +12,7 @@ on:
 jobs:
 
   coverage:
-    name: Coverage (+nightly)
+    name: Coverage (+beta)
     # The large timeout is to accommodate nightly builds
     timeout-minutes: 45
     runs-on: ubuntu-latest
@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.7
         with:
-          toolchain: nightly
+          toolchain: beta
           override: true
           profile: minimal
           components: llvm-tools-preview
