@@ -899,22 +899,23 @@ Implemented by querying:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
     the `block_by_height` tree (to get the block data), if the block is not in any non-finalized chain
 
-### `Request::AwaitSpendableUtxo { outpoint: OutPoint, spend_height: Height, spend_pools: SpendPools }`
+### `Request::AwaitSpendableUtxo { outpoint: OutPoint, spend_height: Height, spend_restriction: SpendRestriction }`
 
 Returns
 
-- `Response::Utxo(transparent::Output)`
+- `Response::SpendableUtxo(transparent::Output)`
 
 Implemented by querying:
-
-- (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`
-  get the `transparent::Output` from `OutPoint`'s transaction,
-  and the `height` for `OutPoint.hash`;
+- (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`,
+  return the `Utxo` for `OutPoint`;
 - (finalized) else if `OutPoint` is in `utxos_by_outpoint`,
-  return the associated `transparent::Output`,
-  and the `height` for `OutPoint.hash`;
+  return the `Utxo` for `OutPoint`;
 - else wait for `OutPoint` to be created as described in [RFC0004];
-- then perform the coinbase validation specified in [RFC0004].
+
+Then validating:
+- check the transparent coinbase spend restrictions specified in [RFC0004];
+- if the restrictions are satisfied, return the response;
+- if the spend is invalid, drop the request (and the caller will time out).
 
 [RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 
