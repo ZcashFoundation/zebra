@@ -14,6 +14,7 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    history_tree::HistoryTree,
     parameters::Network,
     transaction::{self, Transaction},
     transparent,
@@ -22,6 +23,8 @@ use zebra_chain::{
 use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo, ValidateContextError};
 
 use self::chain::Chain;
+
+use super::check;
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Default)]
@@ -74,7 +77,14 @@ impl NonFinalizedState {
     }
 
     /// Commit block to the non-finalized state.
-    pub fn commit_block(&mut self, prepared: PreparedBlock) -> Result<(), ValidateContextError> {
+    ///
+    /// `finalized_tip_history_tree`: the history tree of the finalized tip used to recompute
+    /// the history tree, if needed.
+    pub fn commit_block(
+        &mut self,
+        prepared: PreparedBlock,
+        finalized_tip_history_tree: &HistoryTree,
+    ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -85,8 +95,12 @@ impl NonFinalizedState {
             );
         }
 
-        let mut parent_chain = self.parent_chain(parent_hash)?;
-
+        let mut parent_chain = self.parent_chain(parent_hash, finalized_tip_history_tree)?;
+        check::block_commitment_is_valid_for_chain_history(
+            &prepared,
+            self.network,
+            &parent_chain.history_root_hash(),
+        )?;
         parent_chain.push(prepared)?;
         self.chain_set.insert(parent_chain);
         self.update_metrics_for_committed_block(height, hash);
@@ -95,12 +109,20 @@ impl NonFinalizedState {
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
+    ///
+    /// `history_tree` must contain the history of the finalized tip.
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
+        finalized_tip_history_tree: HistoryTree,
     ) -> Result<(), ValidateContextError> {
-        let mut chain = Chain::default();
+        let mut chain = Chain::new(finalized_tip_history_tree);
         let (height, hash) = (prepared.height, prepared.hash);
+        check::block_commitment_is_valid_for_chain_history(
+            &prepared,
+            self.network,
+            &chain.history_root_hash(),
+        )?;
         chain.push(prepared)?;
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
@@ -246,9 +268,13 @@ impl NonFinalizedState {
     ///
     /// The chain can be an existing chain in the non-finalized state or a freshly
     /// created fork, if needed.
+    ///
+    /// `finalized_tip_history_tree`: the history tree of the finalized tip used to recompute
+    /// the history tree, if needed.
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
+        finalized_tip_history_tree: &HistoryTree,
     ) -> Result<Box<Chain>, ValidateContextError> {
         match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // An existing chain in the non-finalized state
@@ -257,7 +283,11 @@ impl NonFinalizedState {
             None => Ok(Box::new(
                 self.chain_set
                     .iter()
-                    .find_map(|chain| chain.fork(parent_hash).transpose())
+                    .find_map(|chain| {
+                        chain
+                            .fork(parent_hash, finalized_tip_history_tree)
+                            .transpose()
+                    })
                     .expect(
                         "commit_block is only called with blocks that are ready to be commited",
                     )?,

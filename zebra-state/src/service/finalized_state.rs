@@ -7,6 +7,7 @@ mod tests;
 
 use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
+use zebra_chain::history_tree::HistoryTree;
 use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},
@@ -376,6 +377,11 @@ impl FinalizedState {
 
                 block.transactions[index as usize].clone()
             })
+    }
+
+    /// Returns the history tree for the finalized state.
+    pub fn history_tree(&self) -> &HistoryTree {
+        todo!("add history tree to finalized state");
     }
 
     /// If the database is `ephemeral`, delete it.

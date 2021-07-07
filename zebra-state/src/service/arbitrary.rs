@@ -50,6 +50,29 @@ impl ValueTree for PreparedChainTree {
 pub struct PreparedChain {
     // the proptests are threaded (not async), so we want to use a threaded mutex here
     chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>)>>,
+    // the height from which to start the chain. If None, starts at the genesis block
+    start_height: Option<Height>,
+}
+
+impl PreparedChain {
+    /// Create a PreparedChain strategy with Heartwood-onward blocks.
+    pub(super) fn new_heartwood() -> Self {
+        // The history tree only works with Heartwood onward.
+        // Since the network will be chosen later, we pick the larger
+        // between the mainnet and testnet Heartwood activation heights.
+        let main_height = NetworkUpgrade::Heartwood
+            .activation_height(Network::Mainnet)
+            .expect("must have height");
+        let test_height = NetworkUpgrade::Heartwood
+            .activation_height(Network::Testnet)
+            .expect("must have height");
+        let height = (std::cmp::max(main_height, test_height) + 1).expect("must be valid");
+
+        PreparedChain {
+            start_height: Some(height),
+            ..Default::default()
+        }
+    }
 }
 
 impl Strategy for PreparedChain {
@@ -60,7 +83,12 @@ impl Strategy for PreparedChain {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
-            let ledger_strategy = LedgerState::genesis_strategy(NetworkUpgrade::Nu5, None, false);
+            let ledger_strategy = match self.start_height {
+                Some(start_height) => {
+                    LedgerState::height_strategy(start_height, NetworkUpgrade::Nu5, None, false)
+                }
+                None => LedgerState::genesis_strategy(NetworkUpgrade::Nu5, None, false),
+            };
 
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {
@@ -83,7 +111,9 @@ impl Strategy for PreparedChain {
         }
 
         let chain = chain.clone().expect("should be generated");
-        let count = (1..chain.1.len()).new_tree(runner)?;
+        // `count` must be 1 less since the first block is used to build the
+        // history tree.
+        let count = (1..chain.1.len() - 1).new_tree(runner)?;
         Ok(PreparedChainTree {
             chain: chain.1,
             count,

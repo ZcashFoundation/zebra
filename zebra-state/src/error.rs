@@ -3,7 +3,11 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, work::difficulty::CompactDifficulty};
+use zebra_chain::{
+    block::{self, ChainHistoryMmrRootHash},
+    history_tree::HistoryTreeError,
+    work::difficulty::CompactDifficulty,
+};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -74,4 +78,17 @@ pub enum ValidateContextError {
         difficulty_threshold: CompactDifficulty,
         expected_difficulty: CompactDifficulty,
     },
+
+    #[error("block contains an invalid commitment")]
+    InvalidBlockCommitment(#[from] block::CommitmentError),
+
+    #[error("block history commitment {candidate_commitment:?} is different to the expected commitment {expected_commitment:?}")]
+    #[non_exhaustive]
+    InvalidHistoryCommitment {
+        candidate_commitment: ChainHistoryMmrRootHash,
+        expected_commitment: ChainHistoryMmrRootHash,
+    },
+
+    #[error("error building the history tree")]
+    HistoryTreeError(#[from] HistoryTreeError),
 }

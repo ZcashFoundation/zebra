@@ -4,7 +4,7 @@ use std::borrow::Borrow;
 
 use chrono::Duration;
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, ChainHistoryMmrRootHash},
     parameters::POW_AVERAGING_WINDOW,
     parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
@@ -18,8 +18,11 @@ use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 pub(crate) mod difficulty;
 
-/// Check that `block` is contextually valid for `network`, based on the
-/// `finalized_tip_height` and `relevant_chain`.
+/// Check that the `prepared` block is contextually valid for `network`, based
+/// on the `finalized_tip_height` and `relevant_chain`.
+///
+/// This function performs checks that require a small number of recent blocks,
+/// including previous hash, previous height, and block difficulty.
 ///
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
@@ -28,12 +31,8 @@ pub(crate) mod difficulty;
 ///
 /// If the state contains less than 28
 /// (`POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN`) blocks.
-#[tracing::instrument(
-    name = "contextual_validation",
-    fields(?network),
-    skip(prepared, network, finalized_tip_height, relevant_chain)
-)]
-pub(crate) fn block_is_contextually_valid<C>(
+#[tracing::instrument(skip(prepared, finalized_tip_height, relevant_chain))]
+pub(crate) fn block_is_valid_for_recent_chain<C>(
     prepared: &PreparedBlock,
     network: Network,
     finalized_tip_height: Option<block::Height>,
@@ -84,6 +83,40 @@ where
 
     // TODO: other contextual validation design and implementation
     Ok(())
+}
+
+/// Check that the `prepared` block is contextually valid for `network`, based
+/// on the `history_root_hash` of the history tree up to and including the
+/// previous block.
+#[tracing::instrument(skip(prepared))]
+pub(crate) fn block_commitment_is_valid_for_chain_history(
+    prepared: &PreparedBlock,
+    network: Network,
+    history_root_hash: &ChainHistoryMmrRootHash,
+) -> Result<(), ValidateContextError> {
+    match prepared.block.commitment(network)? {
+        block::Commitment::PreSaplingReserved(_)
+        | block::Commitment::FinalSaplingRoot(_)
+        | block::Commitment::ChainHistoryActivationReserved => {
+            // No contextual checks needed for those.
+            Ok(())
+        }
+        block::Commitment::ChainHistoryRoot(block_history_root_hash) => {
+            if block_history_root_hash == *history_root_hash {
+                Ok(())
+            } else {
+                Err(ValidateContextError::InvalidHistoryCommitment {
+                    candidate_commitment: block_history_root_hash,
+                    expected_commitment: *history_root_hash,
+                })
+            }
+        }
+        block::Commitment::ChainHistoryBlockTxAuthCommitment(_) => {
+            // TODO: Get auth_hash from block (ZIP-244), e.g.
+            // let auth_hash = prepared.block.auth_hash();
+            todo!("hash mmr_hash and auth_hash per ZIP-244 and compare")
+        }
+    }
 }
 
 /// Returns `ValidateContextError::OrphanedBlock` if the height of the given

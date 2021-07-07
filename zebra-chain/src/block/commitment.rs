@@ -149,6 +149,12 @@ impl From<[u8; 32]> for ChainHistoryMmrRootHash {
     }
 }
 
+impl From<ChainHistoryMmrRootHash> for [u8; 32] {
+    fn from(hash: ChainHistoryMmrRootHash) -> Self {
+        hash.0
+    }
+}
+
 /// A block commitment to chain history and transaction auth.
 /// - the chain history tree for all ancestors in the current network upgrade,
 ///   and
