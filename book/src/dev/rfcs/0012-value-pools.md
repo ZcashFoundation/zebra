@@ -46,7 +46,15 @@ We also need to check that non-coinbase transactions only spend the coins provid
 
 Each of the chain value pools can change its value with every block added to the chain. This is a state feature and Zebra handle this in the `zebra-state` crate. We propose to store the pool values for the finalized tip height on disk.
 
-TODO: summarise the implementation
+## Summary of the implementation:
+
+- Create a new type `ValueBalance` that will contain `Amount`s for each pool(transparent, sprout, sapling, orchard).
+- Create `value_pool()` methods on each relevant submodule (transparent, joinsplit, sapling and orchard).
+- Create a `value_pool()` method in transaction with all the above and in block with all the transaction value balances.
+- Pass the value balance of the incoming block into the state.
+- Get a previously stored value balance.
+- With both values check the consensus rules (constraint violations).
+- Update the saved values for the new tip.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -245,6 +253,8 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 #### Create the `Transaction` method
 
 - Method location: `zebra-chain/src/transaction.rs`
+- Method will use all the `value_balances()` we created until now.
+- Method will check the remaining transaction value consensus rule.
 
 ```rust
 /// utxos must contain the utxos of every input in the transaction,
@@ -338,7 +348,7 @@ impl UpdateWith<PreparedBlock> for ValueBalance<NegativeAllowed> {
 
 The state service will call `commit_new_chain()`. We need to pass the value pool from the disk into this function.
 
-```
+```rust
 self.mem
     .commit_new_chain(prepared, self.disk.history_tree(), self.disk.get_pool())?;
 ```
