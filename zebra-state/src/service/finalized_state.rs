@@ -35,6 +35,9 @@ pub struct FinalizedState {
     ephemeral: bool,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
+
+    network: Network,
+    history_tree: Option<HistoryTree>,
 }
 
 impl FinalizedState {
@@ -72,6 +75,8 @@ impl FinalizedState {
             db,
             ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            network,
+            history_tree: None,
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
@@ -380,8 +385,20 @@ impl FinalizedState {
     }
 
     /// Returns the history tree for the finalized state.
-    pub fn history_tree(&self) -> &HistoryTree {
-        todo!("add history tree to finalized state");
+    /// TODO: this a dummy implementation to prevent zebra from panicking.
+    /// It will be properly implemented in https://github.com/ZcashFoundation/zebra/issues/2134
+    pub fn history_tree(&mut self) -> &HistoryTree {
+        // TODO: do we need to handle an empty tip?
+        let (height, _) = self.tip().expect("tip exists");
+        let tip = self
+            .block(height.into())
+            .expect("block will exist if tip does");
+        // TODO: pass roots
+        // TODO: return error?
+        let tree = HistoryTree::from_block(self.network, tip, &Default::default(), None)
+            .expect("it works");
+        self.history_tree = Some(tree);
+        self.history_tree.as_ref().unwrap()
     }
 
     /// If the database is `ephemeral`, delete it.
