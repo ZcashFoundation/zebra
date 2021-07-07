@@ -606,7 +606,7 @@ We use the following rocksdb column families:
 | `height_by_hash`     | `block::Hash`         | `BE32(height)`                      |
 | `block_by_height`    | `BE32(height)`        | `Block`                             |
 | `tx_by_hash`         | `transaction::Hash`   | `(BE32(height) \|\| BE32(tx_index))`|
-| `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`               |
+| `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
 | `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
 | `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
 | `orchard_nullifiers` | `orchard::Nullifier`  | `()`                                |
