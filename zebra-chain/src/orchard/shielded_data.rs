@@ -49,6 +49,12 @@ impl ShieldedData {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
     }
+
+    /// Collect the cm_x's for this transaction, if it contains [`Action`]s with
+    /// outputs.
+    pub fn note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.actions().map(|action| &action.cm_x)
+    }
 }
 
 impl AtLeastOne<AuthorizedAction> {
