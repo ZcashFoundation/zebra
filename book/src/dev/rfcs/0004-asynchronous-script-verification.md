@@ -66,7 +66,7 @@ At a high level, this adds a new request/response pair to the state service:
 
 - `Request::AwaitSpendableUtxo { output: OutPoint, ..conditions }`
    requests a spendable `transparent::Output`, looked up using `OutPoint`.
-- `Response::Utxo(Utxo)` supplies the requested `transparent::Output`
+- `Response::SpendableUtxo(Utxo)` supplies the requested `transparent::Output`
    as part of a new `Utxo` type,
    if the output is spendable based on `conditions`;
 
@@ -118,8 +118,6 @@ enum SpendRestriction {
     /// The UTXO is spent in a transaction with all shielded outputs
     AllShieldedOutputs,
 }
-
-enum Response::Utxo(Utxo)
 ```
 
 As described above, the request name is intended to indicate the request's behavior.
@@ -130,6 +128,8 @@ The request does not resolve until:
 The new `Utxo` type adds a coinbase flag and height to `transparent::Output`s
 that we look up in the state, or get from newly commited blocks:
 ```rust
+enum Response::SpendableUtxo(Utxo)
+
 pub struct Utxo {
     /// The output itself.
     pub output: transparent::Output,
