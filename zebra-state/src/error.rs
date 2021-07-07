@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    amount, block, orchard, sapling, sprout, transparent, value_balance::ValueBalanceError,
-    work::difficulty::CompactDifficulty,
+    amount, block, history_tree::HistoryTreeError, orchard, sapling, sprout, transparent,
+    value_balance::ValueBalanceError, work::difficulty::CompactDifficulty,
 };
 
 use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
@@ -36,12 +36,12 @@ impl From<BoxError> for CloneError {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a block could not be committed to the state.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[error("block is not contextually valid")]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
@@ -185,6 +185,9 @@ pub enum ValidateContextError {
 
     #[error("error in Orchard note commitment tree")]
     OrchardNoteCommitmentTreeError(#[from] zebra_chain::orchard::tree::NoteCommitmentTreeError),
+
+    #[error("error building the history tree")]
+    HistoryTreeError(#[from] HistoryTreeError),
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

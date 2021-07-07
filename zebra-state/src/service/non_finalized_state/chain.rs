@@ -8,14 +8,16 @@ use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
-    transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
+    block, history_tree::HistoryTree, orchard, parameters::Network, primitives::Groth16Proof,
+    sapling, sprout, transaction, transaction::Transaction::*, transparent,
+    work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
 
 #[derive(Debug, Clone)]
 pub struct Chain {
+    network: Network,
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
 
@@ -37,6 +39,8 @@ pub struct Chain {
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
     /// The Orchard note commitment tree of the tip of this Chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    /// The ZIP-221 history tree of the tip of this Chain.
+    pub(crate) history_tree: HistoryTree,
 
     /// The Sapling anchors created by `blocks`.
     pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
@@ -59,12 +63,15 @@ pub struct Chain {
 }
 
 impl Chain {
-    // Create a new Chain with the given note commitment trees.
+    /// Create a new Chain with the given note commitment trees.
     pub(crate) fn new(
+        network: Network,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        history_tree: HistoryTree,
     ) -> Self {
         Self {
+            network,
             blocks: Default::default(),
             height_by_hash: Default::default(),
             tx_by_hash: Default::default(),
@@ -80,6 +87,7 @@ impl Chain {
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
             partial_cumulative_work: Default::default(),
+            history_tree,
         }
     }
 
@@ -95,6 +103,8 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(test)]
     pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
+        use zebra_chain::history_tree::NonEmptyHistoryTree;
+
         // this method must be updated every time a field is added to Chain
 
         // blocks, heights, hashes
@@ -109,6 +119,9 @@ impl Chain {
             // note commitment trees
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
+
+            // history tree
+            self.history_tree.as_ref().map(NonEmptyHistoryTree::hash) == other.history_tree.as_ref().map(NonEmptyHistoryTree::hash) &&
 
             // anchors
             self.sapling_anchors == other.sapling_anchors &&
@@ -169,19 +182,24 @@ impl Chain {
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
     ///
-    /// The note commitment trees must be the trees of the finalized tip.
+    /// The trees must match the trees of the finalized tip and are used
+    /// to rebuild them after the fork.
     pub fn fork(
         &self,
         fork_tip: block::Hash,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        history_tree: HistoryTree,
     ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
         }
 
-        let mut forked =
-            self.with_trees(sapling_note_commitment_tree, orchard_note_commitment_tree);
+        let mut forked = self.with_trees(
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            history_tree,
+        );
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
@@ -206,6 +224,24 @@ impl Chain {
                         .expect("must work since it was already appended before the fork");
                 }
             }
+
+            // Note that anchors don't need to be recreated since they are already
+            // handled in revert_chain_state_with.
+
+            let sapling_root = forked
+                .sapling_anchors_by_height
+                .get(&block.height)
+                .expect("Sapling anchors must exist for pre-fork blocks");
+            let orchard_root = forked
+                .orchard_anchors_by_height
+                .get(&block.height)
+                .expect("Orchard anchors must exist for pre-fork blocks");
+            forked.history_tree.push(
+                self.network,
+                block.block.clone(),
+                *sapling_root,
+                *orchard_root,
+            )?;
         }
 
         Ok(Some(forked))
@@ -267,8 +303,10 @@ impl Chain {
         &self,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        history_tree: HistoryTree,
     ) -> Self {
         Chain {
+            network: self.network,
             blocks: self.blocks.clone(),
             height_by_hash: self.height_by_hash.clone(),
             tx_by_hash: self.tx_by_hash.clone(),
@@ -284,6 +322,7 @@ impl Chain {
             sapling_nullifiers: self.sapling_nullifiers.clone(),
             orchard_nullifiers: self.orchard_nullifiers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
+            history_tree,
         }
     }
 }
@@ -395,12 +434,19 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the treestates of this block.
-        let root = self.sapling_note_commitment_tree.root();
-        self.sapling_anchors.insert(root);
-        self.sapling_anchors_by_height.insert(height, root);
-        let root = self.orchard_note_commitment_tree.root();
-        self.orchard_anchors.insert(root);
-        self.orchard_anchors_by_height.insert(height, root);
+        let sapling_root = self.sapling_note_commitment_tree.root();
+        self.sapling_anchors.insert(sapling_root);
+        self.sapling_anchors_by_height.insert(height, sapling_root);
+        let orchard_root = self.orchard_note_commitment_tree.root();
+        self.orchard_anchors.insert(orchard_root);
+        self.orchard_anchors_by_height.insert(height, orchard_root);
+
+        self.history_tree.push(
+            self.network,
+            contextually_valid.block.clone(),
+            sapling_root,
+            orchard_root,
+        )?;
 
         Ok(())
     }
@@ -428,6 +474,11 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             .to_work()
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
+
+        // Note: the history tree is not modified in this method.
+        // This method is called on two scenarios:
+        // - When popping the root: the history tree does not change.
+        // - When popping the tip: the history tree is rebuilt in fork().
 
         // for each transaction in block
         for (transaction, transaction_hash) in

@@ -33,6 +33,16 @@ pub enum HistoryTreeError {
     IOError(#[from] io::Error),
 }
 
+impl PartialEq for HistoryTreeError {
+    fn eq(&self, other: &Self) -> bool {
+        // Workaround since subtypes do not implement Eq.
+        // This is only used for tests anyway.
+        format!("{:?}", self) == format!("{:?}", other)
+    }
+}
+
+impl Eq for HistoryTreeError {}
+
 /// The inner [Tree] in one of its supported versions.
 #[derive(Debug)]
 enum InnerHistoryTree {
