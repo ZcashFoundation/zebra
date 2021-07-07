@@ -318,80 +318,27 @@ let mut chain = Chain::new(finalized_tip_history_tree, finalized_tip_value_balan
 
 Note: We don't need to pass the finalized tip value balance into the `commit_block()` method.
 
-### Update value pools when chain is updated or reversed
+### Check the consensus rules when the chain is updated or reversed
 
 - Location: `zebra-state/src/service/non_finalized_state/chain.rs`
 
 ```rust
 impl UpdateWith<PreparedBlock> for ValueBalance<NegativeAllowed> {
-    fn update_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) {
-        self += value_balance;
+    fn update_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) -> Result<(), Err> {
+        self += value_balance?;
     }
 
-    fn revert_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) {
-        self -= value_balance;
+    fn revert_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) -> Result<(), Err> {
+        self -= value_balance?;
     }
 }
 ```
-
-### Check pool balance consensus rules
-
-#### Check that no pool is negative
-
-- Do the check in `commit_block` and `commit_new_chain`, located in `zebra-state/src/service/non_finalized_state.rs`. Both methods will need new a new argument with the value pool saved in the disk.
-- Pass this value to a new method `check_value_pools()` that will make the consensus rules check.
-
-```rust
-pub fn commit_block(
-    &mut self,
-    prepared: PreparedBlock,
-    finalized_tip_history_tree: &HistoryTree,
-    finalized_value_pool: ValueBalance<NonNegative>,
-) -> Result<(), ValidateContextError> {
-    ..
-    check_value_pools(finalized_value_pools, prepared.value_balance)?;
-    ..
-}
-
-pub fn commit_new_chain(
-    &mut self,
-    prepared: PreparedBlock,
-    finalized_tip_history_tree: HistoryTree,
-    finalized_value_pool: ValueBalance<NonNegative>,
-) -> Result<(), ValidateContextError> {
-    ..
-    check_value_pools(finalized_value_pools, prepared.value_balance)?;
-    ..
-}
-
-fn check_value_pools(
-    finalized_value_pools: ValueBalance<NonNegative>,
-    block_value_balance: ValueBalance<NegativeAllowed>
-) -> Result<()> {
-    if finalized_value_pools + block_value_balance < 0 {
-        Err("Value pool can't be negative");
-    }
-    Ok(())
-}
-```
-
-##### Consensus rule
-
-The chain value pool balance rules apply to Block transactions, but they are optional for Mempool transactions:
-> Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
-
-https://zips.z.cash/zip-0209#specification
-
-Since Zebra does chain value pool balance validation in the state, we want to skip verifying the speculative chain balance of Mempool transactions.
 
 ### Changes to finalized state
 
-The state service is what will call `commit_block()` and `commit_new_chain()`. We need to pass the value pool from the disk into this functions.
+The state service will call `commit_new_chain()`. We need to pass the value pool from the disk into this function.
 
 ```
-self.mem
-    .commit_block(prepared, self.disk.history_tree(), self.disk.get_pool())?;
-..
 self.mem
     .commit_new_chain(prepared, self.disk.history_tree(), self.disk.get_pool())?;
 ```
@@ -508,7 +455,33 @@ pub fn get_pool(&self, pool_name: Pool) -> ValuePool<NonNegative> {
 ## Test Plan
 [test-plan]: #test-plan
 
+### Unit tests
+ - Create a transaction that haves a negative remaining value.
+   - Test that the transaction fails the verification in `Transaction::value_balance()`
+   - To avoid passing the utxo we can have `0` as the amount of the transparent pool and some negative shielded pool.
+
+### Prop tests
+
+ - Create a chain strategy that ends up with a valid value balance for all the pools (transparent, sprout, sapling, orchard)
+   - Test that the amounts are all added to disk.
+ - Add new blocks that will make each pool became negative.
+   - Test for constraint violations in the value balances for each case.
+   - Failures should be at `update_chain_state_with()`.
+ - Test consensus rules success and failures in `revert_chain_state_with()`
+   - TODO: how?
+
+ ### Manual tests
+
+ - Zebra must sync up to tip computing all value balances and never breaking the value pool rules.
+
 ## Future Work
 [future-work]: #future-work
 
 Add an extra state request to verify the speculative chain balance after applying a Mempool transaction. (This is out of scope for our current NU5 and mempool work.)
+
+Note: The chain value pool balance rules apply to Block transactions, but they are optional for Mempool transactions:
+> Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
+
+https://zips.z.cash/zip-0209#specification
+
+Since Zebra does chain value pool balance validation in the state, we want to skip verifying the speculative chain balance of Mempool transactions.
