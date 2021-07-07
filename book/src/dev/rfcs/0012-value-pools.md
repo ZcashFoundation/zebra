@@ -237,13 +237,7 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 - Method location is at `zebra-chain/src/transaction/orchard/shielded_data.rs`
 
 ```rust
-pub fn value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, Err> {
-    ..
-    // As soon as we have the value balance for all the pools
-    // check the remaining transaction value consensus rule:
-    value_balance.remaining_transaction_value()?;
-
-    Ok(value_balance);
+pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 
 }
 ```
@@ -256,7 +250,12 @@ pub fn value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, Err> {
 /// utxos must contain the utxos of every input in the transaction,
 /// including UTXOs created by earlier transactions in this block.
 pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Result<ValueBalance<NegativeAllowed>, Err> {
+    ..
+    // As soon as we have the value balance for all the pools
+    // check the remaining transaction value consensus rule:
+    value_balance.remaining_transaction_value()?;
 
+    Ok(value_balance);
 }
 ```
 
