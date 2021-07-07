@@ -29,8 +29,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     fmt::DisplayToDebug,
+    orchard,
     parameters::{Network, NetworkUpgrade},
+    sapling,
     serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
+    sprout,
     transaction::Transaction,
     transparent,
 };
@@ -115,6 +118,30 @@ impl Block {
         }
 
         Ok(())
+    }
+
+    /// Access the sprout::Nullifiers from all transactions in this block.
+    pub fn sprout_nullifiers(&self) -> impl Iterator<Item = &sprout::Nullifier> {
+        self.transactions
+            .iter()
+            .map(|transaction| transaction.sprout_nullifiers())
+            .flatten()
+    }
+
+    /// Access the sapling::Nullifiers from all transactions in this block.
+    pub fn sapling_nullifiers(&self) -> impl Iterator<Item = &sapling::Nullifier> {
+        self.transactions
+            .iter()
+            .map(|transaction| transaction.sapling_nullifiers())
+            .flatten()
+    }
+
+    /// Access the orchard::Nullifiers from all transactions in this block.
+    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+        self.transactions
+            .iter()
+            .map(|transaction| transaction.orchard_nullifiers())
+            .flatten()
     }
 }
 
