@@ -232,6 +232,71 @@ impl IntoDisk for transparent::OutPoint {
     }
 }
 
+impl IntoDisk for sprout::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl IntoDisk for sapling::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl IntoDisk for orchard::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl IntoDisk for sprout::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        unimplemented!();
+    }
+}
+
+impl FromDisk for sprout::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        unimplemented!()
+    }
+}
+
+impl IntoDisk for sapling::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        unimplemented!();
+    }
+}
+
+impl FromDisk for sapling::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        unimplemented!()
+    }
+}
+impl IntoDisk for orchard::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        unimplemented!();
+    }
+}
+
+impl FromDisk for orchard::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        unimplemented!()
+    }
+}
+
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
 /// defined format
 pub trait DiskSerialize {
