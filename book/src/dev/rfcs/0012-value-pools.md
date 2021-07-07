@@ -127,9 +127,11 @@ struct ValueBalance<C = NegativeAllowed> {
 }
 
 impl ValueBalance {
-    /// Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
+    /// [Consensus rule]: The remaining value in the transparent transaction value pool MUST be nonnegative.
     ///
-    /// This rule applies to Block and Mempool transactions
+    /// This rule applies to Block and Mempool transactions.
+    ///
+    /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
     fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Err> {
         // This rule checks the transparent value balance minus the sum of the sprout, sapling, and orchard
         // value balances in a transaction is nonnegative
@@ -235,7 +237,13 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 - Method location is at `zebra-chain/src/transaction/orchard/shielded_data.rs`
 
 ```rust
-pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+pub fn value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, Err> {
+    ..
+    // As soon as we have the value balance for all the pools
+    // check the remaining transaction value consensus rule:
+    value_balance.remaining_transaction_value()?;
+
+    Ok(value_balance);
 
 }
 ```
