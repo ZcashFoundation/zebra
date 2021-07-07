@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Chain {
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
@@ -31,6 +31,10 @@ pub struct Chain {
     /// The [`OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
     pub(super) spent_utxos: HashSet<transparent::OutPoint>,
+
+    sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+    sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
 
     /// The sprout anchors created by `blocks`.
     ///
@@ -289,6 +293,17 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_state_with(orchard_shielded_data)?;
         }
 
+        // Having updated all the note commitment trees and nullifier sets in
+        // this block, the roots of the note commitment trees as of the last
+        // transaction are the treestates of this block.
+        let sprout_root = self.sprout_note_commitment_tree.hash();
+        let sapling_root = self.sapling_note_commitment_tree.root();
+        let orchard_root = self.orchard_note_commitment_tree.root();
+
+        self.sprout_anchors.insert(sprout_root);
+        self.sapling_anchors.insert(sapling_root);
+        self.orchard_anchors.insert(orchard_root);
+
         Ok(())
     }
 
@@ -426,6 +441,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
+            for cm in joinsplit_data.note_commitments() {
+                self.sprout_note_commitment_tree.append(cm);
+            }
+
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
@@ -463,6 +482,10 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            for cm_u in sapling_shielded_data.note_commitments() {
+                self.sapling_note_commitment_tree.append(*cm_u);
+            }
+
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
@@ -497,6 +520,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for cm_x in orchard_shielded_data.note_commitments() {
+                self.orchard_note_commitment_tree.append(*cm_x);
+            }
+
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),

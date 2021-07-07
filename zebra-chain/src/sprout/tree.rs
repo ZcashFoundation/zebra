@@ -104,10 +104,22 @@ impl From<Root> for [u8; 32] {
     }
 }
 
+impl From<&[u8; 32]> for Root {
+    fn from(bytes: &[u8; 32]) -> Root {
+        (*bytes).into()
+    }
+}
+
+impl From<&Root> for [u8; 32] {
+    fn from(root: &Root) -> Self {
+        (*root).into()
+    }
+}
+
 /// Sprout Note Commitment Tree
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-struct NoteCommitmentTree {
+pub struct NoteCommitmentTree {
     /// The root node of the tree (often used as an anchor).
     root: Root,
     /// The height of the tree (maximum height for Sprout is 29).
@@ -164,8 +176,13 @@ impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
 impl NoteCommitmentTree {
     /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
     /// commitment notes.
-    pub fn hash(&self) -> [u8; 32] {
-        self.root.0
+    pub fn hash(&self) -> Root {
+        self.root
+    }
+
+    /// Add a note commitment to the tree.
+    pub fn append(&self, _cm: &NoteCommitment) {
+        // TODO
     }
 }
 
@@ -277,7 +294,7 @@ mod tests {
 
             let tree = NoteCommitmentTree::from(leaves.clone());
 
-            assert_eq!(hex::encode(tree.hash()), roots[i]);
+            assert_eq!(hex::encode(<[u8; 32]>::from(tree.hash())), roots[i]);
         }
     }
 }
