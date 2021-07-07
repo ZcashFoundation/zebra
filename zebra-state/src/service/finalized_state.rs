@@ -50,6 +50,18 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "sapling_note_commitment_tree",
+                db_options.clone(),
+            ),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "orchard_note_commitment_tree",
+                db_options.clone(),
+            ),
         ];
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
@@ -201,9 +213,20 @@ impl FinalizedState {
         let block_by_height = self.db.cf_handle("block_by_height").unwrap();
         let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
+
         let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
+
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
+        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
+
+        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sapling_note_commitment_tree =
+            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let orchard_note_commitment_tree =
+            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
