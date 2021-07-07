@@ -170,19 +170,40 @@ https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 [parallel-coinbase-checks]: #parallel-coinbase-checks
 
 We can perform these coinbase checks asynchronously, in the presence of multiple chain forks,
-as long as the following conditions hold.
+as long as the following conditions both hold:
 
-We don't mistakenly accept or reject spends to the transparent pool:
-- across all chains, the set of coinbase transaction hashes is disjoint from
-  the set of non-coinbase transaction hashes.
+1. We don't mistakenly accept or reject spends to the transparent pool.
 
-We don't mistakenly accept or reject mature spends:
-- across all chains, the set of coinbase transaction hashes is disjoint from
-  the set of non-coinbase transaction hashes; and
-- across all chains, duplicate coinbase transaction hashes can only occur at
+2. We don't mistakenly accept or reject mature spends.
+
+### Parallel coinbase justification
+[parallel-coinbase-justification]: #parallel-coinbase-justification
+
+There are two parts to a spend restriction:
+- the `from_coinbase` flag, and
+- if the `from_coinbase` flag is true, the coinbase `height`.
+
+If a particular transaction hash `h` always has the same `from_coinbase` value,
+and `h` exists in multiple chains, then regardless of which `Utxo` arrives first,
+the outputs of `h` always get the same `from_coinbase` value during validation.
+So spends can not be mistakenly accepted or rejected due to a different coinbase flag.
+
+Similarly, if a particular coinbase transaction hash `h` always has the same `height` value,
+and `h` exists in multiple chains, then regardless of which `Utxo` arrives first,
+the outputs of `h` always get the same `height` value during validation.
+So coinbase spends can not be mistakenly accepted or rejected due to a different `height` value.
+(The heights of non-coinbase outputs are irrelevant, because they are never checked.)
+
+These conditions hold as long as the following multi-chain properties are satisfied:
+- `from_coinbase`: across all chains, the set of coinbase transaction hashes is disjoint from
+  the set of non-coinbase transaction hashes, and
+- coinbase `height`: across all chains, duplicate coinbase transaction hashes can only occur at
   exactly the same height.
 
-These properties are implied by the following consensus rules:
+### Parallel coinbase consensus rules
+[parallel-coinbase-consensus]: #parallel-coinbase-consensus
+
+These multi-chain properties can be derived from the following consensus rules:
 
 Transaction versions 1-4:
 
