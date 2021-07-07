@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     primitives::{ed25519, ZkSnarkProof},
-    sprout::{JoinSplit, Nullifier},
+    sprout::{self, JoinSplit, Nullifier},
 };
 
 /// A bundle of [`JoinSplit`] descriptions and signature data.
@@ -53,5 +53,11 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.joinsplits()
             .flat_map(|joinsplit| joinsplit.nullifiers.iter())
+    }
+
+    /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s.
+    pub fn note_commitments(&self) -> impl Iterator<Item = &sprout::commitment::NoteCommitment> {
+        self.joinsplits()
+            .flat_map(|joinsplit| &joinsplit.commitments)
     }
 }
