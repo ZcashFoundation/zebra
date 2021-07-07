@@ -1,5 +1,14 @@
 //! Orchard shielded data for `V5` `Transaction`s.
 
+use std::{
+    cmp::{Eq, PartialEq},
+    fmt::Debug,
+    io,
+};
+
+use byteorder::{ReadBytesExt, WriteBytesExt};
+use halo2::pasta::pallas;
+
 use crate::{
     amount::Amount,
     block::MAX_BLOCK_BYTES,
@@ -11,14 +20,6 @@ use crate::{
     serialization::{
         AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
-};
-
-use byteorder::{ReadBytesExt, WriteBytesExt};
-
-use std::{
-    cmp::{Eq, PartialEq},
-    fmt::Debug,
-    io,
 };
 
 /// A bundle of [`Action`] descriptions and signature data.
