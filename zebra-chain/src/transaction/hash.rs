@@ -19,7 +19,7 @@ pub struct Hash(pub [u8; 32]);
 
 impl<'a> From<&'a Transaction> for Hash {
     fn from(transaction: &'a Transaction) -> Self {
-        let hasher = TxIdBuilder::new(&transaction);
+        let hasher = TxIdBuilder::new(transaction);
         hasher
             .txid()
             .expect("zcash_primitives and Zebra transaction formats must be compatible")
