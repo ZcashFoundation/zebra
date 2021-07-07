@@ -183,9 +183,12 @@ impl<'a> SigHasher<'a> {
         self.trans
             .inputs()
             .iter()
-            .filter_map(|input| match input {
-                transparent::Input::PrevOut { outpoint, .. } => Some(outpoint),
-                transparent::Input::Coinbase { .. } => None,
+            .map(|input| match input {
+                transparent::Input::PrevOut { outpoint, .. } => outpoint,
+                transparent::Input::Coinbase { .. } => &transparent::OutPoint {
+                    hash: crate::transaction::Hash([0; 32]),
+                    index: u32::MAX,
+                },
             })
             .try_for_each(|outpoint| outpoint.zcash_serialize(&mut hash))?;
 

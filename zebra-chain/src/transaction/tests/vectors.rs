@@ -1,9 +1,9 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
-use zebra_test::zip0244;
+use zebra_test::{zip0243, zip0244};
 
 use super::super::*;
 use crate::{
@@ -956,6 +956,37 @@ fn test_vec243_3() -> Result<()> {
 }
 
 #[test]
+fn zip243_sighash() -> Result<()> {
+    zebra_test::init();
+
+    for (i, test) in zip0243::TEST_VECTORS.iter().enumerate() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let input = match test.transparent_input {
+            Some(transparent_input) => Some((
+                transparent_input,
+                transparent::Output {
+                    value: test.amount.try_into()?,
+                    lock_script: transparent::Script::new(test.script_code.as_ref()),
+                },
+            )),
+            None => None,
+        };
+        let result = hex::encode(
+            transaction.sighash(
+                NetworkUpgrade::from_branch_id(test.consensus_branch_id)
+                    .expect("must be a valid branch ID"),
+                HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+                input,
+            ),
+        );
+        let expected = hex::encode(test.sighash);
+        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+    }
+
+    Ok(())
+}
+
+#[test]
 fn zip244_sighash() -> Result<()> {
     zebra_test::init();
 
@@ -1016,8 +1047,7 @@ fn librustzcash_sighash_for_network(network: Network) {
 
         let network_upgrade = NetworkUpgrade::current(network, Height(*height));
 
-        // Test each transaction. Skip the coinbase transaction
-        for original_tx in original_block.transactions.iter().skip(1) {
+        for original_tx in original_block.transactions.iter() {
             let original_sighash = original_tx.sighash(network_upgrade, HashType::ALL, None);
 
             let alt_sighash = crate::primitives::zcash_primitives::sighash(
@@ -1028,6 +1058,73 @@ fn librustzcash_sighash_for_network(network: Network) {
             );
 
             assert_eq!(original_sighash, alt_sighash);
+        }
+    }
+}
+
+#[test]
+fn binding_signatures() {
+    zebra_test::init();
+
+    binding_signatures_for_network(Network::Mainnet);
+    binding_signatures_for_network(Network::Testnet);
+}
+
+fn binding_signatures_for_network(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (height, bytes) in block_iter {
+        let upgrade = NetworkUpgrade::current(network, Height(*height));
+
+        let block = bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("a valid block");
+
+        for tx in block.transactions {
+            match &*tx {
+                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
+                Transaction::V4 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
+
+                        let bvk = redjubjub::VerificationKey::try_from(
+                            sapling_shielded_data.binding_verification_key(),
+                        )
+                        .expect("a valid redjubjub::VerificationKey");
+
+                        bvk.verify(
+                            shielded_sighash.as_ref(),
+                            &sapling_shielded_data.binding_sig,
+                        )
+                        .expect("must pass verification");
+                    }
+                }
+                Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
+
+                        let bvk = redjubjub::VerificationKey::try_from(
+                            sapling_shielded_data.binding_verification_key(),
+                        )
+                        .expect("a valid redjubjub::VerificationKey");
+
+                        bvk.verify(
+                            shielded_sighash.as_ref(),
+                            &sapling_shielded_data.binding_sig,
+                        )
+                        .expect("must pass verification");
+                    }
+                }
+            }
         }
     }
 }
