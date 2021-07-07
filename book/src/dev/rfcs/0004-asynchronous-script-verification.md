@@ -22,7 +22,7 @@ and in parallel on a thread pool.
 - *UTXO*: unspent transparent transaction output.
   Transparent transaction outputs are modeled in `zebra-chain` by the [`transparent::Output`][transout] structure.
 - outpoint: a reference to an unspent transparent transaction output, including a transaction hash and output index.
-  Outpoints are modeled in `zebra-chain` by the [`transparent::OutPoint`][outpoint] structure.  
+  Outpoints are modeled in `zebra-chain` by the [`transparent::OutPoint`][outpoint] structure.
 - transparent input: a previous transparent output consumed by a later transaction (the one it is an input to).
   Modeled in `zebra-chain` by the [`transparent::Input::PrevOut`][transin] enum variant.
 - coinbase transaction: the first transaction in each block, which creates new coins.
@@ -66,8 +66,9 @@ At a high level, this adds a new request/response pair to the state service:
 
 - `Request::AwaitSpendableUtxo { output: OutPoint, ..conditions }`
    requests a spendable `transparent::Output`, looked up using `OutPoint`.
-- `Response::Utxo(transparent::Output)` supplies the requested `transparent::Output`,
-   if it is spendable based on `conditions`;
+- `Response::Utxo(Utxo)` supplies the requested `transparent::Output`
+   as part of a new `Utxo` type,
+   if the output is spendable based on `conditions`;
 
 Note that this request is named differently from the other requests,
 `AwaitSpendableUtxo` rather than `GetUtxo` or similar. This is because the
@@ -108,8 +109,9 @@ enum Request::AwaitSpendableUtxo {
     spend_restriction: SpendRestriction,
 }
 
-/// A transaction with one or more transparent inputs from coinbase transactions
-/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0).
+/// Consensus rule:
+/// "A transaction with one or more transparent inputs from coinbase transactions
+/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0)."
 enum SpendRestriction {
     /// The UTXO is spent in a transaction with transparent outputs
     SomeTransparentOutputs,
@@ -117,7 +119,7 @@ enum SpendRestriction {
     AllShieldedOutputs,
 }
 
-enum Response::Utxo(transparent::Output)
+enum Response::Utxo(Utxo)
 ```
 
 As described above, the request name is intended to indicate the request's behavior.
@@ -125,32 +127,27 @@ The request does not resolve until:
 - the state layer learns of a UTXO described by the request, and
 - the output is spendable at `height` with `spend_restriction`.
 
-We also add a coinbase flag and height to `transparent::Output`s that we look up in
-the state, or get from newly commited blocks:
+The new `Utxo` type adds a coinbase flag and height to `transparent::Output`s
+that we look up in the state, or get from newly commited blocks:
 ```rust
-enum TransparentOutputOrigin {
-    Coinbase {
-        output: transparent::Output,
-        height: Height,
-    },
-    NonCoinbase {
-        output: transparent::Output,
-    },
+pub struct Utxo {
+    /// The output itself.
+    pub output: transparent::Output,
+
+    /// The height at which the output was created.
+    pub height: block::Height,
+
+    /// Whether the output originated in a coinbase transaction.
+    pub from_coinbase: bool,
 }
 ```
-
-The coinbase flag and height can be derived from the `tx_index` and `height`:
-- looked up from the `OutPoint.hash` in `tx_by_hash`, or
-- retrieved from the newly arrived block.
-
-There is exactly one coinbase transaction per block, and it must have an index of `0`.
 
 ## Transparent coinbase consensus rules
 [transparent-coinbase-consensus-rules]: #transparent-coinbase-consensus-rules
 
 Specifically, if the UTXO is a transparent coinbase output,
 the service is not required to return a response if:
-- `spend_height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` (100) blocks after the `Coinbase.height`, or
+- `spend_height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` (100) blocks after the `Utxo.height`, or
 - `spend_restriction` is `SomeTransparentOutputs`.
 
 This implements the following consensus rules:
@@ -322,7 +319,7 @@ structure described below.
 ```rust
 // sketch
 #[derive(Default, Debug)]
-struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<TransparentOutputOrigin>>);
+struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<Utxo>>);
 
 impl PendingUtxos {
     // adds the outpoint and returns (wrapped) rx end of oneshot
@@ -333,8 +330,7 @@ impl PendingUtxos {
     pub fn respond(&mut self, outpoint: OutPoint, output: transparent::Output);
 
     /// check the list of pending UTXO requests against the supplied `utxos`
-    /// from a transaction at `tx_index` in a block at `height`
-    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>, height: Height,  tx_index: u32);
+    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>);
 
     // scans the hashmap and removes any entries with closed senders
     pub fn prune(&mut self);
@@ -353,31 +349,23 @@ The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows
   before starting the rocksdb lookup.
 
 2. In `f`, the future returned by `PendingUtxos::queue(u)`, the service should
-  check that the `TransparentOutputOrigin` is spendable before returning it:
-  - if the `TransparentOutputOrigin` is `NonCoinbase`, return the utxo;
-  - if the `TransparentOutputOrigin` is `Coinbase`, check that:
+  check that the `Utxo` is spendable before returning it:
+  - if `Utxo.from_coinbase` is false, return the utxo;
+  - if `Utxo.from_coinbase` is true, check that:
     - `spend_restriction` is `AllShieldedOutputs`, and
     - `spend_height` is greater than or equal to
-      `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Coinbase.height`,
+      `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Utxo.height`,
     - then return the utxo.
 
-3. In `PendingUtxos::check_against(utxos, height, tx_index)`, the service should:
-  - return `TransparentOutputOrigin::Coinbase` if `tx_index == 0`,
-    using `height` as `Coinbase.height`.
-
-4. In `Service::any_utxo(outpoint)`, the service should:
-  - lookup `OutPoint.hash` in `tx_by_hash`;
-  - return `TransparentOutputOrigin::Coinbase` if `tx_index == 0`,
-    using `height` as `Coinbase.height`.
-
-5. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
-  - check for double-spends of each UTXO in the block, and
+3. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
+  - [check for double-spends of each UTXO in the block](https://github.com/ZcashFoundation/zebra/issues/2231),
+    and
   - do any other transactional checks before committing a block as normal.
   Because the `AwaitSpendableUtxo` request is informational, there's no need to do
   the transactional checks before matching against pending UTXO requests,
   and doing so upfront can run expensive verification earlier than needed.
 
-6. In `Service::poll_ready()`, the service should call
+4. In `Service::poll_ready()`, the service should call
   `PendingUtxos::prune()` at least *some* of the time. This is required because
   when a consumer uses a timeout layer, the cancelled requests should be
   flushed from the queue to avoid a resource leak. However, doing this on every
@@ -407,8 +395,15 @@ cleaner and the cost is probably not too large.
 account for the fact that we may start verifying blocks before all of their
 ancestors are downloaded.
 
+These optimisations can be delayed until after the initial implementation is
+complete, and covered by tests:
+
+- Should we stop storing heights for non-coinbase UTXOs? (#2455)
+
+- Should we avoid storing any extra data for UTXOs, and just lookup the coinbase
+  flag and height using `outpoint.hash` and `tx_by_hash`? (#2455)
+
 - The maturity check can be skipped for UTXOs from the finalized state,
 because Zebra only finalizes mature UTXOs. We could implement this
-optimisation by adding a `TransparentOutputOrigin::MatureCoinbase { output: transparent::Output }`
-variant, which only performs the spend checks. But this optimisation can be
-delayed after the initial implementation is complete and covered by tests.
+optimisation by adding a `Utxo::MatureCoinbase { output: transparent::Output }`
+variant, which only performs the spend checks. (#2455)
