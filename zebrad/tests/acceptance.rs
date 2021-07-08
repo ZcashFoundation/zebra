@@ -858,7 +858,6 @@ fn sync_until(
 
 fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
-    config.consensus.checkpoint_sync = true;
     config.state.cache_dir = "/zebrad-cache".into();
     Ok(config)
 }
