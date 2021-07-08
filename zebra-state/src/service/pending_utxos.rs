@@ -46,13 +46,20 @@ impl PendingUtxos {
         }
     }
 
-    /// Check the list of pending UTXO requests against the supplied UTXO index.
+    /// Check the list of pending UTXO requests against the supplied [`OrderedUtxo`] index.
+    pub fn check_against_ordered(
+        &mut self,
+        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) {
+        for (outpoint, ordered_utxo) in ordered_utxos.iter() {
+            self.respond(outpoint, ordered_utxo.utxo.clone())
+        }
+    }
+
+    /// Check the list of pending UTXO requests against the supplied [`Utxo`] index.
     pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, transparent::Utxo>) {
         for (outpoint, utxo) in utxos.iter() {
-            if let Some(sender) = self.0.remove(outpoint) {
-                tracing::trace!(?outpoint, "found pending UTXO");
-                let _ = sender.send(utxo.clone());
-            }
+            self.respond(outpoint, utxo.clone())
         }
     }
 

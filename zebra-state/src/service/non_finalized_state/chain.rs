@@ -11,25 +11,46 @@ use zebra_chain::{
     transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{service::check, PreparedBlock, ValidateContextError};
+use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
 
 #[derive(Debug, Default, Clone)]
 pub struct Chain {
-    pub blocks: BTreeMap<block::Height, PreparedBlock>,
+    /// The contextually valid blocks which form this non-finalized partial chain, in height order.
+    pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
+
+    // chain state
+    //
+    /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
+    /// An index of block heights and transaction indexes for each transaction hash in `blocks`.
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
-    pub created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    /// The [`Utxo`]s created by `blocks`.
+    ///
+    /// Note that these UTXOs may not be unspent.
+    /// Outputs can be spent by later transactions or blocks in the chain.
+    pub(super) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    /// The [`OutPoint`]s spent by `blocks`,
+    /// including those created by earlier transactions or blocks in the chain.
     pub(super) spent_utxos: HashSet<transparent::OutPoint>,
 
+    /// The sprout anchors created by `blocks`.
+    ///
+    /// TODO: does this include intersitial anchors?
     pub(super) sprout_anchors: HashSet<sprout::tree::Root>,
+    /// The sapling anchors created by `blocks`.
     pub(super) sapling_anchors: HashSet<sapling::tree::Root>,
+    /// The orchard anchors created by `blocks`.
     pub(super) orchard_anchors: HashSet<orchard::tree::Root>,
 
+    /// The sprout nullifiers revealed by `blocks`.
     pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    /// The sapling nullifiers revealed by `blocks`.
     pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    /// The orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
+    /// The cumulative work represented by this partial non-finalized chain.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 }
 
@@ -76,6 +97,9 @@ impl Chain {
     /// If the block is invalid, drop this chain and return an error.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(mut self, block: PreparedBlock) -> Result<Chain, ValidateContextError> {
+        // the block isn't contextually valid until `update_chain_state_with` returns success
+        let block = ContextuallyValidBlock::from(block);
+
         // update cumulative data members
         self.update_chain_state_with(&block)?;
         tracing::debug!(block = %block.block, "adding block to chain");
@@ -85,7 +109,7 @@ impl Chain {
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
     #[instrument(level = "debug", skip(self))]
-    pub fn pop_root(&mut self) -> PreparedBlock {
+    pub(crate) fn pop_root(&mut self) -> ContextuallyValidBlock {
         let block_height = self.lowest_height();
 
         // remove the lowest height block from self.blocks
@@ -180,16 +204,18 @@ trait UpdateWith<T> {
     fn revert_chain_state_with(&mut self, _: &T);
 }
 
-impl UpdateWith<PreparedBlock> for Chain {
+impl UpdateWith<ContextuallyValidBlock> for Chain {
+    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     fn update_chain_state_with(
         &mut self,
-        prepared: &PreparedBlock,
+        contextually_valid: &ContextuallyValidBlock,
     ) -> Result<(), ValidateContextError> {
-        let (block, hash, height, transaction_hashes) = (
-            prepared.block.as_ref(),
-            prepared.hash,
-            prepared.height,
-            &prepared.transaction_hashes,
+        let (block, hash, height, new_outputs, transaction_hashes) = (
+            contextually_valid.block.as_ref(),
+            contextually_valid.hash,
+            contextually_valid.height,
+            &contextually_valid.new_outputs,
+            &contextually_valid.transaction_hashes,
         );
 
         // add hash to height_by_hash
@@ -254,7 +280,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             );
 
             // add the utxos this produced
-            self.update_chain_state_with(&prepared.new_outputs)?;
+            self.update_chain_state_with(new_outputs)?;
             // add the utxos this consumed
             self.update_chain_state_with(inputs)?;
 
@@ -268,12 +294,13 @@ impl UpdateWith<PreparedBlock> for Chain {
         Ok(())
     }
 
-    #[instrument(skip(self, prepared), fields(block = %prepared.block))]
-    fn revert_chain_state_with(&mut self, prepared: &PreparedBlock) {
-        let (block, hash, transaction_hashes) = (
-            prepared.block.as_ref(),
-            prepared.hash,
-            &prepared.transaction_hashes,
+    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    fn revert_chain_state_with(&mut self, contextually_valid: &ContextuallyValidBlock) {
+        let (block, hash, new_outputs, transaction_hashes) = (
+            contextually_valid.block.as_ref(),
+            contextually_valid.hash,
+            &contextually_valid.new_outputs,
+            &contextually_valid.transaction_hashes,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -331,7 +358,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             );
 
             // remove the utxos this produced
-            self.revert_chain_state_with(&prepared.new_outputs);
+            self.revert_chain_state_with(new_outputs);
             // remove the utxos this consumed
             self.revert_chain_state_with(inputs);
 
