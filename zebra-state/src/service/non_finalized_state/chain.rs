@@ -6,19 +6,13 @@ use std::{
 
 use tracing::{debug_span, instrument, trace};
 use zebra_chain::{
-    block::{self, ChainHistoryMmrRootHash},
-    history_tree::HistoryTree,
-    orchard,
-    primitives::Groth16Proof,
-    sapling, sprout, transaction,
-    transaction::Transaction::*,
-    transparent,
-    work::difficulty::PartialCumulativeWork,
+    block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
+    transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{PreparedBlock, Utxo, ValidateContextError};
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Default, Clone)]
 pub struct Chain {
     pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,
@@ -33,30 +27,9 @@ pub struct Chain {
     sapling_nullifiers: HashSet<sapling::Nullifier>,
     orchard_nullifiers: HashSet<orchard::Nullifier>,
     partial_cumulative_work: PartialCumulativeWork,
-    pub(crate) history_tree: HistoryTree,
 }
 
 impl Chain {
-    /// Create a new empty non-finalized chain with the given history tree.
-    ///
-    /// The history tree must contain the history of the previous (finalized) blocks.
-    pub fn new(history_tree: HistoryTree) -> Self {
-        Chain {
-            blocks: Default::default(),
-            height_by_hash: Default::default(),
-            tx_by_hash: Default::default(),
-            created_utxos: Default::default(),
-            spent_utxos: Default::default(),
-            sprout_anchors: Default::default(),
-            sapling_anchors: Default::default(),
-            sprout_nullifiers: Default::default(),
-            sapling_nullifiers: Default::default(),
-            orchard_nullifiers: Default::default(),
-            partial_cumulative_work: Default::default(),
-            history_tree,
-        }
-    }
-
     /// Push a contextually valid non-finalized block into a chain as the new tip.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(&mut self, block: PreparedBlock) -> Result<(), ValidateContextError> {
@@ -95,38 +68,16 @@ impl Chain {
 
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
-    ///
-    /// `finalized_tip_history_tree`: the history tree for the finalized tip
-    /// from which the tree of the fork will be computed.
-    pub fn fork(
-        &self,
-        fork_tip: block::Hash,
-        finalized_tip_history_tree: &HistoryTree,
-    ) -> Result<Option<Self>, ValidateContextError> {
+    pub fn fork(&self, fork_tip: block::Hash) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
         }
 
-        let mut forked = self.with_history_tree(finalized_tip_history_tree.clone());
+        let mut forked = self.clone();
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
-
-        // Rebuild the history tree starting from the finalized tip tree.
-        // TODO: change to a more efficient approach by removing nodes
-        // from the tree of the original chain (in `pop_tip()`).
-        // See https://github.com/ZcashFoundation/zebra/issues/2378
-        forked
-            .history_tree
-            .try_extend(forked.blocks.values().map(|prepared_block| {
-                (
-                    prepared_block.block.clone(),
-                    // TODO: pass Sapling and Orchard roots
-                    &sapling::tree::Root([0; 32]),
-                    None,
-                )
-            }))?;
 
         Ok(Some(forked))
     }
@@ -166,31 +117,6 @@ impl Chain {
 
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
-    }
-
-    pub fn history_root_hash(&self) -> ChainHistoryMmrRootHash {
-        self.history_tree.hash()
-    }
-
-    /// Clone the Chain but not the history tree, using the history tree
-    /// specified instead.
-    ///
-    /// Useful when forking, where the history tree is rebuilt anyway.
-    fn with_history_tree(&self, history_tree: HistoryTree) -> Self {
-        Chain {
-            blocks: self.blocks.clone(),
-            height_by_hash: self.height_by_hash.clone(),
-            tx_by_hash: self.tx_by_hash.clone(),
-            created_utxos: self.created_utxos.clone(),
-            spent_utxos: self.spent_utxos.clone(),
-            sprout_anchors: self.sprout_anchors.clone(),
-            sapling_anchors: self.sapling_anchors.clone(),
-            sprout_nullifiers: self.sprout_nullifiers.clone(),
-            sapling_nullifiers: self.sapling_nullifiers.clone(),
-            orchard_nullifiers: self.orchard_nullifiers.clone(),
-            partial_cumulative_work: self.partial_cumulative_work,
-            history_tree,
-        }
     }
 }
 
@@ -237,10 +163,6 @@ impl UpdateWith<PreparedBlock> for Chain {
             .to_work()
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
-
-        // TODO: pass Sapling and Orchard roots
-        self.history_tree
-            .push(prepared.block.clone(), &sapling::tree::Root([0; 32]), None)?;
 
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
@@ -324,11 +246,6 @@ impl UpdateWith<PreparedBlock> for Chain {
             .to_work()
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
-
-        // Note: the history tree is not modified in this method.
-        // This method is called on two scenarios:
-        // - When popping the root: the history tree does not change.
-        // - When popping the tip: the history tree is rebuilt in fork().
 
         // for each transaction in block
         for (transaction, transaction_hash) in
@@ -527,6 +444,14 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         }
     }
 }
+
+impl PartialEq for Chain {
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+impl Eq for Chain {}
 
 impl PartialOrd for Chain {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

@@ -45,7 +45,7 @@ impl From<&zcash_history::NodeData> for NodeData {
 /// An encoded entry in the tree.
 ///
 /// Contains the node data and information about its position in the tree.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Entry {
     inner: [u8; zcash_history::MAX_ENTRY_SIZE],
 }
@@ -228,15 +228,6 @@ impl Tree {
             .data()
             .hash()
             .into()
-    }
-}
-
-impl std::fmt::Debug for Tree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Tree")
-            .field("network", &self.network)
-            .field("network_upgrade", &self.network_upgrade)
-            .finish()
     }
 }
 
