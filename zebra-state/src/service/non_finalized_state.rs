@@ -25,7 +25,7 @@ use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
 use self::chain::Chain;
 
-use super::finalized_state::FinalizedState;
+use super::{check, finalized_state::FinalizedState};
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Debug, Clone)]
@@ -169,9 +169,14 @@ impl NonFinalizedState {
         &self,
         parent_chain: Chain,
         prepared: PreparedBlock,
-        _finalized_state: &FinalizedState,
+        finalized_state: &FinalizedState,
     ) -> Result<Chain, ValidateContextError> {
-        // TODO: insert validation of `prepared` block and `parent_chain` here
+        check::utxo::transparent_double_spends(
+            &prepared,
+            &parent_chain.unspent_utxos(),
+            &parent_chain.spent_utxos,
+            finalized_state,
+        )?;
 
         parent_chain.push(prepared)
     }

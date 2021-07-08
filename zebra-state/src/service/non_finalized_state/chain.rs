@@ -183,6 +183,12 @@ impl Chain {
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
+
+    pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::Utxo> {
+        let mut unspent_utxos = self.created_utxos.clone();
+        unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
+        unspent_utxos
+    }
 }
 
 /// Helper trait to organize inverse operations done on the `Chain` type. Used to
