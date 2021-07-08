@@ -10,7 +10,7 @@ use zebra_chain::{
     transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{PreparedBlock, Utxo, ValidateContextError};
+use crate::{OrderedUtxo, PreparedBlock, ValidateContextError};
 
 #[derive(Default, Clone)]
 pub struct Chain {
@@ -18,7 +18,7 @@ pub struct Chain {
     pub height_by_hash: HashMap<block::Hash, block::Height>,
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
-    pub created_utxos: HashMap<transparent::OutPoint, Utxo>,
+    pub created_utxos: HashMap<transparent::OutPoint, OrderedUtxo>,
     spent_utxos: HashSet<transparent::OutPoint>,
     // TODO: add sprout, sapling and orchard anchors (#1320)
     sprout_anchors: HashSet<sprout::tree::Root>,
@@ -301,17 +301,17 @@ impl UpdateWith<PreparedBlock> for Chain {
     }
 }
 
-impl UpdateWith<HashMap<transparent::OutPoint, Utxo>> for Chain {
+impl UpdateWith<HashMap<transparent::OutPoint, OrderedUtxo>> for Chain {
     fn update_chain_state_with(
         &mut self,
-        utxos: &HashMap<transparent::OutPoint, Utxo>,
+        utxos: &HashMap<transparent::OutPoint, OrderedUtxo>,
     ) -> Result<(), ValidateContextError> {
         self.created_utxos
             .extend(utxos.iter().map(|(k, v)| (*k, v.clone())));
         Ok(())
     }
 
-    fn revert_chain_state_with(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
+    fn revert_chain_state_with(&mut self, utxos: &HashMap<transparent::OutPoint, OrderedUtxo>) {
         self.created_utxos
             .retain(|outpoint, _| !utxos.contains_key(outpoint));
     }

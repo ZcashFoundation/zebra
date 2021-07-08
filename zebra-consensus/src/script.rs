@@ -5,7 +5,7 @@ use tracing::Instrument;
 
 use zebra_chain::{parameters::NetworkUpgrade, transparent};
 use zebra_script::CachedFfiTransaction;
-use zebra_state::Utxo;
+use zebra_state::OrderedUtxo;
 
 use crate::BoxError;
 
@@ -59,7 +59,7 @@ pub struct Request {
     /// A set of additional UTXOs known in the context of this verification request.
     ///
     /// This allows specifying additional UTXOs that are not already known to the chain state.
-    pub known_utxos: Arc<HashMap<transparent::OutPoint, Utxo>>,
+    pub known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
     /// The network upgrade active in the context of this verification request.
     ///
     /// Because the consensus branch ID changes with each network upgrade,
@@ -111,7 +111,7 @@ where
                     tracing::trace!("awaiting outpoint lookup");
                     let utxo = if let Some(output) = known_utxos.get(&outpoint) {
                         tracing::trace!("UXTO in known_utxos, discarding query");
-                        output.clone()
+                        output.utxo.clone()
                     } else if let zebra_state::Response::Utxo(utxo) = query.await? {
                         utxo
                     } else {

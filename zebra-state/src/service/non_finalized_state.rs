@@ -155,8 +155,8 @@ impl NonFinalizedState {
     /// `transparent::OutPoint` if it is present in any chain.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
         for chain in self.chain_set.iter().rev() {
-            if let Some(output) = chain.created_utxos.get(outpoint) {
-                return Some(output.clone());
+            if let Some(ordered_utxo) = chain.created_utxos.get(outpoint) {
+                return Some(ordered_utxo.utxo.clone());
             }
         }
 

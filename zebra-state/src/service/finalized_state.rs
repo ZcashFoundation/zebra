@@ -246,8 +246,8 @@ impl FinalizedState {
             }
 
             // Index all new transparent outputs
-            for (outpoint, utxo) in new_outputs.into_iter() {
-                batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
+            for (outpoint, ordered_utxo) in new_outputs.into_iter() {
+                batch.zs_insert(utxo_by_outpoint, outpoint, ordered_utxo.utxo);
             }
 
             // Index each transaction, spent inputs, nullifiers

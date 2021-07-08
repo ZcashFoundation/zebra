@@ -5,7 +5,9 @@ use tokio::sync::broadcast;
 
 use zebra_chain::transparent;
 
-use crate::{BoxError, Response, Utxo};
+use crate::OrderedUtxo;
+use crate::Utxo;
+use crate::{BoxError, Response};
 
 #[derive(Debug, Default)]
 pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<Utxo>>);
@@ -47,12 +49,9 @@ impl PendingUtxos {
     }
 
     /// Check the list of pending UTXO requests against the supplied UTXO index.
-    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>) {
-        for (outpoint, utxo) in utxos.iter() {
-            if let Some(sender) = self.0.remove(outpoint) {
-                tracing::trace!(?outpoint, "found pending UTXO");
-                let _ = sender.send(utxo.clone());
-            }
+    pub fn check_against(&mut self, ordered_utxos: &HashMap<transparent::OutPoint, OrderedUtxo>) {
+        for (outpoint, ordered_utxo) in ordered_utxos.iter() {
+            self.respond(outpoint, ordered_utxo.utxo.clone())
         }
     }
 
