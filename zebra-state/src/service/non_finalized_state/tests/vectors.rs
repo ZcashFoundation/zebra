@@ -1,11 +1,6 @@
 use std::sync::Arc;
 
-use zebra_chain::{
-    block::Block,
-    history_tree::{HistoryTree, HistoryTreeError},
-    parameters::Network,
-    serialization::ZcashDeserializeInto,
-};
+use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 use zebra_test::prelude::*;
 
 use crate::{
@@ -15,32 +10,20 @@ use crate::{
 
 use self::assert_eq;
 
-/// Make a history tree for the given block givens the history tree of its parent.
-fn make_tree(
-    block: Arc<Block>,
-    parent_tree: &HistoryTree,
-) -> Result<HistoryTree, HistoryTreeError> {
-    let mut tree = parent_tree.clone();
-    tree.push(block, &Default::default(), None)?;
-    Ok(tree)
+#[test]
+fn construct_empty() {
+    zebra_test::init();
+    let _chain = Chain::default();
 }
 
 #[test]
 fn construct_single() -> Result<()> {
     zebra_test::init();
-    let block0: Arc<Block> =
+    let block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
-    let finalized_tree =
-        HistoryTree::from_block(Network::Mainnet, block0.clone(), &Default::default(), None)
-            .unwrap();
-
-    let block1 = block0
-        .make_fake_child()
-        .set_block_commitment(finalized_tree.hash().into());
-
-    let mut chain = Chain::new(finalized_tree);
-    chain.push(block1.prepare())?;
+    let mut chain = Chain::default();
+    chain.push(block.prepare())?;
 
     assert_eq!(1, chain.blocks.len());
 
@@ -53,22 +36,15 @@ fn construct_many() -> Result<()> {
 
     let mut block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
-    let finalized_tree =
-        HistoryTree::from_block(Network::Mainnet, block.clone(), &Default::default(), None)
-            .unwrap();
     let mut blocks = vec![];
 
-    let mut tree = finalized_tree.clone();
     while blocks.len() < 100 {
-        let next_block = block
-            .make_fake_child()
-            .set_block_commitment(tree.hash().into());
-        blocks.push(next_block.clone());
+        let next_block = block.make_fake_child();
+        blocks.push(block);
         block = next_block;
-        tree = make_tree(block.clone(), &tree)?;
     }
 
-    let mut chain = Chain::new(finalized_tree);
+    let mut chain = Chain::default();
 
     for block in blocks {
         chain.push(block.prepare())?;
@@ -82,25 +58,15 @@ fn construct_many() -> Result<()> {
 #[test]
 fn ord_matches_work() -> Result<()> {
     zebra_test::init();
-    let block =
-        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
-    let finalized_tree =
-        HistoryTree::from_block(Network::Mainnet, block.clone(), &Default::default(), None)
-            .unwrap();
+    let less_block = zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()?
+        .set_work(1);
+    let more_block = less_block.clone().set_work(10);
 
-    let less_block = block
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(finalized_tree.hash().into());
-    let more_block = block
-        .make_fake_child()
-        .set_work(10)
-        .set_block_commitment(finalized_tree.hash().into());
-
-    let mut lesser_chain = Chain::new(finalized_tree.clone());
+    let mut lesser_chain = Chain::default();
     lesser_chain.push(less_block.prepare())?;
 
-    let mut bigger_chain = Chain::new(finalized_tree);
+    let mut bigger_chain = Chain::default();
     bigger_chain.push(more_block.prepare())?;
 
     assert!(bigger_chain > lesser_chain);
@@ -127,23 +93,15 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
             zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
         }
     };
-    let finalized_tree =
-        HistoryTree::from_block(network, block1.clone(), &Default::default(), None).unwrap();
 
-    let block2 = block1
-        .make_fake_child()
-        .set_work(10)
-        .set_block_commitment(finalized_tree.hash().into());
-    let child = block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(finalized_tree.hash().into());
+    let block2 = block1.make_fake_child().set_work(10);
+    let child = block1.make_fake_child().set_work(1);
 
     let expected_hash = block2.hash();
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block2.prepare(), finalized_tree.clone())?;
-    state.commit_new_chain(child.prepare(), finalized_tree)?;
+    state.commit_new_chain(block2.prepare())?;
+    state.commit_new_chain(child.prepare())?;
 
     let best_chain = state.best_chain().unwrap();
     assert!(best_chain.height_by_hash.contains_key(&expected_hash));
@@ -162,7 +120,7 @@ fn finalize_pops_from_best_chain() -> Result<()> {
 }
 
 fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
-    let block0: Arc<Block> = match network {
+    let block1: Arc<Block> = match network {
         Network::Mainnet => {
             zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
         }
@@ -170,27 +128,14 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
             zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
         }
     };
-    let finalized_tree =
-        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
-    let block1 = block0
-        .make_fake_child()
-        .set_block_commitment(finalized_tree.hash().into());
-    let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
-
-    let block2 = block1
-        .make_fake_child()
-        .set_work(10)
-        .set_block_commitment(block1_tree.hash().into());
-    let child = block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(block1_tree.hash().into());
+    let block2 = block1.make_fake_child().set_work(10);
+    let child = block1.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.clone().prepare(), finalized_tree.clone())?;
-    state.commit_block(block2.clone().prepare(), &finalized_tree)?;
-    state.commit_block(child.prepare(), &finalized_tree)?;
+    state.commit_new_chain(block1.clone().prepare())?;
+    state.commit_block(block2.clone().prepare())?;
+    state.commit_block(child.prepare())?;
 
     let finalized = state.finalize();
     assert_eq!(block1, finalized.block);
@@ -217,7 +162,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
 fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     network: Network,
 ) -> Result<()> {
-    let block0: Arc<Block> = match network {
+    let block1: Arc<Block> = match network {
         Network::Mainnet => {
             zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
         }
@@ -225,37 +170,20 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
             zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
         }
     };
-    let finalized_tree =
-        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
-    let block1 = block0
-        .make_fake_child()
-        .set_block_commitment(finalized_tree.hash().into());
-    let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
-
-    let block2 = block1
-        .make_fake_child()
-        .set_work(10)
-        .set_block_commitment(block1_tree.hash().into());
-    let block2_tree = make_tree(block2.clone(), &block1_tree)?;
-    let child1 = block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(block1_tree.hash().into());
-    let child2 = block2
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(block2_tree.hash().into());
+    let block2 = block1.make_fake_child().set_work(10);
+    let child1 = block1.make_fake_child().set_work(1);
+    let child2 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::default();
     assert_eq!(0, state.chain_set.len());
-    state.commit_new_chain(block1.prepare(), finalized_tree.clone())?;
+    state.commit_new_chain(block1.prepare())?;
     assert_eq!(1, state.chain_set.len());
-    state.commit_block(block2.prepare(), &finalized_tree)?;
+    state.commit_block(block2.prepare())?;
     assert_eq!(1, state.chain_set.len());
-    state.commit_block(child1.prepare(), &finalized_tree)?;
+    state.commit_block(child1.prepare())?;
     assert_eq!(2, state.chain_set.len());
-    state.commit_block(child2.prepare(), &finalized_tree)?;
+    state.commit_block(child2.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     Ok(())
@@ -272,7 +200,7 @@ fn shorter_chain_can_be_best_chain() -> Result<()> {
 }
 
 fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
-    let block0: Arc<Block> = match network {
+    let block1: Arc<Block> = match network {
         Network::Mainnet => {
             zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
         }
@@ -280,34 +208,17 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
             zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
         }
     };
-    let finalized_tree =
-        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
-    let block1 = block0
-        .make_fake_child()
-        .set_block_commitment(finalized_tree.hash().into());
-    let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
+    let long_chain_block1 = block1.make_fake_child().set_work(1);
+    let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
 
-    let long_chain_block1 = block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(block1_tree.hash().into());
-    let long_chain_block1_tree = make_tree(long_chain_block1.clone(), &block1_tree)?;
-    let long_chain_block2 = long_chain_block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(long_chain_block1_tree.hash().into());
-
-    let short_chain_block = block1
-        .make_fake_child()
-        .set_work(3)
-        .set_block_commitment(block1_tree.hash().into());
+    let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.prepare(), finalized_tree.clone())?;
-    state.commit_block(long_chain_block1.prepare(), &finalized_tree)?;
-    state.commit_block(long_chain_block2.prepare(), &finalized_tree)?;
-    state.commit_block(short_chain_block.prepare(), &finalized_tree)?;
+    state.commit_new_chain(block1.prepare())?;
+    state.commit_block(long_chain_block1.prepare())?;
+    state.commit_block(long_chain_block2.prepare())?;
+    state.commit_block(short_chain_block.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     assert_eq!(2, state.best_chain_len());
@@ -326,7 +237,7 @@ fn longer_chain_with_more_work_wins() -> Result<()> {
 }
 
 fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> {
-    let block0: Arc<Block> = match network {
+    let block1: Arc<Block> = match network {
         Network::Mainnet => {
             zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
         }
@@ -334,46 +245,21 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
             zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
         }
     };
-    let finalized_tree =
-        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
-    let block1 = block0
-        .make_fake_child()
-        .set_block_commitment(finalized_tree.hash().into());
-    let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
+    let long_chain_block1 = block1.make_fake_child().set_work(1);
+    let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
+    let long_chain_block3 = long_chain_block2.make_fake_child().set_work(1);
+    let long_chain_block4 = long_chain_block3.make_fake_child().set_work(1);
 
-    let long_chain_block1 = block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(block1_tree.hash().into());
-    let long_chain_block1_tree = make_tree(long_chain_block1.clone(), &block1_tree)?;
-    let long_chain_block2 = long_chain_block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(long_chain_block1_tree.hash().into());
-    let long_chain_block2_tree = make_tree(long_chain_block2.clone(), &long_chain_block1_tree)?;
-    let long_chain_block3 = long_chain_block2
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(long_chain_block2_tree.hash().into());
-    let long_chain_block3_tree = make_tree(long_chain_block3.clone(), &long_chain_block2_tree)?;
-    let long_chain_block4 = long_chain_block3
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(long_chain_block3_tree.hash().into());
-
-    let short_chain_block = block1
-        .make_fake_child()
-        .set_work(3)
-        .set_block_commitment(block1_tree.hash().into());
+    let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.prepare(), finalized_tree.clone())?;
-    state.commit_block(long_chain_block1.prepare(), &finalized_tree)?;
-    state.commit_block(long_chain_block2.prepare(), &finalized_tree)?;
-    state.commit_block(long_chain_block3.prepare(), &finalized_tree)?;
-    state.commit_block(long_chain_block4.prepare(), &finalized_tree)?;
-    state.commit_block(short_chain_block.prepare(), &finalized_tree)?;
+    state.commit_new_chain(block1.prepare())?;
+    state.commit_block(long_chain_block1.prepare())?;
+    state.commit_block(long_chain_block2.prepare())?;
+    state.commit_block(long_chain_block3.prepare())?;
+    state.commit_block(long_chain_block4.prepare())?;
+    state.commit_block(short_chain_block.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     assert_eq!(5, state.best_chain_len());
@@ -391,7 +277,7 @@ fn equal_length_goes_to_more_work() -> Result<()> {
     Ok(())
 }
 fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
-    let block0: Arc<Block> = match network {
+    let block1: Arc<Block> = match network {
         Network::Mainnet => {
             zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
         }
@@ -399,28 +285,15 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
             zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
         }
     };
-    let finalized_tree =
-        HistoryTree::from_block(network, block0.clone(), &Default::default(), None).unwrap();
 
-    let block1 = block0
-        .make_fake_child()
-        .set_block_commitment(finalized_tree.hash().into());
-    let block1_tree = make_tree(block1.clone(), &finalized_tree)?;
-
-    let less_work_child = block1
-        .make_fake_child()
-        .set_work(1)
-        .set_block_commitment(block1_tree.hash().into());
-    let more_work_child = block1
-        .make_fake_child()
-        .set_work(3)
-        .set_block_commitment(block1_tree.hash().into());
+    let less_work_child = block1.make_fake_child().set_work(1);
+    let more_work_child = block1.make_fake_child().set_work(3);
     let expected_hash = more_work_child.hash();
 
     let mut state = NonFinalizedState::default();
-    state.commit_new_chain(block1.prepare(), finalized_tree.clone())?;
-    state.commit_block(less_work_child.prepare(), &finalized_tree)?;
-    state.commit_block(more_work_child.prepare(), &finalized_tree)?;
+    state.commit_new_chain(block1.prepare())?;
+    state.commit_block(less_work_child.prepare())?;
+    state.commit_block(more_work_child.prepare())?;
     assert_eq!(2, state.chain_set.len());
 
     let tip_hash = state.best_tip().unwrap().1;

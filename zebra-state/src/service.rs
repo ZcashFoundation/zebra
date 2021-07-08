@@ -178,10 +178,9 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem
-                .commit_new_chain(prepared, self.disk.history_tree().clone())?;
+            self.mem.commit_new_chain(prepared)?;
         } else {
-            self.mem.commit_block(prepared, self.disk.history_tree())?;
+            self.mem.commit_block(prepared)?;
         }
 
         Ok(())
@@ -223,7 +222,7 @@ impl StateService {
         assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
                 "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
 
-        check::block_is_valid_for_recent_chain(
+        check::block_is_contextually_valid(
             prepared,
             self.network,
             self.disk.finalized_tip_height(),
