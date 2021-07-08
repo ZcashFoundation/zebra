@@ -376,7 +376,8 @@ The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows
     - `spend_restriction` is `AllShieldedOutputs`, and
     - `spend_height` is greater than or equal to
       `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Utxo.height`,
-    - then return the utxo.
+    - if both checks pass, return the utxo.
+    - if any check fails, drop the utxo, and let the request timeout.
 
 3. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
   - [check for double-spends of each UTXO in the block](https://github.com/ZcashFoundation/zebra/issues/2231),
