@@ -344,8 +344,14 @@ struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<Utxo>>);
 
 impl PendingUtxos {
     // adds the outpoint and returns (wrapped) rx end of oneshot
+    // checks the spend height and restriction before sending the utxo response
     // return can be converted to `Service::Future`
-    pub fn queue(&mut self, outpoint: OutPoint) -> impl Future<Output=Result<Response, ...>>;
+    pub fn queue(
+        &mut self,
+        outpoint: OutPoint,
+        spend_height: Height,
+        spend_restriction: SpendRestriction,
+    ) -> impl Future<Output=Result<Response, ...>>;
 
     // if outpoint is a hashmap key, remove the entry and send output on the channel
     pub fn respond(&mut self, outpoint: OutPoint, output: transparent::Output);
