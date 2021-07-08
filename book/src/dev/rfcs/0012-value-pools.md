@@ -487,7 +487,7 @@ pub fn current_value_pool(&self) -> ValuePool<NonNegative> {
 [test-plan]: #test-plan
 
 ### Unit tests
- - Create a transaction that haves a negative remaining value.
+ - Create a transaction that has a negative remaining value.
    - Test that the transaction fails the verification in `Transaction::value_balance()`
    - To avoid passing the utxo we can have `0` as the amount of the transparent pool and some negative shielded pool.
 
