@@ -254,18 +254,12 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 
 - Method location: `zebra-chain/src/transaction.rs`
 - Method will use all the `value_balances()` we created until now.
-- Method will check the remaining transaction value consensus rule.
 
 ```rust
 /// utxos must contain the utxos of every input in the transaction,
 /// including UTXOs created by earlier transactions in this block.
-pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Result<ValueBalance<NegativeAllowed>, Err> {
-    ..
-    // As soon as we have the value balance for all the pools
-    // check the remaining transaction value consensus rule:
-    value_balance.remaining_transaction_value()?;
+pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> ValueBalance<NegativeAllowed> {
 
-    Ok(value_balance);
 }
 ```
 
@@ -284,6 +278,18 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Val
         .sum()
         .expect("Each block should have at least one coinbase transaction")
 }
+```
+
+### Check the remaining transaction value consensus rule
+
+- Do the check in `zebra-consensus/src/transaction.rs`
+- Make the check part of the [basic checks](https://github.com/ZcashFoundation/zebra/blob/f817df638b1ba8cf8c261c536a30599c805cf04c/zebra-consensus/src/transaction.rs#L168-L177)
+
+```rust
+..
+// Check the remaining transaction value consensus rule:
+tx.value_balance().remaining_transaction_value()?;
+..
 ```
 
 ### Pass the value balance for this block from the consensus into the state
