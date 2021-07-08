@@ -618,6 +618,7 @@ We use the following rocksdb column families:
 | `orchard_incremental` | `BE32(height)`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
 | `history_incremental` | `BE32(height)`        | `zcash_history::NodeData`            | Delete  |
 | `value_pools`         | `BE32(height)`        | `ValueBalance<NonNegative>`          | Update  |
+| `tip_chain_value_pool`| `BE32(height)`        | `ValueBalance<NonNegative>`          | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
