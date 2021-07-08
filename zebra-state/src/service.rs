@@ -158,7 +158,7 @@ impl StateService {
             tracing::trace!("finalizing block past the reorg limit");
             let finalized = self.mem.finalize();
             self.disk
-                .commit_finalized_direct(finalized)
+                .commit_finalized_direct(finalized, "best non-finalized chain root")
                 .expect("expected that disk errors would not occur");
         }
 
