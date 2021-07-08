@@ -22,8 +22,6 @@ pub struct Utxo {
     pub from_coinbase: bool,
 }
 
-
-
 /// Compute an index of newly created transparent outputs, given a block and a
 /// list of precomputed transaction hashes.
 pub fn new_outputs(
