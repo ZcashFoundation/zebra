@@ -429,36 +429,36 @@ impl From<PreparedBlock> for FinalizedBlock {
 
 #### Changes to `zebra-state/src/service/finalized_state.rs`
 
-First we add a column for all the pools: transparent, sprout, sapling, orchard:
+First we add a column of type `ValueBalance` that will contain `Amount`s for all the pools: transparent, sprout, sapling, orchard:
 
 ```rust
-rocksdb::ColumnFamilyDescriptor::new("value_pools", db_options.clone()),
+rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
 ```
 
-At block commit(`commit_finalized_direct()`) we create the handles for the new columns:
+At block commit(`commit_finalized_direct()`) we create the handle for the new column:
 
 ```rust
-let value_pools = self.db.cf_handle("value_pools").unwrap();
+let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
 ```
 
-Next we save each value pool into the field for each upcoming block except for the genesis block:
+Next we save each tip value pool into the field for each upcoming block except for the genesis block:
 
 ```rust
 // Consensus rule: The block height of the genesis block is 0
 // https://zips.z.cash/protocol/protocol.pdf#blockchain
 if height == block::Height(0) {
-    batch.zs_insert(value_pools, height, ValueBalance::default());
+    batch.zs_insert(tip_chain_value_pool, height, ValueBalance::default());
 } else {
-    let current_pool = self.get_pool();
-    batch.zs_insert(value_pools, height, (current_pool + finalized.block_value_balance)?);
+    let current_pool = self.current_value_pool();
+    batch.zs_insert(tip_chain_value_pool, height, (current_pool + finalized.block_value_balance)?);
 }
 ```
 
-The `get_pool()` function will get the value of the pool at the tip as follows:
+The `current_value_pool()` function will get the stored value of the pool at the tip as follows:
 
 ```rust
-pub fn get_pool(&self, pool_name: Pool) -> ValuePool<NonNegative> {
-    self.db.cf_handle("value_pools")
+pub fn current_value_pool(&self) -> ValuePool<NonNegative> {
+    self.db.cf_handle("tip_chain_value_pool")
 }
 ```
 
