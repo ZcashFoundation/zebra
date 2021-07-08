@@ -333,13 +333,14 @@ Note: We don't need to pass the finalized tip value balance into the `commit_blo
 - Location: `zebra-state/src/service/non_finalized_state/chain.rs`
 
 ```rust
-impl UpdateWith<PreparedBlock> for ValueBalance<NegativeAllowed> {
+impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     fn update_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) -> Result<(), Err> {
-        self += value_balance?;
+        self.value_pool = (self.value_pool + value_balance)?;
+        Ok(())
     }
-
     fn revert_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) -> Result<(), Err> {
-        self -= value_balance?;
+        self.value_pool = (self.value_pool + value_balance)?;
+        Ok(())
     }
 }
 ```
