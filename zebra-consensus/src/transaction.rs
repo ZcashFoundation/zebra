@@ -546,7 +546,7 @@ where
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_shielded_data(
         orchard_shielded_data: &Option<orchard::ShieldedData>,
-        shielded_sighash: &blake2b_simd::Hash,
+        shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();
 
