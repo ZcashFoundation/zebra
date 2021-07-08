@@ -380,10 +380,10 @@ impl FromDisk for ValueBalance<C> {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
         ValueBalance {
-            transparent: i64::from_be_bytes(array[0..8]).try_into().unwrap()
-            sprout: i64::from_be_bytes(array[8..16]).try_into().unwrap()
-            sapling: i64::from_be_bytes(array[16..24]).try_into().unwrap()
-            orchard: i64::from_be_bytes(array[24..32]).try_into().unwrap()
+            transparent: Amount::from_bytes(array[0..8]).try_into().unwrap()
+            sprout: Amount::from_bytes(array[8..16]).try_into().unwrap()
+            sapling: Amount::from_bytes(array[16..24]).try_into().unwrap()
+            orchard: Amount::from_bytes(array[24..32]).try_into().unwrap()
         }
     }
 }
@@ -399,8 +399,22 @@ impl IntoDisk for Amount {
 impl FromDisk for Amount {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
-        i64::from_be_bytes(array).try_into().unwrap()
+        Amount::from_bytes(array)
     }
+}
+```
+The above code is goint to need a `Amount::from_bytes` new method.
+
+#### Add a `from_bytes` method in `Amount`
+
+- Method location is at `zebra-chain/src/amount.rs`
+- A `to_bytes()` method already exist, place `from_bytes()` right after it.
+
+```rust
+/// From little endian byte array
+pub fn from_bytes(&self, bytes: [u8; 8]) -> Self {
+    let amount = i64::from_le_bytes(bytes).try_into().unwrap();
+    Self(amount, PhantomData)
 }
 ```
 
