@@ -500,6 +500,7 @@ pub fn current_value_pool(&self) -> ValuePool<NonNegative> {
    - Failures should be at `update_chain_state_with()`.
  - Test consensus rules success and failures in `revert_chain_state_with()`
    - TODO: how?
+ - serialize and deserialize `ValueBalance` using `IntoDisk` and `FromDisk`
 
  ### Manual tests
 
