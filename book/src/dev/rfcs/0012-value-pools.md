@@ -403,7 +403,7 @@ impl FromDisk for Amount {
     }
 }
 ```
-The above code is goint to need a `Amount::from_bytes` new method.
+The above code is going to need a `Amount::from_bytes` new method.
 
 #### Add a `from_bytes` method in `Amount`
 
