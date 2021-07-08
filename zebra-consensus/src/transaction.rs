@@ -153,7 +153,7 @@ where
         };
         if is_mempool {
             // XXX determine exactly which rules apply to mempool transactions
-            unimplemented!();
+            unimplemented!("Zebra does not yet have a mempool (#2309)");
         }
 
         let script_verifier = self.script_verifier.clone();
