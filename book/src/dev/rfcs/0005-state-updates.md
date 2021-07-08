@@ -707,8 +707,7 @@ fields in the `Commit*Block` requests.
 
 Due to the coinbase maturity rules, the Sprout root is the empty root
 for the first 100 blocks. (These rules are already implemented in contextual
-validation and the anchor calculations.) Therefore, `zcashd`'s genesis bug is
-irrelevant for the mainnet and testnet chains.
+validation and the anchor calculations.)
 
 Hypothetically, if Sapling were activated from genesis, the specification requires
 a Sapling anchor, but `zcashd` would ignore that anchor.
@@ -900,19 +899,23 @@ Implemented by querying:
 - (finalized) the `height_by_hash` tree (to get the block height) and then
     the `block_by_height` tree (to get the block data), if the block is not in any non-finalized chain
 
-### `Request::AwaitUtxo(OutPoint)`
+### `Request::AwaitSpendableUtxo { outpoint: OutPoint, spend_height: Height, spend_restriction: SpendRestriction }`
 
 Returns
 
-- `Response::Utxo(transparent::Output)`
+- `Response::SpendableUtxo(transparent::Output)`
 
 Implemented by querying:
+- (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`,
+  return the `Utxo` for `OutPoint`;
+- (finalized) else if `OutPoint` is in `utxos_by_outpoint`,
+  return the `Utxo` for `OutPoint`;
+- else wait for `OutPoint` to be created as described in [RFC0004];
 
-- (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`
-  get the `transparent::Output` from `OutPoint`'s transaction
-- (finalized) else if `OutPoint` is in `utxos_by_outpoint` return the
-  associated `transparent::Output`.
-- else wait for `OutPoint` to be created as described in [RFC0004]
+Then validating:
+- check the transparent coinbase spend restrictions specified in [RFC0004];
+- if the restrictions are satisfied, return the response;
+- if the spend is invalid, drop the request (and the caller will time out).
 
 [RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 
