@@ -749,53 +749,6 @@ fn zip244_sighash() -> Result<()> {
     Ok(())
 }
 
-/// Use librustzcash to compute sighashes and compare with zebra sighashes.
-#[test]
-fn librustzcash_sighash() {
-    zebra_test::init();
-
-    librustzcash_sighash_for_network(Network::Mainnet);
-    librustzcash_sighash_for_network(Network::Testnet);
-}
-
-fn librustzcash_sighash_for_network(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
-
-    for (height, original_bytes) in block_iter {
-        let original_block = original_bytes
-            .zcash_deserialize_into::<Block>()
-            .expect("block is structurally valid");
-
-        // skip blocks that are before overwinter as they will not have a valid consensus branch id
-        if *height
-            < NetworkUpgrade::Overwinter
-                .activation_height(network)
-                .expect("a valid height")
-                .0
-        {
-            continue;
-        }
-
-        let network_upgrade = NetworkUpgrade::current(network, Height(*height));
-
-        for original_tx in original_block.transactions.iter() {
-            let original_sighash = original_tx.sighash(network_upgrade, HashType::ALL, None);
-
-            let alt_sighash = crate::primitives::zcash_primitives::sighash(
-                original_tx,
-                HashType::ALL,
-                network_upgrade,
-                None,
-            );
-
-            assert_eq!(original_sighash, alt_sighash);
-        }
-    }
-}
-
 #[test]
 fn binding_signatures() {
     zebra_test::init();
