@@ -1,10 +1,12 @@
 //! The primary implementation of the `zebra_state::Service` built upon rocksdb
 
+mod check;
 mod disk_format;
 
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
 use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::transparent;
@@ -39,6 +41,7 @@ pub struct FinalizedState {
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
         let (path, db_options) = config.db_config(network);
+
         let column_families = vec![
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
@@ -49,6 +52,7 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
         ];
+
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
         let db = match db_result {
@@ -227,6 +231,44 @@ impl FinalizedState {
             );
         }
 
+        let spent_transparent_outpoints;
+        let revealed_sprout_nullifiers;
+        let revealed_sapling_nullifiers;
+        let revealed_orchard_nullifiers;
+
+        // Consensus rule: transactions in the genesis block are ignored.
+        if block.header.previous_block_hash != GENESIS_PREVIOUS_BLOCK_HASH {
+            // Reject double-spends of transparent outputs and nullifers, where:
+            // - both are within this block, and
+            // - one is in this block, and the other was already committed to the finalized state.
+
+            spent_transparent_outpoints =
+                check::transparent_double_spends(&self.db, utxo_by_outpoint, &block, &new_outputs)?;
+
+            revealed_sprout_nullifiers = check::nullifier_double_spends(
+                &self.db,
+                sprout_nullifiers,
+                block.sprout_nullifiers().cloned().collect(),
+            )?;
+
+            revealed_sapling_nullifiers = check::nullifier_double_spends(
+                &self.db,
+                sapling_nullifiers,
+                block.sapling_nullifiers().cloned().collect(),
+            )?;
+
+            revealed_orchard_nullifiers = check::nullifier_double_spends(
+                &self.db,
+                orchard_nullifiers,
+                block.orchard_nullifiers().cloned().collect(),
+            )?;
+        } else {
+            spent_transparent_outpoints = HashSet::new();
+            revealed_sprout_nullifiers = HashSet::new();
+            revealed_sapling_nullifiers = HashSet::new();
+            revealed_orchard_nullifiers = HashSet::new();
+        }
+
         // We use a closure so we can use an early return for control flow in
         // the genesis case
         let prepare_commit = || -> rocksdb::WriteBatch {
@@ -246,17 +288,37 @@ impl FinalizedState {
             }
 
             // Index all new transparent outputs
+            //
+            // Spends of outputs created by this block will be added here,
+            // then deleted in the next statement.
             for (outpoint, ordered_utxo) in new_outputs.into_iter() {
                 batch.zs_insert(utxo_by_outpoint, outpoint, ordered_utxo.utxo);
             }
 
+            // Mark all transparent inputs as spent
+            //
+            // Deletes of missing keys and multiple deletes of the same key are ignored,
+            // so we must check for double-spends separately above.
+            for spent_outpoint in spent_transparent_outpoints {
+                batch.delete_cf(utxo_by_outpoint, spent_outpoint.as_bytes());
+            }
+
+            // Mark sprout, sapling and orchard nullifiers as spent
+            //
+            // Multiple inserts of the same key are ignored,
+            // so we must check for double-spends separately above.
+            for sprout_nullifier in revealed_sprout_nullifiers {
+                batch.zs_insert(sprout_nullifiers, sprout_nullifier, ());
+            }
+            for sapling_nullifier in revealed_sapling_nullifiers {
+                batch.zs_insert(sapling_nullifiers, sapling_nullifier, ());
+            }
+            for orchard_nullifier in revealed_orchard_nullifiers {
+                batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
+            }
+
             // Index each transaction, spent inputs, nullifiers
-            // TODO: move computation into FinalizedBlock as with transparent outputs
-            for (transaction_index, (transaction, transaction_hash)) in block
-                .transactions
-                .iter()
-                .zip(transaction_hashes.into_iter())
-                .enumerate()
+            for (transaction_index, transaction_hash) in transaction_hashes.into_iter().enumerate()
             {
                 let transaction_location = TransactionLocation {
                     height,
@@ -265,29 +327,6 @@ impl FinalizedState {
                         .expect("no more than 4 billion transactions per block"),
                 };
                 batch.zs_insert(tx_by_hash, transaction_hash, transaction_location);
-
-                // Mark all transparent inputs as spent
-                for input in transaction.inputs() {
-                    match input {
-                        transparent::Input::PrevOut { outpoint, .. } => {
-                            batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
-                        }
-                        // Coinbase inputs represent new coins,
-                        // so there are no UTXOs to mark as spent.
-                        transparent::Input::Coinbase { .. } => {}
-                    }
-                }
-
-                // Mark sprout, sapling and orchard nullifiers as spent
-                for sprout_nullifier in transaction.sprout_nullifiers() {
-                    batch.zs_insert(sprout_nullifiers, sprout_nullifier, ());
-                }
-                for sapling_nullifier in transaction.sapling_nullifiers() {
-                    batch.zs_insert(sapling_nullifiers, sapling_nullifier, ());
-                }
-                for orchard_nullifier in transaction.orchard_nullifiers() {
-                    batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
-                }
             }
 
             batch

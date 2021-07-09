@@ -4629,6 +4629,7 @@ dependencies = [
  "displaydoc",
  "futures 0.3.15",
  "hex",
+ "itertools 0.10.1",
  "lazy_static",
  "metrics",
  "once_cell",
