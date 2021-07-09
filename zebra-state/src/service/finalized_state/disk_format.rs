@@ -237,7 +237,8 @@ impl IntoDisk for transparent::OutPoint {
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
 /// defined format
 pub trait DiskSerialize {
-    /// Serialize and insert the given key and value into a rocksdb column family.
+    /// Serialize and insert the given key and value into a rocksdb column family,
+    /// overwriting any existing `value` for `key`.
     fn zs_insert<K, V>(&mut self, cf: &rocksdb::ColumnFamily, key: K, value: V)
     where
         K: IntoDisk + Debug,
