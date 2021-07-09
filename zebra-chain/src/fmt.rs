@@ -7,7 +7,7 @@ use proptest::prelude::*;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-/// Wrapper to override `Debug`, redirecting it to the type's name.
+/// Wrapper to override `Debug`, redirecting it to only output the type's name.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct TypeNameToDebug<T>(pub T);
