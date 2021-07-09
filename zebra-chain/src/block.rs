@@ -120,7 +120,7 @@ impl Block {
         Ok(())
     }
 
-    /// Access the sprout::Nullifiers from all transactions in this block.
+    /// Access the [`sprout::Nullifier`]s from all transactions in this block.
     pub fn sprout_nullifiers(&self) -> impl Iterator<Item = &sprout::Nullifier> {
         self.transactions
             .iter()
@@ -128,7 +128,7 @@ impl Block {
             .flatten()
     }
 
-    /// Access the sapling::Nullifiers from all transactions in this block.
+    /// Access the [`sapling::Nullifier`]s from all transactions in this block.
     pub fn sapling_nullifiers(&self) -> impl Iterator<Item = &sapling::Nullifier> {
         self.transactions
             .iter()
@@ -136,7 +136,7 @@ impl Block {
             .flatten()
     }
 
-    /// Access the orchard::Nullifiers from all transactions in this block.
+    /// Access the [`orchard::Nullifier`]s from all transactions in this block.
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
         self.transactions
             .iter()
