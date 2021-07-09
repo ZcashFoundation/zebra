@@ -508,27 +508,11 @@ where
 
             let bvk = sapling_shielded_data.binding_verification_key();
 
-            // TODO: enable async verification and remove this block - #1939
-            {
-                let item: zebra_chain::primitives::redjubjub::batch::Item =
-                    (bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into();
-                item.verify_single().unwrap_or_else(|binding_sig_error| {
-                    let binding_sig_error = binding_sig_error.to_string();
-                    tracing::warn!(%binding_sig_error, "ignoring");
-                    metrics::counter!("zebra.error.sapling.binding",
-                                                  1,
-                                                  "kind" => binding_sig_error);
-                });
-                // Ignore errors until binding signatures are fixed
-                //.map_err(|e| BoxError::from(Box::new(e)))?;
-            }
-
-            // TODO: stop ignoring binding signature errors - #1939
-            // async_checks.push(
-            //     primitives::redjubjub::VERIFIER
-            //         .clone()
-            //         .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
-            // );
+            async_checks.push(
+                primitives::redjubjub::VERIFIER
+                    .clone()
+                    .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
+            );
         }
 
         Ok(async_checks)
