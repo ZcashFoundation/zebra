@@ -360,12 +360,42 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
-                let span = debug_span!("revert_chain_state_with", ?nullifiers);
+            for nullifier in joinsplit_data.nullifiers() {
+                let span = debug_span!("update_chain_state_with", ?nullifier);
                 let _entered = span.enter();
-                trace!("Adding sprout nullifiers.");
-                self.sprout_nullifiers.insert(nullifiers[0]);
-                self.sprout_nullifiers.insert(nullifiers[1]);
+                trace!("adding sprout nullifier");
+
+                // Reject double-spends of nullifers:
+                // - both within the same JoinSplit,
+                // - from different JoinSplits in this transaction's JoinSplitData, or
+                // - one from this joinsplit, and another from:
+                //   - a previous transaction in this Block, or
+                //   - a previous block in this non-finalized Chain.
+                //
+                // (Duplicate finalized nullifiers are rejected during contextual validation.)
+                //
+                // TODO:
+                // - test that the chain's nullifiers are not modified on error
+                //
+                // "A nullifier MUST NOT repeat either within a transaction,
+                // or across transactions in a valid blockchain.
+                // Sprout and Sapling and Orchard nullifiers are considered disjoint,
+                // even if they have the same bit pattern."
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#nullifierset
+                //
+                // "A transaction is not valid if it would have added a nullifier
+                // to the nullifier set that already exists in the set"
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
+
+                // Reject the nullifier if it is already present in this non-finalized chain.
+                if !self.sprout_nullifiers.insert(*nullifier) {
+                    Err(ValidateContextError::DuplicateSproutNullifier {
+                        in_finalized_state: false,
+                        nullifier: *nullifier,
+                    })?;
+                }
             }
         }
         Ok(())
@@ -377,17 +407,28 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
-                let span = debug_span!("revert_chain_state_with", ?nullifiers);
+            for nullifier in joinsplit_data.nullifiers() {
+                let span = debug_span!("revert_chain_state_with", ?nullifier);
                 let _entered = span.enter();
-                trace!("Removing sprout nullifiers.");
+                trace!("removing sprout nullifier");
+
+                // "A note can change from being unspent to spent as a node’s view
+                // of the best valid block chain is extended by new transactions.
+                //
+                // Also, block chain reorganizations can cause a node to switch
+                // to a different best valid block chain that does not contain
+                // the transaction in which a note was output"
+                //
+                // https://zips.z.cash/protocol/nu5.pdf#decryptivk
+                //
+                // Note: reorganizations can also change the best chain to one
+                // where a note was unspent, rather than spent.
+
+                // Blocks with duplicate nullifiers are rejected by `update_chain_state_with`,
+                // so we know that this JoinSplit is the sole owner of this nullifier.
                 assert!(
-                    self.sprout_nullifiers.remove(&nullifiers[0]),
-                    "nullifiers must be present if block was"
-                );
-                assert!(
-                    self.sprout_nullifiers.remove(&nullifiers[1]),
-                    "nullifiers must be present if block was"
+                    self.sprout_nullifiers.remove(nullifier),
+                    "nullifier must be present if block was"
                 );
             }
         }

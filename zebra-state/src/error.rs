@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, work::difficulty::CompactDifficulty};
+use zebra_chain::{block, sprout, work::difficulty::CompactDifficulty};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -73,5 +73,12 @@ pub enum ValidateContextError {
     InvalidDifficultyThreshold {
         difficulty_threshold: CompactDifficulty,
         expected_difficulty: CompactDifficulty,
+    },
+
+    #[error("sprout double-spend detected, in finalized state: {in_finalized_state:?}, duplicate nullifier: {nullifier:?}")]
+    #[non_exhaustive]
+    DuplicateSproutNullifier {
+        in_finalized_state: bool,
+        nullifier: sprout::Nullifier,
     },
 }
