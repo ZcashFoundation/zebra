@@ -174,6 +174,13 @@ impl StateService {
     /// Run contextual validation on the prepared block and add it to the
     /// non-finalized state if it is contextually valid.
     fn validate_and_commit(&mut self, prepared: PreparedBlock) -> Result<(), CommitBlockError> {
+        let mandatory_checkpoint = self.network.mandatory_checkpoint_height();
+        if prepared.height <= mandatory_checkpoint {
+            panic!(
+                "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
+            );
+        }
+
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
 
