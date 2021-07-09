@@ -1727,6 +1727,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "incrementalmerkletree"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16d75fb342984cc8cea665a9ef5607b4956569839ca098172082fa1b19bdaf02"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4506,6 +4515,7 @@ dependencies = [
  "group",
  "halo2",
  "hex",
+ "incrementalmerkletree",
  "itertools 0.10.1",
  "jubjub",
  "lazy_static",

@@ -241,10 +241,36 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
     }
 }
 
+#[derive(Clone)]
+struct Node {
+    inner: [u8; 32],
+}
+
+impl incrementalmerkletree::Hashable for Node {
+    fn empty_leaf() -> Self {
+        Self {
+            inner: jubjub::Fq::one().to_bytes(),
+        }
+    }
+
+    fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+        Self {
+            inner: merkle_crh_sapling(level.into(), a.inner, b.inner),
+        }
+    }
+
+    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+        Self {
+            inner: EMPTY_ROOTS[usize::from(level)],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use hex::FromHex;
+    use incrementalmerkletree::Frontier;
 
     use super::*;
 
@@ -344,6 +370,9 @@ mod tests {
 
         let mut incremental_tree = NoteCommitmentTree::default();
 
+        let mut alt_tree =
+            incrementalmerkletree::bridgetree::Frontier::<Node, { MERKLE_DEPTH as u8 }>::new();
+
         for (i, cm_u) in commitments.iter().enumerate() {
             let bytes = <[u8; 32]>::from_hex(cm_u).unwrap();
 
@@ -353,7 +382,10 @@ mod tests {
 
             let _ = incremental_tree.append(cm_u);
 
+            alt_tree.append(&Node { inner: cm_u.into() });
+
             assert_eq!(hex::encode(incremental_tree.hash()), roots[i]);
+            assert_eq!(hex::encode(alt_tree.root().inner), roots[i]);
 
             assert_eq!(
                 hex::encode((NoteCommitmentTree::from(leaves.clone())).hash()),
