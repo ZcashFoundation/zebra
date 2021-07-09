@@ -36,4 +36,4 @@ pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;
-pub use utxo::Utxo;
+pub use utxo::{new_outputs, Utxo};

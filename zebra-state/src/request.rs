@@ -117,27 +117,7 @@ impl From<Arc<Block>> for FinalizedBlock {
             .iter()
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
-
-        let mut new_outputs = HashMap::default();
-
-        for (transaction, hash) in block
-            .transactions
-            .iter()
-            .zip(transaction_hashes.iter().cloned())
-        {
-            let from_coinbase = transaction.is_coinbase();
-            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-                let index = index as u32;
-                new_outputs.insert(
-                    transparent::OutPoint { hash, index },
-                    Utxo {
-                        output,
-                        height,
-                        from_coinbase,
-                    },
-                );
-            }
-        }
+        let new_outputs = crate::utxo::new_outputs(&block, transaction_hashes.as_slice());
 
         Self {
             block,
