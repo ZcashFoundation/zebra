@@ -5,9 +5,11 @@ mod address;
 mod keys;
 mod script;
 mod serialize;
+mod utxo;
 
 pub use address::Address;
 pub use script::Script;
+pub use utxo::{new_outputs, Utxo};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;

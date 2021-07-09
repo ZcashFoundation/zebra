@@ -17,7 +17,6 @@ use zebra_chain::{
     },
     transparent::{self, CoinbaseData},
 };
-use zebra_state::Utxo;
 
 use super::{check, Request, Verifier};
 
@@ -839,7 +838,7 @@ fn mock_transparent_transfer(
 ) -> (
     transparent::Input,
     transparent::Output,
-    HashMap<transparent::OutPoint, Utxo>,
+    HashMap<transparent::OutPoint, transparent::Utxo>,
 ) {
     // A script with a single opcode that accepts the transaction (pushes true on the stack)
     let accepting_script = transparent::Script::new(&[1, 1]);
@@ -863,7 +862,7 @@ fn mock_transparent_transfer(
         lock_script,
     };
 
-    let previous_utxo = Utxo {
+    let previous_utxo = transparent::Utxo {
         output: previous_output,
         height: previous_utxo_height,
         from_coinbase: false,
