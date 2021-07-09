@@ -120,6 +120,8 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
+    //
+    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L121
     pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), ()> {
         if self.is_complete() {
             // Tree is full
@@ -158,6 +160,8 @@ impl NoteCommitmentTree {
 
     /// Returns the current root of the tree, used as an anchor in Sapling
     /// shielded transactions.
+    //
+    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L160
     pub fn root(&self) -> Root {
         // Hash left and right together, filling in empty leaves as needed.
         let leaf_root = merkle_crh_sapling(
@@ -194,13 +198,15 @@ impl NoteCommitmentTree {
     /// Count of note commitments added to the tree.
     ///
     /// For Sapling, the tree is capped at 2^32.
+    //
+    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L91
     pub fn count(&self) -> u32 {
         self.parents.iter().enumerate().fold(
             match (self.left, self.right) {
                 (None, None) => 0,
                 (Some(_), None) => 1,
                 (Some(_), Some(_)) => 2,
-                (None, Some(_)) => unreachable!(),
+                (None, Some(_)) => unreachable!("roots are always added left to right"),
             },
             |acc, (i, p)| {
                 // Treat occupation of parents array as a binary number
