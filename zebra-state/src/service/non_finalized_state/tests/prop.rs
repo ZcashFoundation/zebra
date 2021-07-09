@@ -20,10 +20,10 @@ fn forked_equals_pushed() -> Result<()> {
             let mut partial_chain = Chain::default();
 
             for block in chain.iter().take(count) {
-                partial_chain.push(block.clone())?;
+                partial_chain = partial_chain.push(block.clone())?;
             }
             for block in chain.iter() {
-                full_chain.push(block.clone())?;
+                full_chain = full_chain.push(block.clone())?;
             }
 
             let forked = full_chain.fork(fork_tip_hash).expect("fork works").expect("hash is present");
@@ -48,10 +48,10 @@ fn finalized_equals_pushed() -> Result<()> {
         let mut partial_chain = Chain::default();
 
         for block in chain.iter().skip(finalized_count) {
-            partial_chain.push(block.clone())?;
+            partial_chain = partial_chain.push(block.clone())?;
         }
         for block in chain.iter() {
-            full_chain.push(block.clone())?;
+            full_chain = full_chain.push(block.clone())?;
         }
 
         for _ in 0..finalized_count {

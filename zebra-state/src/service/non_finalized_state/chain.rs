@@ -30,14 +30,16 @@ pub struct Chain {
 }
 
 impl Chain {
-    /// Push a contextually valid non-finalized block into a chain as the new tip.
+    /// Push a contextually valid non-finalized block into this chain as the new tip.
+    ///
+    /// If the block is invalid, drop this chain and return an error.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(&mut self, block: PreparedBlock) -> Result<(), ValidateContextError> {
+    pub fn push(mut self, block: PreparedBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
         self.update_chain_state_with(&block)?;
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
-        Ok(())
+        Ok(self)
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.

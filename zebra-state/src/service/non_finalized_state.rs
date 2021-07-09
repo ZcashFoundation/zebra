@@ -78,19 +78,22 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let mandatory_checkpoint = self.network.mandatory_checkpoint_height();
-        if height <= mandatory_checkpoint {
-            panic!(
-                "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
-            );
+        let parent_chain = self.parent_chain(parent_hash)?;
+
+        match parent_chain.clone().push(prepared) {
+            Ok(child_chain) => {
+                // if the block is valid, keep the child chain, and drop the parent chain
+                self.chain_set.insert(Box::new(child_chain));
+                self.update_metrics_for_committed_block(height, hash);
+                Ok(())
+            }
+            Err(err) => {
+                // if the block is invalid, restore the unmodified parent chain
+                // (the child chain might have been modified before the error)
+                self.chain_set.insert(parent_chain);
+                Err(err)
+            }
         }
-
-        let mut parent_chain = self.parent_chain(parent_hash)?;
-
-        parent_chain.push(prepared)?;
-        self.chain_set.insert(parent_chain);
-        self.update_metrics_for_committed_block(height, hash);
-        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
@@ -99,9 +102,11 @@ impl NonFinalizedState {
         &mut self,
         prepared: PreparedBlock,
     ) -> Result<(), ValidateContextError> {
-        let mut chain = Chain::default();
+        let chain = Chain::default();
         let (height, hash) = (prepared.height, prepared.hash);
-        chain.push(prepared)?;
+
+        // if the block is invalid, drop the newly created chain fork
+        let chain = chain.push(prepared)?;
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
