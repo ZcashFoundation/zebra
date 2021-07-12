@@ -238,7 +238,7 @@ impl UpdateWith<PreparedBlock> for Chain {
         // remove the blocks hash from `height_by_hash`
         assert!(
             self.height_by_hash.remove(&hash).is_some(),
-            "hash must be present if block was"
+            "hash must be present if block was added to chain"
         );
 
         // remove work from partial_cumulative_work
@@ -286,7 +286,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             // remove `transaction.hash` from `tx_by_hash`
             assert!(
                 self.tx_by_hash.remove(transaction_hash).is_some(),
-                "transactions must be present if block was"
+                "transactions must be present if block was added to chain"
             );
 
             // remove the utxos this produced
@@ -344,7 +344,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     assert!(
                         self.spent_utxos.remove(outpoint),
-                        "spent_utxos must be present if block was"
+                        "spent_utxos must be present if block was added to chain"
                     );
                 }
                 transparent::Input::Coinbase { .. } => {}
@@ -459,7 +459,7 @@ where
             for nullifier in sapling_shielded_data.nullifiers() {
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was"
+                    "nullifier must be present if block was added to chain"
                 );
             }
         }
@@ -484,7 +484,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
             for nullifier in orchard_shielded_data.nullifiers() {
                 assert!(
                     self.orchard_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was"
+                    "nullifier must be present if block was added to chain"
                 );
             }
         }
