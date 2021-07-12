@@ -611,11 +611,11 @@ We use the following rocksdb column families:
 | `sapling_nullifiers`  | `sapling::Nullifier`  | `()`                                 | Never   |
 | `orchard_nullifiers`  | `orchard::Nullifier`  | `()`                                 | Never   |
 | `sprout_anchors`      | `sprout::tree::Root`  | `()`                                 | Never   |
-| `sprout_incremental`  | `BE32(height)`        | `sprout::tree::NoteCommitmentTree`   | Delete  |
+| `sprout_incremental`  | `BE32(height)` *?*    | `sprout::tree::NoteCommitmentTree`   | Delete  |
 | `sapling_anchors`     | `sapling::tree::Root` | `()`                                 | Never   |
-| `sapling_incremental` | `BE32(height)`        | `sapling::tree::NoteCommitmentTree`  | Delete  |
+| `sapling_incremental` | `BE32(height)` *?*    | `sapling::tree::NoteCommitmentTree`  | Delete  |
 | `orchard_anchors`     | `orchard::tree::Root` | `()`                                 | Never   |
-| `orchard_incremental` | `BE32(height)`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
+| `orchard_incremental` | `BE32(height)` *?*    | `orchard::tree::NoteCommitmentTree`  | Delete  |
 | `history_incremental` | `BE32(height)`        | `zcash_history::NodeData`            | Delete  |
 | `value_pools`         | `BE32(height)`        | `ValueBalance<NonNegative>`          | Update  |
 | `tip_chain_value_pool`| `BE32(height)`        | `ValueBalance<NonNegative>`          | Update  |
@@ -684,6 +684,7 @@ So they should not be used for consensus-critical checks.
   New incremental tree nodes can be added each time the finalized tip changes,
   and unused nodes can be deleted.
   We only keep the nodes needed for the incremental tree for the finalized tip.
+  TODO: update this description based on the incremental merkle tree code
 
 - The history tree indexes its peaks using blocks since the last network upgrade.
   But we map those peak indexes to heights, to make testing and debugging easier.
