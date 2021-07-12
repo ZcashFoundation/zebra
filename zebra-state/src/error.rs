@@ -75,7 +75,7 @@ pub enum ValidateContextError {
         expected_difficulty: CompactDifficulty,
     },
 
-    #[error("sprout double-spend detected, in finalized state: {in_finalized_state:?}, duplicate nullifier: {nullifier:?}")]
+    #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
     DuplicateSproutNullifier {
         in_finalized_state: bool,
