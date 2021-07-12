@@ -616,7 +616,7 @@ We use the following rocksdb column families:
 | `sapling_incremental` | `BE32(height)` *?*    | `sapling::tree::NoteCommitmentTree`  | Delete  |
 | `orchard_anchors`     | `orchard::tree::Root` | `()`                                 | Never   |
 | `orchard_incremental` | `BE32(height)` *?*    | `orchard::tree::NoteCommitmentTree`  | Delete  |
-| `history_incremental` | `BE32(height)`        | `zcash_history::NodeData`            | Delete  |
+| `history_incremental` | `BE32(height)`        | `zcash_history::Entry`         | Delete  |
 | `value_pools`         | `BE32(height)`        | `ValueBalance<NonNegative>`          | Update  |
 | `tip_chain_value_pool`| `BE32(height)`        | `ValueBalance<NonNegative>`          | Update  |
 
