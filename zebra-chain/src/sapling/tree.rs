@@ -15,9 +15,11 @@
 
 use std::fmt;
 
-use super::commitment::pedersen_hashes::pedersen_hash;
 use bitvec::prelude::*;
+use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
+
+use super::commitment::pedersen_hashes::pedersen_hash;
 
 const MERKLE_DEPTH: usize = 32;
 
@@ -104,12 +106,40 @@ impl From<&Root> for [u8; 32] {
     }
 }
 
-/// Sapling Incremental Note Commitment Tree
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+// A node of the Sapling Incremental Note Commitment Tree.
+#[derive(Clone, Debug)]
+struct Node([u8; 32]);
+
+impl incrementalmerkletree::Hashable for Node {
+    fn empty_leaf() -> Self {
+        Self(jubjub::Fq::one().to_bytes())
+    }
+
+    fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+        Self(merkle_crh_sapling(level.into(), a.0, b.0))
+    }
+
+    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+        Self(EMPTY_ROOTS[usize::from(level)])
+    }
+}
+
+impl From<jubjub::Fq> for Node {
+    fn from(x: jubjub::Fq) -> Self {
+        Node(x.into())
+    }
+}
+
+/// Sapling Incremental Note Commitment Tree.
+#[derive(Clone, Debug)]
 struct NoteCommitmentTree {
-    left: Option<[u8; 32]>,
-    right: Option<[u8; 32]>,
-    parents: Vec<Option<[u8; 32]>>,
+    /// The tree represented as a Frontier.
+    ///
+    /// A Frontier is a subset of the tree that allows to fully specify it.
+    /// It consists of nodes along the rightmost (newer) branch of the tree that
+    /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
+    /// stored.
+    inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
 }
 
 impl NoteCommitmentTree {
@@ -120,73 +150,18 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
-    //
-    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L121
     pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), ()> {
-        if self.is_complete() {
-            // Tree is full
-            return Err(());
+        if self.inner.append(&cm_u.into()) {
+            Ok(())
+        } else {
+            Err(())
         }
-
-        let cm_bytes = cm_u.into();
-
-        match (self.left, self.right) {
-            (None, _) => self.left = Some(cm_bytes),
-            (_, None) => self.right = Some(cm_bytes),
-            (Some(l), Some(r)) => {
-                let mut combined = merkle_crh_sapling(0, l, r);
-                self.left = Some(cm_bytes);
-                self.right = None;
-
-                for i in 0..MERKLE_DEPTH {
-                    if i < self.parents.len() {
-                        if let Some(p) = self.parents[i] {
-                            combined = merkle_crh_sapling((i + 1) as u8, p, combined);
-                            self.parents[i] = None;
-                        } else {
-                            self.parents[i] = Some(combined);
-                            break;
-                        }
-                    } else {
-                        self.parents.push(Some(combined));
-                        break;
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Returns the current root of the tree, used as an anchor in Sapling
     /// shielded transactions.
-    //
-    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L160
     pub fn root(&self) -> Root {
-        // Hash left and right together, filling in empty leaves as needed.
-        let leaf_root = merkle_crh_sapling(
-            0,
-            self.left.unwrap_or_else(|| EMPTY_ROOTS[0]),
-            self.right.unwrap_or_else(|| EMPTY_ROOTS[0]),
-        );
-
-        // Hash in parents up to the currently-filled depth, roots of the empty
-        // subtrees are used as needed.
-        let mid_root = self
-            .parents
-            .iter()
-            .enumerate()
-            .fold(leaf_root, |root, (i, p)| match p {
-                Some(node) => merkle_crh_sapling((i + 1) as u8, *node, root),
-                None => merkle_crh_sapling((i + 1) as u8, root, EMPTY_ROOTS[i + 1]),
-            });
-
-        // Hash in roots of the empty subtrees up to the final depth.
-        ((self.parents.len() + 1)..MERKLE_DEPTH)
-            .fold(mid_root, |root, d| {
-                merkle_crh_sapling(d as u8, root, EMPTY_ROOTS[d])
-            })
-            .into()
+        Root(self.inner.root().0)
     }
 
     /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
@@ -198,29 +173,26 @@ impl NoteCommitmentTree {
     /// Count of note commitments added to the tree.
     ///
     /// For Sapling, the tree is capped at 2^32.
-    //
-    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L91
     pub fn count(&self) -> u32 {
-        self.parents.iter().enumerate().fold(
-            match (self.left, self.right) {
-                (None, None) => 0,
-                (Some(_), None) => 1,
-                (Some(_), Some(_)) => 2,
-                (None, Some(_)) => unreachable!("roots are always added left to right"),
-            },
-            |acc, (i, p)| {
-                // Treat occupation of parents array as a binary number
-                // (right-shifted by 1)
-                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
-            },
-        )
+        self.inner
+            .position()
+            .map_or(0, |pos| usize::from(pos) as u32 + 1)
     }
+}
 
-    fn is_complete(&self) -> bool {
-        self.left.is_some()
-            && self.right.is_some()
-            && self.parents.len() == MERKLE_DEPTH - 1
-            && self.parents.iter().all(|p| p.is_some())
+impl Default for NoteCommitmentTree {
+    fn default() -> Self {
+        Self {
+            inner: bridgetree::Frontier::new(),
+        }
+    }
+}
+
+impl Eq for NoteCommitmentTree {}
+
+impl PartialEq for NoteCommitmentTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash() == other.hash()
     }
 }
 
@@ -241,36 +213,10 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
     }
 }
 
-#[derive(Clone)]
-struct Node {
-    inner: [u8; 32],
-}
-
-impl incrementalmerkletree::Hashable for Node {
-    fn empty_leaf() -> Self {
-        Self {
-            inner: jubjub::Fq::one().to_bytes(),
-        }
-    }
-
-    fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
-        Self {
-            inner: merkle_crh_sapling(level.into(), a.inner, b.inner),
-        }
-    }
-
-    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
-        Self {
-            inner: EMPTY_ROOTS[usize::from(level)],
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
     use hex::FromHex;
-    use incrementalmerkletree::Frontier;
 
     use super::*;
 
@@ -370,9 +316,6 @@ mod tests {
 
         let mut incremental_tree = NoteCommitmentTree::default();
 
-        let mut alt_tree =
-            incrementalmerkletree::bridgetree::Frontier::<Node, { MERKLE_DEPTH as u8 }>::new();
-
         for (i, cm_u) in commitments.iter().enumerate() {
             let bytes = <[u8; 32]>::from_hex(cm_u).unwrap();
 
@@ -382,10 +325,7 @@ mod tests {
 
             let _ = incremental_tree.append(cm_u);
 
-            alt_tree.append(&Node { inner: cm_u.into() });
-
             assert_eq!(hex::encode(incremental_tree.hash()), roots[i]);
-            assert_eq!(hex::encode(alt_tree.root().inner), roots[i]);
 
             assert_eq!(
                 hex::encode((NoteCommitmentTree::from(leaves.clone())).hash()),

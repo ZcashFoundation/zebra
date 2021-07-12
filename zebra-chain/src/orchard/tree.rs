@@ -23,6 +23,7 @@ use std::{
 
 use bitvec::prelude::*;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
+use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
 
 use super::sinsemilla::*;
@@ -37,33 +38,28 @@ const MERKLE_DEPTH: usize = 32;
 ///
 /// Used to hash incremental Merkle tree hash values for Orchard.
 ///
-/// MerkleCRH^Orchard: {0..MerkleDepth^Orchard − 1} × P𝑥 ∪ {⊥} × P𝑥 ∪ {⊥} → P𝑥 ∪ {⊥}
+/// MerkleCRH^Orchard: {0..MerkleDepth^Orchard − 1} × P𝑥 × P𝑥 → P𝑥
 ///
-/// MerkleCRH^Orchard(layer, left, right) := SinsemillaHash("z.cash:Orchard-MerkleCRH", l || left || right),
+/// MerkleCRH^Orchard(layer, left, right) := 0 if hash == ⊥; hash otherwise
 ///
-/// where l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer),  and left, right, and
+/// where hash = SinsemillaHash("z.cash:Orchard-MerkleCRH", l || left || right),
+/// l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer),  and left, right, and
 /// the output are the x-coordinates of Pallas affine points.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh
 /// https://zips.z.cash/protocol/protocol.pdf#constants
-fn merkle_crh_orchard(
-    layer: u8,
-    maybe_left: Option<pallas::Base>,
-    maybe_right: Option<pallas::Base>,
-) -> Option<pallas::Base> {
-    match (maybe_left, maybe_right) {
-        (None, _) | (_, None) => None,
-        (Some(left), Some(right)) => {
-            let mut s = bitvec![Lsb0, u8;];
+fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
+    let mut s = bitvec![Lsb0, u8;];
 
-            // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
-            let l = MERKLE_DEPTH - 1 - layer as usize;
-            s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
-            s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_bytes())[0..255]);
-            s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_bytes())[0..255]);
+    // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
+    let l = MERKLE_DEPTH - 1 - layer as usize;
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_bytes())[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_bytes())[0..255]);
 
-            sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s)
-        }
+    match sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s) {
+        Some(h) => h,
+        None => pallas::Base::zero(),
     }
 }
 
@@ -80,7 +76,7 @@ lazy_static! {
         // generate the empty roots up to layer 0, the root.
         for d in 0..MERKLE_DEPTH
         {
-            let next = merkle_crh_orchard((MERKLE_DEPTH - 1  - d) as u8, Some(v[d]), Some(v[d])).unwrap();
+            let next = merkle_crh_orchard((MERKLE_DEPTH - 1  - d) as u8, v[d], v[d]);
             v.push(next);
         }
 
@@ -153,12 +149,40 @@ impl ZcashDeserialize for Root {
     }
 }
 
+// A node of the Orchard Incremental Note Commitment Tree.
+#[derive(Clone, Debug)]
+struct Node(pallas::Base);
+
+impl incrementalmerkletree::Hashable for Node {
+    fn empty_leaf() -> Self {
+        Self(NoteCommitmentTree::uncommitted())
+    }
+
+    fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+        Self(merkle_crh_orchard(level.into(), a.0, b.0))
+    }
+
+    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+        Self(EMPTY_ROOTS[usize::from(level)])
+    }
+}
+
+impl From<pallas::Base> for Node {
+    fn from(x: pallas::Base) -> Self {
+        Node(x)
+    }
+}
+
 /// Orchard Incremental Note Commitment Tree
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 struct NoteCommitmentTree {
-    left: Option<pallas::Base>,
-    right: Option<pallas::Base>,
-    parents: Vec<Option<pallas::Base>>,
+    /// The tree represented as a Frontier.
+    ///
+    /// A Frontier is a subset of the tree that allows to fully specify it.
+    /// It consists of nodes along the rightmost (newer) branch of the tree that
+    /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
+    /// stored.
+    inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
 }
 
 impl NoteCommitmentTree {
@@ -169,86 +193,20 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
-    //
-    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L121
     #[allow(clippy::identity_op)]
     pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), ()> {
-        if self.is_complete() {
-            // Tree is full
-            return Err(());
+        if self.inner.append(&cm_x.into()) {
+            Ok(())
+        } else {
+            Err(())
         }
-
-        match (self.left, self.right) {
-            (None, _) => self.left = Some(cm_x),
-            (_, None) => self.right = Some(cm_x),
-            (Some(l), Some(r)) => {
-                let mut combined =
-                    merkle_crh_orchard((MERKLE_DEPTH - 1 - 0) as u8, Some(l), Some(r));
-                self.left = Some(cm_x);
-                self.right = None;
-
-                for i in 0..MERKLE_DEPTH {
-                    if i < self.parents.len() {
-                        if let Some(p) = self.parents[i] {
-                            combined = merkle_crh_orchard(
-                                (MERKLE_DEPTH - 1 - (i + 1)) as u8,
-                                Some(p),
-                                combined,
-                            );
-                            self.parents[i] = None;
-                        } else {
-                            self.parents[i] = combined;
-                            break;
-                        }
-                    } else {
-                        self.parents.push(combined);
-                        break;
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
-    //
-    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L160
-    #[allow(clippy::identity_op)]
     pub fn root(&self) -> Root {
-        // Hash left and right together, filling in empty leaves as needed.
-        let leaf_root = merkle_crh_orchard(
-            (MERKLE_DEPTH - 1 - 0) as u8,
-            Some(self.left.unwrap_or_else(|| EMPTY_ROOTS[0])),
-            Some(self.right.unwrap_or_else(|| EMPTY_ROOTS[0])),
-        );
-
-        // Hash in parents up to the currently-filled depth, roots of the empty
-        // subtrees are used as needed.
-        let mid_root = self
-            .parents
-            .iter()
-            .enumerate()
-            .fold(leaf_root, |root, (i, p)| match p {
-                Some(node) => {
-                    merkle_crh_orchard((MERKLE_DEPTH - 1 - (i + 1)) as u8, Some(*node), root)
-                }
-                None => merkle_crh_orchard(
-                    (MERKLE_DEPTH - 1 - (i + 1)) as u8,
-                    root,
-                    Some(EMPTY_ROOTS[i + 1]),
-                ),
-            });
-
-        // Hash in roots of the empty subtrees up to the final depth.
-        Root(
-            ((self.parents.len() + 1)..MERKLE_DEPTH)
-                .fold(mid_root, |root, d| {
-                    merkle_crh_orchard((MERKLE_DEPTH - 1 - d) as u8, root, Some(EMPTY_ROOTS[d]))
-                })
-                .unwrap(),
-        )
+        // TODO: explain unwrap
+        Root(self.inner.root().0)
     }
 
     /// Get the Pallas-based Sinsemilla hash / root node of this merkle tree of
@@ -272,26 +230,25 @@ impl NoteCommitmentTree {
     //
     // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L91
     pub fn count(&self) -> u32 {
-        self.parents.iter().enumerate().fold(
-            match (self.left, self.right) {
-                (None, None) => 0,
-                (Some(_), None) => 1,
-                (Some(_), Some(_)) => 2,
-                (None, Some(_)) => unreachable!("roots are always added left to right"),
-            },
-            |acc, (i, p)| {
-                // Treat occupation of parents array as a binary number
-                // (right-shifted by 1)
-                acc + if p.is_some() { 1 << (i + 1) } else { 0 }
-            },
-        )
+        self.inner
+            .position()
+            .map_or(0, |pos| usize::from(pos) as u32 + 1)
     }
+}
 
-    fn is_complete(&self) -> bool {
-        self.left.is_some()
-            && self.right.is_some()
-            && self.parents.len() == MERKLE_DEPTH - 1
-            && self.parents.iter().all(|p| p.is_some())
+impl Default for NoteCommitmentTree {
+    fn default() -> Self {
+        Self {
+            inner: bridgetree::Frontier::new(),
+        }
+    }
+}
+
+impl Eq for NoteCommitmentTree {}
+
+impl PartialEq for NoteCommitmentTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash() == other.hash()
     }
 }
 
