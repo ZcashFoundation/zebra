@@ -78,7 +78,22 @@ pub enum ValidateContextError {
     #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
     DuplicateSproutNullifier {
-        in_finalized_state: bool,
         nullifier: sprout::Nullifier,
+        in_finalized_state: bool,
     },
+}
+
+/// Trait for creating the corresponding duplicate nullifier error from a nullifier.
+pub(crate) trait DuplicateNullifierError {
+    /// Returns the corresponding duplicate nullifier error for `self`.
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError;
+}
+
+impl DuplicateNullifierError for sprout::Nullifier {
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
+        ValidateContextError::DuplicateSproutNullifier {
+            nullifier: *self,
+            in_finalized_state,
+        }
+    }
 }

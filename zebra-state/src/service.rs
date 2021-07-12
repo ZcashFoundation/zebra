@@ -254,30 +254,7 @@ impl StateService {
             relevant_chain,
         )?;
 
-        // Reject double-spends of nullifers:
-        // - one from this block, and the other already committed to the finalized state.
-        //
-        // (Duplicate non-finalized nullifiers are rejected during the chain update.)
-        //
-        // "A nullifier MUST NOT repeat either within a transaction,
-        // or across transactions in a valid blockchain.
-        // Sprout and Sapling and Orchard nullifiers are considered disjoint,
-        // even if they have the same bit pattern."
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#nullifierset
-        //
-        // "A transaction is not valid if it would have added a nullifier
-        // to the nullifier set that already exists in the set"
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
-        for nullifier in prepared.block.sprout_nullifiers() {
-            if self.disk.contains_sprout_nullifier(nullifier) {
-                Err(ValidateContextError::DuplicateSproutNullifier {
-                    in_finalized_state: true,
-                    nullifier: *nullifier,
-                })?;
-            }
-        }
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk)?;
 
         Ok(())
     }
