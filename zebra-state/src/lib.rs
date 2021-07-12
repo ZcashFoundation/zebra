@@ -24,7 +24,6 @@ mod request;
 mod response;
 mod service;
 mod util;
-mod utxo;
 
 // TODO: move these to integration tests.
 #[cfg(test)]
@@ -36,4 +35,3 @@ pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;
-pub use utxo::{new_outputs, Utxo};

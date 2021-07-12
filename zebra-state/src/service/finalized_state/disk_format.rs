@@ -9,8 +9,6 @@ use zebra_chain::{
     sprout, transaction, transparent,
 };
 
-use crate::Utxo;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransactionLocation {
     pub height: block::Height,
@@ -195,7 +193,7 @@ impl FromDisk for block::Height {
     }
 }
 
-impl IntoDisk for Utxo {
+impl IntoDisk for transparent::Utxo {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -209,7 +207,7 @@ impl IntoDisk for Utxo {
     }
 }
 
-impl FromDisk for Utxo {
+impl FromDisk for transparent::Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let (meta_bytes, output_bytes) = bytes.as_ref().split_at(5);
         let height = block::Height(u32::from_be_bytes(meta_bytes[0..4].try_into().unwrap()));
@@ -395,6 +393,6 @@ mod tests {
     fn roundtrip_transparent_output() {
         zebra_test::init();
 
-        proptest!(|(val in any::<Utxo>())| assert_value_properties(val));
+        proptest!(|(val in any::<transparent::Utxo>())| assert_value_properties(val));
     }
 }

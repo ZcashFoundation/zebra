@@ -6,7 +6,7 @@ use std::{
 use tracing::instrument;
 use zebra_chain::{block, transparent};
 
-use crate::{service::QueuedBlock, Utxo};
+use crate::service::QueuedBlock;
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
 #[derive(Default)]
@@ -18,7 +18,7 @@ pub struct QueuedBlocks {
     /// Hashes from `queued_blocks`, indexed by block height.
     by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
     /// Known UTXOs.
-    known_utxos: HashMap<transparent::OutPoint, Utxo>,
+    known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
 }
 
 impl QueuedBlocks {
@@ -150,7 +150,7 @@ impl QueuedBlocks {
     }
 
     /// Try to look up this UTXO in any queued block.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint).cloned()
     }
 }

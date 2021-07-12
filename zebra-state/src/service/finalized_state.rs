@@ -14,7 +14,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 
-use crate::{BoxError, Config, FinalizedBlock, HashOrHeight, Utxo};
+use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 
@@ -363,7 +363,7 @@ impl FinalizedState {
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
         self.db.zs_get(utxo_by_outpoint, outpoint)
     }

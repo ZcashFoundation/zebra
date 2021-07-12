@@ -19,7 +19,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo, ValidateContextError};
+use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
 use self::chain::Chain;
 
@@ -158,7 +158,7 @@ impl NonFinalizedState {
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present in any chain.
-    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         for chain in self.chain_set.iter().rev() {
             if let Some(output) = chain.created_utxos.get(outpoint) {
                 return Some(output.clone());

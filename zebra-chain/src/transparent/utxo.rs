@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use zebra_chain::{
+use crate::{
     block::{self, Block},
     transaction, transparent,
 };

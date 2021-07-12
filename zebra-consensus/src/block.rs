@@ -24,6 +24,7 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -173,7 +174,7 @@ where
 
             let mut async_checks = FuturesUnordered::new();
 
-            let known_utxos = Arc::new(zs::new_outputs(&block, &transaction_hashes));
+            let known_utxos = Arc::new(transparent::new_outputs(&block, &transaction_hashes));
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
                     .ready_and()
