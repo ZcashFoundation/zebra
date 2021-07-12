@@ -600,22 +600,59 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Tree                 |                  Keys |                              Values |
-|----------------------|-----------------------|-------------------------------------|
-| `hash_by_height`     | `BE32(height)`        | `block::Hash`                       |
-| `height_by_hash`     | `block::Hash`         | `BE32(height)`                      |
-| `block_by_height`    | `BE32(height)`        | `Block`                             |
-| `tx_by_hash`         | `transaction::Hash`   | `(BE32(height) \|\| BE32(tx_index))`|
-| `utxo_by_outpoint`   | `OutPoint`            | `TransparentOutput`                 |
-| `sprout_nullifiers`  | `sprout::Nullifier`   | `()`                                |
-| `sapling_nullifiers` | `sapling::Nullifier`  | `()`                                |
-| `orchard_nullifiers` | `orchard::Nullifier`  | `()`                                |
-| `sprout_anchors`     | `sprout::tree::Root`  | `()`                                |
-| `sapling_anchors`    | `sapling::tree::Root` | `()`                                |
+| Column Family         | Keys                  | Values                               | Updates |
+|-----------------------|-----------------------|--------------------------------------|---------|
+| `hash_by_height`      | `BE32(height)`        | `block::Hash`                        | Never   |
+| `height_by_hash`      | `block::Hash`         | `BE32(height)`                       | Never   |
+| `block_by_height`     | `BE32(height)`        | `Block`                              | Never   |
+| `tx_by_hash`          | `transaction::Hash`   | `(BE32(height) \|\| BE32(tx_index))` | Never   |
+| `utxo_by_outpoint`    | `OutPoint`            | `transparent::Output`                | Delete  |
+| `sprout_nullifiers`   | `sprout::Nullifier`   | `()`                                 | Never   |
+| `sapling_nullifiers`  | `sapling::Nullifier`  | `()`                                 | Never   |
+| `orchard_nullifiers`  | `orchard::Nullifier`  | `()`                                 | Never   |
+| `sprout_anchors`      | `sprout::tree::Root`  | `()`                                 | Never   |
+| `sprout_incremental`  | `BE32(height)` *?*    | `sprout::tree::NoteCommitmentTree`   | Delete  |
+| `sapling_anchors`     | `sapling::tree::Root` | `()`                                 | Never   |
+| `sapling_incremental` | `BE32(height)` *?*    | `sapling::tree::NoteCommitmentTree`  | Delete  |
+| `orchard_anchors`     | `orchard::tree::Root` | `()`                                 | Never   |
+| `orchard_incremental` | `BE32(height)` *?*    | `orchard::tree::NoteCommitmentTree`  | Delete  |
+| `history_incremental` | `BE32(height)`        | `zcash_history::Entry`         | Delete  |
+| `tip_chain_value_pool`| `BE32(height)`        | `ValueBalance<NonNegative>`          | Delete  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
+Other structures are encoded using `IntoDisk`/`FromDisk`.
 
 **Note:** We do not store the cumulative work for the finalized chain, because the finalized work is equal for all non-finalized chains. So the additional non-finalized work can be used to calculate the relative chain order, and choose the best chain.
+
+### Implementing consensus rules using rocksdb
+[rocksdb-consensus-rules]: #rocksdb-consensus-rules
+
+Each column family handles updates differently, based on its specific consensus rules:
+- Never: Keys are never deleted, values are never updated. The value for each key is inserted once.
+- Delete: Keys can be deleted, but values are never updated. The value for each key is inserted once.
+  - TODO: should we prevent re-inserts of keys that have been deleted?
+- Update: Keys are never deleted, but values can be updated.
+
+Currently, there are no column families that both delete and update keys.
+
+RocksDB ignores duplicate puts and deletes, preserving the latest values.
+If rejecting duplicate puts or deletes is consensus-critical,
+check [`db.get_cf(cf, key)?`](https://docs.rs/rocksdb/0.16.0/rocksdb/struct.DBWithThreadMode.html#method.get_cf)
+before putting or deleting any values in a batch.
+
+Currently, these restrictions should be enforced by code review:
+- multiple `zs_insert`s are only allowed on Update column families, and
+- [`delete_cf`](https://docs.rs/rocksdb/0.16.0/rocksdb/struct.WriteBatch.html#method.delete_cf)
+  is only allowed on Delete column families.
+
+In future, we could enforce these restrictions by:
+- creating traits for Never, Delete, and Update
+- doing different checks in `zs_insert` depending on the trait
+- wrapping `delete_cf` in a trait, and only implementing that trait for types that use Delete column families.
+
+As of June 2021, the Rust `rocksdb` crate [ignores the delete callback](https://docs.rs/rocksdb/0.16.0/src/rocksdb/merge_operator.rs.html#83-94),
+and merge operators are unreliable (or have undocumented behaviour).
+So they should not be used for consensus-critical checks.
 
 ### Notes on rocksdb column families
 
@@ -640,6 +677,19 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
   height of the transaction's parent block and the transaction's index in that
   block.  This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
+
+- Each incremental tree consists of nodes for a small number of peaks.
+  Peaks are written once, then deleted when they are no longer required.
+  New incremental tree nodes can be added each time the finalized tip changes,
+  and unused nodes can be deleted.
+  We only keep the nodes needed for the incremental tree for the finalized tip.
+  TODO: update this description based on the incremental merkle tree code
+
+- The history tree indexes its peaks using blocks since the last network upgrade.
+  But we map those peak indexes to heights, to make testing and debugging easier.
+
+- The value pools are only stored for the finalized tip.
+  We index it by height to make testing and debugging easier.
 
 ## Committing finalized blocks
 
