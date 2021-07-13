@@ -1,3 +1,4 @@
 mod preallocate;
 mod prop;
-pub mod test_vectors;
+mod test_vectors;
+mod vectors;

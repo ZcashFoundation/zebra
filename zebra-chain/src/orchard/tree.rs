@@ -25,6 +25,7 @@ use bitvec::prelude::*;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
+use thiserror::Error;
 
 use super::sinsemilla::*;
 
@@ -32,7 +33,7 @@ use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
-const MERKLE_DEPTH: usize = 32;
+pub(super) const MERKLE_DEPTH: usize = 32;
 
 /// MerkleCRH^Orchard Hash Function
 ///
@@ -69,7 +70,7 @@ lazy_static! {
     /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#constants
-    static ref EMPTY_ROOTS: Vec<pallas::Base> = {
+    pub(super) static ref EMPTY_ROOTS: Vec<pallas::Base> = {
         // The empty leaf node. This is layer 32.
         let mut v = vec![NoteCommitmentTree::uncommitted()];
 
@@ -176,9 +177,16 @@ impl From<pallas::Base> for Node {
     }
 }
 
+#[allow(dead_code, missing_docs)]
+#[derive(Error, Debug, PartialEq)]
+pub enum NoteCommitmentTreeError {
+    #[error("The note commitment tree is full")]
+    FullTree,
+}
+
 /// Orchard Incremental Note Commitment Tree
 #[derive(Clone, Debug)]
-struct NoteCommitmentTree {
+pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
     /// A Frontier is a subset of the tree that allows to fully specify it.
@@ -196,12 +204,11 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
-    #[allow(clippy::identity_op)]
-    pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), ()> {
+    pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
             Ok(())
         } else {
-            Err(())
+            Err(NoteCommitmentTreeError::FullTree)
         }
     }
 
@@ -266,56 +273,5 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
         }
 
         tree
-    }
-}
-
-// TODO: check empty roots, incremental roots, as part of https://github.com/ZcashFoundation/zebra/issues/1287
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::orchard::tests::test_vectors;
-
-    #[test]
-    fn empty_roots() {
-        zebra_test::init();
-
-        for i in 0..EMPTY_ROOTS.len() {
-            assert_eq!(
-                EMPTY_ROOTS[i].to_bytes(),
-                // The test vector is in reversed order.
-                test_vectors::EMPTY_ROOTS[MERKLE_DEPTH - i]
-            );
-        }
-    }
-
-    #[test]
-    fn incremental_roots() {
-        zebra_test::init();
-
-        let mut leaves = vec![];
-
-        let mut incremental_tree = NoteCommitmentTree::default();
-
-        for (i, commitment_set) in test_vectors::COMMITMENTS.iter().enumerate() {
-            for cm_x in commitment_set.iter() {
-                let cm_u = pallas::Base::from_bytes(&cm_x).unwrap();
-
-                leaves.push(cm_u);
-
-                let _ = incremental_tree.append(cm_u);
-            }
-
-            assert_eq!(
-                hex::encode(incremental_tree.hash()),
-                hex::encode(test_vectors::ROOTS[i].anchor)
-            );
-
-            assert_eq!(
-                hex::encode((NoteCommitmentTree::from(leaves.clone())).hash()),
-                hex::encode(test_vectors::ROOTS[i].anchor)
-            );
-        }
     }
 }
