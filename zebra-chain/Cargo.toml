@@ -62,7 +62,6 @@ redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", rev = "f
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-bincode = "1"
 color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
 itertools = "0.10.1"
