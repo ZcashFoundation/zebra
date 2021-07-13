@@ -246,9 +246,10 @@ impl FinalizedState {
 
             // TODO: sprout and sapling anchors (per block)
 
-            // Consensus-critical bug in zcashd: transactions in the
-            // genesis block are ignored.
-            if block.header.previous_block_hash == block::Hash([0; 32]) {
+            // "A transaction MUST NOT spend an output of the genesis block coinbase transaction.
+            // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
                 return batch;
             }
 
@@ -258,7 +259,6 @@ impl FinalizedState {
             }
 
             // Index each transaction, spent inputs, nullifiers
-            // TODO: move computation into FinalizedBlock as with transparent outputs
             for (transaction_index, (transaction, transaction_hash)) in block
                 .transactions
                 .iter()
