@@ -24,13 +24,11 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
 
-// in a world where specialization existed
-// https://github.com/rust-lang/rust/issues/31844
-// we could do much better here
-// for now, drop the constraint
 impl<C> std::fmt::Debug for Amount<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Amount").field(&self.0).finish()
+        f.debug_tuple(&format!("Amount<{}>", std::any::type_name::<C>()))
+            .field(&self.0)
+            .finish()
     }
 }
 
