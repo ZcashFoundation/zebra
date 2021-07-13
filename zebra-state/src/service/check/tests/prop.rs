@@ -21,7 +21,7 @@ use crate::{
 };
 
 // These tests use the `Arbitrary` trait to easily generate complex types,
-// then modify those types to cause an error.
+// then modify those types to cause an error (or to ensure success).
 //
 // We could use mainnet or testnet blocks in these tests,
 // but the differences shouldn't matter,
@@ -87,13 +87,11 @@ proptest! {
         let duplicate_nullifier = joinsplit.nullifiers[0];
         joinsplit.nullifiers[1] = duplicate_nullifier;
 
-        // make sure there are no other nullifiers
         joinsplit_data.first = joinsplit.0;
         joinsplit_data.rest = Vec::new();
 
         let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0);
 
-        // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
         block1
@@ -147,7 +145,6 @@ proptest! {
 
         let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0);
 
-        // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
         block1
@@ -160,8 +157,6 @@ proptest! {
         let commit_result =
             state.validate_and_commit(block1);
 
-        // if the random proptest data produces other errors,
-        // we might need to just check `is_err()` here
         prop_assert_eq!(
             commit_result,
             Err(
@@ -171,7 +166,6 @@ proptest! {
                 }.into()
             )
         );
-        // block was rejected
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
     }
 
@@ -206,7 +200,6 @@ proptest! {
         let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0);
         let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0);
 
-        // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
         block1
@@ -222,8 +215,6 @@ proptest! {
         let commit_result =
             state.validate_and_commit(block1);
 
-        // if the random proptest data produces other errors,
-        // we might need to just check `is_err()` here
         prop_assert_eq!(
             commit_result,
             Err(
@@ -233,7 +224,6 @@ proptest! {
                 }.into()
             )
         );
-        // block was rejected
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
     }
 
@@ -272,7 +262,6 @@ proptest! {
         let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0);
         let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0);
 
-        // convert the coinbase transactions to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
@@ -286,6 +275,7 @@ proptest! {
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
 
         let block1_hash;
+        // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
             let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
@@ -309,8 +299,6 @@ proptest! {
         let commit_result =
             state.validate_and_commit(block2);
 
-        // if the random proptest data produces other errors,
-        // we might need to just check `is_err()` here
         prop_assert_eq!(
             commit_result,
             Err(
@@ -320,13 +308,12 @@ proptest! {
                 }.into()
             )
         );
-        // block was rejected
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
     }
 }
 
-/// Return a new `StateService` containing the mainnet genesis block,
-/// and the finalized genesis block.
+/// Return a new `StateService` containing the mainnet genesis block.
+/// Also returns the finalized genesis block itself.
 fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
@@ -362,8 +349,9 @@ fn make_distinct_nullifiers<'joinsplit>(
     }
 }
 
-/// Return a `Transaction::V4` with empty or default values,
-/// using `joinsplit_data`.
+/// Return a `Transaction::V4` containing `joinsplit_data`.
+///
+/// Other fields have empty or default values.
 fn transaction_v4_with_joinsplit_data(
     joinsplit_data: impl Into<Option<JoinSplitData<Groth16Proof>>>,
 ) -> Transaction {
