@@ -4,6 +4,49 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - TODO: Update with release date before merging
+
+### Added
+
+- Use the block verifier and non-finalized state in the cached state tests (#2463)
+- Add methods for getting block nullifiers (#2465)
+- Add a TypeNameToDebug formatter to zebra_chain (#2466)
+- Verify orchard spend auth (#2442)
+- Parse MSG_WTX inventory type (part of ZIP-239) (#2446)
+- Add ZIP-244 signature hash support (#2165)
+- Add HistoryTree struct (#2396)
+- Add ZIP-0244 TxId Digest support (#2129)
+- Validate V5 transactions with Sapling shielded data (#2437)
+
+#### Documentation
+
+- Document some consensus-critical finalized state behaviour (#2476)
+- Value pools design (#2430)
+
+### Changed
+
+- Move zebra_state::service::check tests to their own module (#2483)
+- Move Utxo type to zebra-chain (#2481)
+- Combine near-duplicate Utxo creation functions (#2467)
+- Update panics by todo! and unimplemented! macros (#2471)
+- clippy: remove needless borrows (#2457)
+
+#### Documentation
+
+- Update state RFC for incremental trees, value pools, and RocksDB (#2456)
+- Modify UTXO and state designs for transparent coinbase output checks (#2413)
+
+### Fixed
+
+- Restore the previous non-finalized chain if a block is invalid (#2478)
+- Stop ignoring sapling binding signature errors (#2472)
+- Always compute sighash with librustzcash (#2469)
+- Fix missing blake2b_simd::Hash -> SigHash replacement (#2470)
+- Fix bug in sighash for coinbase transactions (#2459)
+- Stop using the wrong name for the coverage action (#2453)
+
+### Security
+
 ## [Zebra 1.0.0-alpha.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.12) - 2021-07-02
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes documentation updates and security fixes. In particular, Zebra no longer gossips unreachable addresses to other nodes and users should update and restart any running Zebra nodes.
