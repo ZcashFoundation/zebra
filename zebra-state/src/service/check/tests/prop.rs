@@ -1,6 +1,6 @@
 //! Randomised property tests for state contextual validation nullifier: (), in_finalized_state: ()  nullifier: (), in_finalized_state: ()  checks.
 
-use std::sync::Arc;
+use std::{convert::TryInto, sync::Arc};
 
 use itertools::Itertools;
 use proptest::prelude::*;
@@ -355,12 +355,27 @@ fn make_distinct_nullifiers<'joinsplit>(
 fn transaction_v4_with_joinsplit_data(
     joinsplit_data: impl Into<Option<JoinSplitData<Groth16Proof>>>,
 ) -> Transaction {
+    let mut joinsplit_data = joinsplit_data.into();
+
+    // set value balance to 0 to pass the chain value pool checks
+    if let Some(ref mut joinsplit_data) = joinsplit_data {
+        let zero_amount = 0.try_into().expect("unexpected invalid zero amount");
+
+        joinsplit_data.first.vpub_old = zero_amount;
+        joinsplit_data.first.vpub_new = zero_amount;
+
+        for mut joinsplit in &mut joinsplit_data.rest {
+            joinsplit.vpub_old = zero_amount;
+            joinsplit.vpub_new = zero_amount;
+        }
+    }
+
     Transaction::V4 {
         inputs: Vec::new(),
         outputs: Vec::new(),
         lock_time: LockTime::min_lock_time(),
         expiry_height: Height(0),
-        joinsplit_data: joinsplit_data.into(),
+        joinsplit_data,
         sapling_shielded_data: None,
     }
 }
@@ -373,6 +388,7 @@ fn transaction_v4_from_coinbase(coinbase: &Transaction) -> Transaction {
         !coinbase.has_sapling_shielded_data(),
         "conversion assumes sapling shielded data is None"
     );
+
     Transaction::V4 {
         inputs: coinbase.inputs().to_vec(),
         outputs: coinbase.outputs().to_vec(),
