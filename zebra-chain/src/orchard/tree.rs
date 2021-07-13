@@ -64,32 +64,29 @@ fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pal
 }
 
 lazy_static! {
-    /// Orchard note commitment trees have a max depth of 32.
+    /// List of "empty" Orchard note commitment nodes, one for each layer.
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#constants
+    /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#constants
     static ref EMPTY_ROOTS: Vec<pallas::Base> = {
-
-        // The empty leaf node, Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(2)
+        // The empty leaf node. This is layer 32.
         let mut v = vec![NoteCommitmentTree::uncommitted()];
 
         // Starting with layer 31 (the first internal layer, after the leaves),
         // generate the empty roots up to layer 0, the root.
-        for d in 0..MERKLE_DEPTH
+        for layer in (0..MERKLE_DEPTH).rev()
         {
-            let next = merkle_crh_orchard((MERKLE_DEPTH - 1  - d) as u8, v[d], v[d]);
-            v.push(next);
+            // The vector is generated from the end, pushing new nodes to its beginning.
+            // For this reason, the layer below is v[0].
+            let next = merkle_crh_orchard(layer as u8, v[0], v[0]);
+            v.insert(0, next);
         }
 
         v
 
     };
 }
-
-/// The index of a note’s commitment at the leafmost layer of its
-/// `NoteCommitmentTree`.
-///
-/// https://zips.z.cash/protocol/nu5.pdf#merkletree
-pub struct Position(pub(crate) u64);
 
 /// Orchard note commitment tree root node hash.
 ///
@@ -158,13 +155,18 @@ impl incrementalmerkletree::Hashable for Node {
         Self(NoteCommitmentTree::uncommitted())
     }
 
+    /// Combine two nodes to generate a new node in the given level.
+    /// Level 0 is the layer above the leaves (layer 31).
+    /// Level 31 is the root (layer 0).
     fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
         let layer = (MERKLE_DEPTH - 1) as u8 - u8::from(level);
         Self(merkle_crh_orchard(layer, a.0, b.0))
     }
 
+    /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
-        Self(EMPTY_ROOTS[usize::from(level)])
+        let layer_below: usize = MERKLE_DEPTH - usize::from(level);
+        Self(EMPTY_ROOTS[layer_below])
     }
 }
 
@@ -280,7 +282,11 @@ mod tests {
         zebra_test::init();
 
         for i in 0..EMPTY_ROOTS.len() {
-            assert_eq!(EMPTY_ROOTS[i].to_bytes(), test_vectors::EMPTY_ROOTS[i]);
+            assert_eq!(
+                EMPTY_ROOTS[i].to_bytes(),
+                // The test vector is in reversed order.
+                test_vectors::EMPTY_ROOTS[MERKLE_DEPTH - i]
+            );
         }
     }
 

@@ -45,16 +45,22 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
 }
 
 lazy_static! {
-    /// Sapling note commitment trees have a max depth of 32.
+    /// List of "empty" Sapling note commitment nodes, one for each layer.
+    ///
+    /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#constants
     static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
-        // Uncommitted^Sapling = I2LEBSP_l_MerkleSapling(1)
-        let mut v = vec![jubjub::Fq::one().to_bytes()];
+        // The empty leaf node. This is layer 32.
+        let mut v = vec![NoteCommitmentTree::uncommitted()];
 
-        for d in 0..MERKLE_DEPTH {
-            let next = merkle_crh_sapling((MERKLE_DEPTH - 1  - d) as u8, v[d], v[d]);
-            v.push(next);
+        // Starting with layer 31 (the first internal layer, after the leaves),
+        // generate the empty roots up to layer 0, the root.
+        for layer in (0..MERKLE_DEPTH).rev() {
+            // The vector is generated from the end, pushing new nodes to its beginning.
+            // For this reason, the layer below is v[0].
+            let next = merkle_crh_sapling(layer as u8, v[0], v[0]);
+            v.insert(0, next);
         }
 
         v
@@ -116,13 +122,18 @@ impl incrementalmerkletree::Hashable for Node {
         Self(NoteCommitmentTree::uncommitted())
     }
 
+    /// Combine two nodes to generate a new node in the given level.
+    /// Level 0 is the layer above the leaves (layer 31).
+    /// Level 31 is the root (layer 0).
     fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
         let layer = (MERKLE_DEPTH - 1) as u8 - u8::from(level);
         Self(merkle_crh_sapling(layer, a.0, b.0))
     }
 
+    /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
-        Self(EMPTY_ROOTS[usize::from(level)])
+        let layer_below: usize = MERKLE_DEPTH - usize::from(level);
+        Self(EMPTY_ROOTS[usize::from(layer_below)])
     }
 }
 
@@ -273,7 +284,11 @@ mod tests {
         ];
 
         for i in 0..EMPTY_ROOTS.len() {
-            assert_eq!(hex::encode(EMPTY_ROOTS[i]), HEX_EMPTY_ROOTS[i]);
+            assert_eq!(
+                hex::encode(EMPTY_ROOTS[i]),
+                // The test vector is in reversed order.
+                HEX_EMPTY_ROOTS[MERKLE_DEPTH - i]
+            );
         }
     }
 
