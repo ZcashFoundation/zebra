@@ -36,6 +36,7 @@ proptest! {
     fn accept_distinct_arbitrary_sprout_nullifiers(
         mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         mut joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        use_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
 
@@ -60,13 +61,21 @@ proptest! {
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
 
-        let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1.clone());
+        // randomly choose to commit the block to the finalized or non-finalized state
+        if use_finalized_state {
+            let block1 = FinalizedBlock::from(Arc::new(block1));
+            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
 
-        // block was accepted
-        prop_assert_eq!(commit_result, Ok(()));
-        prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(commit_result.is_ok());
+        } else {
+            let block1 = Arc::new(block1).prepare();
+            let commit_result =
+                state.validate_and_commit(block1.clone());
+
+            prop_assert_eq!(commit_result, Ok(()));
+            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+        }
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
