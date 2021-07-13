@@ -133,7 +133,7 @@ impl incrementalmerkletree::Hashable for Node {
     /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
         let layer_below: usize = MERKLE_DEPTH - usize::from(level);
-        Self(EMPTY_ROOTS[usize::from(layer_below)])
+        Self(EMPTY_ROOTS[layer_below])
     }
 }
 
