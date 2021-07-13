@@ -31,12 +31,12 @@ impl From<BoxError> for CloneError {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a block could not be committed to the state.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[error("block is not contextually valid")]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
