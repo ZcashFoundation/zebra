@@ -36,7 +36,8 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut s = bitvec![Lsb0, u8;];
 
     // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
-    s.extend_from_bitslice(&BitSlice::<Lsb0, _>::from_element(&layer)[0..6]);
+    let l = (MERKLE_DEPTH - 1) as u8 - layer;
+    s.extend_from_bitslice(&BitSlice::<Lsb0, _>::from_element(&l)[0..6]);
     s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left)[0..255]);
     s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right)[0..255]);
 
@@ -52,7 +53,7 @@ lazy_static! {
         let mut v = vec![jubjub::Fq::one().to_bytes()];
 
         for d in 0..MERKLE_DEPTH {
-            let next = merkle_crh_sapling(d as u8, v[d], v[d]);
+            let next = merkle_crh_sapling((MERKLE_DEPTH - 1  - d) as u8, v[d], v[d]);
             v.push(next);
         }
 
@@ -112,11 +113,12 @@ struct Node([u8; 32]);
 
 impl incrementalmerkletree::Hashable for Node {
     fn empty_leaf() -> Self {
-        Self(jubjub::Fq::one().to_bytes())
+        Self(NoteCommitmentTree::uncommitted())
     }
 
     fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
-        Self(merkle_crh_sapling(level.into(), a.0, b.0))
+        let layer = (MERKLE_DEPTH - 1) as u8 - u8::from(level);
+        Self(merkle_crh_sapling(layer, a.0, b.0))
     }
 
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
@@ -170,13 +172,22 @@ impl NoteCommitmentTree {
         self.root().into()
     }
 
+    /// An as-yet unused Sapling note commitment tree leaf node.
+    ///
+    /// Distinct for Sapling, a distinguished hash value of:
+    ///
+    /// Uncommitted^Sapling = I2LEBSP_l_MerkleSapling(1)
+    pub fn uncommitted() -> [u8; 32] {
+        jubjub::Fq::one().to_bytes()
+    }
+
     /// Count of note commitments added to the tree.
     ///
     /// For Sapling, the tree is capped at 2^32.
-    pub fn count(&self) -> u32 {
+    pub fn count(&self) -> u64 {
         self.inner
             .position()
-            .map_or(0, |pos| usize::from(pos) as u32 + 1)
+            .map_or(0, |pos| usize::from(pos) as u64 + 1)
     }
 }
 

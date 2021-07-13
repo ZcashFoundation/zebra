@@ -159,7 +159,8 @@ impl incrementalmerkletree::Hashable for Node {
     }
 
     fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
-        Self(merkle_crh_orchard(level.into(), a.0, b.0))
+        let layer = (MERKLE_DEPTH - 1) as u8 - u8::from(level);
+        Self(merkle_crh_orchard(layer, a.0, b.0))
     }
 
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
@@ -205,7 +206,6 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        // TODO: explain unwrap
         Root(self.inner.root().0)
     }
 
@@ -227,12 +227,10 @@ impl NoteCommitmentTree {
     /// Count of note commitments added to the tree.
     ///
     /// For Orchard, the tree is capped at 2^32.
-    //
-    // This code is based on https://github.com/zcash/librustzcash/blob/4c4d226f404aef64df6a77caa289b30cc875ae4f/zcash_primitives/src/merkle_tree.rs#L91
-    pub fn count(&self) -> u32 {
+    pub fn count(&self) -> u64 {
         self.inner
             .position()
-            .map_or(0, |pos| usize::from(pos) as u32 + 1)
+            .map_or(0, |pos| usize::from(pos) as u64 + 1)
     }
 }
 
