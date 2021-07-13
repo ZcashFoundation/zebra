@@ -114,7 +114,10 @@ impl From<&Root> for [u8; 32] {
     }
 }
 
-// A node of the Sapling Incremental Note Commitment Tree.
+/// A node of the Sapling Incremental Note Commitment Tree.
+///
+/// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
+/// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
 #[derive(Clone, Debug)]
 struct Node([u8; 32]);
 
