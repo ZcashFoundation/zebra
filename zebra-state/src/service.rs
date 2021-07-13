@@ -22,8 +22,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedBlock, PreparedBlock,
-    Request, Response, ValidateContextError,
+    request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config, FinalizedBlock,
+    PreparedBlock, Request, Response, ValidateContextError,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -201,20 +201,38 @@ impl StateService {
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
     fn process_queued(&mut self, new_parent: block::Hash) {
-        let mut new_parents = vec![new_parent];
+        let mut new_parents: Vec<(block::Hash, Result<(), CloneError>)> =
+            vec![(new_parent, Ok(()))];
 
-        while let Some(parent_hash) = new_parents.pop() {
+        while let Some((parent_hash, parent_result)) = new_parents.pop() {
             let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
             for (child, rsp_tx) in queued_children {
                 let child_hash = child.hash;
-                tracing::trace!(?child_hash, "validating queued child");
-                let result = self
-                    .validate_and_commit(child)
-                    .map(|()| child_hash)
-                    .map_err(BoxError::from);
-                let _ = rsp_tx.send(result);
-                new_parents.push(child_hash);
+                let result;
+
+                // If the block is invalid, reject any descendant blocks.
+                //
+                // At this point, we know that the block and all its descendants
+                // are invalid, because we checked all the consensus rules before
+                // committing the block to the non-finalized state.
+                // (These checks also bind the transaction data to the block
+                // header, using the transaction merkle tree and authorizing data
+                // commitment.)
+                if let Err(ref parent_error) = parent_result {
+                    tracing::trace!(
+                        ?child_hash,
+                        ?parent_error,
+                        "rejecting queued child due to parent error"
+                    );
+                    result = Err(parent_error.clone());
+                } else {
+                    tracing::trace!(?child_hash, "validating queued child");
+                    result = self.validate_and_commit(child).map_err(CloneError::from);
+                }
+
+                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+                new_parents.push((child_hash, result));
             }
         }
     }
