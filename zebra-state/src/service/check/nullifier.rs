@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// Reject double-spends of nullifers:
-/// - one from this [`Block`], and the other already committed to the [`FinalizedState`].
+/// - one from this [`PreparedBlock`], and the other already committed to the [`FinalizedState`].
 ///
 /// (Duplicate non-finalized nullifiers are rejected during the chain update,
 /// see [`add_to_non_finalized_chain_unique`] for details.)
