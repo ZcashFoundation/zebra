@@ -114,16 +114,17 @@ fn rejection_restores_internal_state() -> Result<()> {
                   // use `valid_count` as the number of valid blocks before an invalid block
                   let valid_tip_height = chain[valid_count - 1].height;
                   let valid_tip_hash = chain[valid_count - 1].hash;
-                  let chain = chain.iter().take(valid_count);
+                  let mut chain = chain.iter().take(valid_count).cloned();
 
                   prop_assert!(state.eq_internal_state(&state));
 
-                  for (index, block) in chain.enumerate() {
-                      if index == 0 {
-                          state.commit_new_chain(block.clone())?;
-                      } else {
-                          state.commit_block(block.clone())?;
-                      }
+                  if let Some(first_block) = chain.next() {
+                      state.commit_new_chain(block)?;
+                      prop_assert!(state.eq_internal_state(&state));
+                  }
+
+                  for block in chain {
+                      state.commit_block(block)?;
                       prop_assert!(state.eq_internal_state(&state));
                   }
 
