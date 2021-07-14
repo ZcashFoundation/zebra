@@ -9,8 +9,9 @@ use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
-    sprout,
+    sapling, sprout,
     transaction::{self, Transaction},
     transparent,
 };
@@ -373,6 +374,18 @@ impl FinalizedState {
     pub fn contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
         let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
         self.db.zs_contains(sprout_nullifiers, &sprout_nullifier)
+    }
+
+    /// Returns `true` if the finalized state contains `sapling_nullifier`.
+    pub fn contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
+        let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
+        self.db.zs_contains(sapling_nullifiers, &sapling_nullifier)
+    }
+
+    /// Returns `true` if the finalized state contains `orchard_nullifier`.
+    pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
+        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
+        self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
