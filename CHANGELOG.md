@@ -43,9 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Restore the previous non-finalized chain if a block is invalid (#2478)
 - Stop ignoring sapling binding signature errors (#2472)
 - Always compute sighash with librustzcash (#2469)
-- Fix missing blake2b_simd::Hash -> SigHash replacement (#2470)
-- Fix bug in sighash for coinbase transactions (#2459)
-- Stop using the wrong name for the coverage action (#2453)
+- Fix missing replacement of blake2b_simd::Hash usage with SigHash in the code (#2470)
+- Fix bug in sighash calculation for coinbase transactions (#2459)
+- Stop using the wrong name for the coverage GitHub Actions workflow (#2453)
 
 ### Security
 
