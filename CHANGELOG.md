@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Reject duplicate sprout nullifiers in the state (#2477)
 - Use the block verifier and non-finalized state in the cached state tests (#2463)
 - Add methods for getting block nullifiers (#2465)
 - Add a TypeNameToDebug formatter to zebra_chain (#2466)
@@ -38,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- When a parent block is rejected, also reject its children (#2479)
 - Restore the previous non-finalized chain if a block is invalid (#2478)
 - Stop ignoring sapling binding signature errors (#2472)
 - Always compute sighash with librustzcash (#2469)
