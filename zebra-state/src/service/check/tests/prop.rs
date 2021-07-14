@@ -333,10 +333,12 @@ fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
     assert_eq!(None, state.best_tip());
 
     let genesis = FinalizedBlock::from(genesis);
-    let commit_result = state.disk.commit_finalized_direct(genesis.clone(), "test");
+    state
+        .disk
+        .commit_finalized_direct(genesis.clone(), "test")
+        .expect("unexpected invalid genesis block test vector");
 
     assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-    assert!(commit_result.is_ok());
 
     (state, genesis)
 }
