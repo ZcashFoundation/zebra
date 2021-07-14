@@ -119,7 +119,7 @@ fn rejection_restores_internal_state() -> Result<()> {
                   prop_assert!(state.eq_internal_state(&state));
 
                   if let Some(first_block) = chain.next() {
-                      state.commit_new_chain(block)?;
+                      state.commit_new_chain(first_block)?;
                       prop_assert!(state.eq_internal_state(&state));
                   }
 
