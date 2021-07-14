@@ -432,58 +432,66 @@ impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
 where
     AnchorV: sapling::AnchorVariant + Clone,
 {
+    #[instrument(skip(self, sapling_shielded_data))]
     fn update_chain_state_with(
         &mut self,
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            for nullifier in sapling_shielded_data.nullifiers() {
-                // TODO: check sapling nullifiers are unique (#2231)
-                self.sapling_nullifiers.insert(*nullifier);
-            }
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sapling_nullifiers,
+                sapling_shielded_data.nullifiers(),
+            )?;
         }
         Ok(())
     }
 
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
+    #[instrument(skip(self, sapling_shielded_data))]
     fn revert_chain_state_with(
         &mut self,
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            for nullifier in sapling_shielded_data.nullifiers() {
-                // TODO: refactor using generic assert function (#2231)
-                assert!(
-                    self.sapling_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was added to chain"
-                );
-            }
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sapling_nullifiers,
+                sapling_shielded_data.nullifiers(),
+            );
         }
     }
 }
 
 impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+    #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_state_with(
         &mut self,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
-            // TODO: check orchard nullifiers are unique (#2231)
-            for nullifier in orchard_shielded_data.nullifiers() {
-                self.orchard_nullifiers.insert(*nullifier);
-            }
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.orchard_nullifiers,
+                orchard_shielded_data.nullifiers(),
+            )?;
         }
         Ok(())
     }
 
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
+    #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
-            for nullifier in orchard_shielded_data.nullifiers() {
-                // TODO: refactor using generic assert function (#2231)
-                assert!(
-                    self.orchard_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was added to chain"
-                );
-            }
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.orchard_nullifiers,
+                orchard_shielded_data.nullifiers(),
+            );
         }
     }
 }
