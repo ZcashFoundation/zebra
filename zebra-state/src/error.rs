@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, work::difficulty::CompactDifficulty};
+use zebra_chain::{block, sprout, work::difficulty::CompactDifficulty};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -31,12 +31,12 @@ impl From<BoxError> for CloneError {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a block could not be committed to the state.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[error("block is not contextually valid")]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
@@ -74,4 +74,26 @@ pub enum ValidateContextError {
         difficulty_threshold: CompactDifficulty,
         expected_difficulty: CompactDifficulty,
     },
+
+    #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
+    #[non_exhaustive]
+    DuplicateSproutNullifier {
+        nullifier: sprout::Nullifier,
+        in_finalized_state: bool,
+    },
+}
+
+/// Trait for creating the corresponding duplicate nullifier error from a nullifier.
+pub(crate) trait DuplicateNullifierError {
+    /// Returns the corresponding duplicate nullifier error for `self`.
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError;
+}
+
+impl DuplicateNullifierError for sprout::Nullifier {
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
+        ValidateContextError::DuplicateSproutNullifier {
+            nullifier: *self,
+            in_finalized_state,
+        }
+    }
 }

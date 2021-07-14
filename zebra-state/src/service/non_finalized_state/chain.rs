@@ -4,13 +4,14 @@ use std::{
     ops::Deref,
 };
 
-use tracing::{debug_span, instrument, trace};
+use tracing::instrument;
+
 use zebra_chain::{
     block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
     transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{PreparedBlock, ValidateContextError};
+use crate::{service::check, PreparedBlock, ValidateContextError};
 
 #[derive(Default, Clone)]
 pub struct Chain {
@@ -238,7 +239,7 @@ impl UpdateWith<PreparedBlock> for Chain {
         // remove the blocks hash from `height_by_hash`
         assert!(
             self.height_by_hash.remove(&hash).is_some(),
-            "hash must be present if block was"
+            "hash must be present if block was added to chain"
         );
 
         // remove work from partial_cumulative_work
@@ -286,7 +287,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             // remove `transaction.hash` from `tx_by_hash`
             assert!(
                 self.tx_by_hash.remove(transaction_hash).is_some(),
-                "transactions must be present if block was"
+                "transactions must be present if block was added to chain"
             );
 
             // remove the utxos this produced
@@ -344,7 +345,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     assert!(
                         self.spent_utxos.remove(outpoint),
-                        "spent_utxos must be present if block was"
+                        "spent_utxos must be present if block was added to chain"
                     );
                 }
                 transparent::Input::Coinbase { .. } => {}
@@ -360,36 +361,29 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
-                let span = debug_span!("revert_chain_state_with", ?nullifiers);
-                let _entered = span.enter();
-                trace!("Adding sprout nullifiers.");
-                self.sprout_nullifiers.insert(nullifiers[0]);
-                self.sprout_nullifiers.insert(nullifiers[1]);
-            }
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+            )?;
         }
         Ok(())
     }
 
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
     #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
-                let span = debug_span!("revert_chain_state_with", ?nullifiers);
-                let _entered = span.enter();
-                trace!("Removing sprout nullifiers.");
-                assert!(
-                    self.sprout_nullifiers.remove(&nullifiers[0]),
-                    "nullifiers must be present if block was"
-                );
-                assert!(
-                    self.sprout_nullifiers.remove(&nullifiers[1]),
-                    "nullifiers must be present if block was"
-                );
-            }
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+            );
         }
     }
 }
@@ -404,6 +398,7 @@ where
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for nullifier in sapling_shielded_data.nullifiers() {
+                // TODO: check sapling nullifiers are unique (#2231)
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
@@ -416,9 +411,10 @@ where
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for nullifier in sapling_shielded_data.nullifiers() {
+                // TODO: refactor using generic assert function (#2231)
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was"
+                    "nullifier must be present if block was added to chain"
                 );
             }
         }
@@ -431,6 +427,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            // TODO: check orchard nullifiers are unique (#2231)
             for nullifier in orchard_shielded_data.nullifiers() {
                 self.orchard_nullifiers.insert(*nullifier);
             }
@@ -441,9 +438,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for nullifier in orchard_shielded_data.nullifiers() {
+                // TODO: refactor using generic assert function (#2231)
                 assert!(
                     self.orchard_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was"
+                    "nullifier must be present if block was added to chain"
                 );
             }
         }
