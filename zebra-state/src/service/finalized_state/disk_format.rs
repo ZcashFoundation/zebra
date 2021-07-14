@@ -258,12 +258,16 @@ impl DiskSerialize for rocksdb::WriteBatch {
 /// Helper trait for retrieving values from rocksdb column familys with a consistently
 /// defined format
 pub trait DiskDeserialize {
-    /// Serialize the given key and use that to get and deserialize the
-    /// corresponding value from a rocksdb column family, if it is present.
+    /// Returns the value for `key` in the rocksdb column family `cf`, if present.
     fn zs_get<K, V>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> Option<V>
     where
         K: IntoDisk,
         V: FromDisk;
+
+    /// Check if a rocksdb column family `cf` contains the serialized form of `key`.
+    fn zs_contains<K>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> bool
+    where
+        K: IntoDisk;
 }
 
 impl DiskDeserialize for rocksdb::DB {
@@ -275,13 +279,26 @@ impl DiskDeserialize for rocksdb::DB {
         let key_bytes = key.as_bytes();
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
-        // format because we're going to deserialize it anyways, which avoids an
+        // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
         let value_bytes = self
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur");
 
         value_bytes.map(V::from_bytes)
+    }
+
+    fn zs_contains<K>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> bool
+    where
+        K: IntoDisk,
+    {
+        let key_bytes = key.as_bytes();
+
+        // We use `get_pinned_cf` to avoid taking ownership of the serialized
+        // value, because we don't use the value at all. This avoids an extra copy.
+        self.get_pinned_cf(cf, key_bytes)
+            .expect("expected that disk errors would not occur")
+            .is_some()
     }
 }
 

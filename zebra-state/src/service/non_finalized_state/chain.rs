@@ -4,32 +4,73 @@ use std::{
     ops::Deref,
 };
 
-use tracing::{debug_span, instrument, trace};
+use tracing::instrument;
+
 use zebra_chain::{
     block, orchard, primitives::Groth16Proof, sapling, sprout, transaction,
     transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{PreparedBlock, ValidateContextError};
+use crate::{service::check, PreparedBlock, ValidateContextError};
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Chain {
     pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
     pub created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
-    spent_utxos: HashSet<transparent::OutPoint>,
-    // TODO: add sprout, sapling and orchard anchors (#1320)
-    sprout_anchors: HashSet<sprout::tree::Root>,
-    sapling_anchors: HashSet<sapling::tree::Root>,
-    sprout_nullifiers: HashSet<sprout::Nullifier>,
-    sapling_nullifiers: HashSet<sapling::Nullifier>,
-    orchard_nullifiers: HashSet<orchard::Nullifier>,
-    partial_cumulative_work: PartialCumulativeWork,
+    pub(super) spent_utxos: HashSet<transparent::OutPoint>,
+
+    pub(super) sprout_anchors: HashSet<sprout::tree::Root>,
+    pub(super) sapling_anchors: HashSet<sapling::tree::Root>,
+    pub(super) orchard_anchors: HashSet<orchard::tree::Root>,
+
+    pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
+
+    pub(super) partial_cumulative_work: PartialCumulativeWork,
 }
 
 impl Chain {
+    /// Is the internal state of `self` the same as `other`?
+    ///
+    /// [`Chain`] has custom [`Eq`] and [`Ord`] implementations based on proof of work,
+    /// which are used to select the best chain. So we can't derive [`Eq`] for [`Chain`].
+    ///
+    /// Unlike the custom trait impls, this method returns `true` if the entire internal state
+    /// of two chains is equal.
+    ///
+    /// If the internal states are different, it returns `false`,
+    /// even if the blocks in the two chains are equal.
+    #[cfg(test)]
+    pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
+        // this method must be updated every time a field is added to Chain
+
+        // blocks, heights, hashes
+        self.blocks == other.blocks &&
+            self.height_by_hash == other.height_by_hash &&
+            self.tx_by_hash == other.tx_by_hash &&
+
+            // transparent UTXOs
+            self.created_utxos == other.created_utxos &&
+            self.spent_utxos == other.spent_utxos &&
+
+            // anchors
+            self.sprout_anchors == other.sprout_anchors &&
+            self.sapling_anchors == other.sapling_anchors &&
+            self.orchard_anchors == other.orchard_anchors &&
+
+            // nullifiers
+            self.sprout_nullifiers == other.sprout_nullifiers &&
+            self.sapling_nullifiers == other.sapling_nullifiers &&
+            self.orchard_nullifiers == other.orchard_nullifiers &&
+
+            // proof of work
+            self.partial_cumulative_work == other.partial_cumulative_work
+    }
+
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
     /// If the block is invalid, drop this chain and return an error.
@@ -238,7 +279,7 @@ impl UpdateWith<PreparedBlock> for Chain {
         // remove the blocks hash from `height_by_hash`
         assert!(
             self.height_by_hash.remove(&hash).is_some(),
-            "hash must be present if block was"
+            "hash must be present if block was added to chain"
         );
 
         // remove work from partial_cumulative_work
@@ -286,7 +327,7 @@ impl UpdateWith<PreparedBlock> for Chain {
             // remove `transaction.hash` from `tx_by_hash`
             assert!(
                 self.tx_by_hash.remove(transaction_hash).is_some(),
-                "transactions must be present if block was"
+                "transactions must be present if block was added to chain"
             );
 
             // remove the utxos this produced
@@ -344,7 +385,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     assert!(
                         self.spent_utxos.remove(outpoint),
-                        "spent_utxos must be present if block was"
+                        "spent_utxos must be present if block was added to chain"
                     );
                 }
                 transparent::Input::Coinbase { .. } => {}
@@ -360,36 +401,29 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
-                let span = debug_span!("revert_chain_state_with", ?nullifiers);
-                let _entered = span.enter();
-                trace!("Adding sprout nullifiers.");
-                self.sprout_nullifiers.insert(nullifiers[0]);
-                self.sprout_nullifiers.insert(nullifiers[1]);
-            }
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+            )?;
         }
         Ok(())
     }
 
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
     #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_state_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
-            for sprout::JoinSplit { nullifiers, .. } in joinsplit_data.joinsplits() {
-                let span = debug_span!("revert_chain_state_with", ?nullifiers);
-                let _entered = span.enter();
-                trace!("Removing sprout nullifiers.");
-                assert!(
-                    self.sprout_nullifiers.remove(&nullifiers[0]),
-                    "nullifiers must be present if block was"
-                );
-                assert!(
-                    self.sprout_nullifiers.remove(&nullifiers[1]),
-                    "nullifiers must be present if block was"
-                );
-            }
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+            );
         }
     }
 }
@@ -404,6 +438,7 @@ where
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for nullifier in sapling_shielded_data.nullifiers() {
+                // TODO: check sapling nullifiers are unique (#2231)
                 self.sapling_nullifiers.insert(*nullifier);
             }
         }
@@ -416,9 +451,10 @@ where
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for nullifier in sapling_shielded_data.nullifiers() {
+                // TODO: refactor using generic assert function (#2231)
                 assert!(
                     self.sapling_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was"
+                    "nullifier must be present if block was added to chain"
                 );
             }
         }
@@ -431,6 +467,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            // TODO: check orchard nullifiers are unique (#2231)
             for nullifier in orchard_shielded_data.nullifiers() {
                 self.orchard_nullifiers.insert(*nullifier);
             }
@@ -441,30 +478,57 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for nullifier in orchard_shielded_data.nullifiers() {
+                // TODO: refactor using generic assert function (#2231)
                 assert!(
                     self.orchard_nullifiers.remove(nullifier),
-                    "nullifier must be present if block was"
+                    "nullifier must be present if block was added to chain"
                 );
             }
         }
     }
 }
 
-impl PartialEq for Chain {
-    fn eq(&self, other: &Self) -> bool {
-        self.partial_cmp(other) == Some(Ordering::Equal)
-    }
-}
-
-impl Eq for Chain {}
-
-impl PartialOrd for Chain {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Ord for Chain {
+    /// Chain order for the [`NonFinalizedState`]'s `chain_set`.
+    /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`],
+    /// breaking ties using the tip block hash.
+    ///
+    /// Despite the consensus rules, Zebra uses the tip block hash as a tie-breaker.
+    /// Zebra blocks are downloaded in parallel, so download timestamps may not be unique.
+    /// (And Zebra currently doesn't track download times, because [`Block`]s are immutable.)
+    ///
+    /// This departure from the consensus rules may delay network convergence,
+    /// for as long as the greater hash belongs to the later mined block.
+    /// But Zebra nodes should converge as soon as the tied work is broken.
+    ///
+    /// "At a given point in time, each full validator is aware of a set of candidate blocks.
+    /// These form a tree rooted at the genesis block, where each node in the tree
+    /// refers to its parent via the hashPrevBlock block header field.
+    ///
+    /// A path from the root toward the leaves of the tree consisting of a sequence
+    /// of one or more valid blocks consistent with consensus rules,
+    /// is called a valid block chain.
+    ///
+    /// In order to choose the best valid block chain in its view of the overall block tree,
+    /// a node sums the work ... of all blocks in each valid block chain,
+    /// and considers the valid block chain with greatest total work to be best.
+    ///
+    /// To break ties between leaf blocks, a node will prefer the block that it received first.
+    ///
+    /// The consensus protocol is designed to ensure that for any given block height,
+    /// the vast majority of nodes should eventually agree on their best valid block chain
+    /// up to that height."
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#blockchain
+    ///
+    /// # Panics
+    ///
+    /// If two chains compare equal.
+    ///
+    /// This panic enforces the `NonFinalizedState.chain_set` unique chain invariant.
+    ///
+    /// If the chain set contains duplicate chains, the non-finalized state might
+    /// handle new blocks or block finalization incorrectly.
     fn cmp(&self, other: &Self) -> Ordering {
         if self.partial_cumulative_work != other.partial_cumulative_work {
             self.partial_cumulative_work
@@ -493,3 +557,25 @@ impl Ord for Chain {
         }
     }
 }
+
+impl PartialOrd for Chain {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Chain {
+    /// Chain equality for the [`NonFinalizedState`]'s `chain_set`,
+    /// using proof of work, then the tip block hash as a tie-breaker.
+    ///
+    /// # Panics
+    ///
+    /// If two chains compare equal.
+    ///
+    /// See [`Chain::cmp`] for details.
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+impl Eq for Chain {}
