@@ -201,20 +201,21 @@ impl StateService {
             let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
             for (child, rsp_tx) in queued_children {
-                // required by validate_and_commit
-                let mandatory_checkpoint = self.network.mandatory_checkpoint_height();
-                if child.height <= mandatory_checkpoint {
-                    panic!(
-                        "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
-                    );
-                }
+                // required by validate_and_commit, moved here to make testing easier
+                assert!(
+                    child.height > self.network.mandatory_checkpoint_height(),
+                    "invalid non-finalized block height: the canopy checkpoint is mandatory, \
+                     pre-canopy blocks, and the canopy activation block, \
+                     must be committed to the state as finalized blocks"
+                );
 
-                // required by check_contextual_validity
+                // required by check_contextual_validity, moved here to make testing easier
                 let relevant_chain =
                     self.any_ancestor_blocks(child.block.header.previous_block_hash);
                 assert!(
                     relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
-                    "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks"
+                    "contextual validation requires at least \
+                     28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks"
                 );
 
                 let child_hash = child.hash;

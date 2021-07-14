@@ -69,18 +69,19 @@ where
         .expect("valid blocks have a coinbase height");
     check::height_one_more_than_parent_height(parent_height, prepared.height)?;
 
-    // process_queued also checks the chain length, so we can disable this assertion during testing
-    #[cfg(not(test))]
-    assert_eq!(
-        relevant_chain.len(),
-        POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
-        "state must contain enough blocks to do contextual validation"
-    );
     // skip this check during tests if we don't have enough blocks in the chain
     #[cfg(test)]
     if relevant_chain.len() < POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN {
         return Ok(());
     }
+    // process_queued also checks the chain length, so we can skip this assertion during testing
+    // (tests that want to check this code should use the correct number of blocks)
+    assert_eq!(
+        relevant_chain.len(),
+        POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
+        "state must contain enough blocks to do proof of work contextual validation, \
+         and validation must receive the exact number of required blocks"
+    );
 
     let relevant_data = relevant_chain.iter().map(|block| {
         (
@@ -95,7 +96,6 @@ where
         difficulty_adjustment,
     )?;
 
-    // TODO: other contextual validation design and implementation
     Ok(())
 }
 
