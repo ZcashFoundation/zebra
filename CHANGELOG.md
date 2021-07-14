@@ -11,7 +11,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Reject duplicate sprout nullifiers in the state (#2477)
 - Use the block verifier and non-finalized state in the cached state tests (#2463)
 - Add methods for getting block nullifiers (#2465)
-- Add a TypeNameToDebug formatter to zebra_chain (#2466)
 - Verify orchard spend auth (#2442)
 - Parse MSG_WTX inventory type (part of ZIP-239) (#2446)
 - Add ZIP-244 signature hash support (#2165)
@@ -26,11 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- Move zebra_state::service::check tests to their own module (#2483)
 - Move Utxo type to zebra-chain (#2481)
 - Combine near-duplicate Utxo creation functions (#2467)
-- Update panics by todo! and unimplemented! macros (#2471)
-- clippy: remove needless borrows (#2457)
 
 #### Documentation
 
@@ -43,9 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Restore the previous non-finalized chain if a block is invalid (#2478)
 - Stop ignoring sapling binding signature errors (#2472)
 - Always compute sighash with librustzcash (#2469)
-- Fix missing replacement of blake2b_simd::Hash usage with SigHash in the code (#2470)
 - Fix bug in sighash calculation for coinbase transactions (#2459)
-- Stop using the wrong name for the coverage GitHub Actions workflow (#2453)
 
 ### Security
 
