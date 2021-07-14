@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Reject duplicate sprout nullifiers in the state (#2477)
 - Add methods for getting block nullifiers (#2465)
 - Verify orchard spend auth (#2442)
-- Parse MSG_WTX inventory type (part of ZIP-239) (#2446)
+- Parse and ignore MSG_WTX inventory type in network messages (part of ZIP-239) (#2446)
 - Add ZIP-244 signature hash support (#2165)
 - Add HistoryTree struct (#2396)
 - Add ZIP-0244 TxId Digest support (#2129)
