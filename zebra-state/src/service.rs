@@ -67,10 +67,7 @@ impl StateService {
     pub fn new(config: Config, network: Network) -> Self {
         let disk = FinalizedState::new(&config, network);
 
-        let mem = NonFinalizedState {
-            network,
-            ..Default::default()
-        };
+        let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
@@ -174,13 +171,6 @@ impl StateService {
     /// Run contextual validation on the prepared block and add it to the
     /// non-finalized state if it is contextually valid.
     fn validate_and_commit(&mut self, prepared: PreparedBlock) -> Result<(), CommitBlockError> {
-        let mandatory_checkpoint = self.network.mandatory_checkpoint_height();
-        if prepared.height <= mandatory_checkpoint {
-            panic!(
-                "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
-            );
-        }
-
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
 
@@ -208,6 +198,23 @@ impl StateService {
             let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
             for (child, rsp_tx) in queued_children {
+                // required by validate_and_commit, moved here to make testing easier
+                assert!(
+                    child.height > self.network.mandatory_checkpoint_height(),
+                    "invalid non-finalized block height: the canopy checkpoint is mandatory, \
+                     pre-canopy blocks, and the canopy activation block, \
+                     must be committed to the state as finalized blocks"
+                );
+
+                // required by check_contextual_validity, moved here to make testing easier
+                let relevant_chain =
+                    self.any_ancestor_blocks(child.block.header.previous_block_hash);
+                assert!(
+                    relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
+                    "contextual validation requires at least \
+                     28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks"
+                );
+
                 let child_hash = child.hash;
                 let result;
 
@@ -244,15 +251,16 @@ impl StateService {
         prepared: &PreparedBlock,
     ) -> Result<(), ValidateContextError> {
         let relevant_chain = self.any_ancestor_blocks(prepared.block.header.previous_block_hash);
-        assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
-                "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
 
+        // Security: check proof of work before any other checks
         check::block_is_contextually_valid(
             prepared,
             self.network,
             self.disk.finalized_tip_height(),
             relevant_chain,
         )?;
+
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk)?;
 
         Ok(())
     }

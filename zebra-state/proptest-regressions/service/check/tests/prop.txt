@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3b0fa74b6a4ffeb31638d5a38f832ffc972be3a66e390a2a88d8bcef2519d67c # shrinks to mut joinsplit = zebra_chain::sprout::joinsplit::JoinSplit<zebra_chain::primitives::proofs::groth16::Groth16Proof>, mut joinsplit_data = zebra_chain::transaction::joinsplit::JoinSplitData<zebra_chain::primitives::proofs::groth16::Groth16Proof>
