@@ -224,7 +224,7 @@ impl SpendingKey {
 /// Description_ that spends notes, proving ownership of notes.
 ///
 /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq)]
 pub struct SpendAuthorizingKey(pub(crate) pallas::Scalar);
 
 impl ConstantTimeEq for SpendAuthorizingKey {
@@ -242,8 +242,6 @@ impl fmt::Debug for SpendAuthorizingKey {
             .finish()
     }
 }
-
-impl Eq for SpendAuthorizingKey {}
 
 impl From<SpendAuthorizingKey> for [u8; 32] {
     fn from(sk: SpendAuthorizingKey) -> Self {
