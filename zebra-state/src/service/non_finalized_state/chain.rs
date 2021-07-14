@@ -448,21 +448,47 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     }
 }
 
-impl PartialEq for Chain {
-    fn eq(&self, other: &Self) -> bool {
-        self.partial_cmp(other) == Some(Ordering::Equal)
-    }
-}
-
-impl Eq for Chain {}
-
-impl PartialOrd for Chain {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Ord for Chain {
+    /// Chain order for the [`NonFinalizedState`]'s `chain_set`.
+    /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`],
+    /// breaking ties using the tip block hash.
+    ///
+    /// Despite the consensus rules, Zebra uses the tip block hash as a tie-breaker.
+    /// Zebra blocks are downloaded in parallel, so download timestamps may not be unique.
+    /// (And Zebra currently doesn't track download times, because [`Block`]s are immutable.)
+    ///
+    /// This departure from the consensus rules may delay network convergence,
+    /// for as long as the greater hash belongs to the later mined block.
+    /// But Zebra nodes should converge as soon as the tied work is broken.
+    ///
+    /// "At a given point in time, each full validator is aware of a set of candidate blocks.
+    /// These form a tree rooted at the genesis block, where each node in the tree
+    /// refers to its parent via the hashPrevBlock block header field.
+    ///
+    /// A path from the root toward the leaves of the tree consisting of a sequence
+    /// of one or more valid blocks consistent with consensus rules,
+    /// is called a valid block chain.
+    ///
+    /// In order to choose the best valid block chain in its view of the overall block tree,
+    /// a node sums the work ... of all blocks in each valid block chain,
+    /// and considers the valid block chain with greatest total work to be best.
+    ///
+    /// To break ties between leaf blocks, a node will prefer the block that it received first.
+    ///
+    /// The consensus protocol is designed to ensure that for any given block height,
+    /// the vast majority of nodes should eventually agree on their best valid block chain
+    /// up to that height."
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#blockchain
+    ///
+    /// # Panics
+    ///
+    /// If two chains compare equal.
+    ///
+    /// This panic enforces the `NonFinalizedState.chain_set` unique chain invariant.
+    ///
+    /// If the chain set contains duplicate chains, the non-finalized state might
+    /// handle new blocks or block finalization incorrectly.
     fn cmp(&self, other: &Self) -> Ordering {
         if self.partial_cumulative_work != other.partial_cumulative_work {
             self.partial_cumulative_work
@@ -491,3 +517,25 @@ impl Ord for Chain {
         }
     }
 }
+
+impl PartialOrd for Chain {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Chain {
+    /// Chain equality for the [`NonFinalizedState`]'s `chain_set`,
+    /// using proof of work, then the tip block hash as a tie-breaker.
+    ///
+    /// # Panics
+    ///
+    /// If two chains compare equal.
+    ///
+    /// See [`Chain::cmp`] for details.
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+impl Eq for Chain {}
