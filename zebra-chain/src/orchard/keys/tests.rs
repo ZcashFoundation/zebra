@@ -5,27 +5,6 @@ use crate::orchard::tests::vectors::KEY_COMPONENTS;
 
 use proptest::prelude::*;
 
-impl Arbitrary for TransmissionKey {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<SpendingKey>())
-            .prop_map(|spending_key| {
-                let full_viewing_key = FullViewingKey::from(spending_key);
-
-                let diversifier_key = DiversifierKey::from(full_viewing_key);
-
-                let diversifier = Diversifier::from(diversifier_key);
-                let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
-
-                Self::from((incoming_viewing_key, diversifier))
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 #[test]
 fn generate_keys_from_test_vectors() {
     zebra_test::init();

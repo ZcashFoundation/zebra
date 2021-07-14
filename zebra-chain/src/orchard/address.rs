@@ -2,9 +2,6 @@
 
 use std::fmt;
 
-#[cfg(test)]
-use proptest::prelude::*;
-
 use super::keys;
 
 /// A raw **Orchard** _shielded payment address_.
@@ -26,22 +23,6 @@ impl fmt::Debug for Address {
             .field("transmission_key", &self.transmission_key)
             .finish()
     }
-}
-
-#[cfg(test)]
-impl Arbitrary for Address {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<keys::Diversifier>(), any::<keys::TransmissionKey>())
-            .prop_map(|(diversifier, transmission_key)| Self {
-                diversifier,
-                transmission_key,
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
 }
 
 #[cfg(test)]
