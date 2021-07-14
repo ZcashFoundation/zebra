@@ -26,12 +26,12 @@ fn incremental_roots() {
     let mut incremental_tree = NoteCommitmentTree::default();
 
     for (i, commitment_set) in test_vectors::COMMITMENTS.iter().enumerate() {
-        for cm_x in commitment_set.iter() {
-            let cm_u = pallas::Base::from_bytes(&cm_x).unwrap();
+        for cm_x_bytes in commitment_set.iter() {
+            let cm_x = pallas::Base::from_bytes(&cm_x_bytes).unwrap();
 
-            leaves.push(cm_u);
+            leaves.push(cm_x);
 
-            let _ = incremental_tree.append(cm_u);
+            let _ = incremental_tree.append(cm_x);
         }
 
         assert_eq!(
