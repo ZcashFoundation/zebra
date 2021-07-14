@@ -6,7 +6,7 @@
 
 mod tests;
 
-use std::{collections::HashMap, convert::TryInto, io, sync::Arc};
+use std::{collections::BTreeMap, convert::TryInto, io, sync::Arc};
 
 use crate::{
     block::{Block, ChainHistoryMmrRootHash},
@@ -43,7 +43,9 @@ impl From<&zcash_history::NodeData> for NodeData {
 }
 
 /// An encoded entry in the tree.
+///
 /// Contains the node data and information about its position in the tree.
+#[derive(Clone)]
 pub struct Entry {
     inner: [u8; zcash_history::MAX_ENTRY_SIZE],
 }
@@ -101,12 +103,12 @@ impl Tree {
     /// # Panics
     ///
     /// Will panic if `peaks` is empty.
-    fn new_from_cache(
+    pub fn new_from_cache(
         network: Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
-        peaks: &HashMap<u32, &Entry>,
-        extra: &HashMap<u32, &Entry>,
+        peaks: &BTreeMap<u32, Entry>,
+        extra: &BTreeMap<u32, Entry>,
     ) -> Result<Self, io::Error> {
         let branch_id = network_upgrade
             .branch_id()
@@ -132,19 +134,24 @@ impl Tree {
     /// Create a single-node MMR tree for the given block.
     ///
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
-    fn new_from_block(
+    pub fn new_from_block(
         network: Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<(Self, Entry), io::Error> {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(network, height);
         let entry0 = Entry::new_leaf(block, network, sapling_root);
-        let mut peaks = HashMap::new();
-        peaks.insert(0u32, &entry0);
-        Tree::new_from_cache(network, network_upgrade, 1, &peaks, &HashMap::new())
+        let mut peaks = BTreeMap::new();
+        peaks.insert(0u32, entry0);
+        Ok((
+            Tree::new_from_cache(network, network_upgrade, 1, &peaks, &BTreeMap::new())?,
+            peaks
+                .remove(&0u32)
+                .expect("must work since it was just added"),
+        ))
     }
 
     /// Append a new block to the tree, as a new leaf.
@@ -157,18 +164,18 @@ impl Tree {
     ///
     /// Panics if the network upgrade of the given block is different from
     /// the network upgrade of the other blocks in the tree.
-    fn append_leaf(
+    pub fn append_leaf(
         &mut self,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
-    ) -> Result<Vec<NodeData>, zcash_history::Error> {
+    ) -> Result<Vec<Entry>, zcash_history::Error> {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(self.network, height);
         if self.network_upgrade != network_upgrade {
             panic!(
-                "added block from network upgrade {:?} but MMR tree is restricted to {:?}",
+                "added block from network upgrade {:?} but history tree is restricted to {:?}",
                 network_upgrade, self.network_upgrade
             );
         }
@@ -177,17 +184,17 @@ impl Tree {
         let appended = self.inner.append_leaf(node_data)?;
 
         let mut new_nodes = Vec::new();
-        for entry in appended {
-            let mut node = NodeData {
-                inner: [0; zcash_history::MAX_NODE_DATA_SIZE],
+        for entry_link in appended {
+            let mut entry = Entry {
+                inner: [0; zcash_history::MAX_ENTRY_SIZE],
             };
             self.inner
-                .resolve_link(entry)
+                .resolve_link(entry_link)
                 .expect("entry was just generated so it must be valid")
-                .data()
-                .write(&mut &mut node.inner[..])
+                .node()
+                .write(&mut &mut entry.inner[..])
                 .expect("buffer was created with enough capacity");
-            new_nodes.push(node);
+            new_nodes.push(entry);
         }
         Ok(new_nodes)
     }
@@ -196,7 +203,7 @@ impl Tree {
     fn append_leaf_iter(
         &mut self,
         vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root)>,
-    ) -> Result<Vec<NodeData>, zcash_history::Error> {
+    ) -> Result<Vec<Entry>, zcash_history::Error> {
         let mut new_nodes = Vec::new();
         for (block, root) in vals {
             new_nodes.append(&mut self.append_leaf(block, &root)?);
@@ -212,7 +219,7 @@ impl Tree {
     }
 
     /// Return the root hash of the tree, i.e. `hashChainHistoryRoot`.
-    fn hash(&self) -> ChainHistoryMmrRootHash {
+    pub fn hash(&self) -> ChainHistoryMmrRootHash {
         // Both append_leaf() and truncate_leaf() leave a root node, so it should
         // always exist.
         self.inner

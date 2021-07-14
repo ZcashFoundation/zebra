@@ -5,7 +5,6 @@ use tracing::Instrument;
 
 use zebra_chain::{parameters::NetworkUpgrade, transparent};
 use zebra_script::CachedFfiTransaction;
-use zebra_state::Utxo;
 
 use crate::BoxError;
 
@@ -59,7 +58,7 @@ pub struct Request {
     /// A set of additional UTXOs known in the context of this verification request.
     ///
     /// This allows specifying additional UTXOs that are not already known to the chain state.
-    pub known_utxos: Arc<HashMap<transparent::OutPoint, Utxo>>,
+    pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Utxo>>,
     /// The network upgrade active in the context of this verification request.
     ///
     /// Because the consensus branch ID changes with each network upgrade,

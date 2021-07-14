@@ -23,7 +23,7 @@ fn construct_single() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
     let mut chain = Chain::default();
-    chain.push(block.prepare())?;
+    chain = chain.push(block.prepare())?;
 
     assert_eq!(1, chain.blocks.len());
 
@@ -47,7 +47,7 @@ fn construct_many() -> Result<()> {
     let mut chain = Chain::default();
 
     for block in blocks {
-        chain.push(block.prepare())?;
+        chain = chain.push(block.prepare())?;
     }
 
     assert_eq!(100, chain.blocks.len());
@@ -64,10 +64,10 @@ fn ord_matches_work() -> Result<()> {
     let more_block = less_block.clone().set_work(10);
 
     let mut lesser_chain = Chain::default();
-    lesser_chain.push(less_block.prepare())?;
+    lesser_chain = lesser_chain.push(less_block.prepare())?;
 
     let mut bigger_chain = Chain::default();
-    bigger_chain.push(more_block.prepare())?;
+    bigger_chain = bigger_chain.push(more_block.prepare())?;
 
     assert!(bigger_chain > lesser_chain);
 

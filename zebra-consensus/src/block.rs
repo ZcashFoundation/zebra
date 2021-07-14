@@ -8,7 +8,6 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,7 +24,7 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    transaction, transparent,
+    transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -175,7 +174,7 @@ where
 
             let mut async_checks = FuturesUnordered::new();
 
-            let known_utxos = new_outputs(&block, &transaction_hashes);
+            let known_utxos = Arc::new(transparent::new_outputs(&block, &transaction_hashes));
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
                     .ready_and()
@@ -229,34 +228,4 @@ where
         .instrument(span)
         .boxed()
     }
-}
-
-/// Compute an index of newly created transparent outputs, given a block and a
-/// list of precomputed transaction hashes.
-fn new_outputs(
-    block: &Block,
-    transaction_hashes: &[transaction::Hash],
-) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
-    let mut new_outputs = HashMap::default();
-    let height = block.coinbase_height().expect("block has coinbase height");
-    for (transaction, hash) in block
-        .transactions
-        .iter()
-        .zip(transaction_hashes.iter().cloned())
-    {
-        let from_coinbase = transaction.is_coinbase();
-        for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-            let index = index as u32;
-            new_outputs.insert(
-                transparent::OutPoint { hash, index },
-                zs::Utxo {
-                    output,
-                    height,
-                    from_coinbase,
-                },
-            );
-        }
-    }
-
-    Arc::new(new_outputs)
 }

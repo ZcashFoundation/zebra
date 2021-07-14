@@ -1,16 +1,18 @@
-use proptest::{arbitrary::any, arbitrary::Arbitrary, prelude::*};
+use std::convert::TryInto;
 
-use super::{types::PeerServices, InventoryHash};
+use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
+
+use super::{types::PeerServices, InventoryHash, Message};
 
 use zebra_chain::{block, transaction};
 
 impl InventoryHash {
-    /// Generate a proptest strategy for Inv Errors
+    /// Generate a proptest strategy for [`InventoryHash::Error`]s.
     pub fn error_strategy() -> BoxedStrategy<Self> {
         Just(InventoryHash::Error).boxed()
     }
 
-    /// Generate a proptest strategy for Inv Tx hashes
+    /// Generate a proptest strategy for [`InventoryHash::Tx`] hashes.
     pub fn tx_strategy() -> BoxedStrategy<Self> {
         // using any::<transaction::Hash> causes a trait impl error
         // when building the zebra-network crate separately
@@ -20,7 +22,7 @@ impl InventoryHash {
             .boxed()
     }
 
-    /// Generate a proptest strategy for Inv Block hashes
+    /// Generate a proptest strategy for [`InventotryHash::Block`] hashes.
     pub fn block_strategy() -> BoxedStrategy<Self> {
         (any::<[u8; 32]>())
             .prop_map(block::Hash)
@@ -28,11 +30,34 @@ impl InventoryHash {
             .boxed()
     }
 
-    /// Generate a proptest strategy for Inv FilteredBlock hashes
+    /// Generate a proptest strategy for [`InventoryHash::FilteredBlock`] hashes.
     pub fn filtered_block_strategy() -> BoxedStrategy<Self> {
         (any::<[u8; 32]>())
             .prop_map(block::Hash)
             .prop_map(InventoryHash::FilteredBlock)
+            .boxed()
+    }
+
+    /// Generate a proptest strategy for [`InventoryHash::Wtx`] hashes.
+    pub fn wtx_strategy() -> BoxedStrategy<Self> {
+        vec(any::<u8>(), 64)
+            .prop_map(|bytes| InventoryHash::Wtx(bytes.try_into().unwrap()))
+            .boxed()
+    }
+
+    /// Generate a proptest strategy for [`InventoryHash`] variants of the smallest serialized size.
+    pub fn smallest_types_strategy() -> BoxedStrategy<Self> {
+        InventoryHash::arbitrary()
+            .prop_filter(
+                "inventory type is not one of the smallest",
+                |inventory_hash| match inventory_hash {
+                    InventoryHash::Error
+                    | InventoryHash::Tx(_)
+                    | InventoryHash::Block(_)
+                    | InventoryHash::FilteredBlock(_) => true,
+                    InventoryHash::Wtx(_) => false,
+                },
+            )
             .boxed()
     }
 }
@@ -46,6 +71,7 @@ impl Arbitrary for InventoryHash {
             Self::tx_strategy(),
             Self::block_strategy(),
             Self::filtered_block_strategy(),
+            Self::wtx_strategy(),
         ]
         .boxed()
     }
@@ -53,7 +79,6 @@ impl Arbitrary for InventoryHash {
     type Strategy = BoxedStrategy<Self>;
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for PeerServices {
     type Parameters = ();
 
@@ -64,4 +89,18 @@ impl Arbitrary for PeerServices {
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+impl Message {
+    /// Create a strategy that only generates [`Message::Inv`] messages.
+    pub fn inv_strategy() -> BoxedStrategy<Self> {
+        any::<Vec<InventoryHash>>().prop_map(Message::Inv).boxed()
+    }
+
+    /// Create a strategy that only generates [`Message::GetData`] messages.
+    pub fn get_data_strategy() -> BoxedStrategy<Self> {
+        any::<Vec<InventoryHash>>()
+            .prop_map(Message::GetData)
+            .boxed()
+    }
 }

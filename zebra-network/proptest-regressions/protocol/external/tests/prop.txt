@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 62951c0bf7f003f29184881befbd1e8144493b3b14a6dd738ecef9e4c8c06148 # shrinks to inventory_hash = Wtx

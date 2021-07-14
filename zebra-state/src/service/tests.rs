@@ -10,7 +10,7 @@ use zebra_chain::{
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
-use crate::{init, service::arbitrary, BoxError, Config, Request, Response, Utxo};
+use crate::{init, service::arbitrary, BoxError, Config, Request, Response};
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
@@ -88,7 +88,7 @@ async fn test_populated_state_responds_correctly(
                         hash: transaction_hash,
                         index: index as _,
                     };
-                    let utxo = Utxo {
+                    let utxo = transparent::Utxo {
                         output,
                         height,
                         from_coinbase,

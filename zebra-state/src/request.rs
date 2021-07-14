@@ -5,8 +5,6 @@ use zebra_chain::{
     transaction, transparent,
 };
 
-use crate::Utxo;
-
 // Allow *only* this unused import, so that rustdoc link resolution
 // will work with inline links.
 #[allow(unused_imports)]
@@ -73,7 +71,7 @@ pub struct PreparedBlock {
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
-    pub new_outputs: HashMap<transparent::OutPoint, Utxo>,
+    pub new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     /// A precomputed list of the hashes of the transactions in this block.
     pub transaction_hashes: Vec<transaction::Hash>,
     // TODO: add these parameters when we can compute anchors.
@@ -98,7 +96,7 @@ pub struct FinalizedBlock {
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, Utxo>,
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     /// A precomputed list of the hashes of the transactions in this block.
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
 }
@@ -117,27 +115,7 @@ impl From<Arc<Block>> for FinalizedBlock {
             .iter()
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
-
-        let mut new_outputs = HashMap::default();
-
-        for (transaction, hash) in block
-            .transactions
-            .iter()
-            .zip(transaction_hashes.iter().cloned())
-        {
-            let from_coinbase = transaction.is_coinbase();
-            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-                let index = index as u32;
-                new_outputs.insert(
-                    transparent::OutPoint { hash, index },
-                    Utxo {
-                        output,
-                        height,
-                        from_coinbase,
-                    },
-                );
-            }
-        }
+        let new_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
 
         Self {
             block,

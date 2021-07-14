@@ -15,12 +15,9 @@
 
 use std::{collections::VecDeque, fmt};
 
+use super::commitment::{pedersen_hashes::pedersen_hash, NoteCommitment};
 use bitvec::prelude::*;
 use lazy_static::lazy_static;
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
-use super::commitment::{pedersen_hashes::pedersen_hash, NoteCommitment};
 
 const MERKLE_DEPTH: usize = 32;
 
@@ -75,7 +72,6 @@ pub struct Position(pub(crate) u64);
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {

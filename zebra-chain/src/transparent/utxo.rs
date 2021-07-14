@@ -1,7 +1,11 @@
-// needed to make clippy happy with derive(Arbitrary)
-#![allow(clippy::unit_arg)]
+//! Unspent transparent output data structures and functions.
 
-use zebra_chain::{block, transparent};
+use std::collections::HashMap;
+
+use crate::{
+    block::{self, Block},
+    transaction, transparent,
+};
 
 /// An unspent `transparent::Output`, with accompanying metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,15 +22,19 @@ pub struct Utxo {
     pub from_coinbase: bool,
 }
 
-#[cfg(test)]
-pub fn new_outputs(block: &block::Block) -> std::collections::HashMap<transparent::OutPoint, Utxo> {
-    use std::collections::HashMap;
-
-    let height = block.coinbase_height().expect("block has coinbase height");
-
+/// Compute an index of newly created transparent outputs, given a block and a
+/// list of precomputed transaction hashes.
+pub fn new_outputs(
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> HashMap<transparent::OutPoint, Utxo> {
     let mut new_outputs = HashMap::default();
-    for transaction in &block.transactions {
-        let hash = transaction.hash();
+    let height = block.coinbase_height().expect("block has coinbase height");
+    for (transaction, hash) in block
+        .transactions
+        .iter()
+        .zip(transaction_hashes.iter().cloned())
+    {
         let from_coinbase = transaction.is_coinbase();
         for (index, output) in transaction.outputs().iter().cloned().enumerate() {
             let index = index as u32;

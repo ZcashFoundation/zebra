@@ -25,7 +25,10 @@ fn blocks_with_v5_transactions() -> Result<()> {
             let mut height = Height(0);
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {
-                let hash = state.commit_finalized_direct(FinalizedBlock::from(block.clone()));
+                let hash = state.commit_finalized_direct(
+                    FinalizedBlock::from(block.clone()),
+                    "blocks_with_v5_transactions test"
+                );
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
                 prop_assert_eq!(hash.unwrap(), block.hash);
                 // TODO: check that the nullifiers were correctly inserted (#2230)

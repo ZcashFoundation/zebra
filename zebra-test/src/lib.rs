@@ -24,6 +24,9 @@ pub mod net;
 pub mod prelude;
 pub mod transcript;
 pub mod vectors;
+pub mod zip0143;
+pub mod zip0243;
+pub mod zip0244;
 
 /// A multi-threaded Tokio runtime that can be shared between tests.
 ///

@@ -17,7 +17,6 @@ use zebra_chain::{
     },
     transparent::{self, CoinbaseData},
 };
-use zebra_state::Utxo;
 
 use super::{check, Request, Verifier};
 
@@ -201,8 +200,6 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 }
 
 #[tokio::test]
-// TODO: Remove `should_panic` once V5 transaction sighash is implemened by the merge of #2165.
-#[should_panic]
 async fn v5_transaction_is_rejected_before_nu5_activation() {
     const V5_TRANSACTION_VERSION: u32 = 5;
 
@@ -620,7 +617,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data.sig = signing_key.sign(sighash.as_bytes()),
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
             _ => unreachable!("Mock transaction was created incorrectly"),
         }
 
@@ -841,7 +838,7 @@ fn mock_transparent_transfer(
 ) -> (
     transparent::Input,
     transparent::Output,
-    HashMap<transparent::OutPoint, Utxo>,
+    HashMap<transparent::OutPoint, transparent::Utxo>,
 ) {
     // A script with a single opcode that accepts the transaction (pushes true on the stack)
     let accepting_script = transparent::Script::new(&[1, 1]);
@@ -865,7 +862,7 @@ fn mock_transparent_transfer(
         lock_script,
     };
 
-    let previous_utxo = Utxo {
+    let previous_utxo = transparent::Utxo {
         output: previous_output,
         height: previous_utxo_height,
         from_coinbase: false,

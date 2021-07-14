@@ -22,8 +22,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, BoxError, CommitBlockError, Config, FinalizedBlock, PreparedBlock,
-    Request, Response, Utxo, ValidateContextError,
+    request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config, FinalizedBlock,
+    PreparedBlock, Request, Response, ValidateContextError,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -158,7 +158,7 @@ impl StateService {
             tracing::trace!("finalizing block past the reorg limit");
             let finalized = self.mem.finalize();
             self.disk
-                .commit_finalized_direct(finalized)
+                .commit_finalized_direct(finalized, "best non-finalized chain root")
                 .expect("expected that disk errors would not occur");
         }
 
@@ -194,20 +194,55 @@ impl StateService {
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
     fn process_queued(&mut self, new_parent: block::Hash) {
-        let mut new_parents = vec![new_parent];
+        let mut new_parents: Vec<(block::Hash, Result<(), CloneError>)> =
+            vec![(new_parent, Ok(()))];
 
-        while let Some(parent_hash) = new_parents.pop() {
+        while let Some((parent_hash, parent_result)) = new_parents.pop() {
             let queued_children = self.queued_blocks.dequeue_children(parent_hash);
 
             for (child, rsp_tx) in queued_children {
+                // required by validate_and_commit, moved here to make testing easier
+                assert!(
+                    child.height > self.network.mandatory_checkpoint_height(),
+                    "invalid non-finalized block height: the canopy checkpoint is mandatory, \
+                     pre-canopy blocks, and the canopy activation block, \
+                     must be committed to the state as finalized blocks"
+                );
+
+                // required by check_contextual_validity, moved here to make testing easier
+                let relevant_chain =
+                    self.any_ancestor_blocks(child.block.header.previous_block_hash);
+                assert!(
+                    relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
+                    "contextual validation requires at least \
+                     28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks"
+                );
+
                 let child_hash = child.hash;
-                tracing::trace!(?child_hash, "validating queued child");
-                let result = self
-                    .validate_and_commit(child)
-                    .map(|()| child_hash)
-                    .map_err(BoxError::from);
-                let _ = rsp_tx.send(result);
-                new_parents.push(child_hash);
+                let result;
+
+                // If the block is invalid, reject any descendant blocks.
+                //
+                // At this point, we know that the block and all its descendants
+                // are invalid, because we checked all the consensus rules before
+                // committing the block to the non-finalized state.
+                // (These checks also bind the transaction data to the block
+                // header, using the transaction merkle tree and authorizing data
+                // commitment.)
+                if let Err(ref parent_error) = parent_result {
+                    tracing::trace!(
+                        ?child_hash,
+                        ?parent_error,
+                        "rejecting queued child due to parent error"
+                    );
+                    result = Err(parent_error.clone());
+                } else {
+                    tracing::trace!(?child_hash, "validating queued child");
+                    result = self.validate_and_commit(child).map_err(CloneError::from);
+                }
+
+                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+                new_parents.push((child_hash, result));
             }
         }
     }
@@ -219,15 +254,16 @@ impl StateService {
         prepared: &PreparedBlock,
     ) -> Result<(), ValidateContextError> {
         let relevant_chain = self.any_ancestor_blocks(prepared.block.header.previous_block_hash);
-        assert!(relevant_chain.len() >= POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
-                "contextual validation requires at least 28 (POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN) blocks");
 
+        // Security: check proof of work before any other checks
         check::block_is_contextually_valid(
             prepared,
             self.network,
             self.disk.finalized_tip_height(),
             relevant_chain,
         )?;
+
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk)?;
 
         Ok(())
     }
@@ -307,7 +343,7 @@ impl StateService {
     }
 
     /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
-    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))

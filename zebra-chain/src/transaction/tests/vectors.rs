@@ -1,12 +1,34 @@
-use super::super::*;
+use std::convert::{TryFrom, TryInto};
 
+use color_eyre::eyre::Result;
+use lazy_static::lazy_static;
+
+use zebra_test::{zip0143, zip0243, zip0244};
+
+use super::super::*;
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::{sighash::SigHasher, txid::TxIdBuilder},
 };
 
-use std::convert::TryInto;
+use crate::{amount::Amount, transaction::Transaction};
+
+use transparent::Script;
+use zebra_test::vectors::{ZIP143_1, ZIP143_2, ZIP243_1, ZIP243_2, ZIP243_3};
+
+lazy_static! {
+    pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::min_lock_time(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+}
 
 #[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
@@ -133,18 +155,10 @@ fn zip243_deserialize_and_round_trip() {
 fn empty_v5_round_trip() {
     zebra_test::init();
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::min_lock_time(),
-        expiry_height: block::Height(0),
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    let tx: &Transaction = &*EMPTY_V5_TX;
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
-    let tx2 = data
+    let tx2: &Transaction = &data
         .zcash_deserialize_into()
         .expect("tx should deserialize");
 
@@ -188,6 +202,18 @@ fn empty_v4_round_trip() {
     assert_eq!(data, data2, "data must be equal if structs are equal");
 }
 
+/// Check if an empty V5 transaction can be deserialized by librustzcash too.
+#[test]
+fn empty_v5_librustzcash_round_trip() {
+    zebra_test::init();
+
+    let tx: &Transaction = &*EMPTY_V5_TX;
+    let _alt_tx: zcash_primitives::transaction::Transaction = tx.try_into().expect(
+        "librustzcash deserialization might work for empty zebra serialized transactions. \
+        Hint: if empty transactions fail, but other transactions work, delete this test",
+    );
+}
+
 /// Do a round-trip test on fake v5 transactions created from v4 transactions
 /// in the block test vectors.
 ///
@@ -207,20 +233,19 @@ fn fake_v5_round_trip_for_network(network: Network) {
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    for (height, original_bytes) in block_iter {
+    let overwinter_activation_height = NetworkUpgrade::Overwinter
+        .activation_height(network)
+        .expect("a valid height")
+        .0;
+
+    // skip blocks that are before overwinter as they will not have a valid consensus branch id
+    let blocks_after_overwinter =
+        block_iter.skip_while(|(height, _)| **height < overwinter_activation_height);
+
+    for (height, original_bytes) in blocks_after_overwinter {
         let original_block = original_bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
-
-        // skip blocks that are before overwinter as they will not have a valid consensus branch id
-        if *height
-            < NetworkUpgrade::Overwinter
-                .activation_height(network)
-                .expect("a valid height")
-                .0
-        {
-            continue;
-        }
 
         // skip this block if it only contains v5 transactions,
         // the block round-trip test covers it already
@@ -340,4 +365,453 @@ fn invalid_orchard_nullifier() {
             .to_string(),
         SerializationError::Parse("Invalid pallas::Base value for orchard Nullifier").to_string()
     );
+}
+
+/// Do a round-trip test via librustzcash on fake v5 transactions created from v4 transactions
+/// in the block test vectors.
+/// Makes sure that zebra-serialized transactions can be deserialized by librustzcash.
+#[test]
+fn fake_v5_librustzcash_round_trip() {
+    zebra_test::init();
+
+    fake_v5_librustzcash_round_trip_for_network(Network::Mainnet);
+    fake_v5_librustzcash_round_trip_for_network(Network::Testnet);
+}
+
+fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    let overwinter_activation_height = NetworkUpgrade::Overwinter
+        .activation_height(network)
+        .expect("a valid height")
+        .0;
+
+    // skip blocks that are before overwinter as they will not have a valid consensus branch id
+    let blocks_after_overwinter =
+        block_iter.skip_while(|(height, _)| **height < overwinter_activation_height);
+
+    for (height, original_bytes) in blocks_after_overwinter {
+        let original_block = original_bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        let mut fake_block = original_block.clone();
+        fake_block.transactions = fake_block
+            .transactions
+            .iter()
+            .map(AsRef::as_ref)
+            .map(|t| arbitrary::transaction_to_fake_v5(t, network, Height(*height)))
+            .map(Into::into)
+            .collect();
+
+        // test each transaction
+        for (original_tx, fake_tx) in original_block
+            .transactions
+            .iter()
+            .zip(fake_block.transactions.iter())
+        {
+            assert_ne!(
+                &original_tx, &fake_tx,
+                "v1-v4 transactions must change when converted to fake v5"
+            );
+
+            let fake_bytes = fake_tx
+                .zcash_serialize_to_vec()
+                .expect("vec serialization is infallible");
+
+            assert_ne!(
+                &original_bytes[..],
+                fake_bytes,
+                "v1-v4 transaction data must change when converted to fake v5"
+            );
+
+            let _alt_tx: zcash_primitives::transaction::Transaction = fake_tx
+                .as_ref()
+                .try_into()
+                .expect("librustzcash deserialization must work for zebra serialized transactions");
+        }
+    }
+}
+
+#[test]
+fn zip244_round_trip() -> Result<()> {
+    zebra_test::init();
+
+    for test in zip0244::TEST_VECTORS.iter() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let reencoded = transaction.zcash_serialize_to_vec()?;
+        assert_eq!(test.tx, reencoded);
+
+        let _alt_tx: zcash_primitives::transaction::Transaction = (&transaction)
+            .try_into()
+            .expect("librustzcash deserialization must work for zebra serialized transactions");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn zip244_txid() -> Result<()> {
+    zebra_test::init();
+
+    for test in zip0244::TEST_VECTORS.iter() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let hasher = TxIdBuilder::new(&transaction);
+        let txid = hasher.txid()?;
+        assert_eq!(txid.0, test.txid);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_vec143_1() -> Result<()> {
+    zebra_test::init();
+
+    let transaction = ZIP143_1.zcash_deserialize_into::<Transaction>()?;
+
+    let hasher = SigHasher::new(
+        &transaction,
+        HashType::ALL,
+        NetworkUpgrade::Overwinter,
+        None,
+    );
+
+    let hash = hasher.sighash();
+    let expected = "a1f1a4e5cd9bd522322d661edd2af1bf2a7019cfab94ece18f4ba935b0a19073";
+    let result = hex::encode(hash);
+    let span = tracing::span!(
+        tracing::Level::ERROR,
+        "compare_final",
+        expected.len = expected.len(),
+        buf.len = result.len()
+    );
+    let _guard = span.enter();
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn test_vec143_2() -> Result<()> {
+    zebra_test::init();
+
+    let transaction = ZIP143_2.zcash_deserialize_into::<Transaction>()?;
+
+    let value = hex::decode("2f6e04963b4c0100")?.zcash_deserialize_into::<Amount<_>>()?;
+    let lock_script = Script::new(&hex::decode("53")?);
+    let input_ind = 1;
+
+    let hasher = SigHasher::new(
+        &transaction,
+        HashType::SINGLE,
+        NetworkUpgrade::Overwinter,
+        Some((input_ind, transparent::Output { value, lock_script })),
+    );
+
+    let hash = hasher.sighash();
+    let expected = "23652e76cb13b85a0e3363bb5fca061fa791c40c533eccee899364e6e60bb4f7";
+    let result: &[u8] = hash.as_ref();
+    let result = hex::encode(result);
+    let span = tracing::span!(
+        tracing::Level::ERROR,
+        "compare_final",
+        expected.len = expected.len(),
+        buf.len = result.len()
+    );
+    let _guard = span.enter();
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn test_vec243_1() -> Result<()> {
+    zebra_test::init();
+
+    let transaction = ZIP243_1.zcash_deserialize_into::<Transaction>()?;
+
+    let hasher = SigHasher::new(&transaction, HashType::ALL, NetworkUpgrade::Sapling, None);
+
+    let hash = hasher.sighash();
+    let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
+    let result = hex::encode(hash);
+    let span = tracing::span!(
+        tracing::Level::ERROR,
+        "compare_final",
+        expected.len = expected.len(),
+        buf.len = result.len()
+    );
+    let _guard = span.enter();
+    assert_eq!(expected, result);
+
+    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+        &transaction,
+        HashType::ALL,
+        NetworkUpgrade::Sapling,
+        None,
+    );
+    let result = hex::encode(alt_sighash);
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn test_vec243_2() -> Result<()> {
+    zebra_test::init();
+
+    let transaction = ZIP243_2.zcash_deserialize_into::<Transaction>()?;
+
+    let value = hex::decode("adedf02996510200")?.zcash_deserialize_into::<Amount<_>>()?;
+    let lock_script = Script::new(&[]);
+    let input_ind = 1;
+
+    let hasher = SigHasher::new(
+        &transaction,
+        HashType::NONE,
+        NetworkUpgrade::Sapling,
+        Some((input_ind, transparent::Output { value, lock_script })),
+    );
+
+    let hash = hasher.sighash();
+    let expected = "bbe6d84f57c56b29b914c694baaccb891297e961de3eb46c68e3c89c47b1a1db";
+    let result = hex::encode(hash);
+    let span = tracing::span!(
+        tracing::Level::ERROR,
+        "compare_final",
+        expected.len = expected.len(),
+        buf.len = result.len()
+    );
+    let _guard = span.enter();
+    assert_eq!(expected, result);
+
+    let lock_script = Script::new(&[]);
+    let prevout = transparent::Output { value, lock_script };
+    let index = input_ind as usize;
+    let inputs = transaction.inputs();
+    let input = Some((&prevout, &inputs[index], index));
+
+    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+        &transaction,
+        HashType::NONE,
+        NetworkUpgrade::Sapling,
+        input,
+    );
+    let result = hex::encode(alt_sighash);
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn test_vec243_3() -> Result<()> {
+    zebra_test::init();
+
+    let transaction = ZIP243_3.zcash_deserialize_into::<Transaction>()?;
+
+    let value = hex::decode("80f0fa0200000000")?.zcash_deserialize_into::<Amount<_>>()?;
+    let lock_script = Script::new(&hex::decode(
+        "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
+    )?);
+    let input_ind = 0;
+
+    let hasher = SigHasher::new(
+        &transaction,
+        HashType::ALL,
+        NetworkUpgrade::Sapling,
+        Some((input_ind, transparent::Output { value, lock_script })),
+    );
+
+    let hash = hasher.sighash();
+    let expected = "f3148f80dfab5e573d5edfe7a850f5fd39234f80b5429d3a57edcc11e34c585b";
+    let result = hex::encode(hash);
+    let span = tracing::span!(
+        tracing::Level::ERROR,
+        "compare_final",
+        expected.len = expected.len(),
+        buf.len = result.len()
+    );
+    let _guard = span.enter();
+    assert_eq!(expected, result);
+
+    let lock_script = Script::new(&hex::decode(
+        "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
+    )?);
+    let prevout = transparent::Output { value, lock_script };
+    let index = input_ind as usize;
+    let inputs = transaction.inputs();
+    let input = Some((&prevout, &inputs[index], index));
+
+    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+        &transaction,
+        HashType::ALL,
+        NetworkUpgrade::Sapling,
+        input,
+    );
+    let result = hex::encode(alt_sighash);
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn zip143_sighash() -> Result<()> {
+    zebra_test::init();
+
+    for (i, test) in zip0143::TEST_VECTORS.iter().enumerate() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let input = match test.transparent_input {
+            Some(transparent_input) => Some((
+                transparent_input,
+                transparent::Output {
+                    value: test.amount.try_into()?,
+                    lock_script: transparent::Script::new(test.script_code.as_ref()),
+                },
+            )),
+            None => None,
+        };
+        let result = hex::encode(
+            transaction.sighash(
+                NetworkUpgrade::from_branch_id(test.consensus_branch_id)
+                    .expect("must be a valid branch ID"),
+                HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+                input,
+            ),
+        );
+        let expected = hex::encode(test.sighash);
+        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn zip243_sighash() -> Result<()> {
+    zebra_test::init();
+
+    for (i, test) in zip0243::TEST_VECTORS.iter().enumerate() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let input = match test.transparent_input {
+            Some(transparent_input) => Some((
+                transparent_input,
+                transparent::Output {
+                    value: test.amount.try_into()?,
+                    lock_script: transparent::Script::new(test.script_code.as_ref()),
+                },
+            )),
+            None => None,
+        };
+        let result = hex::encode(
+            transaction.sighash(
+                NetworkUpgrade::from_branch_id(test.consensus_branch_id)
+                    .expect("must be a valid branch ID"),
+                HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+                input,
+            ),
+        );
+        let expected = hex::encode(test.sighash);
+        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn zip244_sighash() -> Result<()> {
+    zebra_test::init();
+
+    for (i, test) in zip0244::TEST_VECTORS.iter().enumerate() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let input = match test.amount {
+            Some(amount) => Some((
+                test.transparent_input
+                    .expect("test vector must have transparent_input when it has amount"),
+                transparent::Output {
+                    value: amount.try_into()?,
+                    lock_script: transparent::Script::new(
+                        test.script_code
+                            .as_ref()
+                            .expect("test vector must have script_code when it has amount"),
+                    ),
+                },
+            )),
+            None => None,
+        };
+        let result = hex::encode(transaction.sighash(NetworkUpgrade::Nu5, HashType::ALL, input));
+        let expected = hex::encode(test.sighash_all);
+        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn binding_signatures() {
+    zebra_test::init();
+
+    binding_signatures_for_network(Network::Mainnet);
+    binding_signatures_for_network(Network::Testnet);
+}
+
+fn binding_signatures_for_network(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (height, bytes) in block_iter {
+        let upgrade = NetworkUpgrade::current(network, Height(*height));
+
+        let block = bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("a valid block");
+
+        for tx in block.transactions {
+            match &*tx {
+                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
+                Transaction::V4 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
+
+                        let bvk = redjubjub::VerificationKey::try_from(
+                            sapling_shielded_data.binding_verification_key(),
+                        )
+                        .expect("a valid redjubjub::VerificationKey");
+
+                        bvk.verify(
+                            shielded_sighash.as_ref(),
+                            &sapling_shielded_data.binding_sig,
+                        )
+                        .expect("must pass verification");
+                    }
+                }
+                Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
+
+                        let bvk = redjubjub::VerificationKey::try_from(
+                            sapling_shielded_data.binding_verification_key(),
+                        )
+                        .expect("a valid redjubjub::VerificationKey");
+
+                        bvk.verify(
+                            shielded_sighash.as_ref(),
+                            &sapling_shielded_data.binding_sig,
+                        )
+                        .expect("must pass verification");
+                    }
+                }
+            }
+        }
+    }
 }
