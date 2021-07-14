@@ -60,6 +60,7 @@ proptest! {
             .push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
@@ -68,6 +69,7 @@ proptest! {
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
+            prop_assert!(state.mem.eq_internal_state(&previous_mem));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result =
@@ -75,6 +77,7 @@ proptest! {
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
         }
     }
 
@@ -108,6 +111,7 @@ proptest! {
             .push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result =
@@ -126,6 +130,7 @@ proptest! {
         );
         // block was rejected
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
@@ -161,6 +166,7 @@ proptest! {
             .push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result =
@@ -176,6 +182,7 @@ proptest! {
             )
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
@@ -219,6 +226,7 @@ proptest! {
             .push(transaction2.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result =
@@ -234,6 +242,7 @@ proptest! {
             )
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
@@ -282,6 +291,7 @@ proptest! {
             .push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+        let mut previous_mem = state.mem.clone();
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
@@ -291,6 +301,7 @@ proptest! {
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
+            prop_assert!(state.mem.eq_internal_state(&previous_mem));
 
             block1_hash = block1.hash;
         } else {
@@ -300,8 +311,10 @@ proptest! {
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
 
             block1_hash = block1.hash;
+            previous_mem = state.mem.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
@@ -318,6 +331,7 @@ proptest! {
             )
         );
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
 }
 
