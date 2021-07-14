@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - TODO: Update with release date before merging
 
+Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. New validation
+rules were implemented for transactions, preventing double spends in the Sprout pool, checking
+Sapling spends in V5 transactions, and some initial work to validate parts of Orchard transactions.
+
 ### Added
 
 - Reject duplicate sprout nullifiers in the state (#2477)
