@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, sprout, work::difficulty::CompactDifficulty};
+use zebra_chain::{block, orchard, sapling, sprout, work::difficulty::CompactDifficulty};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -81,6 +81,20 @@ pub enum ValidateContextError {
         nullifier: sprout::Nullifier,
         in_finalized_state: bool,
     },
+
+    #[error("sapling double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
+    #[non_exhaustive]
+    DuplicateSaplingNullifier {
+        nullifier: sapling::Nullifier,
+        in_finalized_state: bool,
+    },
+
+    #[error("orchard double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
+    #[non_exhaustive]
+    DuplicateOrchardNullifier {
+        nullifier: orchard::Nullifier,
+        in_finalized_state: bool,
+    },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
@@ -92,6 +106,24 @@ pub(crate) trait DuplicateNullifierError {
 impl DuplicateNullifierError for sprout::Nullifier {
     fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
         ValidateContextError::DuplicateSproutNullifier {
+            nullifier: *self,
+            in_finalized_state,
+        }
+    }
+}
+
+impl DuplicateNullifierError for sapling::Nullifier {
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
+        ValidateContextError::DuplicateSaplingNullifier {
+            nullifier: *self,
+            in_finalized_state,
+        }
+    }
+}
+
+impl DuplicateNullifierError for orchard::Nullifier {
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
+        ValidateContextError::DuplicateOrchardNullifier {
             nullifier: *self,
             in_finalized_state,
         }
