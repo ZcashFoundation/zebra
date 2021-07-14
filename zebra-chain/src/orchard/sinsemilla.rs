@@ -272,7 +272,6 @@ mod tests {
     #[allow(non_snake_case)]
     fn hackworks_group_hash_test_vectors() {
         use group::GroupEncoding;
-        use std::iter::FromIterator;
 
         for tv in tests::vectors::GROUP_HASHES.iter() {
             let D = tv.domain.as_slice();
