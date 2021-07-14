@@ -9,7 +9,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Reject duplicate sprout nullifiers in the state (#2477)
-- Use the block verifier and non-finalized state in the cached state tests (#2463)
 - Add methods for getting block nullifiers (#2465)
 - Verify orchard spend auth (#2442)
 - Parse MSG_WTX inventory type (part of ZIP-239) (#2446)
@@ -40,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Stop ignoring sapling binding signature errors (#2472)
 - Always compute sighash with librustzcash (#2469)
 - Fix bug in sighash calculation for coinbase transactions (#2459)
+- Increase coverage of cached state tests by covering non-finalized state validation (#2463)
 
 ### Security
 
