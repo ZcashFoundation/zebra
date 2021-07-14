@@ -151,7 +151,8 @@ fn rejection_restores_internal_state() -> Result<()> {
     Ok(())
 }
 
-/// Check that different blocks create different internal chain states.
+/// Check that different blocks create different internal chain states,
+/// and that all the state fields are covered by `eq_internal_state`.
 #[test]
 fn different_blocks_different_chains() -> Result<()> {
     zebra_test::init();
