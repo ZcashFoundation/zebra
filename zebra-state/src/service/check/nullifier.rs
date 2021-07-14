@@ -74,8 +74,6 @@ where
         }
     }
 
-    // TODO:  test that the chain's nullifiers are not modified on error (this PR)
-
     Ok(())
 }
 
