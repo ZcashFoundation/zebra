@@ -46,6 +46,29 @@ impl NonFinalizedState {
         }
     }
 
+    /// Is the internal state of `self` the same as `other`?
+    ///
+    /// [`Chain`] has a custom [`Eq`] implementation based on proof of work,
+    /// which is used to select the best chain. So we can't derive [`Eq`] for [`NonFinalizedState`].
+    ///
+    /// Unlike the custom trait impl, this method returns `true` if the entire internal state
+    /// of two non-finalized states is equal.
+    ///
+    /// If the internal states are different, it returns `false`,
+    /// even if the chains and blocks are equal.
+    #[cfg(test)]
+    pub(crate) fn eq_internal_state(&self, other: &NonFinalizedState) -> bool {
+        // this method must be updated every time a field is added to NonFinalizedState
+
+        self.chain_set.len() == other.chain_set.len()
+            && self
+                .chain_set
+                .iter()
+                .zip(other.chain_set.iter())
+                .all(|(self_chain, other_chain)| self_chain.eq_internal_state(other_chain))
+            && self.network == other.network
+    }
+
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizedBlock {

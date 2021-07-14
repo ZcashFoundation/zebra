@@ -20,17 +20,57 @@ pub struct Chain {
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
     pub created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
-    spent_utxos: HashSet<transparent::OutPoint>,
-    // TODO: add sprout, sapling and orchard anchors (#1320)
-    sprout_anchors: HashSet<sprout::tree::Root>,
-    sapling_anchors: HashSet<sapling::tree::Root>,
-    sprout_nullifiers: HashSet<sprout::Nullifier>,
-    sapling_nullifiers: HashSet<sapling::Nullifier>,
-    orchard_nullifiers: HashSet<orchard::Nullifier>,
-    partial_cumulative_work: PartialCumulativeWork,
+    pub(super) spent_utxos: HashSet<transparent::OutPoint>,
+
+    pub(super) sprout_anchors: HashSet<sprout::tree::Root>,
+    pub(super) sapling_anchors: HashSet<sapling::tree::Root>,
+    pub(super) orchard_anchors: HashSet<orchard::tree::Root>,
+
+    pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
+
+    pub(super) partial_cumulative_work: PartialCumulativeWork,
 }
 
 impl Chain {
+    /// Is the internal state of `self` the same as `other`?
+    ///
+    /// [`Chain`] has custom [`Eq`] and [`Ord`] implementations based on proof of work,
+    /// which are used to select the best chain. So we can't derive [`Eq`] for [`Chain`].
+    ///
+    /// Unlike the custom trait impls, this method returns `true` if the entire internal state
+    /// of two chains is equal.
+    ///
+    /// If the internal states are different, it returns `false`,
+    /// even if the blocks in the two chains are equal.
+    #[cfg(test)]
+    pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
+        // this method must be updated every time a field is added to Chain
+
+        // blocks, heights, hashes
+        self.blocks == other.blocks &&
+            self.height_by_hash == other.height_by_hash &&
+            self.tx_by_hash == other.tx_by_hash &&
+
+            // transparent UTXOs
+            self.created_utxos == other.created_utxos &&
+            self.spent_utxos == other.spent_utxos &&
+
+            // anchors
+            self.sprout_anchors == other.sprout_anchors &&
+            self.sapling_anchors == other.sapling_anchors &&
+            self.orchard_anchors == other.orchard_anchors &&
+
+            // nullifiers
+            self.sprout_nullifiers == other.sprout_nullifiers &&
+            self.sapling_nullifiers == other.sapling_nullifiers &&
+            self.orchard_nullifiers == other.orchard_nullifiers &&
+
+            // proof of work
+            self.partial_cumulative_work == other.partial_cumulative_work
+    }
+
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
     /// If the block is invalid, drop this chain and return an error.
