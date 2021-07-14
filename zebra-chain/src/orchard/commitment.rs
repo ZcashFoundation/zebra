@@ -124,13 +124,10 @@ impl NoteCommitment {
 
         // The `TryFrom<Diversifier>` impls for the `pallas::*Point`s handles
         // calling `DiversifyHash` implicitly.
-        let g_d_bytes: [u8; 32];
         // _diversified base_
-        if let Ok(g_d) = pallas::Affine::try_from(note.address.diversifier) {
-            g_d_bytes = g_d.to_bytes();
-        } else {
-            return None;
-        }
+        let g_d_bytes = pallas::Affine::try_from(note.address.diversifier)
+            .ok()?
+            .to_bytes();
 
         let pk_d_bytes: [u8; 32] = note.address.transmission_key.into();
         let v_bytes = note.value.to_bytes();

@@ -246,19 +246,18 @@ mod tests {
     fn hackworks_test_vectors() {
         use group::GroupEncoding;
         use halo2::arithmetic::FieldExt;
-        use std::iter::FromIterator;
 
         for tv in tests::vectors::SINSEMILLA.iter() {
             let D = tv.domain.as_slice();
-            let M = &<BitVec<Lsb0, u8> as FromIterator<bool>>::from_iter(tv.msg.clone());
+            let M: &BitVec<Lsb0, u8> = &tv.msg.iter().collect();
 
             assert_eq!(
-                sinsemilla_hash_to_point(D, M).expect(""),
+                sinsemilla_hash_to_point(D, M).expect("should not fail per Theorem 5.4.4"),
                 pallas::Point::from_bytes(&tv.point).unwrap()
             );
 
             assert_eq!(
-                sinsemilla_hash(D, M).expect(""),
+                sinsemilla_hash(D, M).expect("should not fail per Theorem 5.4.4"),
                 pallas::Base::from_bytes(&tv.hash).unwrap()
             )
         }

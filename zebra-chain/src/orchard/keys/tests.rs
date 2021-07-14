@@ -55,22 +55,22 @@ proptest! {
         zebra_test::init();
 
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(spending_key == SpendingKey::from_bytes(spending_key.bytes, spending_key.network));
+        assert_eq!(spending_key, SpendingKey::from_bytes(spending_key.bytes, spending_key.network));
 
         let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(spend_authorizing_key == spend_authorizing_key.clone());
+        assert_eq!(spend_authorizing_key, spend_authorizing_key.clone());
 
         // ConstantTimeEq not implemented as it's a public value
         let spend_validating_key = SpendValidatingKey::from(spend_authorizing_key);
 
         let nullifier_deriving_key = NullifierDerivingKey::from(spending_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(nullifier_deriving_key == nullifier_deriving_key.clone());
+        assert_eq!(nullifier_deriving_key, nullifier_deriving_key.clone());
 
         let ivk_commit_randomness = IvkCommitRandomness::from(spending_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(ivk_commit_randomness == ivk_commit_randomness.clone());
+        assert_eq!(ivk_commit_randomness, ivk_commit_randomness.clone());
 
         let full_viewing_key = FullViewingKey {
             spend_validating_key,
@@ -78,19 +78,19 @@ proptest! {
             ivk_commit_randomness,
         };
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(full_viewing_key == full_viewing_key.clone());
+        assert_eq!(full_viewing_key, full_viewing_key.clone());
 
         let diversifier_key = DiversifierKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(diversifier_key == diversifier_key.clone());
+        assert_eq!(diversifier_key, diversifier_key.clone());
 
         let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(incoming_viewing_key == incoming_viewing_key.clone());
+        assert_eq!(incoming_viewing_key, incoming_viewing_key.clone());
 
         let outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(outgoing_viewing_key == outgoing_viewing_key.clone());
+        assert_eq!(outgoing_viewing_key, outgoing_viewing_key.clone());
 
         // ConstantTimeEq not implemented for Diversifier as it's a public value
         let diversifier = Diversifier::from(diversifier_key);

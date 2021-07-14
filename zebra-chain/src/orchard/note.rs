@@ -20,7 +20,7 @@ pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
 pub use nullifiers::Nullifier;
 
 #[derive(Clone, Copy, Debug)]
-///
+/// A uniformly random seed (rseed) used in the Orchard note creation.
 pub struct SeedRandomness(pub(crate) [u8; 32]);
 
 impl SeedRandomness {
