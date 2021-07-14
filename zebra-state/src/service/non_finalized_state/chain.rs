@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{service::check, PreparedBlock, ValidateContextError};
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Chain {
     pub blocks: BTreeMap<block::Height, PreparedBlock>,
     pub height_by_hash: HashMap<block::Hash, block::Height>,

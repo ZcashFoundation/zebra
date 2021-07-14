@@ -24,17 +24,28 @@ use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 use self::chain::Chain;
 
 /// The state of the chains in memory, incuding queued blocks.
-#[derive(Default)]
+#[derive(Debug, Clone)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
     /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
     pub chain_set: BTreeSet<Box<Chain>>,
-    /// The configured Zcash network
+
+    /// The configured Zcash network.
+    //
+    // Note: this field is currently unused, but it's useful for debugging.
     pub network: Network,
 }
 
 impl NonFinalizedState {
+    /// Returns a new non-finalized state for `network`.
+    pub fn new(network: Network) -> NonFinalizedState {
+        NonFinalizedState {
+            chain_set: Default::default(),
+            network,
+        }
+    }
+
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizedBlock {
