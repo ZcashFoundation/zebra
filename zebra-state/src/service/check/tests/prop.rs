@@ -1,4 +1,4 @@
-//! Randomised property tests for state contextual validation nullifier: (), in_finalized_state: ()  nullifier: (), in_finalized_state: ()  checks.
+//! Randomised property tests for state contextual validation
 
 use std::{convert::TryInto, sync::Arc};
 
@@ -8,7 +8,8 @@ use proptest::prelude::*;
 use zebra_chain::{
     block::{Block, Height},
     fmt::TypeNameToDebug,
-    parameters::Network::*,
+    orchard,
+    parameters::{Network::*, NetworkUpgrade::Nu5},
     primitives::Groth16Proof,
     sapling::{self, FieldNotPresent, PerSpendAnchor, TransferData::*},
     serialization::ZcashDeserializeInto,
@@ -21,7 +22,9 @@ use crate::{
     service::StateService,
     tests::Prepare,
     FinalizedBlock,
-    ValidateContextError::{DuplicateSaplingNullifier, DuplicateSproutNullifier},
+    ValidateContextError::{
+        DuplicateOrchardNullifier, DuplicateSaplingNullifier, DuplicateSproutNullifier,
+    },
 };
 
 // These tests use the `Arbitrary` trait to easily generate complex types,
@@ -572,6 +575,261 @@ proptest! {
     }
 }
 
+// orchard
+
+proptest! {
+    /// Make sure an arbitrary orchard nullifier is accepted by state contextual validation.
+    ///
+    /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
+    /// (And that the test infrastructure generally works.)
+    #[test]
+    fn accept_distinct_arbitrary_orchard_nullifiers(
+        authorized_action in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        use_finalized_state in any::<bool>(),
+    ) {
+        zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let transaction = transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data.0,
+            &[authorized_action.0]
+        );
+
+        // convert the coinbase transaction to a version that the non-finalized state will accept
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+
+        block1
+            .transactions
+            .push(transaction.into());
+
+        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
+
+        // randomly choose to commit the block to the finalized or non-finalized state
+        if use_finalized_state {
+            let block1 = FinalizedBlock::from(Arc::new(block1));
+            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+
+            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(commit_result.is_ok());
+            prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        } else {
+            let block1 = Arc::new(block1).prepare();
+            let commit_result =
+                state.validate_and_commit(block1.clone());
+
+            prop_assert_eq!(commit_result, Ok(()));
+            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+        }
+    }
+
+    /// Make sure duplicate orchard nullifiers are rejected by state contextual validation,
+    /// if they come from different AuthorizedActions in the same orchard::ShieldedData/Transaction.
+    #[test]
+    fn reject_duplicate_orchard_nullifiers_in_transaction(
+        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+    ) {
+        zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        // we can't reliably make orchard nullifiers distinct,
+        // because they must be valid Pallas points.
+        // So just skip the test if they are the same.
+        prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
+
+        // create a double-spend across two authorized_actions
+        let duplicate_nullifier = authorized_action1.action.nullifier;
+        authorized_action2.action.nullifier = duplicate_nullifier;
+
+        let transaction = transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data.0,
+            &[authorized_action1.0, authorized_action2.0],
+        );
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+
+        block1
+            .transactions
+            .push(transaction.into());
+
+        let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
+
+        let block1 = Arc::new(block1).prepare();
+        let commit_result =
+            state.validate_and_commit(block1);
+
+        prop_assert_eq!(
+            commit_result,
+            Err(
+                DuplicateOrchardNullifier {
+                    nullifier: duplicate_nullifier,
+                    in_finalized_state: false,
+                }.into()
+            )
+        );
+        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+    }
+
+    /// Make sure duplicate orchard nullifiers are rejected by state contextual validation,
+    /// if they come from different transactions in the same block.
+    #[test]
+    fn reject_duplicate_orchard_nullifiers_in_block(
+        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+    ) {
+        zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
+
+        // create a double-spend across two transactions
+        let duplicate_nullifier = authorized_action1.action.nullifier;
+        authorized_action2.action.nullifier = duplicate_nullifier;
+
+        let transaction1 = transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data1.0,
+            &[authorized_action1.0]
+        );
+        let transaction2 = transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data2.0,
+            &[authorized_action2.0]
+        );
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+
+        block1
+            .transactions
+            .push(transaction1.into());
+        block1
+            .transactions
+            .push(transaction2.into());
+
+        let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
+
+        let block1 = Arc::new(block1).prepare();
+        let commit_result =
+            state.validate_and_commit(block1);
+
+        prop_assert_eq!(
+            commit_result,
+            Err(
+                DuplicateOrchardNullifier {
+                    nullifier: duplicate_nullifier,
+                    in_finalized_state: false,
+                }.into()
+            )
+        );
+        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+    }
+
+    /// Make sure duplicate orchard nullifiers are rejected by state contextual validation,
+    /// if they come from different blocks in the same chain.
+    #[test]
+    fn reject_duplicate_orchard_nullifiers_in_chain(
+        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        duplicate_in_finalized_state in any::<bool>(),
+    ) {
+        zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+        let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
+
+        // create a double-spend across two blocks
+        let duplicate_nullifier = authorized_action1.action.nullifier;
+        authorized_action2.action.nullifier = duplicate_nullifier;
+
+        let transaction1 = transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data1.0,
+            &[authorized_action1.0]
+        );
+        let transaction2 = transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data2.0,
+            &[authorized_action2.0]
+        );
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+        block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
+
+        block1
+            .transactions
+            .push(transaction1.into());
+        block2
+            .transactions
+            .push(transaction2.into());
+
+        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+        let mut previous_mem = state.mem.clone();
+
+        let block1_hash;
+        // randomly choose to commit the next block to the finalized or non-finalized state
+        if duplicate_in_finalized_state {
+            let block1 = FinalizedBlock::from(Arc::new(block1));
+            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+
+            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(commit_result.is_ok());
+            prop_assert!(state.mem.eq_internal_state(&previous_mem));
+
+            block1_hash = block1.hash;
+        } else {
+            let block1 = Arc::new(block1).prepare();
+            let commit_result =
+                state.validate_and_commit(block1.clone());
+
+            prop_assert_eq!(commit_result, Ok(()));
+            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+
+            block1_hash = block1.hash;
+            previous_mem = state.mem.clone();
+        }
+
+        let block2 = Arc::new(block2).prepare();
+        let commit_result =
+            state.validate_and_commit(block2);
+
+        prop_assert_eq!(
+            commit_result,
+            Err(
+                DuplicateOrchardNullifier {
+                    nullifier: duplicate_nullifier,
+                    in_finalized_state: duplicate_in_finalized_state,
+                }.into()
+            )
+        );
+        prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+    }
+}
+
 /// Return a new `StateService` containing the mainnet genesis block.
 /// Also returns the finalized genesis block itself.
 fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
@@ -595,10 +853,10 @@ fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
 }
 
 /// Make sure the supplied nullifiers are distinct, modifying them if necessary.
-fn make_distinct_nullifiers<'shielded_data, NullifierT>(
-    nullifiers: impl IntoIterator<Item = &'shielded_data mut NullifierT>,
+fn make_distinct_nullifiers<'until_modified, NullifierT>(
+    nullifiers: impl IntoIterator<Item = &'until_modified mut NullifierT>,
 ) where
-    NullifierT: Into<[u8; 32]> + Clone + Eq + std::hash::Hash + 'shielded_data,
+    NullifierT: Into<[u8; 32]> + Clone + Eq + std::hash::Hash + 'until_modified,
     [u8; 32]: Into<NullifierT>,
 {
     let nullifiers: Vec<_> = nullifiers.into_iter().collect();
@@ -625,9 +883,9 @@ fn make_distinct_nullifiers<'shielded_data, NullifierT>(
 /// # Panics
 ///
 /// If there are no `JoinSplit`s in `joinsplits`.
-fn transaction_v4_with_joinsplit_data<'js>(
+fn transaction_v4_with_joinsplit_data<'until_cloned>(
     joinsplit_data: impl Into<Option<JoinSplitData<Groth16Proof>>>,
-    joinsplits: impl IntoIterator<Item = &'js JoinSplit<Groth16Proof>>,
+    joinsplits: impl IntoIterator<Item = &'until_cloned JoinSplit<Groth16Proof>>,
 ) -> Transaction {
     let mut joinsplit_data = joinsplit_data.into();
     let joinsplits: Vec<_> = joinsplits.into_iter().cloned().collect();
@@ -673,9 +931,9 @@ fn transaction_v4_with_joinsplit_data<'js>(
 /// # Panics
 ///
 /// If there are no `Spend`s in `spends`, and no `Output`s in `sapling_shielded_data`.
-fn transaction_v4_with_sapling_shielded_data<'s>(
+fn transaction_v4_with_sapling_shielded_data<'until_cloned>(
     sapling_shielded_data: impl Into<Option<sapling::ShieldedData<PerSpendAnchor>>>,
-    spends: impl IntoIterator<Item = &'s sapling::Spend<PerSpendAnchor>>,
+    spends: impl IntoIterator<Item = &'until_cloned sapling::Spend<PerSpendAnchor>>,
 ) -> Transaction {
     let mut sapling_shielded_data = sapling_shielded_data.into();
     let spends: Vec<_> = spends.into_iter().cloned().collect();
@@ -727,6 +985,43 @@ fn transaction_v4_with_sapling_shielded_data<'s>(
         expiry_height: Height(0),
         joinsplit_data: None,
         sapling_shielded_data,
+    }
+}
+
+/// Return a `Transaction::V5` containing `orchard_shielded_data`.
+/// with its `AuthorizedAction`s replaced by `authorized_actions`.
+///
+/// Other fields have empty or default values.
+///
+/// # Panics
+///
+/// If there are no `AuthorizedAction`s in `authorized_actions`.
+fn transaction_v5_with_orchard_shielded_data<'until_cloned>(
+    orchard_shielded_data: impl Into<Option<orchard::ShieldedData>>,
+    authorized_actions: impl IntoIterator<Item = &'until_cloned orchard::AuthorizedAction>,
+) -> Transaction {
+    let mut orchard_shielded_data = orchard_shielded_data.into();
+    let authorized_actions: Vec<_> = authorized_actions.into_iter().cloned().collect();
+
+    if let Some(ref mut orchard_shielded_data) = orchard_shielded_data {
+        // make sure there are no other nullifiers, by replacing all the authorized_actions
+        orchard_shielded_data.actions = authorized_actions.try_into().expect(
+            "unexpected invalid orchard::ShieldedData: must have at least one AuthorizedAction",
+        );
+
+        // set value balance to 0 to pass the chain value pool checks
+        let zero_amount = 0.try_into().expect("unexpected invalid zero amount");
+        orchard_shielded_data.value_balance = zero_amount;
+    }
+
+    Transaction::V5 {
+        network_upgrade: Nu5,
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        lock_time: LockTime::min_lock_time(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data,
     }
 }
 
