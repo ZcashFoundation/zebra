@@ -149,18 +149,9 @@ impl NoteCommitment {
         ))
     }
 
-    /// Hash Extractor for Pallas
-    ///
-    /// https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
-    // TODO: dedupe with the other extract_x()
+    /// Extract the x coordinate of the note commitment.
     pub fn extract_x(&self) -> pallas::Base {
-        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
-
-        match option {
-            // If Some, it's not the identity.
-            Some(coordinates) => *coordinates.x(),
-            _ => pallas::Base::zero(),
-        }
+        extract_p(self.0.into())
     }
 }
 
