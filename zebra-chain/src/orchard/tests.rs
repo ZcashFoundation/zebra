@@ -1,3 +1,4 @@
 mod preallocate;
 mod prop;
-pub mod vectors;
+mod tree;
+pub(crate) mod vectors;

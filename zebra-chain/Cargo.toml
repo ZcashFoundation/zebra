@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-alpha.12"
+version = "1.0.0-alpha.13"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -46,6 +46,7 @@ zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "0
 bigint = "4"
 uint = "0.9.1"
 bls12_381 = "0.5.0"
+incrementalmerkletree = "0.1.0"
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
