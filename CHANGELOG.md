@@ -4,7 +4,7 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - TODO: Update with release date before merging
+## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - 2021-07-15
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. New validation
 rules were implemented for transactions, preventing double spends in the Sprout pool, checking
