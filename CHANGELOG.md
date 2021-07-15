@@ -4,6 +4,49 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - 2021-07-15
+
+Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. New validation
+rules were implemented for transactions, preventing double spends in the Sprout pool, checking
+Sapling spends in V5 transactions, and some initial work to validate parts of Orchard transactions.
+
+### Added
+
+- Reject duplicate sprout nullifiers in the state (#2477)
+- Add methods for getting block nullifiers (#2465)
+- Verify orchard spend auth (#2442)
+- Parse and ignore MSG_WTX inventory type in network messages (part of ZIP-239) (#2446)
+- Add ZIP-244 signature hash support (#2165)
+- Add HistoryTree struct (#2396)
+- Add ZIP-0244 TxId Digest support (#2129)
+- Validate V5 transactions with Sapling shielded data (#2437)
+
+#### Documentation
+
+- Document some consensus-critical finalized state behaviour (#2476)
+- Value pools design (#2430)
+
+### Changed
+
+- Move Utxo type to zebra-chain (#2481)
+- Combine near-duplicate Utxo creation functions (#2467)
+
+#### Documentation
+
+- Update state RFC for incremental trees, value pools, and RocksDB (#2456)
+- Modify UTXO and state designs for transparent coinbase output checks (#2413)
+
+### Fixed
+
+- When a parent block is rejected, also reject its children (#2479)
+- Restore the previous non-finalized chain if a block is invalid (#2478)
+- Stop ignoring sapling binding signature errors (#2472)
+- Always compute sighash with librustzcash (#2469)
+- Fix bug in sighash calculation for coinbase transactions (#2459)
+- Increase coverage of cached state tests by covering non-finalized state validation (#2463)
+
+### Security
+
 ## [Zebra 1.0.0-alpha.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.12) - 2021-07-02
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. It also includes documentation updates and security fixes. In particular, Zebra no longer gossips unreachable addresses to other nodes and users should update and restart any running Zebra nodes.
