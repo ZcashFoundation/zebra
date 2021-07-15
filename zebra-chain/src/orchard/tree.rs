@@ -275,4 +275,3 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
         tree
     }
 }
-
