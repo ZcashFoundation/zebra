@@ -108,7 +108,7 @@ pub struct Note {
     /// the _note_.
     pub rho: Rho,
     /// 32 random bytes from which _rcm_, _psi_, and the _ephemeral private key_
-    /// is derived.
+    /// are derived.
     pub rseed: SeedRandomness,
 }
 
