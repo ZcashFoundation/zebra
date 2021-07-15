@@ -11,7 +11,7 @@ use zebra_chain::{
     parameters::Network::*,
     primitives::Groth16Proof,
     serialization::ZcashDeserializeInto,
-    sprout::{self, JoinSplit},
+    sprout::JoinSplit,
     transaction::{JoinSplitData, LockTime, Transaction},
 };
 
@@ -27,6 +27,9 @@ use crate::{
 // but the differences shouldn't matter,
 // because we're only interested in spend validation,
 // (and passing various other state checks).
+
+// sprout
+
 proptest! {
     /// Make sure an arbitrary sprout nullifier is accepted by state contextual validation.
     ///
@@ -35,7 +38,7 @@ proptest! {
     #[test]
     fn accept_distinct_arbitrary_sprout_nullifiers(
         mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
@@ -46,11 +49,7 @@ proptest! {
 
         make_distinct_nullifiers(&mut joinsplit.nullifiers);
 
-        // make sure there are no other nullifiers
-        joinsplit_data.first = joinsplit.0;
-        joinsplit_data.rest = Vec::new();
-
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0);
+        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, &[joinsplit.0]);
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -86,7 +85,7 @@ proptest! {
     #[test]
     fn reject_duplicate_sprout_nullifiers_in_joinsplit(
         mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -99,10 +98,7 @@ proptest! {
         let duplicate_nullifier = joinsplit.nullifiers[0];
         joinsplit.nullifiers[1] = duplicate_nullifier;
 
-        joinsplit_data.first = joinsplit.0;
-        joinsplit_data.rest = Vec::new();
-
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0);
+        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, &[joinsplit.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -139,7 +135,7 @@ proptest! {
     fn reject_duplicate_sprout_nullifiers_in_transaction(
         mut joinsplit1 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         mut joinsplit2 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -153,11 +149,10 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        // make sure there are no other nullifiers
-        joinsplit_data.first = joinsplit1.0;
-        joinsplit_data.rest = vec![joinsplit2.0];
-
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0);
+        let transaction = transaction_v4_with_joinsplit_data(
+            joinsplit_data.0,
+            &[joinsplit1.0, joinsplit2.0]
+        );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -191,8 +186,8 @@ proptest! {
     fn reject_duplicate_sprout_nullifiers_in_block(
         mut joinsplit1 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         mut joinsplit2 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data1 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data2 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data1 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data2 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -206,15 +201,8 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        // make sure there are no other nullifiers
-        joinsplit_data1.first = joinsplit1.0;
-        joinsplit_data1.rest = Vec::new();
-
-        joinsplit_data2.first = joinsplit2.0;
-        joinsplit_data2.rest = Vec::new();
-
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0);
-        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0);
+        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, &[joinsplit1.0]);
+        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, &[joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -251,8 +239,8 @@ proptest! {
     fn reject_duplicate_sprout_nullifiers_in_chain(
         mut joinsplit1 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         mut joinsplit2 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data1 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
-        mut joinsplit_data2 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data1 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        joinsplit_data2 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
@@ -270,15 +258,8 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        // make sure there are no other nullifiers
-        joinsplit_data1.first = joinsplit1.0;
-        joinsplit_data1.rest = Vec::new();
-
-        joinsplit_data2.first = joinsplit2.0;
-        joinsplit_data2.rest = Vec::new();
-
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0);
-        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0);
+        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, &[joinsplit1.0]);
+        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, &[joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -358,15 +339,21 @@ fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
 }
 
 /// Make sure the supplied nullifiers are distinct, modifying them if necessary.
-fn make_distinct_nullifiers<'joinsplit>(
-    nullifiers: impl IntoIterator<Item = &'joinsplit mut sprout::Nullifier>,
-) {
+fn make_distinct_nullifiers<'shielded_data, NullifierT>(
+    nullifiers: impl IntoIterator<Item = &'shielded_data mut NullifierT>,
+) where
+    NullifierT: Into<[u8; 32]> + Clone + Eq + std::hash::Hash + 'shielded_data,
+    [u8; 32]: Into<NullifierT>,
+{
     let nullifiers: Vec<_> = nullifiers.into_iter().collect();
 
     if nullifiers.iter().unique().count() < nullifiers.len() {
         let mut tweak: u8 = 0x00;
         for nullifier in nullifiers {
-            nullifier.0[0] = tweak;
+            let mut nullifier_bytes: [u8; 32] = nullifier.clone().into();
+            nullifier_bytes[0] = tweak;
+            *nullifier = nullifier_bytes.into();
+
             tweak = tweak
                 .checked_add(0x01)
                 .expect("unexpectedly large nullifier list");
@@ -374,16 +361,30 @@ fn make_distinct_nullifiers<'joinsplit>(
     }
 }
 
-/// Return a `Transaction::V4` containing `joinsplit_data`.
+/// Return a `Transaction::V4` containing `joinsplit_data`,
+/// with its `JoinSplit`s replaced by `joinsplits`.
 ///
 /// Other fields have empty or default values.
-fn transaction_v4_with_joinsplit_data(
+///
+/// # Panics
+///
+/// If there are no `JoinSplit`s in `joinsplits`.
+fn transaction_v4_with_joinsplit_data<'js>(
     joinsplit_data: impl Into<Option<JoinSplitData<Groth16Proof>>>,
+    joinsplits: impl IntoIterator<Item = &'js JoinSplit<Groth16Proof>>,
 ) -> Transaction {
     let mut joinsplit_data = joinsplit_data.into();
+    let joinsplits: Vec<_> = joinsplits.into_iter().cloned().collect();
 
-    // set value balance to 0 to pass the chain value pool checks
     if let Some(ref mut joinsplit_data) = joinsplit_data {
+        // make sure there are no other nullifiers, by replacing all the joinsplits
+        let (first, rest) = joinsplits
+            .split_first()
+            .expect("unexpected empty joinsplits");
+        joinsplit_data.first = first.clone();
+        joinsplit_data.rest = rest.to_vec();
+
+        // set value balance to 0 to pass the chain value pool checks
         let zero_amount = 0.try_into().expect("unexpected invalid zero amount");
 
         joinsplit_data.first.vpub_old = zero_amount;
