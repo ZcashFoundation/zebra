@@ -295,6 +295,15 @@ impl std::ops::Div<u64> for Amount<NonNegative> {
     }
 }
 
+impl<C> std::iter::Sum<Amount<C>> for Result<Amount<C>>
+where
+    C: Constraint,
+{
+    fn sum<I: Iterator<Item = Amount<C>>>(iter: I) -> Self {
+        Amount::try_from(iter.map(|a| a.0).fold(0i64, std::ops::Add::add))
+    }
+}
+
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
@@ -688,6 +697,58 @@ mod test {
         assert!(zero >= negative_one);
         assert!(negative_two < negative_one);
         assert!(negative_one > negative_two);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sum() -> Result<()> {
+        zebra_test::init();
+
+        let one: Amount = 1.try_into()?;
+        let neg_one: Amount = (-1).try_into()?;
+
+        let zero: Amount = 0.try_into()?;
+
+        // success
+        let amounts = vec![one, neg_one, zero];
+        let sum: Amount = amounts.iter().copied().sum::<Result<Amount, Error>>()?;
+
+        assert_eq!(sum, zero);
+
+        // above max error
+        let max: Amount = MAX_MONEY.try_into()?;
+        let amounts = vec![one, max];
+        let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
+
+        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+            Err(e) => e,
+            _ => unreachable!("above operation will always fail"),
+        };
+        assert_eq!(
+            err,
+            Error::Contains {
+                range: -MAX_MONEY..=MAX_MONEY,
+                value: integer_sum
+            }
+        );
+
+        // below min error
+        let min: Amount = (-MAX_MONEY).try_into()?;
+        let amounts = vec![min, neg_one];
+        let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
+
+        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+            Err(e) => e,
+            _ => unreachable!("above operation will always fail"),
+        };
+        assert_eq!(
+            err,
+            Error::Contains {
+                range: -MAX_MONEY..=MAX_MONEY,
+                value: integer_sum
+            }
+        );
 
         Ok(())
     }
