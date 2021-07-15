@@ -43,7 +43,8 @@ Sapling spends in V5 transactions, and some initial work to validate parts of Or
 - Stop ignoring sapling binding signature errors (#2472)
 - Always compute sighash with librustzcash (#2469)
 - Fix bug in sighash calculation for coinbase transactions (#2459)
-- Increase coverage of cached state tests by covering non-finalized state validation (#2463)
+- Increase coverage of cached state tests: full block and transaction validation, and non-finalized
+  state validation (#2463)
 
 ### Security
 
