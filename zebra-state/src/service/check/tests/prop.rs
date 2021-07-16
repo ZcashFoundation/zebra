@@ -55,6 +55,7 @@ proptest! {
             .expect("block should deserialize");
 
         make_distinct_nullifiers(&mut joinsplit.nullifiers);
+        let expected_nullifiers = joinsplit.nullifiers;
 
         let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, &[joinsplit.0]);
 
@@ -73,17 +74,32 @@ proptest! {
             let block1 = FinalizedBlock::from(Arc::new(block1));
             let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
 
+            // the block was committed
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
+
+            // the non-finalized state didn't change
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
+
+            // the finalized state has the nullifiers
+            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[1]));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result =
                 state.validate_and_commit(block1.clone());
 
+            // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+
+            // the block data is in the non-finalized state
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+
+            // the non-finalized state has the nullifiers
+            prop_assert_eq!(state.mem.chain_set.len(), 1);
+            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[1]));
         }
     }
 
@@ -260,6 +276,7 @@ proptest! {
             .expect("block should deserialize");
 
         make_distinct_nullifiers(&mut joinsplit1.nullifiers.iter_mut().chain(joinsplit2.nullifiers.iter_mut()));
+        let expected_nullifiers = joinsplit1.nullifiers;
 
         // create a double-spend across two blocks
         let duplicate_nullifier = joinsplit1.nullifiers[0];
@@ -290,6 +307,8 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[1]));
 
             block1_hash = block1.hash;
         } else {
@@ -300,6 +319,8 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[1]));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
@@ -342,6 +363,8 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
+        let expected_nullifier = spend.nullifier;
+
         let transaction = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data.0,
             &[spend.0]
@@ -365,6 +388,7 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.disk.contains_sapling_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result =
@@ -373,6 +397,7 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.mem.best_contains_sapling_nullifier(&expected_nullifier));
         }
     }
 
@@ -506,6 +531,7 @@ proptest! {
             .expect("block should deserialize");
 
         make_distinct_nullifiers(&mut [spend1.nullifier, spend2.nullifier]);
+        let expected_nullifier = spend1.nullifier;
 
         // create a double-spend across two blocks
         let duplicate_nullifier = spend1.nullifier;
@@ -542,6 +568,7 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.disk.contains_sapling_nullifier(&expected_nullifier));
 
             block1_hash = block1.hash;
         } else {
@@ -552,6 +579,7 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.mem.best_contains_sapling_nullifier(&expected_nullifier));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
@@ -594,6 +622,8 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
+        let expected_nullifier = authorized_action.action.nullifier;
+
         let transaction = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data.0,
             &[authorized_action.0]
@@ -617,6 +647,7 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.disk.contains_orchard_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result =
@@ -625,6 +656,7 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.mem.best_contains_orchard_nullifier(&expected_nullifier));
         }
     }
 
@@ -761,6 +793,7 @@ proptest! {
             .expect("block should deserialize");
 
         prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
+        let expected_nullifier = authorized_action1.action.nullifier;
 
         // create a double-spend across two blocks
         let duplicate_nullifier = authorized_action1.action.nullifier;
@@ -797,6 +830,7 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.disk.contains_orchard_nullifier(&expected_nullifier));
 
             block1_hash = block1.hash;
         } else {
@@ -807,6 +841,7 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(state.mem.best_contains_orchard_nullifier(&expected_nullifier));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
