@@ -184,7 +184,7 @@ impl From<pallas::Base> for Node {
 }
 
 #[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,

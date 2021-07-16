@@ -483,7 +483,7 @@ where
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for cm_u in sapling_shielded_data.note_commitments() {
-                self.sapling_note_commitment_tree.append(*cm_u);
+                self.sapling_note_commitment_tree.append(*cm_u)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -521,7 +521,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for cm_x in orchard_shielded_data.note_commitments() {
-                self.orchard_note_commitment_tree.append(*cm_x);
+                self.orchard_note_commitment_tree.append(*cm_x)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(

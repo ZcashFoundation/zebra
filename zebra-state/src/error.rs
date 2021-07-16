@@ -95,6 +95,12 @@ pub enum ValidateContextError {
         nullifier: orchard::Nullifier,
         in_finalized_state: bool,
     },
+
+    #[error("error in Sapling note commitment tree")]
+    SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
+
+    #[error("error in Orchard note commitment tree")]
+    OrchardNoteCommitmentTreeError(#[from] zebra_chain::orchard::tree::NoteCommitmentTreeError),
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
