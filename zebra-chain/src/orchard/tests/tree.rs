@@ -27,7 +27,7 @@ fn incremental_roots() {
 
     for (i, commitment_set) in test_vectors::COMMITMENTS.iter().enumerate() {
         for cm_x_bytes in commitment_set.iter() {
-            let cm_x = pallas::Base::from_bytes(&cm_x_bytes).unwrap();
+            let cm_x = pallas::Base::from_bytes(cm_x_bytes).unwrap();
 
             leaves.push(cm_x);
 
