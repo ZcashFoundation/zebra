@@ -300,7 +300,21 @@ where
     C: Constraint,
 {
     fn sum<I: Iterator<Item = Amount<C>>>(iter: I) -> Self {
-        Amount::try_from(iter.map(|a| a.0).fold(0i64, std::ops::Add::add))
+        let mut overflow = false;
+        let sum = iter
+            .map(|a| a.0)
+            .fold(0i64, |acc, amount| match acc.checked_add(amount) {
+                Some(result) => result,
+                None => {
+                    overflow = true;
+                    0
+                }
+            });
+        if overflow {
+            return Err(Error::SumOverflow);
+        }
+
+        Amount::try_from(sum)
     }
 }
 
@@ -322,6 +336,9 @@ pub enum Error {
     MultiplicationOverflow { amount: i64, multiplier: u64 },
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
+
+    /// Attempt to sum with overflow
+    SumOverflow,
 }
 
 /// Marker type for `Amount` that allows negative values.
@@ -713,10 +730,9 @@ mod test {
         // success
         let amounts = vec![one, neg_one, zero];
         let sum: Amount = amounts.iter().copied().sum::<Result<Amount, Error>>()?;
-
         assert_eq!(sum, zero);
 
-        // above max error
+        // above max for Amount error
         let max: Amount = MAX_MONEY.try_into()?;
         let amounts = vec![one, max];
         let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
@@ -733,7 +749,7 @@ mod test {
             }
         );
 
-        // below min error
+        // below min for Amount error
         let min: Amount = (-MAX_MONEY).try_into()?;
         let amounts = vec![min, neg_one];
         let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
@@ -749,6 +765,31 @@ mod test {
                 value: integer_sum
             }
         );
+
+        // above max of i64 error
+        let times = i64::MAX / MAX_MONEY;
+        let mut amounts = vec![MAX_MONEY.try_into()?];
+        for _ in 0..times {
+            amounts.push(MAX_MONEY.try_into()?);
+        }
+
+        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+            Err(e) => e,
+            _ => unreachable!("above operation will always fail"),
+        };
+        assert_eq!(err, Error::SumOverflow);
+
+        // below min of i64 overflow
+        let mut amounts = vec![(-MAX_MONEY).try_into()?];
+        for _ in 0..times {
+            amounts.push((-MAX_MONEY).try_into()?);
+        }
+
+        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+            Err(e) => e,
+            _ => unreachable!("above operation will always fail"),
+        };
+        assert_eq!(err, Error::SumOverflow);
 
         Ok(())
     }
