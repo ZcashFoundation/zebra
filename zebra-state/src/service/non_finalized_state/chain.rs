@@ -464,6 +464,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
+            // Note commitments are not removed from the tree here because we
+            // don't support that operation yet. Instead, we recreate the tree
+            // from the finalized tip in NonFinalizedState.
+
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
@@ -505,6 +509,10 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            // Note commitments are not removed from the tree here because we
+            // don't support that operation yet. Instead, we recreate the tree
+            // from the finalized tip in NonFinalizedState.
+
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
@@ -540,6 +548,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            // Note commitments are not removed from the tree here because we
+            // don't support that operation yet. Instead, we recreate the tree
+            // from the finalized tip in NonFinalizedState.
+
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),
