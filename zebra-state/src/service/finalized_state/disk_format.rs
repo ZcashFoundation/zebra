@@ -283,11 +283,12 @@ impl FromDisk for sapling::tree::NoteCommitmentTree {
         unimplemented!()
     }
 }
+
 impl IntoDisk for orchard::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        unimplemented!();
+        unimplemented!()
     }
 }
 

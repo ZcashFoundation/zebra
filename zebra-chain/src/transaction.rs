@@ -1,5 +1,6 @@
 //! Transactions and transaction-related structures.
 
+use halo2::pasta::pallas;
 use serde::{Deserialize, Serialize};
 
 mod hash;
@@ -383,6 +384,47 @@ impl Transaction {
         }
     }
 
+    /// Access the Sprout note commitments in this transaction, regardless of version.
+    pub fn sprout_note_commitments(
+        &self,
+    ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
+        // This function returns a boxed iterator because the different
+        // transaction variants end up having different iterator types
+        // (we could extract bctv and groth as separate iterators, then chain
+        // them together, but that would be much harder to read and maintain)
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
     // sapling
 
     /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,
@@ -481,6 +523,36 @@ impl Transaction {
         }
     }
 
+    /// Access the note commitments in this transaction, regardless of version.
+    pub fn sapling_note_commitments(&self) -> Box<dyn Iterator<Item = &jubjub::Fq> + '_> {
+        // This function returns a boxed iterator because the different
+        // transaction variants end up having different iterator types
+        match self {
+            // Spends with Groth Proofs
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.note_commitments()),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.note_commitments()),
+
+            // No Spends
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+        }
+    }
+
     /// Return if the transaction has any Sapling shielded data.
     pub fn has_sapling_shielded_data(&self) -> bool {
         match self {
@@ -531,6 +603,15 @@ impl Transaction {
         self.orchard_shielded_data()
             .into_iter()
             .map(orchard::ShieldedData::nullifiers)
+            .flatten()
+    }
+
+    /// Access the note commitments in this transaction, if there are any,
+    /// regardless of version.
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.orchard_shielded_data()
+            .into_iter()
+            .map(orchard::ShieldedData::note_commitments)
             .flatten()
     }
 

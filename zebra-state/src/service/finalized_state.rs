@@ -225,7 +225,7 @@ impl FinalizedState {
         let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
         let sapling_note_commitment_tree =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree =
+        let orchard_note_commitment_tree_cf =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
@@ -259,6 +259,14 @@ impl FinalizedState {
             );
         }
 
+        let mut orchard_note_commitment_tree = match self.finalized_tip_height() {
+            Some(tip_height) => self
+                .orchard_note_commitment_tree(tip_height)
+                .expect("Orchard tree must exist for the finalized tip"),
+            None => Default::default(),
+        };
+        // TODO: other trees
+
         // We use a closure so we can use an early return for control flow in
         // the genesis case
         let prepare_commit = || -> rocksdb::WriteBatch {
@@ -275,6 +283,12 @@ impl FinalizedState {
             // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
+                // TODO: do this or only add the tree when Orchard activates?
+                batch.zs_insert(
+                    orchard_note_commitment_tree_cf,
+                    height,
+                    orchard_note_commitment_tree,
+                );
                 return batch;
             }
 
@@ -320,7 +334,29 @@ impl FinalizedState {
                 for orchard_nullifier in transaction.orchard_nullifiers() {
                     batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
                 }
+
+                // Update the note commitment trees
+                for orchard_note_commitment in transaction.orchard_note_commitments() {
+                    orchard_note_commitment_tree
+                        .append(*orchard_note_commitment)
+                        .expect("must work since it was already appended before in the non-finalized state");
+                }
+                // TODO: other trees
             }
+
+            // Compute the new anchors and index them
+            let orchard_anchor = orchard_note_commitment_tree.root();
+            batch.zs_insert(orchard_anchors, height, orchard_anchor);
+            // TODO: other trees
+
+            // Update the note commitment trees
+            // TODO: delete the previous trees
+            batch.zs_insert(
+                orchard_note_commitment_tree_cf,
+                height,
+                orchard_note_commitment_tree,
+            );
+            // TODO: other trees
 
             batch
         };
@@ -429,6 +465,17 @@ impl FinalizedState {
 
                 block.transactions[index as usize].clone()
             })
+    }
+
+    /// Returns the Orchard note commitment tree for a given `block::Height`
+    /// if it is present.
+    pub fn orchard_note_commitment_tree(
+        &self,
+        height: block::Height,
+    ) -> Option<orchard::tree::NoteCommitmentTree> {
+        let orchard_note_commitment_tree =
+            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        self.db.zs_get(orchard_note_commitment_tree, &height)
     }
 
     /// If the database is `ephemeral`, delete it.
