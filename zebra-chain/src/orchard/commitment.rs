@@ -12,15 +12,15 @@ use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
-    amount::{Amount, NonNegative},
+    amount::Amount,
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
 };
 
 use super::{
-    keys::{prf_expand, Diversifier, TransmissionKey},
-    note::{self, SeedRandomness},
+    keys::prf_expand,
+    note::{Note, Psi, SeedRandomness},
     sinsemilla::*,
 };
 
@@ -105,11 +105,7 @@ impl TryFrom<[u8; 32]> for NoteCommitment {
 }
 
 impl NoteCommitment {
-    /// Generate a new _NoteCommitment_ and the randomness used to create it.
-    ///
-    /// We return the randomness because it is needed to construct a _Note_,
-    /// before it is encrypted as part of an output of an _Action_. This is a
-    /// higher level function that calls `NoteCommit^Orchard_rcm` internally.
+    /// Generate a new _NoteCommitment_.
     ///
     /// Unlike in Sapling, the definition of an Orchard _note_ includes the ρ
     /// field; the _note_'s position in the _note commitment tree_ does not need
@@ -119,17 +115,7 @@ impl NoteCommitment {
     ///
     /// https://zips.z.cash/protocol/nu5.pdf#concretewindowedcommit
     #[allow(non_snake_case)]
-    pub fn new<T>(
-        csprng: &mut T,
-        diversifier: Diversifier,
-        transmission_key: TransmissionKey,
-        value: Amount<NonNegative>,
-        rho: note::Rho,
-        psi: note::Psi,
-    ) -> Option<(CommitmentRandomness, Self)>
-    where
-        T: RngCore + CryptoRng,
-    {
+    pub fn new(note: Note) -> Option<Self> {
         // s as in the argument name for WindowedPedersenCommit_r(s)
         let mut s: BitVec<Lsb0, u8> = BitVec::new();
 
@@ -138,17 +124,15 @@ impl NoteCommitment {
 
         // The `TryFrom<Diversifier>` impls for the `pallas::*Point`s handles
         // calling `DiversifyHash` implicitly.
-        let g_d_bytes: [u8; 32];
-        if let Ok(g_d) = pallas::Affine::try_from(diversifier) {
-            g_d_bytes = g_d.to_bytes();
-        } else {
-            return None;
-        }
+        // _diversified base_
+        let g_d_bytes = pallas::Affine::try_from(note.address.diversifier)
+            .ok()?
+            .to_bytes();
 
-        let pk_d_bytes: [u8; 32] = transmission_key.into();
-        let v_bytes = value.to_bytes();
-        let rho_bytes: [u8; 32] = rho.into();
-        let psi_bytes: [u8; 32] = psi.into();
+        let pk_d_bytes: [u8; 32] = note.address.transmission_key.into();
+        let v_bytes = note.value.to_bytes();
+        let rho_bytes: [u8; 32] = note.rho.into();
+        let psi_bytes: [u8; 32] = Psi::from(note.rseed).into();
 
         // g*d || pk*d || I2LEBSP_64(v) || I2LEBSP_l^Orchard_Base(ρ) || I2LEBSP_l^Orchard_base(ψ)
         s.extend(g_d_bytes);
@@ -157,28 +141,17 @@ impl NoteCommitment {
         s.extend(rho_bytes);
         s.extend(psi_bytes);
 
-        let rcm = CommitmentRandomness(generate_trapdoor(csprng));
+        let rcm = CommitmentRandomness::from(note.rseed);
 
-        Some((
-            rcm,
-            NoteCommitment::from(
-                sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
-                    .expect("valid orchard note commitment, not ⊥ "),
-            ),
+        Some(NoteCommitment::from(
+            sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
+                .expect("valid orchard note commitment, not ⊥ "),
         ))
     }
 
-    /// Hash Extractor for Pallas
-    ///
-    /// https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
+    /// Extract the x coordinate of the note commitment.
     pub fn extract_x(&self) -> pallas::Base {
-        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
-
-        match option {
-            // If Some, it's not the identity.
-            Some(coordinates) => *coordinates.x(),
-            _ => pallas::Base::zero(),
-        }
+        extract_p(self.0.into())
     }
 }
 

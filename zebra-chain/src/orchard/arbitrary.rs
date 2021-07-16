@@ -4,7 +4,10 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKey, VerificationKeyBytes};
 
-use super::{keys, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment};
+use super::{
+    keys, note, tree, Action, Address, AuthorizedAction, Diversifier, Flags, NoteCommitment,
+    ValueCommitment,
+};
 
 use std::{
     convert::{TryFrom, TryInto},
@@ -119,6 +122,42 @@ impl Arbitrary for tree::Root {
                 let bytes = bytes.try_into().expect("vec is the correct length");
                 Self::try_from(pallas::Base::from_bytes_wide(&bytes).to_bytes())
                     .expect("a valid generated Orchard note commitment tree root")
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for keys::TransmissionKey {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<keys::SpendingKey>())
+            .prop_map(|spending_key| {
+                let full_viewing_key = keys::FullViewingKey::from(spending_key);
+
+                let diversifier_key = keys::DiversifierKey::from(full_viewing_key);
+
+                let diversifier = Diversifier::from(diversifier_key);
+                let incoming_viewing_key = keys::IncomingViewingKey::from(full_viewing_key);
+
+                Self::from((incoming_viewing_key, diversifier))
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for Address {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<keys::Diversifier>(), any::<keys::TransmissionKey>())
+            .prop_map(|(diversifier, transmission_key)| Self {
+                diversifier,
+                transmission_key,
             })
             .boxed()
     }
