@@ -24,13 +24,11 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 #[serde(bound = "C: Constraint")]
 pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
 
-// in a world where specialization existed
-// https://github.com/rust-lang/rust/issues/31844
-// we could do much better here
-// for now, drop the constraint
 impl<C> std::fmt::Debug for Amount<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Amount").field(&self.0).finish()
+        f.debug_tuple(&format!("Amount<{}>", std::any::type_name::<C>()))
+            .field(&self.0)
+            .finish()
     }
 }
 
@@ -425,6 +423,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::serialization::ZcashDeserializeInto;
+
     use super::*;
 
     use std::{collections::hash_map::RandomState, collections::HashSet, fmt::Debug};
@@ -593,20 +593,30 @@ mod test {
     fn deserialize_checks_bounds() -> Result<()> {
         zebra_test::init();
 
-        let big = MAX_MONEY * 2;
+        let big = (MAX_MONEY * 2)
+            .try_into()
+            .expect("unexpectedly large constant: multiplied constant should be within range");
         let neg = -10;
 
-        let big_bytes = bincode::serialize(&big)?;
-        let neg_bytes = bincode::serialize(&neg)?;
+        let mut big_bytes = Vec::new();
+        (&mut big_bytes)
+            .write_u64::<LittleEndian>(big)
+            .expect("unexpected serialization failure: vec should be infalliable");
 
-        bincode::deserialize::<Amount<NonNegative>>(&big_bytes)
+        let mut neg_bytes = Vec::new();
+        (&mut neg_bytes)
+            .write_i64::<LittleEndian>(neg)
+            .expect("unexpected serialization failure: vec should be infalliable");
+
+        Amount::<NonNegative>::zcash_deserialize(big_bytes.as_slice())
             .expect_err("deserialization should reject too large values");
-        bincode::deserialize::<Amount<NegativeAllowed>>(&big_bytes)
+        Amount::<NegativeAllowed>::zcash_deserialize(big_bytes.as_slice())
             .expect_err("deserialization should reject too large values");
 
-        bincode::deserialize::<Amount<NonNegative>>(&neg_bytes)
+        Amount::<NonNegative>::zcash_deserialize(neg_bytes.as_slice())
             .expect_err("NonNegative deserialization should reject negative values");
-        let amount = bincode::deserialize::<Amount<NegativeAllowed>>(&neg_bytes)
+        let amount: Amount<NegativeAllowed> = neg_bytes
+            .zcash_deserialize_into()
             .expect("NegativeAllowed deserialization should allow negative values");
 
         assert_eq!(amount.0, neg);
