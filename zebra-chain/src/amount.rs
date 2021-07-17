@@ -49,6 +49,14 @@ impl<C> Amount<C> {
         LittleEndian::write_i64(&mut buf, self.0);
         buf
     }
+
+    /// Create a zero `Amount`
+    pub fn zero() -> Amount<C>
+    where
+        C: Constraint,
+    {
+        0.try_into().expect("an amount of 0 is always valid")
+    }
 }
 
 impl<C> std::ops::Add<Amount<C>> for Amount<C>
@@ -464,7 +472,7 @@ mod test {
         let one: Amount = 1.try_into()?;
         let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one + neg_one;
 
         assert_eq!(zero, new_zero?);
@@ -480,7 +488,7 @@ mod test {
         let one = Ok(one);
         let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one + neg_one;
 
         assert_eq!(zero, new_zero?);
@@ -496,7 +504,7 @@ mod test {
         let neg_one: Amount = (-1).try_into()?;
         let neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one + neg_one;
 
         assert_eq!(zero, new_zero?);
@@ -513,7 +521,7 @@ mod test {
         let neg_one: Amount = (-1).try_into()?;
         let neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one.and_then(|one| one + neg_one);
 
         assert_eq!(zero, new_zero?);
@@ -529,7 +537,7 @@ mod test {
         let neg_one: Amount = (-1).try_into()?;
         let mut neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         neg_one += one;
         let new_zero = neg_one;
 
@@ -543,7 +551,7 @@ mod test {
         zebra_test::init();
 
         let one: Amount = 1.try_into()?;
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
 
         let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
@@ -559,7 +567,7 @@ mod test {
 
         let one: Amount = 1.try_into()?;
         let one = Ok(one);
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
 
         let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
@@ -574,7 +582,7 @@ mod test {
         zebra_test::init();
 
         let one: Amount = 1.try_into()?;
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let zero = Ok(zero);
 
         let neg_one: Amount = (-1).try_into()?;
@@ -590,7 +598,7 @@ mod test {
         zebra_test::init();
 
         let one: Amount = 1.try_into()?;
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let mut zero = Ok(zero);
 
         let neg_one: Amount = (-1).try_into()?;
@@ -607,7 +615,7 @@ mod test {
         zebra_test::init();
 
         let one = Amount::<NonNegative>::try_from(1)?;
-        let zero = Amount::<NegativeAllowed>::try_from(0)?;
+        let zero: Amount<NegativeAllowed> = Amount::zero();
 
         (zero - one.constrain()).expect("should allow negative");
         (zero.constrain() - one).expect_err("shouldn't allow negative");
@@ -646,7 +654,7 @@ mod test {
 
         let one = Amount::<NonNegative>::try_from(1)?;
         let another_one = Amount::<NonNegative>::try_from(1)?;
-        let zero = Amount::<NonNegative>::try_from(0)?;
+        let zero: Amount<NonNegative> = Amount::zero();
 
         let hash_set: HashSet<Amount<NonNegative>, RandomState> = [one].iter().cloned().collect();
         assert_eq!(hash_set.len(), 1);
@@ -688,7 +696,7 @@ mod test {
         C1: Constraint + Debug,
         C2: Constraint + Debug,
     {
-        let zero = Amount::<C1>::try_from(0)?;
+        let zero: Amount<C1> = Amount::zero();
         let one = Amount::<C2>::try_from(1)?;
         let another_one = Amount::<C1>::try_from(1)?;
 
@@ -725,7 +733,7 @@ mod test {
         let one: Amount = 1.try_into()?;
         let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
 
         // success
         let amounts = vec![one, neg_one, zero];
