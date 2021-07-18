@@ -47,6 +47,14 @@ impl<C> Amount<C> {
         LittleEndian::write_i64(&mut buf, self.0);
         buf
     }
+
+    /// Create a zero `Amount`
+    pub fn zero() -> Amount<C>
+    where
+        C: Constraint,
+    {
+        0.try_into().expect("an amount of 0 is always valid")
+    }
 }
 
 impl<C> std::ops::Add<Amount<C>> for Amount<C>
