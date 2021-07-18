@@ -1,7 +1,7 @@
 use halo2::arithmetic::FieldExt;
 use halo2::pasta::pallas;
 
-use crate::orchard::tests::test_vectors;
+use crate::orchard::tests::vectors;
 use crate::orchard::tree::*;
 
 #[test]
@@ -12,7 +12,7 @@ fn empty_roots() {
         assert_eq!(
             EMPTY_ROOTS[i].to_bytes(),
             // The test vector is in reversed order.
-            test_vectors::EMPTY_ROOTS[MERKLE_DEPTH - i]
+            vectors::EMPTY_ROOTS[MERKLE_DEPTH - i]
         );
     }
 }
@@ -25,9 +25,9 @@ fn incremental_roots() {
 
     let mut incremental_tree = NoteCommitmentTree::default();
 
-    for (i, commitment_set) in test_vectors::COMMITMENTS.iter().enumerate() {
+    for (i, commitment_set) in vectors::COMMITMENTS.iter().enumerate() {
         for cm_x_bytes in commitment_set.iter() {
-            let cm_x = pallas::Base::from_bytes(&cm_x_bytes).unwrap();
+            let cm_x = pallas::Base::from_bytes(cm_x_bytes).unwrap();
 
             leaves.push(cm_x);
 
@@ -36,12 +36,12 @@ fn incremental_roots() {
 
         assert_eq!(
             hex::encode(incremental_tree.hash()),
-            hex::encode(test_vectors::ROOTS[i].anchor)
+            hex::encode(vectors::ROOTS[i].anchor)
         );
 
         assert_eq!(
             hex::encode((NoteCommitmentTree::from(leaves.clone())).hash()),
-            hex::encode(test_vectors::ROOTS[i].anchor)
+            hex::encode(vectors::ROOTS[i].anchor)
         );
     }
 }

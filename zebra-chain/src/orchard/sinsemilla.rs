@@ -201,6 +201,7 @@ pub fn sinsemilla_short_commit(
 mod tests {
 
     use super::*;
+    use crate::orchard::tests::vectors;
 
     fn x_from_str(s: &str) -> pallas::Base {
         use group::ff::PrimeField;
@@ -233,5 +234,52 @@ mod tests {
             sinsemilla_hash_to_point(&D[..], &M).expect("").to_affine(),
             test_vector
         )
+    }
+
+    // Checks Sinsemilla hashes to point and to bytes (aka the x-coordinate
+    // bytes of a point) with:
+    // - One of two domains.
+    // - Random message lengths between 0 and 255 bytes.
+    // - Random message bits.
+    #[test]
+    #[allow(non_snake_case)]
+    fn hackworks_test_vectors() {
+        use group::GroupEncoding;
+        use halo2::arithmetic::FieldExt;
+
+        for tv in tests::vectors::SINSEMILLA.iter() {
+            let D = tv.domain.as_slice();
+            let M: &BitVec<Lsb0, u8> = &tv.msg.iter().collect();
+
+            assert_eq!(
+                sinsemilla_hash_to_point(D, M).expect("should not fail per Theorem 5.4.4"),
+                pallas::Point::from_bytes(&tv.point).unwrap()
+            );
+
+            assert_eq!(
+                sinsemilla_hash(D, M).expect("should not fail per Theorem 5.4.4"),
+                pallas::Base::from_bytes(&tv.hash).unwrap()
+            )
+        }
+    }
+
+    // Checks Pallas group hashes with:
+    // - One of two domains.
+    // - Random message lengths between 0 and 255 bytes.
+    // - Random message contents.
+    #[test]
+    #[allow(non_snake_case)]
+    fn hackworks_group_hash_test_vectors() {
+        use group::GroupEncoding;
+
+        for tv in tests::vectors::GROUP_HASHES.iter() {
+            let D = tv.domain.as_slice();
+            let M = tv.msg.as_slice();
+
+            assert_eq!(
+                pallas_group_hash(D, M),
+                pallas::Point::from_bytes(&tv.point).unwrap()
+            );
+        }
     }
 }
