@@ -11,7 +11,10 @@ use halo2::{arithmetic::FieldExt, pasta::pallas};
 use crate::serialization::{serde_helpers, SerializationError};
 
 use super::super::{
-    commitment::NoteCommitment, keys::NullifierDerivingKey, note::Note, sinsemilla::*,
+    commitment::NoteCommitment,
+    keys::NullifierDerivingKey,
+    note::{Note, Psi},
+    sinsemilla::*,
 };
 
 /// A cryptographic permutation, defined in [poseidonhash].
@@ -41,7 +44,7 @@ fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
 
 /// A Nullifier for Orchard transactions
 #[derive(Clone, Copy, Debug, Eq, Serialize, Deserialize)]
-pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pallas::Base);
+pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 
 impl Hash for Nullifier {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -79,18 +82,19 @@ impl From<(NullifierDerivingKey, Note, NoteCommitment)> for Nullifier {
     ///
     /// DeriveNullifier_nk(ρ, ψ, cm) = Extract_P(︀ [︀ (PRF^nfOrchard_nk(ρ) + ψ) mod q_P ]︀ K^Orchard + cm)︀
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
+    /// <https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers>
     #[allow(non_snake_case)]
+    // TODO: tidy prf_nf, notes/rho/psi
     fn from((nk, note, cm): (NullifierDerivingKey, Note, NoteCommitment)) -> Self {
-        // https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
         let K = pallas_group_hash(b"z.cash:Orchard", b"K");
+
+        let psi: Psi = note.rseed.into();
 
         // impl Add for pallas::Base reduces by the modulus (q_P)
         //
         // [︀ (PRF^nfOrchard_nk(ρ) + ψ) mod q_P ]︀ K^Orchard + cm
         let scalar =
-            pallas::Scalar::from_bytes(&(prf_nf(nk.0, note.rho.0) + note.psi.0).to_bytes())
-                .unwrap();
+            pallas::Scalar::from_bytes(&(prf_nf(nk.0, note.rho.0) + psi.0).to_bytes()).unwrap();
 
         // Basically a new-gen Pedersen hash?
         Nullifier(extract_p((K * scalar) + cm.0))
