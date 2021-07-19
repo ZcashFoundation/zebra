@@ -749,26 +749,28 @@ mod test {
 
         // success
         let amounts = vec![one, neg_one, zero];
-        // use iter to test reference-based sum
-        let sum: Amount = amounts.iter().sum::<Result<Amount, Error>>()?;
-        assert_eq!(sum, zero);
+
+        let sum_ref: Amount = amounts.iter().sum::<Result<Amount, Error>>()?;
+        let sum_value: Amount = amounts.into_iter().sum::<Result<Amount, Error>>()?;
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(sum_ref, zero);
 
         // above max for Amount error
         let max: Amount = MAX_MONEY.try_into()?;
         let amounts = vec![one, max];
         let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
 
-        // use into_iter to test value-based sum
-        let err = match amounts.into_iter().sum::<Result<Amount, Error>>() {
-            Err(e) => e,
-            _ => unreachable!("above operation will always fail"),
-        };
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
         assert_eq!(
-            err,
-            Error::Contains {
+            sum_ref,
+            Err(Error::Contains {
                 range: -MAX_MONEY..=MAX_MONEY,
-                value: integer_sum
-            }
+                value: integer_sum,
+            })
         );
 
         // below min for Amount error
@@ -776,33 +778,31 @@ mod test {
         let amounts = vec![min, neg_one];
         let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
 
-        // also use iter/copied to test value-based sum
-        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
-            Err(e) => e,
-            _ => unreachable!("above operation will always fail"),
-        };
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
         assert_eq!(
-            err,
-            Error::Contains {
+            sum_ref,
+            Err(Error::Contains {
                 range: -MAX_MONEY..=MAX_MONEY,
-                value: integer_sum
-            }
+                value: integer_sum,
+            })
         );
 
         // above max of i64 error
         let times: usize = (i64::MAX / MAX_MONEY)
             .try_into()
             .expect("4392 can always be converted to usize");
-        let amounts: Vec<Amount<NonNegative>> = std::iter::repeat(MAX_MONEY.try_into()?)
+        let amounts: Vec<Amount> = std::iter::repeat(MAX_MONEY.try_into()?)
             .take(times + 1)
             .collect();
 
-        // use iter to test reference-based sum
-        let err = match amounts.iter().sum() {
-            Err(e) => e,
-            _ => unreachable!("above operation will always fail"),
-        };
-        assert_eq!(err, Error::SumOverflow);
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(sum_ref, Err(Error::SumOverflow));
 
         // below min of i64 overflow
         let times: usize = (i64::MAX / MAX_MONEY)
@@ -812,12 +812,11 @@ mod test {
         let amounts: Vec<Amount<NegativeAllowed>> =
             std::iter::repeat(neg_max_money).take(times + 1).collect();
 
-        // use into_iter to test value-based sum
-        let err = match amounts.into_iter().sum() {
-            Err(e) => e,
-            _ => unreachable!("above operation will always fail"),
-        };
-        assert_eq!(err, Error::SumOverflow);
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(sum_ref, Err(Error::SumOverflow));
 
         Ok(())
     }
