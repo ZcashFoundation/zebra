@@ -70,11 +70,11 @@ impl OrderedUtxo {
 
 /// Compute an index of [`Utxo`]s, given an index of [`OrderedUtxo`]s.
 pub fn utxos_from_ordered_utxos(
-    ordered_utxos: &HashMap<transparent::OutPoint, OrderedUtxo>,
+    ordered_utxos: HashMap<transparent::OutPoint, OrderedUtxo>,
 ) -> HashMap<transparent::OutPoint, Utxo> {
     ordered_utxos
-        .iter()
-        .map(|(out_point, ordered_utxo)| (*out_point, ordered_utxo.utxo.clone()))
+        .into_iter()
+        .map(|(out_point, ordered_utxo)| (out_point, ordered_utxo.utxo))
         .collect()
 }
 
@@ -84,7 +84,7 @@ pub fn new_outputs(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> HashMap<transparent::OutPoint, Utxo> {
-    utxos_from_ordered_utxos(&new_ordered_outputs(block, transaction_hashes))
+    utxos_from_ordered_utxos(new_ordered_outputs(block, transaction_hashes))
 }
 
 /// Compute an index of newly created [`OrderedUtxo`]s, given a block and a

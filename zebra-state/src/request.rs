@@ -150,7 +150,7 @@ impl From<PreparedBlock> for ContextuallyValidBlock {
             block,
             hash,
             height,
-            new_outputs: transparent::utxos_from_ordered_utxos(&new_outputs),
+            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
             transaction_hashes,
         }
     }
