@@ -35,3 +35,5 @@ pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;
+
+pub(crate) use request::ContextuallyValidBlock;

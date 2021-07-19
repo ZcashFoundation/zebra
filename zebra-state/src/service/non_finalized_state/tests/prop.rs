@@ -7,9 +7,11 @@ use zebra_chain::{block::Block, fmt::DisplayToDebug, parameters::NetworkUpgrade:
 use crate::{
     service::{
         arbitrary::PreparedChain,
+        finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState},
     },
     tests::Prepare,
+    Config,
 };
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 32;
@@ -110,6 +112,7 @@ fn rejection_restores_internal_state() -> Result<()> {
                 }
                 ))| {
                   let mut state = NonFinalizedState::new(network);
+                  let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
                   // use `valid_count` as the number of valid blocks before an invalid block
                   let valid_tip_height = chain[valid_count - 1].height;
@@ -119,12 +122,12 @@ fn rejection_restores_internal_state() -> Result<()> {
                   prop_assert!(state.eq_internal_state(&state));
 
                   if let Some(first_block) = chain.next() {
-                      state.commit_new_chain(first_block)?;
+                      state.commit_new_chain(first_block, &finalized_state)?;
                       prop_assert!(state.eq_internal_state(&state));
                   }
 
                   for block in chain {
-                      state.commit_block(block)?;
+                      state.commit_block(block, &finalized_state)?;
                       prop_assert!(state.eq_internal_state(&state));
                   }
 
@@ -137,7 +140,7 @@ fn rejection_restores_internal_state() -> Result<()> {
 
                   bad_block.header.previous_block_hash = valid_tip_hash;
                   let bad_block = Arc::new(bad_block.0).prepare();
-                  let reject_result = reject_state.commit_block(bad_block);
+                  let reject_result = reject_state.commit_block(bad_block, &finalized_state);
 
                   if reject_result.is_err() {
                       prop_assert_eq!(state.best_tip(), reject_state.best_tip());
