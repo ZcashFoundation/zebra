@@ -306,21 +306,14 @@ where
     C: Constraint,
 {
     fn sum<I: Iterator<Item = Amount<C>>>(iter: I) -> Self {
-        let mut overflow = false;
         let sum = iter
             .map(|a| a.0)
-            .fold(0i64, |acc, amount| match acc.checked_add(amount) {
-                Some(result) => result,
-                None => {
-                    overflow = true;
-                    0
-                }
-            });
-        if overflow {
-            return Err(Error::SumOverflow);
-        }
+            .try_fold(0i64, |acc, amount| acc.checked_add(amount));
 
-        Amount::try_from(sum)
+        match sum {
+            Some(sum) => Amount::try_from(sum),
+            None => Err(Error::SumOverflow),
+        }
     }
 }
 
