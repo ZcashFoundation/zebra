@@ -33,8 +33,9 @@ impl QueuedBlocks {
         let parent_hash = new.0.block.header.previous_block_hash;
 
         // Track known UTXOs in queued blocks.
-        for (outpoint, output) in new.0.new_outputs.iter() {
-            self.known_utxos.insert(*outpoint, output.clone());
+        for (outpoint, ordered_utxo) in new.0.new_outputs.iter() {
+            self.known_utxos
+                .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
         let replaced = self.blocks.insert(new_hash, new);
