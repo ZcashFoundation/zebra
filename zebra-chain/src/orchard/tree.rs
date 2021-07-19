@@ -188,7 +188,7 @@ impl serde::Serialize for Node {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_bytes(&self.0.to_bytes())
+        self.0.to_bytes().serialize(serializer)
     }
 }
 
@@ -197,7 +197,10 @@ impl<'de> serde::Deserialize<'de> for Node {
     where
         D: serde::Deserializer<'de>,
     {
-        todo!()
+        let bytes = <[u8; 32]>::deserialize(deserializer)?;
+        Option::<pallas::Base>::from(pallas::Base::from_bytes(&bytes))
+            .map(Node)
+            .ok_or_else(|| serde::de::Error::custom("invalid Pallas field element"))
     }
 }
 

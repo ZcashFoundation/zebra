@@ -208,6 +208,8 @@ impl FinalizedState {
             transaction_hashes,
         } = finalized;
 
+        let finalized_tip_height = self.finalized_tip_height();
+
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
         let block_by_height = self.db.cf_handle("block_by_height").unwrap();
@@ -243,9 +245,7 @@ impl FinalizedState {
             );
         } else {
             assert_eq!(
-                self.finalized_tip_height()
-                    .expect("state must have a genesis block committed")
-                    + 1,
+                finalized_tip_height.expect("state must have a genesis block committed") + 1,
                 Some(height),
                 "committed block height must be 1 more than the finalized tip height, source: {}",
                 source,
@@ -259,7 +259,7 @@ impl FinalizedState {
             );
         }
 
-        let mut orchard_note_commitment_tree = match self.finalized_tip_height() {
+        let mut orchard_note_commitment_tree = match finalized_tip_height {
             Some(tip_height) => self
                 .orchard_note_commitment_tree(tip_height)
                 .expect("Orchard tree must exist for the finalized tip"),
@@ -350,7 +350,9 @@ impl FinalizedState {
             // TODO: other trees
 
             // Update the note commitment trees
-            // TODO: delete the previous trees
+            if let Some(h) = finalized_tip_height {
+                batch.zs_delete(orchard_note_commitment_tree_cf, h);
+            }
             batch.zs_insert(
                 orchard_note_commitment_tree_cf,
                 height,

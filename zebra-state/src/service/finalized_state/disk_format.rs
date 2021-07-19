@@ -288,13 +288,14 @@ impl IntoDisk for orchard::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        unimplemented!()
+        bincode::serialize(self).expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for orchard::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        unimplemented!()
+        bincode::deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 
@@ -307,6 +308,11 @@ pub trait DiskSerialize {
     where
         K: IntoDisk + Debug,
         V: IntoDisk;
+
+    /// Remove the given key form rocksdb column family if it exits.
+    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
+    where
+        K: IntoDisk + Debug;
 }
 
 impl DiskSerialize for rocksdb::WriteBatch {
@@ -318,6 +324,14 @@ impl DiskSerialize for rocksdb::WriteBatch {
         let key_bytes = key.as_bytes();
         let value_bytes = value.as_bytes();
         self.put_cf(cf, key_bytes, value_bytes);
+    }
+
+    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
+    where
+        K: IntoDisk + Debug,
+    {
+        let key_bytes = key.as_bytes();
+        self.delete_cf(cf, key_bytes);
     }
 }
 
