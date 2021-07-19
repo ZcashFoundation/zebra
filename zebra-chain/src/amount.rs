@@ -324,6 +324,15 @@ where
     }
 }
 
+impl<'amt, C> std::iter::Sum<&'amt Amount<C>> for Result<Amount<C>>
+where
+    C: Constraint + std::marker::Copy + 'amt,
+{
+    fn sum<I: Iterator<Item = &'amt Amount<C>>>(iter: I) -> Self {
+        iter.copied().sum()
+    }
+}
+
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
@@ -747,7 +756,8 @@ mod test {
 
         // success
         let amounts = vec![one, neg_one, zero];
-        let sum: Amount = amounts.iter().copied().sum::<Result<Amount, Error>>()?;
+        // use iter to test reference-based sum
+        let sum: Amount = amounts.iter().sum::<Result<Amount, Error>>()?;
         assert_eq!(sum, zero);
 
         // above max for Amount error
@@ -755,7 +765,8 @@ mod test {
         let amounts = vec![one, max];
         let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
 
-        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+        // use into_iter to test value-based sum
+        let err = match amounts.into_iter().sum::<Result<Amount, Error>>() {
             Err(e) => e,
             _ => unreachable!("above operation will always fail"),
         };
@@ -772,6 +783,7 @@ mod test {
         let amounts = vec![min, neg_one];
         let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
 
+        // also use iter/copied to test value-based sum
         let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
             Err(e) => e,
             _ => unreachable!("above operation will always fail"),
@@ -786,24 +798,26 @@ mod test {
 
         // above max of i64 error
         let times = i64::MAX / MAX_MONEY;
-        let mut amounts = vec![MAX_MONEY.try_into()?];
+        let mut amounts: Vec<Amount<NonNegative>> = vec![MAX_MONEY.try_into()?];
         for _ in 0..times {
             amounts.push(MAX_MONEY.try_into()?);
         }
 
-        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+        // use iter to test reference-based sum
+        let err = match amounts.iter().sum() {
             Err(e) => e,
             _ => unreachable!("above operation will always fail"),
         };
         assert_eq!(err, Error::SumOverflow);
 
         // below min of i64 overflow
-        let mut amounts = vec![(-MAX_MONEY).try_into()?];
+        let mut amounts: Vec<Amount<NegativeAllowed>> = vec![(-MAX_MONEY).try_into()?];
         for _ in 0..times {
             amounts.push((-MAX_MONEY).try_into()?);
         }
 
-        let err = match amounts.iter().copied().sum::<Result<Amount, Error>>() {
+        // use into_iter to test value-based sum
+        let err = match amounts.into_iter().sum() {
             Err(e) => e,
             _ => unreachable!("above operation will always fail"),
         };
