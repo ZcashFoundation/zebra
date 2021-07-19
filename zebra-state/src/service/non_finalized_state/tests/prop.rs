@@ -38,7 +38,8 @@ fn forked_equals_pushed() -> Result<()> {
                 full_chain = full_chain.push(block.clone())?;
             }
 
-            let forked = full_chain.fork(fork_tip_hash).expect("fork works").expect("hash is present");
+            // TODO: pass correct trees
+            let forked = full_chain.fork(fork_tip_hash, None, None, None).expect("fork works").expect("hash is present");
 
             // the first check is redundant, but it's useful for debugging
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());

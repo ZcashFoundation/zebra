@@ -11,7 +11,10 @@ use zebra_chain::{
     transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
+use crate::{
+    service::{check, finalized_state::FinalizedState},
+    ContextuallyValidBlock, PreparedBlock, ValidateContextError,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct Chain {
@@ -32,9 +35,9 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(super) spent_utxos: HashSet<transparent::OutPoint>,
 
-    sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
-    sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
-    orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
+    sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
+    orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
 
     /// The sprout anchors created by `blocks`.
     ///
@@ -57,6 +60,30 @@ pub struct Chain {
 }
 
 impl Chain {
+    pub(crate) fn new(
+        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
+        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
+        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+    ) -> Self {
+        Self {
+            blocks: Default::default(),
+            height_by_hash: Default::default(),
+            tx_by_hash: Default::default(),
+            created_utxos: Default::default(),
+            sprout_note_commitment_tree,
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            spent_utxos: Default::default(),
+            sprout_anchors: Default::default(),
+            sapling_anchors: Default::default(),
+            orchard_anchors: Default::default(),
+            sprout_nullifiers: Default::default(),
+            sapling_nullifiers: Default::default(),
+            orchard_nullifiers: Default::default(),
+            partial_cumulative_work: Default::default(),
+        }
+    }
+
     /// Is the internal state of `self` the same as `other`?
     ///
     /// [`Chain`] has custom [`Eq`] and [`Ord`] implementations based on proof of work,
@@ -137,12 +164,22 @@ impl Chain {
 
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
-    pub fn fork(&self, fork_tip: block::Hash) -> Result<Option<Self>, ValidateContextError> {
+    pub fn fork(
+        &self,
+        fork_tip: block::Hash,
+        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
+        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
+        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+    ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
         }
 
-        let mut forked = self.clone();
+        let mut forked = self.with_trees(
+            sprout_note_commitment_tree,
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+        );
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
@@ -186,6 +223,35 @@ impl Chain {
 
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
+    }
+
+    /// Clone the Chain but not the history and note commitment trees, using
+    /// the specified trees instead.
+    ///
+    /// Useful when forking, where the trees are rebuilt anyway.
+    fn with_trees(
+        &self,
+        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
+        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
+        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+    ) -> Self {
+        Chain {
+            blocks: self.blocks.clone(),
+            height_by_hash: self.height_by_hash.clone(),
+            tx_by_hash: self.tx_by_hash.clone(),
+            created_utxos: self.created_utxos.clone(),
+            spent_utxos: self.spent_utxos.clone(),
+            sprout_note_commitment_tree,
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            sprout_anchors: self.sprout_anchors.clone(),
+            sapling_anchors: self.sapling_anchors.clone(),
+            orchard_anchors: self.orchard_anchors.clone(),
+            sprout_nullifiers: self.sprout_nullifiers.clone(),
+            sapling_nullifiers: self.sapling_nullifiers.clone(),
+            orchard_nullifiers: self.orchard_nullifiers.clone(),
+            partial_cumulative_work: self.partial_cumulative_work,
+        }
     }
 }
 
@@ -296,13 +362,16 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the treestates of this block.
-        let sprout_root = self.sprout_note_commitment_tree.hash();
-        let sapling_root = self.sapling_note_commitment_tree.root();
-        let orchard_root = self.orchard_note_commitment_tree.root();
-
-        self.sprout_anchors.insert(sprout_root);
-        self.sapling_anchors.insert(sapling_root);
-        self.orchard_anchors.insert(orchard_root);
+        // TODO: create trees when required
+        if let Some(tree) = &self.sprout_note_commitment_tree {
+            self.sprout_anchors.insert(tree.hash());
+        }
+        if let Some(tree) = &self.sapling_note_commitment_tree {
+            self.sapling_anchors.insert(tree.root());
+        }
+        if let Some(tree) = &self.orchard_note_commitment_tree {
+            self.orchard_anchors.insert(tree.root());
+        }
 
         Ok(())
     }
@@ -442,7 +511,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
             for cm in joinsplit_data.note_commitments() {
-                self.sprout_note_commitment_tree.append(cm);
+                self.sprout_note_commitment_tree
+                    .as_mut()
+                    .expect("Sprout note commitment tree must exist")
+                    .append(cm);
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -487,7 +559,10 @@ where
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for cm_u in sapling_shielded_data.note_commitments() {
-                self.sapling_note_commitment_tree.append(*cm_u)?;
+                self.sapling_note_commitment_tree
+                    .as_mut()
+                    .expect("Sapling note commitment tree must exist")
+                    .append(*cm_u)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -529,7 +604,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for cm_x in orchard_shielded_data.note_commitments() {
-                self.orchard_note_commitment_tree.append(*cm_x)?;
+                self.orchard_note_commitment_tree
+                    .as_mut()
+                    .expect("Orchard note commitment tree must exist")
+                    .append(*cm_x)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -651,3 +729,16 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
+
+impl From<&FinalizedState> for Chain {
+    fn from(state: &FinalizedState) -> Self {
+        match state.finalized_tip_height() {
+            Some(height) => Chain::new(
+                state.sprout_note_commitment_tree(height),
+                state.sapling_note_commitment_tree(height),
+                state.orchard_note_commitment_tree(height),
+            ),
+            None => Chain::new(Default::default(), Default::default(), Default::default()),
+        }
+    }
+}

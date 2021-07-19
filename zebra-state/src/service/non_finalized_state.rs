@@ -122,7 +122,8 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let parent_chain = self.parent_chain(parent_hash)?;
+        // TODO: get trees from FinalizedState
+        let parent_chain = self.parent_chain(parent_hash, None, None, None)?;
 
         // We might have taken a chain, so all validation must happen within
         // validate_and_commit, so that the chain is restored correctly.
@@ -153,7 +154,7 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<(), ValidateContextError> {
-        let chain = Chain::default();
+        let chain = finalized_state.into();
         let (height, hash) = (prepared.height, prepared.hash);
 
         // if the block is invalid, drop the newly created chain fork
@@ -342,6 +343,9 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
+        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
+        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
+        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
     ) -> Result<Box<Chain>, ValidateContextError> {
         match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // An existing chain in the non-finalized state
@@ -350,7 +354,17 @@ impl NonFinalizedState {
             None => Ok(Box::new(
                 self.chain_set
                     .iter()
-                    .find_map(|chain| chain.fork(parent_hash).transpose())
+                    .find_map(|chain| {
+                        chain
+                            .fork(
+                                parent_hash,
+                                // TODO: can clone be avoided?
+                                sprout_note_commitment_tree.clone(),
+                                sapling_note_commitment_tree.clone(),
+                                orchard_note_commitment_tree.clone(),
+                            )
+                            .transpose()
+                    })
                     .expect(
                         "commit_block is only called with blocks that are ready to be commited",
                     )?,
