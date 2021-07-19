@@ -960,7 +960,7 @@ fn transaction_v4_with_sapling_shielded_data(
         // make sure there are no other nullifiers, by replacing all the spends
         sapling_shielded_data.transfers = match (
             sapling_shielded_data.transfers.clone(),
-            spends.is_empty(),
+            spends.try_into().ok(),
         ) {
             // old and new spends: replace spends
             (
@@ -969,26 +969,26 @@ fn transaction_v4_with_sapling_shielded_data(
                     maybe_outputs,
                     ..
                 },
-                false,
+                Some(spends),
             ) => SpendsAndMaybeOutputs {
                 shared_anchor,
-                spends: spends.try_into().expect("just checked at least one spend"),
+                spends:,
                 maybe_outputs,
             },
             // old spends, but no new spends: delete spends, panic if no outputs
-            (SpendsAndMaybeOutputs { maybe_outputs, .. }, true) => JustOutputs {
+            (SpendsAndMaybeOutputs { maybe_outputs, .. }, None) => JustOutputs {
                 outputs: maybe_outputs.try_into().expect(
                     "unexpected invalid TransferData: must have at least one spend or one output",
                 ),
             },
             // no old spends, but new spends: add spends
-            (JustOutputs { outputs, .. }, false) => SpendsAndMaybeOutputs {
+            (JustOutputs { outputs, .. }, Some(spends)) => SpendsAndMaybeOutputs {
                 shared_anchor: FieldNotPresent,
-                spends: spends.try_into().expect("just checked at least one spend"),
+                spends,
                 maybe_outputs: outputs.into(),
             },
             // no old and no new spends: do nothing
-            (just_outputs @ JustOutputs { .. }, true) => just_outputs,
+            (just_outputs @ JustOutputs { .. }, None) => just_outputs,
         };
 
         // set value balance to 0 to pass the chain value pool checks
