@@ -972,7 +972,7 @@ fn transaction_v4_with_sapling_shielded_data(
                 Some(spends),
             ) => SpendsAndMaybeOutputs {
                 shared_anchor,
-                spends:,
+                spends,
                 maybe_outputs,
             },
             // old spends, but no new spends: delete spends, panic if no outputs
