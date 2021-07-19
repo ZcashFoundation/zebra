@@ -57,7 +57,7 @@ proptest! {
         make_distinct_nullifiers(&mut joinsplit.nullifiers);
         let expected_nullifiers = joinsplit.nullifiers;
 
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, &[joinsplit.0]);
+        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, vec![joinsplit.0]);
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -121,7 +121,7 @@ proptest! {
         let duplicate_nullifier = joinsplit.nullifiers[0];
         joinsplit.nullifiers[1] = duplicate_nullifier;
 
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, &[joinsplit.0]);
+        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, vec![joinsplit.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -174,7 +174,7 @@ proptest! {
 
         let transaction = transaction_v4_with_joinsplit_data(
             joinsplit_data.0,
-            &[joinsplit1.0, joinsplit2.0]
+            vec![joinsplit1.0, joinsplit2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -224,8 +224,8 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, &[joinsplit1.0]);
-        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, &[joinsplit2.0]);
+        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, vec![joinsplit1.0]);
+        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, vec![joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -282,8 +282,8 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, &[joinsplit1.0]);
-        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, &[joinsplit2.0]);
+        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, vec![joinsplit1.0]);
+        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, vec![joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -367,7 +367,7 @@ proptest! {
 
         let transaction = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data.0,
-            &[spend.0]
+            vec![spend.0]
         );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
@@ -423,7 +423,7 @@ proptest! {
 
         let transaction = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data.0,
-            &[spend1.0, spend2.0],
+            vec![spend1.0, spend2.0],
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -475,11 +475,11 @@ proptest! {
 
         let transaction1 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data1.0,
-            &[spend1.0]
+            vec![spend1.0]
         );
         let transaction2 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data2.0,
-            &[spend2.0]
+            vec![spend2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -539,11 +539,11 @@ proptest! {
 
         let transaction1 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data1.0,
-            &[spend1.0]
+            vec![spend1.0]
         );
         let transaction2 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data2.0,
-            &[spend2.0]
+            vec![spend2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -626,7 +626,7 @@ proptest! {
 
         let transaction = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data.0,
-            &[authorized_action.0]
+            vec![authorized_action.0]
         );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
@@ -685,7 +685,7 @@ proptest! {
 
         let transaction = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data.0,
-            &[authorized_action1.0, authorized_action2.0],
+            vec![authorized_action1.0, authorized_action2.0],
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -737,11 +737,11 @@ proptest! {
 
         let transaction1 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
-            &[authorized_action1.0]
+            vec![authorized_action1.0]
         );
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
-            &[authorized_action2.0]
+            vec![authorized_action2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -801,11 +801,11 @@ proptest! {
 
         let transaction1 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
-            &[authorized_action1.0]
+            vec![authorized_action1.0]
         );
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
-            &[authorized_action2.0]
+            vec![authorized_action2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -918,12 +918,12 @@ fn make_distinct_nullifiers<'until_modified, NullifierT>(
 /// # Panics
 ///
 /// If there are no `JoinSplit`s in `joinsplits`.
-fn transaction_v4_with_joinsplit_data<'until_cloned>(
+fn transaction_v4_with_joinsplit_data(
     joinsplit_data: impl Into<Option<JoinSplitData<Groth16Proof>>>,
-    joinsplits: impl IntoIterator<Item = &'until_cloned JoinSplit<Groth16Proof>>,
+    joinsplits: impl IntoIterator<Item = JoinSplit<Groth16Proof>>,
 ) -> Transaction {
     let mut joinsplit_data = joinsplit_data.into();
-    let joinsplits: Vec<_> = joinsplits.into_iter().cloned().collect();
+    let joinsplits: Vec<_> = joinsplits.into_iter().collect();
 
     if let Some(ref mut joinsplit_data) = joinsplit_data {
         // make sure there are no other nullifiers, by replacing all the joinsplits
@@ -966,12 +966,12 @@ fn transaction_v4_with_joinsplit_data<'until_cloned>(
 /// # Panics
 ///
 /// If there are no `Spend`s in `spends`, and no `Output`s in `sapling_shielded_data`.
-fn transaction_v4_with_sapling_shielded_data<'until_cloned>(
+fn transaction_v4_with_sapling_shielded_data(
     sapling_shielded_data: impl Into<Option<sapling::ShieldedData<PerSpendAnchor>>>,
-    spends: impl IntoIterator<Item = &'until_cloned sapling::Spend<PerSpendAnchor>>,
+    spends: impl IntoIterator<Item = sapling::Spend<PerSpendAnchor>>,
 ) -> Transaction {
     let mut sapling_shielded_data = sapling_shielded_data.into();
-    let spends: Vec<_> = spends.into_iter().cloned().collect();
+    let spends: Vec<_> = spends.into_iter().collect();
 
     if let Some(ref mut sapling_shielded_data) = sapling_shielded_data {
         // make sure there are no other nullifiers, by replacing all the spends
@@ -1031,12 +1031,12 @@ fn transaction_v4_with_sapling_shielded_data<'until_cloned>(
 /// # Panics
 ///
 /// If there are no `AuthorizedAction`s in `authorized_actions`.
-fn transaction_v5_with_orchard_shielded_data<'until_cloned>(
+fn transaction_v5_with_orchard_shielded_data(
     orchard_shielded_data: impl Into<Option<orchard::ShieldedData>>,
-    authorized_actions: impl IntoIterator<Item = &'until_cloned orchard::AuthorizedAction>,
+    authorized_actions: impl IntoIterator<Item = orchard::AuthorizedAction>,
 ) -> Transaction {
     let mut orchard_shielded_data = orchard_shielded_data.into();
-    let authorized_actions: Vec<_> = authorized_actions.into_iter().cloned().collect();
+    let authorized_actions: Vec<_> = authorized_actions.into_iter().collect();
 
     if let Some(ref mut orchard_shielded_data) = orchard_shielded_data {
         // make sure there are no other nullifiers, by replacing all the authorized_actions
