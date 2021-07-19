@@ -57,7 +57,7 @@ proptest! {
         make_distinct_nullifiers(&mut joinsplit.nullifiers);
         let expected_nullifiers = joinsplit.nullifiers;
 
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, vec![joinsplit.0]);
+        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, [joinsplit.0]);
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -121,7 +121,7 @@ proptest! {
         let duplicate_nullifier = joinsplit.nullifiers[0];
         joinsplit.nullifiers[1] = duplicate_nullifier;
 
-        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, vec![joinsplit.0]);
+        let transaction = transaction_v4_with_joinsplit_data(joinsplit_data.0, [joinsplit.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -174,7 +174,7 @@ proptest! {
 
         let transaction = transaction_v4_with_joinsplit_data(
             joinsplit_data.0,
-            vec![joinsplit1.0, joinsplit2.0]
+            [joinsplit1.0, joinsplit2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -224,8 +224,8 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, vec![joinsplit1.0]);
-        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, vec![joinsplit2.0]);
+        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, [joinsplit1.0]);
+        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, [joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -282,8 +282,8 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, vec![joinsplit1.0]);
-        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, vec![joinsplit2.0]);
+        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, [joinsplit1.0]);
+        let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, [joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -367,7 +367,7 @@ proptest! {
 
         let transaction = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data.0,
-            vec![spend.0]
+            [spend.0]
         );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
@@ -421,7 +421,7 @@ proptest! {
 
         let transaction = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data.0,
-            vec![spend1.0, spend2.0],
+            [spend1.0, spend2.0],
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -471,11 +471,11 @@ proptest! {
 
         let transaction1 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data1.0,
-            vec![spend1.0]
+            [spend1.0]
         );
         let transaction2 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data2.0,
-            vec![spend2.0]
+            [spend2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -532,11 +532,11 @@ proptest! {
 
         let transaction1 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data1.0,
-            vec![spend1.0]
+            [spend1.0]
         );
         let transaction2 = transaction_v4_with_sapling_shielded_data(
             sapling_shielded_data2.0,
-            vec![spend2.0]
+            [spend2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -619,7 +619,7 @@ proptest! {
 
         let transaction = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data.0,
-            vec![authorized_action.0]
+            [authorized_action.0]
         );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
@@ -673,7 +673,7 @@ proptest! {
 
         let transaction = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data.0,
-            vec![authorized_action1.0, authorized_action2.0],
+            [authorized_action1.0, authorized_action2.0],
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -723,11 +723,11 @@ proptest! {
 
         let transaction1 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
-            vec![authorized_action1.0]
+            [authorized_action1.0]
         );
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
-            vec![authorized_action2.0]
+            [authorized_action2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -784,11 +784,11 @@ proptest! {
 
         let transaction1 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
-            vec![authorized_action1.0]
+            [authorized_action1.0]
         );
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
-            vec![authorized_action2.0]
+            [authorized_action2.0]
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
