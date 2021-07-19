@@ -147,6 +147,27 @@ impl From<jubjub::Fq> for Node {
     }
 }
 
+impl serde::Serialize for Node {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Node {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = <[u8; 32]>::deserialize(deserializer)?;
+        Option::<jubjub::Fq>::from(jubjub::Fq::from_bytes(&bytes))
+            .map(Node::from)
+            .ok_or_else(|| serde::de::Error::custom("invalid JubJub field element"))
+    }
+}
+
 #[allow(dead_code, missing_docs)]
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum NoteCommitmentTreeError {
@@ -155,7 +176,7 @@ pub enum NoteCommitmentTreeError {
 }
 
 /// Sapling Incremental Note Commitment Tree.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///

@@ -117,7 +117,7 @@ impl From<&Root> for [u8; 32] {
 }
 
 /// Sprout Note Commitment Tree
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct NoteCommitmentTree {
     /// The root node of the tree (often used as an anchor).
@@ -181,7 +181,7 @@ impl NoteCommitmentTree {
     }
 
     /// Add a note commitment to the tree.
-    pub fn append(&self, _cm: &NoteCommitment) {
+    pub fn append(&mut self, _cm: &NoteCommitment) {
         // TODO
     }
 }

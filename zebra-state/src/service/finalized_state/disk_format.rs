@@ -260,13 +260,14 @@ impl IntoDisk for sprout::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        unimplemented!();
+        bincode::serialize(self).expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sprout::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        unimplemented!()
+        bincode::deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 
@@ -274,13 +275,14 @@ impl IntoDisk for sapling::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        unimplemented!();
+        bincode::serialize(self).expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sapling::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        unimplemented!()
+        bincode::deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 

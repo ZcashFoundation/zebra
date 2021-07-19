@@ -224,8 +224,9 @@ impl FinalizedState {
         let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
 
-        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree =
+        let sprout_note_commitment_tree_cf =
+            self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sapling_note_commitment_tree_cf =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
@@ -259,13 +260,26 @@ impl FinalizedState {
             );
         }
 
+        // TODO: decide if they will always exist or only when reaching the correct height
+        // (in that case they will turn into Option's)
+        let mut sprout_note_commitment_tree = match finalized_tip_height {
+            Some(tip_height) => self
+                .sprout_note_commitment_tree(tip_height)
+                .expect("Sprout tree must exist for the finalized tip"),
+            None => Default::default(),
+        };
+        let mut sapling_note_commitment_tree = match finalized_tip_height {
+            Some(tip_height) => self
+                .sapling_note_commitment_tree(tip_height)
+                .expect("Sapling tree must exist for the finalized tip"),
+            None => Default::default(),
+        };
         let mut orchard_note_commitment_tree = match finalized_tip_height {
             Some(tip_height) => self
                 .orchard_note_commitment_tree(tip_height)
                 .expect("Orchard tree must exist for the finalized tip"),
             None => Default::default(),
         };
-        // TODO: other trees
 
         // We use a closure so we can use an early return for control flow in
         // the genesis case
@@ -277,13 +291,21 @@ impl FinalizedState {
             batch.zs_insert(height_by_hash, hash, height);
             batch.zs_insert(block_by_height, height, &block);
 
-            // TODO: sprout and sapling anchors (per block)
-
             // "A transaction MUST NOT spend an output of the genesis block coinbase transaction.
             // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
-                // TODO: do this or only add the tree when Orchard activates?
+                // TODO: see comment above if the trees will always exist or not
+                batch.zs_insert(
+                    sprout_note_commitment_tree_cf,
+                    height,
+                    sprout_note_commitment_tree,
+                );
+                batch.zs_insert(
+                    sapling_note_commitment_tree_cf,
+                    height,
+                    sapling_note_commitment_tree,
+                );
                 batch.zs_insert(
                     orchard_note_commitment_tree_cf,
                     height,
@@ -335,30 +357,48 @@ impl FinalizedState {
                     batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
                 }
 
-                // Update the note commitment trees
+                // Add new commitments to the the note commitment trees
+                for sprout_note_commitment in transaction.sprout_note_commitments() {
+                    sprout_note_commitment_tree.append(sprout_note_commitment);
+                }
+                for sapling_note_commitment in transaction.sapling_note_commitments() {
+                    sapling_note_commitment_tree
+                        .append(*sapling_note_commitment)
+                        .expect("must work since it was already appended before in the non-finalized state");
+                }
                 for orchard_note_commitment in transaction.orchard_note_commitments() {
                     orchard_note_commitment_tree
                         .append(*orchard_note_commitment)
                         .expect("must work since it was already appended before in the non-finalized state");
                 }
-                // TODO: other trees
             }
 
             // Compute the new anchors and index them
-            let orchard_anchor = orchard_note_commitment_tree.root();
-            batch.zs_insert(orchard_anchors, height, orchard_anchor);
-            // TODO: other trees
+            batch.zs_insert(sprout_anchors, height, sprout_note_commitment_tree.hash());
+            batch.zs_insert(sapling_anchors, height, sapling_note_commitment_tree.root());
+            batch.zs_insert(orchard_anchors, height, orchard_note_commitment_tree.root());
 
             // Update the note commitment trees
             if let Some(h) = finalized_tip_height {
+                batch.zs_delete(sprout_note_commitment_tree_cf, h);
+                batch.zs_delete(sapling_note_commitment_tree_cf, h);
                 batch.zs_delete(orchard_note_commitment_tree_cf, h);
             }
+            batch.zs_insert(
+                sprout_note_commitment_tree_cf,
+                height,
+                sprout_note_commitment_tree,
+            );
+            batch.zs_insert(
+                sapling_note_commitment_tree_cf,
+                height,
+                sapling_note_commitment_tree,
+            );
             batch.zs_insert(
                 orchard_note_commitment_tree_cf,
                 height,
                 orchard_note_commitment_tree,
             );
-            // TODO: other trees
 
             batch
         };
@@ -467,6 +507,27 @@ impl FinalizedState {
 
                 block.transactions[index as usize].clone()
             })
+    }
+
+    /// Returns the Sprout note commitment tree for a given `block::Height`
+    /// if it is present.
+    pub fn sprout_note_commitment_tree(
+        &self,
+        height: block::Height,
+    ) -> Option<sprout::tree::NoteCommitmentTree> {
+        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        self.db.zs_get(sprout_note_commitment_tree, &height)
+    }
+
+    /// Returns the Sapling note commitment tree for a given `block::Height`
+    /// if it is present.
+    pub fn sapling_note_commitment_tree(
+        &self,
+        height: block::Height,
+    ) -> Option<sapling::tree::NoteCommitmentTree> {
+        let sapling_note_commitment_tree =
+            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        self.db.zs_get(sapling_note_commitment_tree, &height)
     }
 
     /// Returns the Orchard note commitment tree for a given `block::Height`
