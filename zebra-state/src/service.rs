@@ -175,9 +175,9 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared)?;
+            self.mem.commit_new_chain(prepared, &self.disk)?;
         } else {
-            self.mem.commit_block(prepared)?;
+            self.mem.commit_block(prepared, &self.disk)?;
         }
 
         Ok(())
