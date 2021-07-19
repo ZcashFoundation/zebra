@@ -415,8 +415,6 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        make_distinct_nullifiers(&mut [spend1.nullifier, spend2.nullifier]);
-
         // create a double-spend across two spends
         let duplicate_nullifier = spend1.nullifier;
         spend2.nullifier = duplicate_nullifier;
@@ -466,8 +464,6 @@ proptest! {
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
-
-        make_distinct_nullifiers(&mut [spend1.nullifier, spend2.nullifier]);
 
         // create a double-spend across two transactions
         let duplicate_nullifier = spend1.nullifier;
@@ -530,9 +526,6 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        make_distinct_nullifiers(&mut [spend1.nullifier, spend2.nullifier]);
-        let expected_nullifier = spend1.nullifier;
-
         // create a double-spend across two blocks
         let duplicate_nullifier = spend1.nullifier;
         spend2.nullifier = duplicate_nullifier;
@@ -568,7 +561,7 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_sapling_nullifier(&expected_nullifier));
+            prop_assert!(state.disk.contains_sapling_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
         } else {
@@ -579,7 +572,7 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_sapling_nullifier(&expected_nullifier));
+            prop_assert!(state.mem.best_contains_sapling_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
@@ -674,11 +667,6 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        // we can't reliably make orchard nullifiers distinct,
-        // because they must be valid Pallas points.
-        // So just skip the test if they are the same.
-        prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
-
         // create a double-spend across two authorized_actions
         let duplicate_nullifier = authorized_action1.action.nullifier;
         authorized_action2.action.nullifier = duplicate_nullifier;
@@ -728,8 +716,6 @@ proptest! {
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
-
-        prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
 
         // create a double-spend across two transactions
         let duplicate_nullifier = authorized_action1.action.nullifier;
@@ -792,9 +778,6 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        prop_assume!(authorized_action1.action.nullifier != authorized_action2.action.nullifier);
-        let expected_nullifier = authorized_action1.action.nullifier;
-
         // create a double-spend across two blocks
         let duplicate_nullifier = authorized_action1.action.nullifier;
         authorized_action2.action.nullifier = duplicate_nullifier;
@@ -830,7 +813,7 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_orchard_nullifier(&expected_nullifier));
+            prop_assert!(state.disk.contains_orchard_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
         } else {
@@ -841,7 +824,7 @@ proptest! {
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_orchard_nullifier(&expected_nullifier));
+            prop_assert!(state.mem.best_contains_orchard_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
