@@ -790,11 +790,12 @@ mod test {
         );
 
         // above max of i64 error
-        let times = i64::MAX / MAX_MONEY;
-        let mut amounts: Vec<Amount<NonNegative>> = vec![MAX_MONEY.try_into()?];
-        for _ in 0..times {
-            amounts.push(MAX_MONEY.try_into()?);
-        }
+        let times: usize = (i64::MAX / MAX_MONEY)
+            .try_into()
+            .expect("4392 can always be converted to usize");
+        let amounts: Vec<Amount<NonNegative>> = std::iter::repeat(MAX_MONEY.try_into()?)
+            .take(times + 1)
+            .collect();
 
         // use iter to test reference-based sum
         let err = match amounts.iter().sum() {
@@ -804,10 +805,12 @@ mod test {
         assert_eq!(err, Error::SumOverflow);
 
         // below min of i64 overflow
-        let mut amounts: Vec<Amount<NegativeAllowed>> = vec![(-MAX_MONEY).try_into()?];
-        for _ in 0..times {
-            amounts.push((-MAX_MONEY).try_into()?);
-        }
+        let times: usize = (i64::MAX / MAX_MONEY)
+            .try_into()
+            .expect("4392 can always be converted to usize");
+        let neg_max_money: Amount<NegativeAllowed> = (-MAX_MONEY).try_into()?;
+        let amounts: Vec<Amount<NegativeAllowed>> =
+            std::iter::repeat(neg_max_money).take(times + 1).collect();
 
         // use into_iter to test value-based sum
         let err = match amounts.into_iter().sum() {
