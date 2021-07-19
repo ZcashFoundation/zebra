@@ -18,8 +18,6 @@ pub struct Chain {
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
 
-    // chain state
-    //
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
     /// An index of block heights and transaction indexes for each transaction hash in `blocks`.
