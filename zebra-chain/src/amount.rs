@@ -345,7 +345,7 @@ pub enum Error {
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
 
-    /// Attempt to sum with overflow
+    /// i64 overflow when summing i64 amounts
     SumOverflow,
 }
 
