@@ -93,7 +93,7 @@ pub fn transparent_double_spends(
                         // so all we can say is that it's missing
                         return Err(MissingTransparentOutput {
                             out_point: *spend,
-                            location: "the finalized chain",
+                            location: "the parent chain",
                         });
                     }
                 }
