@@ -184,6 +184,11 @@ impl Chain {
         self.blocks.is_empty()
     }
 
+    /// Returns the unspent transaction outputs (UTXOs) in this non-finalized chain.
+    ///
+    /// Callers should also check the finalized state for available UTXOs.
+    /// If UTXOs remain unspent when a block is finalized, they are stored in the finalized state,
+    /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::Utxo> {
         let mut unspent_utxos = self.created_utxos.clone();
         unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
