@@ -37,7 +37,17 @@ pub(crate) fn no_duplicates_in_finalized_chain(
         }
     }
 
-    // TODO: sapling and orchard nullifiers (#2231)
+    for nullifier in prepared.block.sapling_nullifiers() {
+        if finalized_state.contains_sapling_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
+    for nullifier in prepared.block.orchard_nullifiers() {
+        if finalized_state.contains_orchard_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
 
     Ok(())
 }
