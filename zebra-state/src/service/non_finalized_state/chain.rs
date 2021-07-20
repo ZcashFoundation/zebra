@@ -11,10 +11,7 @@ use zebra_chain::{
     transaction::Transaction::*, transparent, work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{
-    service::{check, finalized_state::FinalizedState},
-    ContextuallyValidBlock, PreparedBlock, ValidateContextError,
-};
+use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
 
 #[derive(Debug, Clone, Default)]
 pub struct Chain {
@@ -183,6 +180,38 @@ impl Chain {
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
+        }
+
+        // Rebuild the note commitment trees starting from the finalized tip tree.
+        // TODO: change to a more efficient approach by removing nodes
+        // from the tree of the original chain (in `pop_tip()`).
+        // See https://github.com/ZcashFoundation/zebra/issues/2378
+        for block in forked.blocks.values() {
+            for transaction in block.block.transactions.iter() {
+                for sprout_note_commitment in transaction.sprout_note_commitments() {
+                    forked
+                        .sprout_note_commitment_tree
+                        .as_mut()
+                        .expect("Sprout note commitment tree must exist")
+                        .append(sprout_note_commitment);
+                }
+                for sapling_note_commitment in transaction.sapling_note_commitments() {
+                    forked
+                        .sapling_note_commitment_tree
+                        .as_mut()
+                        .expect("Sapling note commitment tree must exist")
+                        .append(*sapling_note_commitment)
+                        .expect("must work since it was already appended before the fork");
+                }
+                for orchard_note_commitment in transaction.orchard_note_commitments() {
+                    forked
+                        .orchard_note_commitment_tree
+                        .as_mut()
+                        .expect("Orchard note commitment tree must exist")
+                        .append(*orchard_note_commitment)
+                        .expect("must work since it was already appended before the fork");
+                }
+            }
         }
 
         Ok(Some(forked))
@@ -362,7 +391,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the treestates of this block.
-        // TODO: create trees when required
+        // TODO: create trees when required?
         if let Some(tree) = &self.sprout_note_commitment_tree {
             self.sprout_anchors.insert(tree.hash());
         }
@@ -729,16 +758,3 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
-
-impl From<&FinalizedState> for Chain {
-    fn from(state: &FinalizedState) -> Self {
-        match state.finalized_tip_height() {
-            Some(height) => Chain::new(
-                state.sprout_note_commitment_tree(height),
-                state.sapling_note_commitment_tree(height),
-                state.orchard_note_commitment_tree(height),
-            ),
-            None => Chain::new(Default::default(), Default::default(), Default::default()),
-        }
-    }
-}

@@ -122,8 +122,12 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        // TODO: get trees from FinalizedState
-        let parent_chain = self.parent_chain(parent_hash, None, None, None)?;
+        let parent_chain = self.parent_chain(
+            parent_hash,
+            finalized_state.sprout_note_commitment_tree(),
+            finalized_state.sapling_note_commitment_tree(),
+            finalized_state.orchard_note_commitment_tree(),
+        )?;
 
         // We might have taken a chain, so all validation must happen within
         // validate_and_commit, so that the chain is restored correctly.
@@ -154,7 +158,11 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<(), ValidateContextError> {
-        let chain = finalized_state.into();
+        let chain = Chain::new(
+            finalized_state.sprout_note_commitment_tree(),
+            finalized_state.sapling_note_commitment_tree(),
+            finalized_state.orchard_note_commitment_tree(),
+        );
         let (height, hash) = (prepared.height, prepared.hash);
 
         // if the block is invalid, drop the newly created chain fork
