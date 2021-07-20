@@ -63,7 +63,7 @@ where
 
     /// Insert a transparent value balance into a given `ValueBalance`
     /// leaving the other values untouched.
-    pub fn from_transparent_value_balance(
+    pub fn transparent_value_balance(
         &mut self,
         transparent_value_balance: ValueBalance<C>,
     ) -> &Self {
@@ -73,21 +73,21 @@ where
 
     /// Insert a sprout value balance into a given `ValueBalance`
     /// leaving the other values untouched.
-    pub fn from_sprout_value_balance(&mut self, sprout_value_balance: ValueBalance<C>) -> &Self {
+    pub fn sprout_value_balance(&mut self, sprout_value_balance: ValueBalance<C>) -> &Self {
         self.sprout = sprout_value_balance.sprout;
         self
     }
 
     /// Insert a sapling value balance into a given `ValueBalance`
     /// leaving the other values untouched.
-    pub fn from_sapling_value_balance(&mut self, sapling_value_balance: ValueBalance<C>) -> &Self {
+    pub fn sapling_value_balance(&mut self, sapling_value_balance: ValueBalance<C>) -> &Self {
         self.sapling = sapling_value_balance.sapling;
         self
     }
 
     /// Insert an orchard value balance into a given `ValueBalance`
     /// leaving the other values untouched.
-    pub fn from_orchard_value_balance(&mut self, orchard_value_balance: ValueBalance<C>) -> &Self {
+    pub fn orchard_value_balance(&mut self, orchard_value_balance: ValueBalance<C>) -> &Self {
         self.orchard = orchard_value_balance.orchard;
         self
     }
