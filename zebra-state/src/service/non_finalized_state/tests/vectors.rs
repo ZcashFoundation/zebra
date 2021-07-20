@@ -290,6 +290,7 @@ fn equal_length_goes_to_more_work() -> Result<()> {
 
     Ok(())
 }
+
 fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let block1: Arc<Block> = match network {
         Network::Mainnet => {
