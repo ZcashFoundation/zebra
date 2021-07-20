@@ -91,6 +91,7 @@ pub fn transparent_double_spends(
                     } else {
                         // we don't keep spent UTXOs for the finalized state,
                         // so all we can say is that it's missing
+                        // (from both the finalized and non-finalized chains)
                         return Err(MissingTransparentOutput {
                             out_point: *spend,
                             location: "the parent chain",
