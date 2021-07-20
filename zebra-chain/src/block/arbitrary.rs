@@ -397,6 +397,7 @@ impl Block {
                     }
                 }
 
+                // delete invalid transactions
                 block.transactions = new_transactions;
 
                 // TODO: fixup the history and authorizing data commitments, if needed
