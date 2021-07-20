@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Chain {
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
@@ -758,3 +758,14 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
+
+impl Default for Chain {
+    fn default() -> Self {
+        Self::new(
+            // TODO: decide if we want to default to None or empty tree
+            Some(Default::default()),
+            Some(Default::default()),
+            Some(Default::default()),
+        )
+    }
+}
