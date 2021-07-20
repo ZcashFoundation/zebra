@@ -18,6 +18,8 @@ use crate::{
 ///   (in linear chain and transaction order), and
 /// - spends of an output that was spent by a previous block.
 ///
+/// Also rejects attempts to spend UTXOs that were never created (in this chain).
+///
 /// "each output of a particular transaction
 /// can only be used as an input once in the block chain.
 /// Any subsequent reference is a forbidden double spend-
