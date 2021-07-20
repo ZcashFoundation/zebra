@@ -1,6 +1,6 @@
 //! Unspent transparent output data structures and functions.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::TryInto};
 
 use crate::{
     block::{self, Block},
@@ -102,10 +102,17 @@ pub fn new_ordered_outputs(
         .enumerate()
     {
         let from_coinbase = transaction.is_coinbase();
-        for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-            let index = index as u32;
+        for (output_index_in_transaction, output) in
+            transaction.outputs().iter().cloned().enumerate()
+        {
+            let output_index_in_transaction = output_index_in_transaction
+                .try_into()
+                .expect("unexpectedly large number of outputs");
             new_ordered_outputs.insert(
-                transparent::OutPoint { hash, index },
+                transparent::OutPoint {
+                    hash,
+                    index: output_index_in_transaction,
+                },
                 OrderedUtxo::new(output, height, from_coinbase, tx_index_in_block),
             );
         }
