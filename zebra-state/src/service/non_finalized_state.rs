@@ -77,10 +77,10 @@ impl NonFinalizedState {
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizedBlock {
         let chains = mem::take(&mut self.chain_set);
-        let mut chains = chains.into_iter();
+        let mut chains = chains.into_iter().rev();
 
         // extract best chain
-        let mut best_chain = chains.next_back().expect("there's at least one chain");
+        let mut best_chain = chains.next().expect("there's at least one chain");
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
