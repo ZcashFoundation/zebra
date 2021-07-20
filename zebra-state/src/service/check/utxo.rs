@@ -37,8 +37,8 @@ use crate::{
 /// https://developer.bitcoin.org/reference/block_chain.html#merkle-trees
 pub fn transparent_double_spends(
     prepared: &PreparedBlock,
-    parent_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    parent_chain_spent_utxos: &HashSet<transparent::OutPoint>,
+    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
     finalized_state: &FinalizedState,
 ) -> Result<(), ValidateContextError> {
     let mut block_spends = HashSet::new();
@@ -52,8 +52,8 @@ pub fn transparent_double_spends(
         });
 
         for spend in spends {
-            // check for in-block duplicate spends
-            if block_spends.contains(spend) {
+            if !block_spends.insert(*spend) {
+                // reject in-block duplicate spends
                 return Err(DuplicateTransparentSpend {
                     out_point: *spend,
                     location: "the same block",
@@ -63,7 +63,7 @@ pub fn transparent_double_spends(
             // check spends occur in chain order
             //
             // because we are in the non-finalized state, we need to check spends within the same block,
-            // the unspent and spent non-finalized UTXOs, and the finalized UTXOs.
+            // spent non-finalized UTXOs, and unspent non-finalized and finalized UTXOs.
 
             if let Some(output) = prepared.new_outputs.get(spend) {
                 // reject the spend if it uses an output from this block,
@@ -71,30 +71,39 @@ pub fn transparent_double_spends(
                 //
                 // we know the spend is invalid, because transaction IDs are unique
                 //
-                // transaction IDs also commit to transaction inputs,
+                // (transaction IDs also commit to transaction inputs,
                 // so it should be cryptographically impossible for a transaction
-                // to spend its own outputs
+                // to spend its own outputs)
                 if output.tx_index_in_block >= spend_tx_index_in_block {
                     return Err(EarlyTransparentSpend { out_point: *spend });
+                } else {
+                    // a unique spend of a previous transaction's output is ok
+                    continue;
                 }
-            } else if parent_chain_spent_utxos.contains(spend) {
+            }
+
+            if non_finalized_chain_spent_utxos.contains(spend) {
                 // reject the spend if its UTXO is already spent in the
                 // non-finalized parent chain
                 return Err(DuplicateTransparentSpend {
                     out_point: *spend,
-                    location: "the parent non-finalized chain",
-                });
-            } else if finalized_state.utxo(spend).is_none() {
-                // we don't keep spent UTXOs for the finalized state,
-                // so all we can say is that it's missing
-                // (from both the finalized and non-finalized chains)
-                return Err(MissingTransparentOutput {
-                    out_point: *spend,
-                    location: "the parent chain",
+                    location: "the non-finalized chain",
                 });
             }
 
-            block_spends.insert(*spend);
+            if !non_finalized_chain_unspent_utxos.contains_key(spend)
+                && finalized_state.utxo(spend).is_none()
+            {
+                // we don't keep spent UTXOs in the finalized state,
+                // so all we can say is that it's missing from both
+                // the finalized and non-finalized chains
+                // (it might have been spent in the finalized state,
+                // or it might never have existed in this chain)
+                return Err(MissingTransparentOutput {
+                    out_point: *spend,
+                    location: "the non-finalized and finalized chain",
+                });
+            }
         }
     }
 
