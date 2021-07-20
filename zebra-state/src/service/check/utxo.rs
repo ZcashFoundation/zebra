@@ -62,8 +62,8 @@ pub fn transparent_double_spends(
 
             // check spends occur in chain order
             //
-            // because we are in the finalized state, there is a single chain of ordered blocks,
-            // so we just need to check spends within the same block, and the finalized UTXOs.
+            // because we are in the non-finalized state, we need to check spends within the same block,
+            // the unspent and spent non-finalized UTXOs, and the finalized UTXOs.
 
             if let Some(output) = prepared.new_outputs.get(spend) {
                 // reject the spend if it uses an output from this block,
