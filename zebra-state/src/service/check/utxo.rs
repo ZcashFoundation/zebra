@@ -77,27 +77,21 @@ pub fn transparent_double_spends(
                 if output.tx_index_in_block >= spend_tx_index_in_block {
                     return Err(EarlyTransparentSpend { out_point: *spend });
                 }
-            } else {
-                // reject the spend if its UTXO is not available in the block,
-                // non-finalized parent chain, or finalized state
-                if !parent_chain_unspent_utxos.contains_key(spend)
-                    && finalized_state.utxo(spend).is_none()
-                {
-                    if parent_chain_spent_utxos.contains(spend) {
-                        return Err(DuplicateTransparentSpend {
-                            out_point: *spend,
-                            location: "the parent non-finalized chain",
-                        });
-                    } else {
-                        // we don't keep spent UTXOs for the finalized state,
-                        // so all we can say is that it's missing
-                        // (from both the finalized and non-finalized chains)
-                        return Err(MissingTransparentOutput {
-                            out_point: *spend,
-                            location: "the parent chain",
-                        });
-                    }
-                }
+            } else if parent_chain_spent_utxos.contains(spend) {
+                // reject the spend if its UTXO is already spent in the
+                // non-finalized parent chain
+                return Err(DuplicateTransparentSpend {
+                    out_point: *spend,
+                    location: "the parent non-finalized chain",
+                });
+            } else if finalized_state.utxo(spend).is_none() {
+                // we don't keep spent UTXOs for the finalized state,
+                // so all we can say is that it's missing
+                // (from both the finalized and non-finalized chains)
+                return Err(MissingTransparentOutput {
+                    out_point: *spend,
+                    location: "the parent chain",
+                });
             }
 
             block_spends.insert(*spend);
