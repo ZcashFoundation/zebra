@@ -3,17 +3,19 @@ use proptest::{
     prelude::*,
 };
 
-use std::sync::Arc;
+use std::{collections::HashSet, convert::TryInto, sync::Arc};
 
 use crate::{
     block,
     fmt::SummaryDebug,
+    orchard,
     parameters::{
         Network,
         NetworkUpgrade::{self, *},
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization,
+    transparent::Input::*,
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -326,14 +328,78 @@ impl Block {
             current.height.0 += 1;
         }
 
-        // after the vec strategy generates blocks, update the previous block hashes
+        // after the vec strategy generates blocks, fixup invalid parts of the blocks
         vec.prop_map(|mut vec| {
             let mut previous_block_hash = None;
+            let mut utxos = HashSet::<transparent::OutPoint>::new();
+
             for block in vec.iter_mut() {
+                // fixup the previous block hash
                 if let Some(previous_block_hash) = previous_block_hash {
                     block.header.previous_block_hash = previous_block_hash;
                 }
                 previous_block_hash = Some(block.hash());
+
+                // fixup the transparent spends
+                let mut new_transactions = Vec::new();
+                for transaction in block.transactions.drain(..) {
+                    let mut transaction = (*transaction).clone();
+                    let mut new_inputs = Vec::new();
+
+                    for mut input in transaction.inputs_mut().drain(..) {
+                        if let PrevOut {
+                            ref mut outpoint, ..
+                        } = input
+                        {
+                            // take a UTXO if available
+                            if utxos.remove(outpoint) {
+                                new_inputs.push(input);
+                            } else if let Some(arbitrary_utxo) = utxos.clone().iter().next() {
+                                *outpoint = *arbitrary_utxo;
+                                utxos.remove(arbitrary_utxo);
+                                new_inputs.push(input);
+                            }
+                            // otherwise, drop the invalid input, it has no UTXOs to spend
+                        } else {
+                            // preserve coinbase inputs
+                            new_inputs.push(input);
+                        }
+                    }
+
+                    // delete invalid inputs
+                    *transaction.inputs_mut() = new_inputs;
+
+                    // keep transactions with valid input counts
+                    // coinbase transactions will never fail this check
+                    // this is the input check from `has_inputs_and_outputs`
+                    if !transaction.inputs().is_empty()
+                        || transaction.joinsplit_count() > 0
+                        || transaction.sapling_spends_per_anchor().count() > 0
+                        || (transaction.orchard_actions().count() > 0
+                            && transaction
+                                .orchard_flags()
+                                .unwrap_or_else(orchard::Flags::empty)
+                                .contains(orchard::Flags::ENABLE_SPENDS))
+                    {
+                        // add the created UTXOs
+                        // these outputs can be spent from the next transaction in this block onwards
+                        // see `new_outputs` for details
+                        let hash = transaction.hash();
+                        for output_index_in_transaction in 0..transaction.outputs().len() {
+                            utxos.insert(transparent::OutPoint {
+                                hash,
+                                index: output_index_in_transaction.try_into().unwrap(),
+                            });
+                        }
+
+                        // and keep the transaction
+                        new_transactions.push(Arc::new(transaction));
+                    }
+                }
+
+                block.transactions = new_transactions;
+
+                // TODO: fixup the history and authorizing data commitments, if needed
             }
             SummaryDebug(vec.into_iter().map(Arc::new).collect())
         })
