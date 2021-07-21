@@ -43,7 +43,7 @@ proptest! {
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_sprout_nullifiers(
+    fn accept_distinct_arbitrary_sprout_nullifiers_in_one_block(
         mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -352,7 +352,7 @@ proptest! {
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_sapling_nullifiers(
+    fn accept_distinct_arbitrary_sapling_nullifiers_in_one_block(
         spend in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
         sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -604,7 +604,7 @@ proptest! {
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_orchard_nullifiers(
+    fn accept_distinct_arbitrary_orchard_nullifiers_in_one_block(
         authorized_action in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
         orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
         use_finalized_state in any::<bool>(),
