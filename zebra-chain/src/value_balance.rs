@@ -61,9 +61,14 @@ where
         }
     }
 
-    /// Insert a transparent value balance into a given `ValueBalance`
+    /// Get the transparent amount from the [`ValueBalance`].
+    pub fn transparent_amount(&self) -> Amount<C> {
+        self.transparent
+    }
+
+    /// Insert a transparent value balance into a given [`ValueBalance`]
     /// leaving the other values untouched.
-    pub fn transparent_value_balance(
+    pub fn set_transparent_value_balance(
         &mut self,
         transparent_value_balance: ValueBalance<C>,
     ) -> &Self {
@@ -71,23 +76,38 @@ where
         self
     }
 
-    /// Insert a sprout value balance into a given `ValueBalance`
+    /// Get the sprout amount from the [`ValueBalance`].
+    pub fn sprout_amount(&self) -> Amount<C> {
+        self.sprout
+    }
+
+    /// Insert a sprout value balance into a given [`ValueBalance`]
     /// leaving the other values untouched.
-    pub fn sprout_value_balance(&mut self, sprout_value_balance: ValueBalance<C>) -> &Self {
+    pub fn set_sprout_value_balance(&mut self, sprout_value_balance: ValueBalance<C>) -> &Self {
         self.sprout = sprout_value_balance.sprout;
         self
     }
 
-    /// Insert a sapling value balance into a given `ValueBalance`
+    /// Get the sapling amount from the [`ValueBalance`].
+    pub fn sapling_amount(&self) -> Amount<C> {
+        self.sapling
+    }
+
+    /// Insert a sapling value balance into a given [`ValueBalance`]
     /// leaving the other values untouched.
-    pub fn sapling_value_balance(&mut self, sapling_value_balance: ValueBalance<C>) -> &Self {
+    pub fn set_sapling_value_balance(&mut self, sapling_value_balance: ValueBalance<C>) -> &Self {
         self.sapling = sapling_value_balance.sapling;
         self
     }
 
-    /// Insert an orchard value balance into a given `ValueBalance`
+    /// Get the orchard amount from the [`ValueBalance`].
+    pub fn orchard_amount(&self) -> Amount<C> {
+        self.orchard
+    }
+
+    /// Insert an orchard value balance into a given [`ValueBalance`]
     /// leaving the other values untouched.
-    pub fn orchard_value_balance(&mut self, orchard_value_balance: ValueBalance<C>) -> &Self {
+    pub fn set_orchard_value_balance(&mut self, orchard_value_balance: ValueBalance<C>) -> &Self {
         self.orchard = orchard_value_balance.orchard;
         self
     }
