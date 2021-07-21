@@ -12,7 +12,7 @@ use crate::{
     ContextuallyValidBlock,
 };
 
-const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 32;
+const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 4;
 
 #[test]
 fn blocks_with_v5_transactions() -> Result<()> {

@@ -17,7 +17,7 @@ use crate::tests::Prepare;
 
 use super::*;
 
-const MAX_PARTIAL_CHAIN_BLOCKS: usize = 102;
+const MAX_PARTIAL_CHAIN_BLOCKS: usize = 26;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
