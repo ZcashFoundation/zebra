@@ -232,13 +232,12 @@ mod test {
 
     proptest! {
         #[test]
-        fn test_operations(
+        fn test_add(
             value_balance1 in any::<ValueBalance>(),
             value_balance2 in any::<ValueBalance>())
         {
             zebra_test::init();
 
-            // test the add operator
             let add = Ok(value_balance1) + value_balance2;
 
             if !add.is_err() {
@@ -253,8 +252,14 @@ mod test {
                 let error_string = format!("{:?}", add.err().unwrap());
                 prop_assert_eq!(error_string.contains("AmountError"), true);
             }
+        }
+        #[test]
+        fn test_sub(
+            value_balance1 in any::<ValueBalance>(),
+            value_balance2 in any::<ValueBalance>())
+        {
+            zebra_test::init();
 
-            // check the sub operator
             let sub = Ok(value_balance1) - value_balance2;
 
             if !sub.is_err() {
