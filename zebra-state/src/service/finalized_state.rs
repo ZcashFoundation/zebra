@@ -503,27 +503,45 @@ impl FinalizedState {
     /// Returns the Sprout note commitment tree for a given `block::Height`
     /// if it is present.
     pub fn sprout_note_commitment_tree(&self) -> Option<sprout::tree::NoteCommitmentTree> {
-        let height = self.finalized_tip_height()?;
+        // TODO: decide to use None or empty tree as default
+        let height = match self.finalized_tip_height() {
+            Some(h) => h,
+            None => return Some(Default::default()),
+        };
         let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-        self.db.zs_get(sprout_note_commitment_tree, &height)
+        self.db
+            .zs_get(sprout_note_commitment_tree, &height)
+            .or_else(Default::default)
     }
 
     /// Returns the Sapling note commitment tree for a given `block::Height`
     /// if it is present.
     pub fn sapling_note_commitment_tree(&self) -> Option<sapling::tree::NoteCommitmentTree> {
-        let height = self.finalized_tip_height()?;
+        // TODO: decide to use None or empty tree as default
+        let height = match self.finalized_tip_height() {
+            Some(h) => h,
+            None => return Some(Default::default()),
+        };
         let sapling_note_commitment_tree =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-        self.db.zs_get(sapling_note_commitment_tree, &height)
+        self.db
+            .zs_get(sapling_note_commitment_tree, &height)
+            .or_else(Default::default)
     }
 
     /// Returns the Orchard note commitment tree for a given `block::Height`
     /// if it is present.
     pub fn orchard_note_commitment_tree(&self) -> Option<orchard::tree::NoteCommitmentTree> {
-        let height = self.finalized_tip_height()?;
+        // TODO: decide to use None or empty tree as default
+        let height = match self.finalized_tip_height() {
+            Some(h) => h,
+            None => return Some(Default::default()),
+        };
         let orchard_note_commitment_tree =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-        self.db.zs_get(orchard_note_commitment_tree, &height)
+        self.db
+            .zs_get(orchard_note_commitment_tree, &height)
+            .or_else(Default::default)
     }
 
     /// If the database is `ephemeral`, delete it.
