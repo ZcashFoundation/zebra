@@ -77,23 +77,23 @@ pub enum ValidateContextError {
         expected_difficulty: CompactDifficulty,
     },
 
-    #[error("transparent double-spend: {out_point:?} is spent twice in {location:?}")]
+    #[error("transparent double-spend: {outpoint:?} is spent twice in {location:?}")]
     #[non_exhaustive]
     DuplicateTransparentSpend {
-        out_point: transparent::OutPoint,
+        outpoint: transparent::OutPoint,
         location: &'static str,
     },
 
-    #[error("missing transparent output: possible double-spend of {out_point:?} in {location:?}")]
+    #[error("missing transparent output: possible double-spend of {outpoint:?} in {location:?}")]
     #[non_exhaustive]
     MissingTransparentOutput {
-        out_point: transparent::OutPoint,
+        outpoint: transparent::OutPoint,
         location: &'static str,
     },
 
-    #[error("out-of-order transparent spend: {out_point:?} is created by a later transaction in the same block")]
+    #[error("out-of-order transparent spend: {outpoint:?} is created by a later transaction in the same block")]
     #[non_exhaustive]
-    EarlyTransparentSpend { out_point: transparent::OutPoint },
+    EarlyTransparentSpend { outpoint: transparent::OutPoint },
 
     #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]

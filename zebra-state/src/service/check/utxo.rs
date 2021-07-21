@@ -55,7 +55,7 @@ pub fn transparent_double_spends(
             if !block_spends.insert(*spend) {
                 // reject in-block duplicate spends
                 return Err(DuplicateTransparentSpend {
-                    out_point: *spend,
+                    outpoint: *spend,
                     location: "the same block",
                 });
             }
@@ -75,7 +75,7 @@ pub fn transparent_double_spends(
                 // so it should be cryptographically impossible for a transaction
                 // to spend its own outputs)
                 if output.tx_index_in_block >= spend_tx_index_in_block {
-                    return Err(EarlyTransparentSpend { out_point: *spend });
+                    return Err(EarlyTransparentSpend { outpoint: *spend });
                 } else {
                     // a unique spend of a previous transaction's output is ok
                     continue;
@@ -86,7 +86,7 @@ pub fn transparent_double_spends(
                 // reject the spend if its UTXO is already spent in the
                 // non-finalized parent chain
                 return Err(DuplicateTransparentSpend {
-                    out_point: *spend,
+                    outpoint: *spend,
                     location: "the non-finalized chain",
                 });
             }
@@ -100,7 +100,7 @@ pub fn transparent_double_spends(
                 // (it might have been spent in the finalized state,
                 // or it might never have existed in this chain)
                 return Err(MissingTransparentOutput {
-                    out_point: *spend,
+                    outpoint: *spend,
                     location: "the non-finalized and finalized chain",
                 });
             }
