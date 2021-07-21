@@ -4,6 +4,7 @@ use std::{
     ops::Deref,
 };
 
+use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
@@ -32,18 +33,21 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(super) spent_utxos: HashSet<transparent::OutPoint>,
 
-    sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
-    sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
-    orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+    pub(super) sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
+    pub(super) sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
+    pub(super) orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
 
     /// The sprout anchors created by `blocks`.
     ///
     /// TODO: does this include intersitial anchors?
-    pub(super) sprout_anchors: HashSet<sprout::tree::Root>,
+    pub(super) sprout_anchors: HashMultiSet<sprout::tree::Root>,
+    pub(super) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
     /// The sapling anchors created by `blocks`.
-    pub(super) sapling_anchors: HashSet<sapling::tree::Root>,
+    pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
+    pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// The orchard anchors created by `blocks`.
-    pub(super) orchard_anchors: HashSet<orchard::tree::Root>,
+    pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
+    pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The sprout nullifiers revealed by `blocks`.
     pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
@@ -71,9 +75,12 @@ impl Chain {
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             spent_utxos: Default::default(),
-            sprout_anchors: Default::default(),
-            sapling_anchors: Default::default(),
-            orchard_anchors: Default::default(),
+            sprout_anchors: HashMultiSet::new(),
+            sprout_anchors_by_height: Default::default(),
+            sapling_anchors: HashMultiSet::new(),
+            sapling_anchors_by_height: Default::default(),
+            orchard_anchors: HashMultiSet::new(),
+            orchard_anchors_by_height: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -187,9 +194,9 @@ impl Chain {
         // TODO: change to a more efficient approach by removing nodes
         // from the tree of the original chain (in `pop_tip()`).
         // See https://github.com/ZcashFoundation/zebra/issues/2378
-        forked.sprout_anchors.clear();
-        forked.sapling_anchors.clear();
-        forked.orchard_anchors.clear();
+        forked.sprout_anchors = HashMultiSet::new();
+        forked.sapling_anchors = HashMultiSet::new();
+        forked.orchard_anchors = HashMultiSet::new();
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
@@ -217,13 +224,19 @@ impl Chain {
                 }
             }
             if let Some(tree) = &forked.sprout_note_commitment_tree {
-                forked.sprout_anchors.insert(tree.hash());
+                let root = tree.hash();
+                forked.sprout_anchors.insert(root);
+                forked.sprout_anchors_by_height.insert(block.height, root);
             }
             if let Some(tree) = &forked.sapling_note_commitment_tree {
-                forked.sapling_anchors.insert(tree.root());
+                let root = tree.root();
+                forked.sapling_anchors.insert(root);
+                forked.sapling_anchors_by_height.insert(block.height, root);
             }
             if let Some(tree) = &forked.orchard_note_commitment_tree {
-                forked.orchard_anchors.insert(tree.root());
+                let root = tree.root();
+                forked.orchard_anchors.insert(root);
+                forked.orchard_anchors_by_height.insert(block.height, root);
             }
         }
 
@@ -289,6 +302,9 @@ impl Chain {
             sprout_anchors: self.sprout_anchors.clone(),
             sapling_anchors: self.sapling_anchors.clone(),
             orchard_anchors: self.orchard_anchors.clone(),
+            sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
+            sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
+            orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
             sprout_nullifiers: self.sprout_nullifiers.clone(),
             sapling_nullifiers: self.sapling_nullifiers.clone(),
             orchard_nullifiers: self.orchard_nullifiers.clone(),
@@ -406,13 +422,19 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // transaction are the treestates of this block.
         // TODO: create trees when required?
         if let Some(tree) = &self.sprout_note_commitment_tree {
-            self.sprout_anchors.insert(tree.hash());
+            let root = tree.hash();
+            self.sprout_anchors.insert(root);
+            self.sprout_anchors_by_height.insert(height, root);
         }
         if let Some(tree) = &self.sapling_note_commitment_tree {
-            self.sapling_anchors.insert(tree.root());
+            let root = tree.root();
+            self.sapling_anchors.insert(root);
+            self.sapling_anchors_by_height.insert(height, root);
         }
         if let Some(tree) = &self.orchard_note_commitment_tree {
-            self.orchard_anchors.insert(tree.root());
+            let root = tree.root();
+            self.orchard_anchors.insert(root);
+            self.orchard_anchors_by_height.insert(height, root);
         }
 
         Ok(())
@@ -420,9 +442,10 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     fn revert_chain_state_with(&mut self, contextually_valid: &ContextuallyValidBlock) {
-        let (block, hash, new_outputs, transaction_hashes) = (
+        let (block, hash, height, new_outputs, transaction_hashes) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
+            contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
         );
@@ -491,6 +514,15 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
             self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             self.revert_chain_state_with(orchard_shielded_data);
+        }
+        if let Some(anchor) = &self.sprout_anchors_by_height.remove(&height) {
+            self.sprout_anchors.remove(anchor);
+        }
+        if let Some(anchor) = &self.sapling_anchors_by_height.remove(&height) {
+            self.sapling_anchors.remove(anchor);
+        }
+        if let Some(anchor) = &self.orchard_anchors_by_height.remove(&height) {
+            self.orchard_anchors.remove(anchor);
         }
     }
 }

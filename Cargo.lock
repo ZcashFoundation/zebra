@@ -2141,6 +2141,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "multiset"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce8738c9ddd350996cb8b8b718192851df960803764bcdaa3afb44a63b1ddb5c"
+
+[[package]]
 name = "net2"
 version = "0.2.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4642,6 +4648,7 @@ dependencies = [
  "itertools 0.10.1",
  "lazy_static",
  "metrics",
+ "multiset",
  "once_cell",
  "proptest",
  "proptest-derive",

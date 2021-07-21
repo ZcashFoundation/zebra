@@ -63,12 +63,15 @@ fn finalized_equals_pushed() -> Result<()> {
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
         let mut full_chain = Chain::default();
-        let mut partial_chain = Chain::default();
 
+        for block in chain.iter().take(finalized_count) {
+            full_chain = full_chain.push(block.clone())?;
+        }
+        let mut partial_chain = Chain::new(full_chain.sprout_note_commitment_tree.clone(), full_chain.sapling_note_commitment_tree.clone(), full_chain.orchard_note_commitment_tree.clone());
         for block in chain.iter().skip(finalized_count) {
             partial_chain = partial_chain.push(block.clone())?;
         }
-        for block in chain.iter() {
+        for block in chain.iter().skip(finalized_count) {
             full_chain = full_chain.push(block.clone())?;
         }
 

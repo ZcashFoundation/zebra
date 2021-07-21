@@ -28,6 +28,8 @@ rocksdb = "0.16.0"
 tempdir = "0.3.7"
 chrono = "0.4.19"
 rlimit = "0.5.4"
+# TODO: this crate is not maintained anymore. Replace it?
+multiset = "0.0.5"
 
 [dev-dependencies]
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
