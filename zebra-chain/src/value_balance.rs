@@ -129,7 +129,6 @@ where
 }
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq)]
-//#[allow(missing_docs)]
 /// Errors that can be returned when validating a [`ValueBalance`].
 enum ValueBalanceError {
     #[error("value balance contains invalid amounts")]
