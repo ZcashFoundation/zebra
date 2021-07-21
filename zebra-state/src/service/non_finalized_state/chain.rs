@@ -27,10 +27,10 @@ pub struct Chain {
     ///
     /// Note that these UTXOs may not be unspent.
     /// Outputs can be spent by later transactions or blocks in the chain.
-    pub(super) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
     /// The [`OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
-    pub(super) spent_utxos: HashSet<transparent::OutPoint>,
+    pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
     /// The sprout anchors created by `blocks`.
     ///
