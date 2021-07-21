@@ -1639,7 +1639,7 @@ dependencies = [
  "httparse",
  "httpdate",
  "itoa",
- "pin-project 1.0.7",
+ "pin-project",
  "socket2",
  "tokio 0.2.23",
  "tower-service",
@@ -1662,7 +1662,7 @@ dependencies = [
  "httparse",
  "httpdate",
  "itoa",
- "pin-project 1.0.7",
+ "pin-project",
  "socket2",
  "tokio 0.3.6",
  "tower-service",
@@ -2374,38 +2374,18 @@ checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
 
 [[package]]
 name = "pin-project"
-version = "0.4.28"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "918192b5c59119d51e0cd221f4d49dde9112824ba717369e903c97d076083d0f"
+checksum = "576bc800220cc65dac09e99e97b08b358cfab6e17078de8dc5fee223bd2d0c08"
 dependencies = [
- "pin-project-internal 0.4.28",
-]
-
-[[package]]
-name = "pin-project"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7509cc106041c40a4518d2af7a61530e1eed0e6285296a3d8c5472806ccc4a4"
-dependencies = [
- "pin-project-internal 1.0.7",
+ "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "0.4.28"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3be26700300be6d9d23264c73211d8190e755b6b5ca7a1b28230025511b52a5e"
-dependencies = [
- "proc-macro2 1.0.24",
- "quote 1.0.7",
- "syn 1.0.60",
-]
-
-[[package]]
-name = "pin-project-internal"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c950132583b500556b1efd71d45b319029f2b71518d979fcc208e16b42426f"
+checksum = "6e8fe8163d14ce7f0cdac2e040116f22eac817edabff0be91e8aff7e9accf389"
 dependencies = [
  "proc-macro2 1.0.24",
  "quote 1.0.7",
@@ -3737,7 +3717,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hdrhistogram 6.3.4",
- "pin-project 1.0.7",
+ "pin-project",
  "tokio 0.3.6",
  "tower-layer 0.3.0",
  "tower-service",
@@ -3752,7 +3732,7 @@ dependencies = [
  "ed25519-zebra",
  "futures 0.3.15",
  "futures-core",
- "pin-project 1.0.7",
+ "pin-project",
  "rand 0.8.4",
  "tokio 0.3.6",
  "tokio-test",
@@ -3769,7 +3749,7 @@ name = "tower-fallback"
 version = "0.2.10"
 dependencies = [
  "futures-core",
- "pin-project 0.4.28",
+ "pin-project",
  "tokio 0.3.6",
  "tower",
  "tracing",
@@ -3800,7 +3780,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4546773ffeab9e4ea02b8872faa49bb616a80a7da66afc2f32688943f97efa7"
 dependencies = [
  "futures-util",
- "pin-project 1.0.7",
+ "pin-project",
  "tokio 1.3.0",
  "tokio-test",
  "tower-layer 0.3.1",
@@ -3867,7 +3847,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97d095ae15e245a057c8e8451bab9b3ee1e1f68e9ba2b4fbc18d0ac5237835f2"
 dependencies = [
- "pin-project 1.0.7",
+ "pin-project",
  "tracing",
 ]
 
@@ -4584,7 +4564,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "metrics",
- "pin-project 1.0.7",
+ "pin-project",
  "proptest",
  "proptest-derive",
  "rand 0.8.4",
@@ -4704,7 +4684,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "once_cell",
- "pin-project 1.0.7",
+ "pin-project",
  "regex",
  "semver 1.0.3",
  "sentry",
