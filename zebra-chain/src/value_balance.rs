@@ -130,26 +130,33 @@ where
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq)]
 /// Errors that can be returned when validating a [`ValueBalance`].
-enum ValueBalanceError {
+pub enum ValueBalanceError {
     #[error("value balance contains invalid amounts")]
-    AmountError(#[from] crate::amount::Error),
+    /// Any error related to [`Amount`]s inside the [`ValueBalance`]
+    AmountError(#[from] Error),
 }
 
+impl<C> std::ops::Add for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = Result<ValueBalance<C>, ValueBalanceError>;
+    fn add(self, rhs: ValueBalance<C>) -> Self::Output {
+        Ok(ValueBalance::<C> {
+            transparent: (self.transparent + rhs.transparent)?,
+            sprout: (self.sprout + rhs.sprout)?,
+            sapling: (self.sapling + rhs.sapling)?,
+            orchard: (self.orchard + rhs.orchard)?,
+        })
+    }
+}
 impl<C> std::ops::Add<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
 where
     C: Constraint,
 {
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
-
     fn add(self, rhs: ValueBalance<C>) -> Self::Output {
-        let value_balance = self?;
-
-        Ok(ValueBalance::<C> {
-            transparent: (value_balance.transparent + rhs.transparent)?,
-            sprout: (value_balance.sprout + rhs.sprout)?,
-            sapling: (value_balance.sapling + rhs.sapling)?,
-            orchard: (value_balance.orchard + rhs.orchard)?,
-        })
+        self? + rhs
     }
 }
 
