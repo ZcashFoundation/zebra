@@ -14,7 +14,9 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    orchard,
     parameters::Network,
+    sapling, sprout,
     transaction::{self, Transaction},
     transparent,
 };
@@ -22,6 +24,8 @@ use zebra_chain::{
 use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
 use self::chain::Chain;
+
+use super::finalized_state::FinalizedState;
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Debug, Clone)]
@@ -107,14 +111,22 @@ impl NonFinalizedState {
         finalizing.into()
     }
 
-    /// Commit block to the non-finalized state.
-    pub fn commit_block(&mut self, prepared: PreparedBlock) -> Result<(), ValidateContextError> {
+    /// Commit block to the non-finalized state, on top of:
+    /// - an existing chain's tip, or
+    /// - a newly forked chain.
+    pub fn commit_block(
+        &mut self,
+        prepared: PreparedBlock,
+        finalized_state: &FinalizedState,
+    ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
         let parent_chain = self.parent_chain(parent_hash)?;
 
-        match parent_chain.clone().push(prepared) {
+        // We might have taken a chain, so all validation must happen within
+        // validate_and_commit, so that the chain is restored correctly.
+        match self.validate_and_commit(*parent_chain.clone(), prepared, finalized_state) {
             Ok(child_chain) => {
                 // if the block is valid, keep the child chain, and drop the parent chain
                 self.chain_set.insert(Box::new(child_chain));
@@ -124,6 +136,10 @@ impl NonFinalizedState {
             Err(err) => {
                 // if the block is invalid, restore the unmodified parent chain
                 // (the child chain might have been modified before the error)
+                //
+                // If the chain was forked, this adds an extra chain to the
+                // chain set. This extra chain will eventually get deleted
+                // (or re-used for a valid fork).
                 self.chain_set.insert(parent_chain);
                 Err(err)
             }
@@ -135,15 +151,29 @@ impl NonFinalizedState {
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
+        finalized_state: &FinalizedState,
     ) -> Result<(), ValidateContextError> {
         let chain = Chain::default();
         let (height, hash) = (prepared.height, prepared.hash);
 
         // if the block is invalid, drop the newly created chain fork
-        let chain = chain.push(prepared)?;
+        let chain = self.validate_and_commit(chain, prepared, finalized_state)?;
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
+    }
+
+    /// Contextually validate `prepared` using `finalized_state`.
+    /// If validation succeeds, push `prepared` onto `parent_chain`.
+    fn validate_and_commit(
+        &self,
+        parent_chain: Chain,
+        prepared: PreparedBlock,
+        _finalized_state: &FinalizedState,
+    ) -> Result<Chain, ValidateContextError> {
+        // TODO: insert validation of `prepared` block and `parent_chain` here
+
+        parent_chain.push(prepared)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -194,8 +224,8 @@ impl NonFinalizedState {
     /// `transparent::OutPoint` if it is present in any chain.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         for chain in self.chain_set.iter().rev() {
-            if let Some(output) = chain.created_utxos.get(outpoint) {
-                return Some(output.clone());
+            if let Some(utxo) = chain.created_utxos.get(outpoint) {
+                return Some(utxo.clone());
             }
         }
 
@@ -271,6 +301,30 @@ impl NonFinalizedState {
             .tx_by_hash
             .get(&hash)
             .map(|(height, index)| best_chain.blocks[height].block.transactions[*index].clone())
+    }
+
+    /// Returns `true` if the best chain contains `sprout_nullifier`.
+    #[allow(dead_code)]
+    pub fn best_contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
+        self.best_chain()
+            .map(|best_chain| best_chain.sprout_nullifiers.contains(sprout_nullifier))
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if the best chain contains `sapling_nullifier`.
+    #[allow(dead_code)]
+    pub fn best_contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
+        self.best_chain()
+            .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if the best chain contains `orchard_nullifier`.
+    #[allow(dead_code)]
+    pub fn best_contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
+        self.best_chain()
+            .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
+            .unwrap_or(false)
     }
 
     /// Return the non-finalized portion of the current best chain

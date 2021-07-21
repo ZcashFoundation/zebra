@@ -70,7 +70,7 @@ pub enum Request {
         /// The transaction itself.
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
-        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::Utxo>>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         /// The height of the block containing this transaction.
         height: block::Height,
     },
@@ -100,7 +100,7 @@ impl Request {
     }
 
     /// The set of additional known unspent transaction outputs that's in this request.
-    pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, transparent::Utxo>> {
+    pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>> {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
             Request::Mempool { .. } => HashMap::new().into(),

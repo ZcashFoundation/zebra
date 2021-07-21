@@ -301,6 +301,31 @@ impl std::ops::Div<u64> for Amount<NonNegative> {
     }
 }
 
+impl<C> std::iter::Sum<Amount<C>> for Result<Amount<C>>
+where
+    C: Constraint,
+{
+    fn sum<I: Iterator<Item = Amount<C>>>(iter: I) -> Self {
+        let sum = iter
+            .map(|a| a.0)
+            .try_fold(0i64, |acc, amount| acc.checked_add(amount));
+
+        match sum {
+            Some(sum) => Amount::try_from(sum),
+            None => Err(Error::SumOverflow),
+        }
+    }
+}
+
+impl<'amt, C> std::iter::Sum<&'amt Amount<C>> for Result<Amount<C>>
+where
+    C: Constraint + std::marker::Copy + 'amt,
+{
+    fn sum<I: Iterator<Item = &'amt Amount<C>>>(iter: I) -> Self {
+        iter.copied().sum()
+    }
+}
+
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
@@ -319,6 +344,9 @@ pub enum Error {
     MultiplicationOverflow { amount: i64, multiplier: u64 },
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
+
+    /// i64 overflow when summing i64 amounts
+    SumOverflow,
 }
 
 /// Marker type for `Amount` that allows negative values.
@@ -446,7 +474,7 @@ mod test {
         let one: Amount = 1.try_into()?;
         let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one + neg_one;
 
         assert_eq!(zero, new_zero?);
@@ -462,7 +490,7 @@ mod test {
         let one = Ok(one);
         let neg_one: Amount = (-1).try_into()?;
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one + neg_one;
 
         assert_eq!(zero, new_zero?);
@@ -478,7 +506,7 @@ mod test {
         let neg_one: Amount = (-1).try_into()?;
         let neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one + neg_one;
 
         assert_eq!(zero, new_zero?);
@@ -495,7 +523,7 @@ mod test {
         let neg_one: Amount = (-1).try_into()?;
         let neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let new_zero = one.and_then(|one| one + neg_one);
 
         assert_eq!(zero, new_zero?);
@@ -511,7 +539,7 @@ mod test {
         let neg_one: Amount = (-1).try_into()?;
         let mut neg_one = Ok(neg_one);
 
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         neg_one += one;
         let new_zero = neg_one;
 
@@ -525,7 +553,7 @@ mod test {
         zebra_test::init();
 
         let one: Amount = 1.try_into()?;
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
 
         let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
@@ -541,7 +569,7 @@ mod test {
 
         let one: Amount = 1.try_into()?;
         let one = Ok(one);
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
 
         let neg_one: Amount = (-1).try_into()?;
         let new_neg_one = zero - one;
@@ -556,7 +584,7 @@ mod test {
         zebra_test::init();
 
         let one: Amount = 1.try_into()?;
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let zero = Ok(zero);
 
         let neg_one: Amount = (-1).try_into()?;
@@ -572,7 +600,7 @@ mod test {
         zebra_test::init();
 
         let one: Amount = 1.try_into()?;
-        let zero: Amount = 0.try_into()?;
+        let zero: Amount = Amount::zero();
         let mut zero = Ok(zero);
 
         let neg_one: Amount = (-1).try_into()?;
@@ -589,7 +617,7 @@ mod test {
         zebra_test::init();
 
         let one = Amount::<NonNegative>::try_from(1)?;
-        let zero = Amount::<NegativeAllowed>::try_from(0)?;
+        let zero: Amount<NegativeAllowed> = Amount::zero();
 
         (zero - one.constrain()).expect("should allow negative");
         (zero.constrain() - one).expect_err("shouldn't allow negative");
@@ -638,7 +666,7 @@ mod test {
 
         let one = Amount::<NonNegative>::try_from(1)?;
         let another_one = Amount::<NonNegative>::try_from(1)?;
-        let zero = Amount::<NonNegative>::try_from(0)?;
+        let zero: Amount<NonNegative> = Amount::zero();
 
         let hash_set: HashSet<Amount<NonNegative>, RandomState> = [one].iter().cloned().collect();
         assert_eq!(hash_set.len(), 1);
@@ -680,7 +708,7 @@ mod test {
         C1: Constraint + Debug,
         C2: Constraint + Debug,
     {
-        let zero = Amount::<C1>::try_from(0)?;
+        let zero: Amount<C1> = Amount::zero();
         let one = Amount::<C2>::try_from(1)?;
         let another_one = Amount::<C1>::try_from(1)?;
 
@@ -706,6 +734,89 @@ mod test {
         assert!(zero >= negative_one);
         assert!(negative_two < negative_one);
         assert!(negative_one > negative_two);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sum() -> Result<()> {
+        zebra_test::init();
+
+        let one: Amount = 1.try_into()?;
+        let neg_one: Amount = (-1).try_into()?;
+
+        let zero: Amount = Amount::zero();
+
+        // success
+        let amounts = vec![one, neg_one, zero];
+
+        let sum_ref: Amount = amounts.iter().sum::<Result<Amount, Error>>()?;
+        let sum_value: Amount = amounts.into_iter().sum::<Result<Amount, Error>>()?;
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(sum_ref, zero);
+
+        // above max for Amount error
+        let max: Amount = MAX_MONEY.try_into()?;
+        let amounts = vec![one, max];
+        let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
+
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(
+            sum_ref,
+            Err(Error::Contains {
+                range: -MAX_MONEY..=MAX_MONEY,
+                value: integer_sum,
+            })
+        );
+
+        // below min for Amount error
+        let min: Amount = (-MAX_MONEY).try_into()?;
+        let amounts = vec![min, neg_one];
+        let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
+
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(
+            sum_ref,
+            Err(Error::Contains {
+                range: -MAX_MONEY..=MAX_MONEY,
+                value: integer_sum,
+            })
+        );
+
+        // above max of i64 error
+        let times: usize = (i64::MAX / MAX_MONEY)
+            .try_into()
+            .expect("4392 can always be converted to usize");
+        let amounts: Vec<Amount> = std::iter::repeat(MAX_MONEY.try_into()?)
+            .take(times + 1)
+            .collect();
+
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(sum_ref, Err(Error::SumOverflow));
+
+        // below min of i64 overflow
+        let times: usize = (i64::MAX / MAX_MONEY)
+            .try_into()
+            .expect("4392 can always be converted to usize");
+        let neg_max_money: Amount<NegativeAllowed> = (-MAX_MONEY).try_into()?;
+        let amounts: Vec<Amount<NegativeAllowed>> =
+            std::iter::repeat(neg_max_money).take(times + 1).collect();
+
+        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
+        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
+
+        assert_eq!(sum_ref, sum_value);
+        assert_eq!(sum_ref, Err(Error::SumOverflow));
 
         Ok(())
     }

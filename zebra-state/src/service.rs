@@ -175,9 +175,9 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared)?;
+            self.mem.commit_new_chain(prepared, &self.disk)?;
         } else {
-            self.mem.commit_block(prepared)?;
+            self.mem.commit_block(prepared, &self.disk)?;
         }
 
         Ok(())
@@ -246,6 +246,9 @@ impl StateService {
 
     /// Check that the prepared block is contextually valid for the configured
     /// network, based on the committed finalized and non-finalized state.
+    ///
+    /// Note: some additional contextual validity checks are performed by the
+    /// non-finalized [`Chain`].
     fn check_contextual_validity(
         &mut self,
         prepared: &PreparedBlock,
@@ -631,7 +634,8 @@ impl Service<Request> for StateService {
             Request::CommitBlock(prepared) => {
                 metrics::counter!("state.requests", 1, "type" => "commit_block");
 
-                self.pending_utxos.check_against(&prepared.new_outputs);
+                self.pending_utxos
+                    .check_against_ordered(&prepared.new_outputs);
                 let rsp_rx = self.queue_and_commit_non_finalized(prepared);
 
                 async move {
