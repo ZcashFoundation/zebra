@@ -1,8 +1,8 @@
-//! A type that can hold the Zcash four types of value pools
+//! A type that can hold the four types of Zcash value pools.
 
 use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
 
-/// A structure that hold amounts for the four value pool types.
+/// An amount spread between different Zcash pools.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "C: Constraint")]
 pub struct ValueBalance<C = NegativeAllowed> {
@@ -29,7 +29,7 @@ where
             .constrain::<NonNegative>()
     }
 
-    /// Creates a `ValueBalance` from the given transparent amount.
+    /// Creates a [`ValueBalance`] from the given transparent amount.
     pub fn from_transparent_amount(transparent_amount: Amount<C>) -> Self {
         ValueBalance {
             transparent: transparent_amount,
@@ -37,7 +37,7 @@ where
         }
     }
 
-    /// Creates a `ValueBalance` from the given sprout amount.
+    /// Creates a [`ValueBalance`] from the given sprout amount.
     pub fn from_sprout_amount(sprout_amount: Amount<C>) -> Self {
         ValueBalance {
             sprout: sprout_amount,
@@ -45,7 +45,7 @@ where
         }
     }
 
-    /// Creates a `ValueBalance` from the given sapling amount.
+    /// Creates a [`ValueBalance`] from the given sapling amount.
     pub fn from_sapling_amount(sapling_amount: Amount<C>) -> Self {
         ValueBalance {
             sapling: sapling_amount,
@@ -53,7 +53,7 @@ where
         }
     }
 
-    /// Creates a `ValueBalance` from the given orchard amount.
+    /// Creates a [`ValueBalance`] from the given orchard amount.
     pub fn from_orchard_amount(orchard_amount: Amount<C>) -> Self {
         ValueBalance {
             orchard: orchard_amount,
@@ -110,7 +110,7 @@ where
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq)]
 //#[allow(missing_docs)]
-/// Errors that can be returned when validating `ValueBalance`s
+/// Errors that can be returned when validating a [`ValueBalance`].
 enum ValueBalanceError {
     #[error("value balance contains invalid amounts")]
     AmountError(#[from] crate::amount::Error),
