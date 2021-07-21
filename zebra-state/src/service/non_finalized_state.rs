@@ -14,12 +14,13 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
-    orchard,
     parameters::Network,
-    sapling, sprout,
     transaction::{self, Transaction},
     transparent,
 };
+
+#[cfg(test)]
+use zebra_chain::{orchard, sapling, sprout};
 
 use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
@@ -304,7 +305,7 @@ impl NonFinalizedState {
     }
 
     /// Returns `true` if the best chain contains `sprout_nullifier`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn best_contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.sprout_nullifiers.contains(sprout_nullifier))
@@ -312,7 +313,7 @@ impl NonFinalizedState {
     }
 
     /// Returns `true` if the best chain contains `sapling_nullifier`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn best_contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
@@ -320,7 +321,7 @@ impl NonFinalizedState {
     }
 
     /// Returns `true` if the best chain contains `orchard_nullifier`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn best_contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
