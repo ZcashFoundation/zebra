@@ -103,6 +103,27 @@ pub enum Input {
     },
 }
 
+impl Input {
+    /// Set this input's outpoint.
+    ///
+    /// Should only be called on `PrevOut` inputs.
+    ///
+    /// # Panics
+    ///
+    /// If `self` is a coinbase input.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_outpoint(&mut self, new_outpoint: OutPoint) {
+        if let Input::PrevOut {
+            ref mut outpoint, ..
+        } = self
+        {
+            *outpoint = new_outpoint;
+        } else {
+            unreachable!("unexpected variant: Coinbase Inputs do not have OutPoints");
+        }
+    }
+}
+
 /// A transparent output from a transaction.
 ///
 /// The most fundamental building block of a transaction is a
