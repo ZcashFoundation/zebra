@@ -160,21 +160,27 @@ where
     }
 }
 
+impl<C> std::ops::Sub for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = Result<ValueBalance<C>, ValueBalanceError>;
+    fn sub(self, rhs: ValueBalance<C>) -> Self::Output {
+        Ok(ValueBalance::<C> {
+            transparent: (self.transparent - rhs.transparent)?,
+            sprout: (self.sprout - rhs.sprout)?,
+            sapling: (self.sapling - rhs.sapling)?,
+            orchard: (self.orchard - rhs.orchard)?,
+        })
+    }
+}
 impl<C> std::ops::Sub<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
 where
     C: Constraint,
 {
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
-
     fn sub(self, rhs: ValueBalance<C>) -> Self::Output {
-        let value_balance = self?;
-
-        Ok(ValueBalance::<C> {
-            transparent: (value_balance.transparent - rhs.transparent)?,
-            sprout: (value_balance.sprout - rhs.sprout)?,
-            sapling: (value_balance.sapling - rhs.sapling)?,
-            orchard: (value_balance.orchard - rhs.orchard)?,
-        })
+        self? - rhs
     }
 }
 
@@ -238,19 +244,25 @@ mod test {
         {
             zebra_test::init();
 
-            let add = Ok(value_balance1) + value_balance2;
+            let transparent = value_balance1.transparent + value_balance2.transparent;
+            let sprout = value_balance1.sprout + value_balance2.sprout;
+            let sapling = value_balance1.sapling + value_balance2.sapling;
+            let orchard = value_balance1.orchard + value_balance2.orchard;
 
-            if !add.is_err() {
-                prop_assert_eq!(add?, ValueBalance {
-                    transparent: (value_balance1.transparent + value_balance2.transparent)?,
-                    sprout: (value_balance1.sprout + value_balance2.sprout)?,
-                    sapling: (value_balance1.sapling + value_balance2.sapling)?,
-                    orchard: (value_balance1.orchard + value_balance2.orchard)?,
-                });
-            }
-            else {
-                let error_string = format!("{:?}", add.err().unwrap());
-                prop_assert_eq!(error_string.contains("AmountError"), true);
+            match (transparent, sprout, sapling, orchard) {
+                (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard)) => prop_assert_eq!(
+                    value_balance1 + value_balance2,
+                    Ok(ValueBalance {
+                        transparent,
+                        sprout,
+                        sapling,
+                        orchard,
+                    })
+                ),
+                _ => {
+                    let error_string = format!("{:?}", (value_balance1 + value_balance2));
+                    prop_assert_eq!(error_string.contains("AmountError"), true)
+                }
             }
         }
         #[test]
@@ -260,19 +272,25 @@ mod test {
         {
             zebra_test::init();
 
-            let sub = Ok(value_balance1) - value_balance2;
+            let transparent = value_balance1.transparent - value_balance2.transparent;
+            let sprout = value_balance1.sprout - value_balance2.sprout;
+            let sapling = value_balance1.sapling - value_balance2.sapling;
+            let orchard = value_balance1.orchard - value_balance2.orchard;
 
-            if !sub.is_err() {
-                prop_assert_eq!(sub?, ValueBalance {
-                    transparent: (value_balance1.transparent - value_balance2.transparent)?,
-                    sprout: (value_balance1.sprout - value_balance2.sprout)?,
-                    sapling: (value_balance1.sapling - value_balance2.sapling)?,
-                    orchard: (value_balance1.orchard - value_balance2.orchard)?,
-                });
-            }
-            else {
-                let error_string = format!("{:?}", sub.err().unwrap());
-                prop_assert_eq!(error_string.contains("AmountError"), true);
+            match (transparent, sprout, sapling, orchard) {
+                (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard)) => prop_assert_eq!(
+                    value_balance1 - value_balance2,
+                    Ok(ValueBalance {
+                        transparent,
+                        sprout,
+                        sapling,
+                        orchard,
+                    })
+                ),
+                _ => {
+                    let error_string = format!("{:?}", (value_balance1 - value_balance2));
+                    prop_assert_eq!(error_string.contains("AmountError"), true)
+                }
             }
         }
     }
