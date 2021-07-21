@@ -17,7 +17,6 @@ use zebra_chain::{
     },
     transparent::{self, CoinbaseData},
 };
-use zebra_state::Utxo;
 
 use super::{check, Request, Verifier};
 
@@ -201,8 +200,6 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 }
 
 #[tokio::test]
-// TODO: Remove `should_panic` once V5 transaction sighash is implemened by the merge of #2165.
-#[should_panic]
 async fn v5_transaction_is_rejected_before_nu5_activation() {
     const V5_TRANSACTION_VERSION: u32 = 5;
 
@@ -620,7 +617,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data.sig = signing_key.sign(sighash.as_bytes()),
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
             _ => unreachable!("Mock transaction was created incorrectly"),
         }
 
@@ -825,23 +822,27 @@ fn v5_with_sapling_spends() {
 /// First, this creates a fake unspent transaction output from a fake transaction included in the
 /// specified `previous_utxo_height` block height. This fake [`Utxo`] also contains a simple script
 /// that can either accept or reject any spend attempt, depending on if `script_should_succeed` is
-/// `true` or `false`.
+/// `true` or `false`. Since the `tx_index_in_block` is irrelevant for blocks that have already
+/// been verified, it is set to `1`.
 ///
 /// Then, a [`transparent::Input::PrevOut`] is created that attempts to spend the previously created fake
-/// UTXO. A new UTXO is created with the [`transparent::Output`] resulting from the spend.
+/// UTXO to a new [`transparent::Output`].
 ///
 /// Finally, the initial fake UTXO is placed in a `known_utxos` [`HashMap`] so that it can be
 /// retrieved during verification.
 ///
 /// The function then returns the generated transparent input and output, as well as the
 /// `known_utxos` map.
+///
+/// Note: `known_utxos` is only intended to be used for UTXOs within the same block,
+/// so future verification changes might break this mocking function.
 fn mock_transparent_transfer(
     previous_utxo_height: block::Height,
     script_should_succeed: bool,
 ) -> (
     transparent::Input,
     transparent::Output,
-    HashMap<transparent::OutPoint, Utxo>,
+    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) {
     // A script with a single opcode that accepts the transaction (pushes true on the stack)
     let accepting_script = transparent::Script::new(&[1, 1]);
@@ -865,11 +866,8 @@ fn mock_transparent_transfer(
         lock_script,
     };
 
-    let previous_utxo = Utxo {
-        output: previous_output,
-        height: previous_utxo_height,
-        from_coinbase: false,
-    };
+    let previous_utxo =
+        transparent::OrderedUtxo::new(previous_output, previous_utxo_height, false, 1);
 
     // Use the `previous_outpoint` as input
     let input = transparent::Input::PrevOut {

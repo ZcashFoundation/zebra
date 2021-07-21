@@ -7,14 +7,16 @@ mod tests;
 
 use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
-use zebra_chain::transparent;
 use zebra_chain::{
     block::{self, Block},
+    orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    sapling, sprout,
     transaction::{self, Transaction},
+    transparent,
 };
 
-use crate::{BoxError, Config, FinalizedBlock, HashOrHeight, Utxo};
+use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 
@@ -177,9 +179,12 @@ impl FinalizedState {
     }
 
     /// Immediately commit `finalized` to the finalized state.
+    ///
+    /// Use `source` as the source of the block in log messages.
     pub fn commit_finalized_direct(
         &mut self,
         finalized: FinalizedBlock,
+        source: &str,
     ) -> Result<block::Hash, BoxError> {
         block_precommit_metrics(&finalized);
 
@@ -204,12 +209,14 @@ impl FinalizedState {
         if self.is_empty(hash_by_height) {
             assert_eq!(
                 GENESIS_PREVIOUS_BLOCK_HASH, block.header.previous_block_hash,
-                "the first block added to an empty state must be a genesis block"
+                "the first block added to an empty state must be a genesis block, source: {}",
+                source,
             );
             assert_eq!(
                 block::Height(0),
                 height,
-                "cannot commit genesis: invalid height"
+                "cannot commit genesis: invalid height, source: {}",
+                source,
             );
         } else {
             assert_eq!(
@@ -217,13 +224,15 @@ impl FinalizedState {
                     .expect("state must have a genesis block committed")
                     + 1,
                 Some(height),
-                "committed block height must be 1 more than the finalized tip height"
+                "committed block height must be 1 more than the finalized tip height, source: {}",
+                source,
             );
 
             assert_eq!(
                 self.finalized_tip_hash(),
                 block.header.previous_block_hash,
-                "committed block must be a child of the finalized tip"
+                "committed block must be a child of the finalized tip, source: {}",
+                source,
             );
         }
 
@@ -239,9 +248,10 @@ impl FinalizedState {
 
             // TODO: sprout and sapling anchors (per block)
 
-            // Consensus-critical bug in zcashd: transactions in the
-            // genesis block are ignored.
-            if block.header.previous_block_hash == block::Hash([0; 32]) {
+            // "A transaction MUST NOT spend an output of the genesis block coinbase transaction.
+            // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
                 return batch;
             }
 
@@ -251,7 +261,6 @@ impl FinalizedState {
             }
 
             // Index each transaction, spent inputs, nullifiers
-            // TODO: move computation into FinalizedBlock as with transparent outputs
             for (transaction_index, (transaction, transaction_hash)) in block
                 .transactions
                 .iter()
@@ -297,7 +306,10 @@ impl FinalizedState {
 
         let result = self.db.write(batch).map(|()| hash);
 
+        tracing::trace!(?source, "committed block from");
+
         if result.is_ok() && self.is_at_stop_height(height) {
+            tracing::info!(?source, "committed block from");
             tracing::info!(?height, ?hash, "stopping at configured height");
             // We'd like to drop the database here, because that closes the
             // column families and the database. But Rust's ownership rules
@@ -318,7 +330,7 @@ impl FinalizedState {
     /// [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedFinalized) {
         let (finalized, rsp_tx) = queued_block;
-        let result = self.commit_finalized_direct(finalized);
+        let result = self.commit_finalized_direct(finalized, "CommitFinalized request");
         let _ = rsp_tx.send(result.map_err(Into::into));
     }
 
@@ -353,9 +365,27 @@ impl FinalizedState {
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
         self.db.zs_get(utxo_by_outpoint, outpoint)
+    }
+
+    /// Returns `true` if the finalized state contains `sprout_nullifier`.
+    pub fn contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
+        let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
+        self.db.zs_contains(sprout_nullifiers, &sprout_nullifier)
+    }
+
+    /// Returns `true` if the finalized state contains `sapling_nullifier`.
+    pub fn contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
+        let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
+        self.db.zs_contains(sapling_nullifiers, &sapling_nullifier)
+    }
+
+    /// Returns `true` if the finalized state contains `orchard_nullifier`.
+    pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
+        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
+        self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.

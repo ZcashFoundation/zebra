@@ -14,27 +14,65 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    orchard,
     parameters::Network,
+    sapling, sprout,
     transaction::{self, Transaction},
     transparent,
 };
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, Utxo, ValidateContextError};
+use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
 use self::chain::Chain;
 
+use super::finalized_state::FinalizedState;
+
 /// The state of the chains in memory, incuding queued blocks.
-#[derive(Default)]
+#[derive(Debug, Clone)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
     /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
     pub chain_set: BTreeSet<Box<Chain>>,
-    /// The configured Zcash network
+
+    /// The configured Zcash network.
+    //
+    // Note: this field is currently unused, but it's useful for debugging.
     pub network: Network,
 }
 
 impl NonFinalizedState {
+    /// Returns a new non-finalized state for `network`.
+    pub fn new(network: Network) -> NonFinalizedState {
+        NonFinalizedState {
+            chain_set: Default::default(),
+            network,
+        }
+    }
+
+    /// Is the internal state of `self` the same as `other`?
+    ///
+    /// [`Chain`] has a custom [`Eq`] implementation based on proof of work,
+    /// which is used to select the best chain. So we can't derive [`Eq`] for [`NonFinalizedState`].
+    ///
+    /// Unlike the custom trait impl, this method returns `true` if the entire internal state
+    /// of two non-finalized states is equal.
+    ///
+    /// If the internal states are different, it returns `false`,
+    /// even if the chains and blocks are equal.
+    #[cfg(test)]
+    pub(crate) fn eq_internal_state(&self, other: &NonFinalizedState) -> bool {
+        // this method must be updated every time a field is added to NonFinalizedState
+
+        self.chain_set.len() == other.chain_set.len()
+            && self
+                .chain_set
+                .iter()
+                .zip(other.chain_set.iter())
+                .all(|(self_chain, other_chain)| self_chain.eq_internal_state(other_chain))
+            && self.network == other.network
+    }
+
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizedBlock {
@@ -73,24 +111,39 @@ impl NonFinalizedState {
         finalizing.into()
     }
 
-    /// Commit block to the non-finalized state.
-    pub fn commit_block(&mut self, prepared: PreparedBlock) -> Result<(), ValidateContextError> {
+    /// Commit block to the non-finalized state, on top of:
+    /// - an existing chain's tip, or
+    /// - a newly forked chain.
+    pub fn commit_block(
+        &mut self,
+        prepared: PreparedBlock,
+        finalized_state: &FinalizedState,
+    ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let mandatory_checkpoint = self.network.mandatory_checkpoint_height();
-        if height <= mandatory_checkpoint {
-            panic!(
-                "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy blocks, and the canopy activation block, must be committed to the state as finalized blocks"
-            );
+        let parent_chain = self.parent_chain(parent_hash)?;
+
+        // We might have taken a chain, so all validation must happen within
+        // validate_and_commit, so that the chain is restored correctly.
+        match self.validate_and_commit(*parent_chain.clone(), prepared, finalized_state) {
+            Ok(child_chain) => {
+                // if the block is valid, keep the child chain, and drop the parent chain
+                self.chain_set.insert(Box::new(child_chain));
+                self.update_metrics_for_committed_block(height, hash);
+                Ok(())
+            }
+            Err(err) => {
+                // if the block is invalid, restore the unmodified parent chain
+                // (the child chain might have been modified before the error)
+                //
+                // If the chain was forked, this adds an extra chain to the
+                // chain set. This extra chain will eventually get deleted
+                // (or re-used for a valid fork).
+                self.chain_set.insert(parent_chain);
+                Err(err)
+            }
         }
-
-        let mut parent_chain = self.parent_chain(parent_hash)?;
-
-        parent_chain.push(prepared)?;
-        self.chain_set.insert(parent_chain);
-        self.update_metrics_for_committed_block(height, hash);
-        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
@@ -98,13 +151,29 @@ impl NonFinalizedState {
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
+        finalized_state: &FinalizedState,
     ) -> Result<(), ValidateContextError> {
-        let mut chain = Chain::default();
+        let chain = Chain::default();
         let (height, hash) = (prepared.height, prepared.hash);
-        chain.push(prepared)?;
+
+        // if the block is invalid, drop the newly created chain fork
+        let chain = self.validate_and_commit(chain, prepared, finalized_state)?;
         self.chain_set.insert(Box::new(chain));
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
+    }
+
+    /// Contextually validate `prepared` using `finalized_state`.
+    /// If validation succeeds, push `prepared` onto `parent_chain`.
+    fn validate_and_commit(
+        &self,
+        parent_chain: Chain,
+        prepared: PreparedBlock,
+        _finalized_state: &FinalizedState,
+    ) -> Result<Chain, ValidateContextError> {
+        // TODO: insert validation of `prepared` block and `parent_chain` here
+
+        parent_chain.push(prepared)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -153,10 +222,10 @@ impl NonFinalizedState {
 
     /// Returns the `transparent::Output` pointed to by the given
     /// `transparent::OutPoint` if it is present in any chain.
-    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<Utxo> {
+    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         for chain in self.chain_set.iter().rev() {
-            if let Some(output) = chain.created_utxos.get(outpoint) {
-                return Some(output.clone());
+            if let Some(utxo) = chain.created_utxos.get(outpoint) {
+                return Some(utxo.clone());
             }
         }
 
@@ -232,6 +301,30 @@ impl NonFinalizedState {
             .tx_by_hash
             .get(&hash)
             .map(|(height, index)| best_chain.blocks[height].block.transactions[*index].clone())
+    }
+
+    /// Returns `true` if the best chain contains `sprout_nullifier`.
+    #[allow(dead_code)]
+    pub fn best_contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
+        self.best_chain()
+            .map(|best_chain| best_chain.sprout_nullifiers.contains(sprout_nullifier))
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if the best chain contains `sapling_nullifier`.
+    #[allow(dead_code)]
+    pub fn best_contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
+        self.best_chain()
+            .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if the best chain contains `orchard_nullifier`.
+    #[allow(dead_code)]
+    pub fn best_contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
+        self.best_chain()
+            .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
+            .unwrap_or(false)
     }
 
     /// Return the non-finalized portion of the current best chain

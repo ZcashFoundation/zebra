@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-alpha.12"
+version = "1.0.0-alpha.13"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -9,7 +9,7 @@ edition = "2018"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test"]
+proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test", "rand", "rand_chacha"]
 bench = ["zebra-test"]
 
 [dependencies]
@@ -45,10 +45,14 @@ zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3e
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
 bigint = "4"
 uint = "0.9.1"
+bls12_381 = "0.5.0"
+incrementalmerkletree = "0.1.0"
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 itertools = { version = "0.10.1", optional = true }
+rand = { version = "0.8", optional = true }
+rand_chacha = { version = "0.3", optional = true }
 
 # ZF deps
 ed25519-zebra = "2"
@@ -59,7 +63,6 @@ redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", rev = "f
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-bincode = "1"
 color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
 itertools = "0.10.1"

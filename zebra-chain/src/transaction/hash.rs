@@ -5,9 +5,9 @@ use std::fmt;
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{sha256d, SerializationError, ZcashSerialize};
+use crate::serialization::SerializationError;
 
-use super::Transaction;
+use super::{txid::TxIdBuilder, Transaction};
 
 /// A transaction hash.
 ///
@@ -19,11 +19,10 @@ pub struct Hash(pub [u8; 32]);
 
 impl<'a> From<&'a Transaction> for Hash {
     fn from(transaction: &'a Transaction) -> Self {
-        let mut hash_writer = sha256d::Writer::default();
-        transaction
-            .zcash_serialize(&mut hash_writer)
-            .expect("Transactions must serialize into the hash.");
-        Self(hash_writer.finish())
+        let hasher = TxIdBuilder::new(transaction);
+        hasher
+            .txid()
+            .expect("zcash_primitives and Zebra transaction formats must be compatible")
     }
 }
 

@@ -7,16 +7,9 @@ use group::GroupEncoding;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use rand_core::{CryptoRng, RngCore};
 
-use crate::{
-    amount::{Amount, NonNegative},
-    transaction::Memo,
-};
+use crate::amount::{Amount, NonNegative};
 
-use super::{
-    commitment::CommitmentRandomness,
-    keys::{prf_expand, Diversifier, TransmissionKey},
-    sinsemilla::extract_p,
-};
+use super::{address::Address, keys::prf_expand, sinsemilla::extract_p};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -26,8 +19,20 @@ mod nullifiers;
 pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
 pub use nullifiers::Nullifier;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
+/// A random seed (rseed) used in the Orchard note creation.
 pub struct SeedRandomness(pub(crate) [u8; 32]);
+
+impl SeedRandomness {
+    pub fn new<T>(csprng: &mut T) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        let mut bytes = [0u8; 32];
+        csprng.fill_bytes(&mut bytes);
+        Self(bytes)
+    }
+}
 
 /// Used as input to PRF^nf as part of deriving the _nullifier_ of the _note_.
 ///
@@ -47,6 +52,12 @@ impl From<Rho> for [u8; 32] {
     }
 }
 
+impl From<Nullifier> for Rho {
+    fn from(nf: Nullifier) -> Self {
+        Self(nf.0)
+    }
+}
+
 impl Rho {
     pub fn new<T>(csprng: &mut T) -> Self
     where
@@ -61,7 +72,7 @@ impl Rho {
 
 /// Additional randomness used in deriving the _nullifier_.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#orchardsend
+/// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
 #[derive(Clone, Debug)]
 pub struct Psi(pub(crate) pallas::Base);
 
@@ -74,7 +85,7 @@ impl From<Psi> for [u8; 32] {
 impl From<SeedRandomness> for Psi {
     /// rcm = ToScalar^Orchard((PRF^expand_rseed ([9]))
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#orchardsend
+    /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
     fn from(rseed: SeedRandomness) -> Self {
         Self(pallas::Base::from_bytes_wide(&prf_expand(
             rseed.0,
@@ -83,25 +94,43 @@ impl From<SeedRandomness> for Psi {
     }
 }
 
-/// A Note represents that a value is spendable by the recipient who
-/// holds the spending key corresponding to a given shielded payment
-/// address.
+/// A Note represents that a value is spendable by the recipient who holds the
+/// spending key corresponding to a given shielded payment address.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#notes>
 #[derive(Clone, Debug)]
 pub struct Note {
-    /// The _diversifer_ of the recipient’s _shielded payment address_.
-    pub diversifier: Diversifier,
-    /// The _diversified transmission key_ of the recipient’s shielded
-    /// payment address.
-    pub transmission_key: TransmissionKey,
+    /// The recipient's shielded payment address.
+    pub address: Address,
     /// An integer representing the value of the _note_ in zatoshi.
     pub value: Amount<NonNegative>,
-    /// Used as input to PRF^nf as part of deriving the _nullifier_ of the _note_.
+    /// Used as input to PRF^nfOrchard_nk as part of deriving the _nullifier_ of
+    /// the _note_.
     pub rho: Rho,
-    /// Additional randomness used in deriving the _nullifier_.
-    pub psi: Psi,
-    /// A random _commitment trapdoor_ used to produce the associated note
-    /// commitment.
-    pub rcm: CommitmentRandomness,
-    /// The note memo, after decryption.
-    pub memo: Memo,
+    /// 32 random bytes from which _rcm_, _psi_, and the _ephemeral private key_
+    /// are derived.
+    pub rseed: SeedRandomness,
+}
+
+impl Note {
+    /// Create an Orchard _note_, by choosing 32 uniformly random bytes for
+    /// rseed.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#notes>
+    pub fn new<T>(
+        csprng: &mut T,
+        address: Address,
+        value: Amount<NonNegative>,
+        nf_old: Nullifier,
+    ) -> Self
+    where
+        T: RngCore + CryptoRng,
+    {
+        Self {
+            address,
+            value,
+            rho: nf_old.into(),
+            rseed: SeedRandomness::new(csprng),
+        }
+    }
 }

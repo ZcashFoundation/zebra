@@ -2,9 +2,8 @@ use std::sync::Arc;
 use zebra_chain::{
     block::{self, Block},
     transaction::Transaction,
+    transparent,
 };
-
-use crate::Utxo;
 
 // Allow *only* this unused import, so that rustdoc link resolution
 // will work with inline links.
@@ -34,7 +33,7 @@ pub enum Response {
     Block(Option<Arc<Block>>),
 
     /// The response to a `AwaitUtxo` request.
-    Utxo(Utxo),
+    Utxo(transparent::Utxo),
 
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),

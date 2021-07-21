@@ -5,8 +5,6 @@ use zebra_chain::{
     transaction, transparent,
 };
 
-use crate::Utxo;
-
 // Allow *only* this unused import, so that rustdoc link resolution
 // will work with inline links.
 #[allow(unused_imports)]
@@ -70,15 +68,32 @@ pub struct PreparedBlock {
     /// New transparent outputs created in this block, indexed by
     /// [`Outpoint`](transparent::Outpoint).
     ///
+    /// Each output is tagged with its transaction index in the block.
+    /// (The outputs of earlier transactions in a block can be spent by later
+    /// transactions.)
+    ///
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
-    pub new_outputs: HashMap<transparent::OutPoint, Utxo>,
+    pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// A precomputed list of the hashes of the transactions in this block.
     pub transaction_hashes: Vec<transaction::Hash>,
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
+}
+
+/// A contextually validated block, ready to be committed directly to the finalized state with
+/// no checks, if it becomes the root of the best non-finalized chain.
+///
+/// Used by the state service and non-finalized [`Chain`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ContextuallyValidBlock {
+    pub(crate) block: Arc<Block>,
+    pub(crate) hash: block::Hash,
+    pub(crate) height: block::Height,
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
+    pub(crate) transaction_hashes: Vec<transaction::Hash>,
 }
 
 /// A finalized block, ready to be committed directly to the finalized state with
@@ -92,14 +107,7 @@ pub struct FinalizedBlock {
     pub(crate) block: Arc<Block>,
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
-    /// New transparent outputs created in this block, indexed by
-    /// [`Outpoint`](transparent::Outpoint).
-    ///
-    /// Note: although these transparent outputs are newly created, they may not
-    /// be unspent, since a later transaction in a block can spend outputs of an
-    /// earlier transaction.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, Utxo>,
-    /// A precomputed list of the hashes of the transactions in this block.
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
 }
 
@@ -117,27 +125,7 @@ impl From<Arc<Block>> for FinalizedBlock {
             .iter()
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
-
-        let mut new_outputs = HashMap::default();
-
-        for (transaction, hash) in block
-            .transactions
-            .iter()
-            .zip(transaction_hashes.iter().cloned())
-        {
-            let from_coinbase = transaction.is_coinbase();
-            for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-                let index = index as u32;
-                new_outputs.insert(
-                    transparent::OutPoint { hash, index },
-                    Utxo {
-                        output,
-                        height,
-                        from_coinbase,
-                    },
-                );
-            }
-        }
+        let new_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
 
         Self {
             block,
@@ -149,7 +137,7 @@ impl From<Arc<Block>> for FinalizedBlock {
     }
 }
 
-impl From<PreparedBlock> for FinalizedBlock {
+impl From<PreparedBlock> for ContextuallyValidBlock {
     fn from(prepared: PreparedBlock) -> Self {
         let PreparedBlock {
             block,
@@ -158,6 +146,25 @@ impl From<PreparedBlock> for FinalizedBlock {
             new_outputs,
             transaction_hashes,
         } = prepared;
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
+            transaction_hashes,
+        }
+    }
+}
+
+impl From<ContextuallyValidBlock> for FinalizedBlock {
+    fn from(contextually_valid: ContextuallyValidBlock) -> Self {
+        let ContextuallyValidBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        } = contextually_valid;
         Self {
             block,
             hash,

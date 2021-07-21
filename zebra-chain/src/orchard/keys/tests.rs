@@ -1,32 +1,52 @@
 #![allow(clippy::module_inception)]
-use super::*;
 
-#[cfg(test)]
+use super::*;
+use crate::orchard::tests::vectors::KEY_COMPONENTS;
+
 use proptest::prelude::*;
 
-#[cfg(test)]
-impl Arbitrary for TransmissionKey {
-    type Parameters = ();
+#[test]
+fn generate_keys_from_test_vectors() {
+    zebra_test::init();
 
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<SpendingKey>())
-            .prop_map(|spending_key| {
-                let full_viewing_key = FullViewingKey::from_spending_key(spending_key);
+    for test_vector in KEY_COMPONENTS.iter() {
+        let spending_key = SpendingKey::from_bytes(test_vector.sk, Network::Mainnet);
 
-                let diversifier_key = DiversifierKey::from(full_viewing_key);
+        let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
+        assert_eq!(spend_authorizing_key, test_vector.ask);
 
-                let diversifier = Diversifier::from(diversifier_key);
-                let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
+        let spend_validating_key = SpendValidatingKey::from(spend_authorizing_key);
+        assert_eq!(<[u8; 32]>::from(spend_validating_key), test_vector.ak);
 
-                Self::from((incoming_viewing_key, diversifier))
-            })
-            .boxed()
+        let nullifier_deriving_key = NullifierDerivingKey::from(spending_key);
+        assert_eq!(nullifier_deriving_key, test_vector.nk);
+
+        let ivk_commit_randomness = IvkCommitRandomness::from(spending_key);
+        assert_eq!(ivk_commit_randomness, test_vector.rivk);
+
+        let full_viewing_key = FullViewingKey {
+            spend_validating_key,
+            nullifier_deriving_key,
+            ivk_commit_randomness,
+        };
+
+        let diversifier_key = DiversifierKey::from(full_viewing_key);
+        assert_eq!(diversifier_key, test_vector.dk);
+
+        let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
+        assert_eq!(<[u8; 32]>::from(incoming_viewing_key.ivk), test_vector.ivk);
+
+        let outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
+        assert_eq!(outgoing_viewing_key, test_vector.ovk);
+
+        let diversifier = Diversifier::from(diversifier_key);
+        assert_eq!(diversifier, test_vector.default_d);
+
+        let transmission_key = TransmissionKey::from((incoming_viewing_key, diversifier));
+        assert_eq!(transmission_key, test_vector.default_pk_d);
     }
-
-    type Strategy = BoxedStrategy<Self>;
 }
 
-#[cfg(test)]
 proptest! {
 
     #[test]
@@ -35,46 +55,42 @@ proptest! {
         zebra_test::init();
 
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(spending_key == SpendingKey::from_bytes(spending_key.bytes, spending_key.network));
+        assert_eq!(spending_key, SpendingKey::from_bytes(spending_key.bytes, spending_key.network));
 
         let spend_authorizing_key = SpendAuthorizingKey::from(spending_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(spend_authorizing_key == <[u8; 32]>::from(spend_authorizing_key));
+        assert_eq!(spend_authorizing_key, spend_authorizing_key.clone());
 
         // ConstantTimeEq not implemented as it's a public value
         let spend_validating_key = SpendValidatingKey::from(spend_authorizing_key);
 
         let nullifier_deriving_key = NullifierDerivingKey::from(spending_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(nullifier_deriving_key == <[u8; 32]>::from(nullifier_deriving_key));
+        assert_eq!(nullifier_deriving_key, nullifier_deriving_key.clone());
 
         let ivk_commit_randomness = IvkCommitRandomness::from(spending_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(ivk_commit_randomness == <[u8; 32]>::from(ivk_commit_randomness));
+        assert_eq!(ivk_commit_randomness, ivk_commit_randomness.clone());
 
         let full_viewing_key = FullViewingKey {
-            network: spending_key.network,
             spend_validating_key,
             nullifier_deriving_key,
             ivk_commit_randomness,
         };
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(full_viewing_key == full_viewing_key.clone());
+        assert_eq!(full_viewing_key, full_viewing_key.clone());
 
         let diversifier_key = DiversifierKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(diversifier_key == <[u8; 32]>::from(diversifier_key));
+        assert_eq!(diversifier_key, diversifier_key.clone());
 
         let incoming_viewing_key = IncomingViewingKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(incoming_viewing_key ==
-                IncomingViewingKey::from_bytes(incoming_viewing_key.scalar.into(),
-                                               incoming_viewing_key.network));
-
+        assert_eq!(incoming_viewing_key, incoming_viewing_key.clone());
 
         let outgoing_viewing_key = OutgoingViewingKey::from(full_viewing_key);
         // Test ConstantTimeEq, Eq, PartialEq
-        assert!(outgoing_viewing_key == <[u8; 32]>::from(outgoing_viewing_key));
+        assert_eq!(outgoing_viewing_key, outgoing_viewing_key.clone());
 
         // ConstantTimeEq not implemented for Diversifier as it's a public value
         let diversifier = Diversifier::from(diversifier_key);

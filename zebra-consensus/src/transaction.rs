@@ -19,7 +19,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
-    transaction::{self, HashType, Transaction},
+    transaction::{self, HashType, SigHash, Transaction},
     transparent,
 };
 
@@ -43,9 +43,6 @@ mod tests;
 pub struct Verifier<ZS> {
     network: Network,
     script_verifier: script::Verifier<ZS>,
-    // spend_verifier: groth16::Verifier,
-    // output_verifier: groth16::Verifier,
-    // joinsplit_verifier: groth16::Verifier,
 }
 
 impl<ZS> Verifier<ZS>
@@ -53,16 +50,10 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    // XXX: how should this struct be constructed?
     pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
-        // let (spend_verifier, output_verifier, joinsplit_verifier) = todo!();
-
         Self {
             network,
             script_verifier,
-            // spend_verifier,
-            // output_verifier,
-            // joinsplit_verifier,
         }
     }
 }
@@ -79,7 +70,7 @@ pub enum Request {
         /// The transaction itself.
         transaction: Arc<Transaction>,
         /// Additional UTXOs which are known at the time of verification.
-        known_utxos: Arc<HashMap<transparent::OutPoint, zs::Utxo>>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         /// The height of the block containing this transaction.
         height: block::Height,
     },
@@ -109,7 +100,7 @@ impl Request {
     }
 
     /// The set of additional known unspent transaction outputs that's in this request.
-    pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, zs::Utxo>> {
+    pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>> {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
             Request::Mempool { .. } => HashMap::new().into(),
@@ -153,7 +144,7 @@ where
         };
         if is_mempool {
             // XXX determine exactly which rules apply to mempool transactions
-            unimplemented!();
+            unimplemented!("Zebra does not yet have a mempool (#2309)");
         }
 
         let script_verifier = self.script_verifier.clone();
@@ -300,6 +291,8 @@ where
     /// - the `network` to consider when verifying
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the transparent `inputs` in the transaction
+    /// - the sapling shielded data of the transaction, if any
+    /// - the orchard shielded data of the transaction, if any
     fn verify_v5_transaction(
         request: Request,
         network: Network,
@@ -405,7 +398,7 @@ where
     /// Verifies a transaction's Sprout shielded join split data.
     fn verify_sprout_shielded_data(
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-        shielded_sighash: &blake2b_simd::Hash,
+        shielded_sighash: &SigHash,
     ) -> AsyncChecks {
         let mut checks = AsyncChecks::new();
 
@@ -441,7 +434,7 @@ where
     /// Verifies a transaction's Sapling shielded data.
     fn verify_sapling_shielded_data<A>(
         sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
-        shielded_sighash: &blake2b_simd::Hash,
+        shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError>
     where
         A: sapling::AnchorVariant + Clone,
@@ -515,27 +508,41 @@ where
 
             let bvk = sapling_shielded_data.binding_verification_key();
 
-            // TODO: enable async verification and remove this block - #1939
-            {
-                let item: zebra_chain::primitives::redjubjub::batch::Item =
-                    (bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into();
-                item.verify_single().unwrap_or_else(|binding_sig_error| {
-                    let binding_sig_error = binding_sig_error.to_string();
-                    tracing::warn!(%binding_sig_error, "ignoring");
-                    metrics::counter!("zebra.error.sapling.binding",
-                                                  1,
-                                                  "kind" => binding_sig_error);
-                });
-                // Ignore errors until binding signatures are fixed
-                //.map_err(|e| BoxError::from(Box::new(e)))?;
-            }
+            async_checks.push(
+                primitives::redjubjub::VERIFIER
+                    .clone()
+                    .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
+            );
+        }
 
-            // TODO: stop ignoring binding signature errors - #1939
-            // async_checks.push(
-            //     primitives::redjubjub::VERIFIER
-            //         .clone()
-            //         .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
-            // );
+        Ok(async_checks)
+    }
+
+    /// Verifies a transaction's Orchard shielded data.
+    fn verify_orchard_shielded_data(
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        shielded_sighash: &SigHash,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let mut async_checks = AsyncChecks::new();
+
+        if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for authorized_action in orchard_shielded_data.actions.iter().cloned() {
+                let (action, spend_auth_sig) = authorized_action.into_parts();
+                // Consensus rule: The spend authorization signature
+                // MUST be a valid SpendAuthSig signature over
+                // SigHash using rk as the validating key.
+                //
+                // Queue the validation of the RedPallas spend
+                // authorization signature for each Action
+                // description while adding the resulting future to
+                // our collection of async checks that (at a
+                // minimum) must pass for the transaction to verify.
+                async_checks.push(
+                    primitives::redpallas::VERIFIER
+                        .clone()
+                        .oneshot((action.rk, spend_auth_sig, &shielded_sighash).into()),
+                );
+            }
         }
 
         Ok(async_checks)

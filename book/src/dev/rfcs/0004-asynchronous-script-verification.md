@@ -19,12 +19,20 @@ and in parallel on a thread pool.
 # Definitions
 [definitions]: #definitions
 
-- *UTXO*: unspent transaction output. Transaction outputs are modeled in `zebra-chain` by the [`transparent::Output`][transout] structure.
-- Transaction input: an output of a previous transaction consumed by a later transaction (the one it is an input to).  Modeled in `zebra-chain` by the [`transparent::Input`][transin] structure.
-- lock script: the script that defines the conditions under which some UTXO can be spent.  Stored in the [`transparent::Output::lock_script`][lock_script] field.
-- unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.  Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
+- *UTXO*: unspent transparent transaction output.
+  Transparent transaction outputs are modeled in `zebra-chain` by the [`transparent::Output`][transout] structure.
+- outpoint: a reference to an unspent transparent transaction output, including a transaction hash and output index.
+  Outpoints are modeled in `zebra-chain` by the [`transparent::OutPoint`][outpoint] structure.
+- transparent input: a previous transparent output consumed by a later transaction (the one it is an input to).
+  Modeled in `zebra-chain` by the [`transparent::Input::PrevOut`][transin] enum variant.
+- coinbase transaction: the first transaction in each block, which creates new coins.
+- lock script: the script that defines the conditions under which some UTXO can be spent.
+  Stored in the [`transparent::Output::lock_script`][lock_script] field.
+- unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.
+  Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
 
 [transout]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html
+[outpoint]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.OutPoint.html
 [lock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html#structfield.lock_script
 [transin]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html
 [unlock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html#variant.PrevOut.field.unlock_script
@@ -34,7 +42,7 @@ and in parallel on a thread pool.
 [guide-level-explanation]: #guide-level-explanation
 
 Zcash's transparent address system is inherited from Bitcoin. Transactions
-spend unspent transaction outputs (UTXOs) from previous transactions. These
+spend unspent transparent transaction outputs (UTXOs) from previous transactions. These
 UTXOs are encumbered by *locking scripts* that define the conditions under
 which they can be spent, e.g., requiring a signature from a certain key.
 Transactions wishing to spend UTXOs supply an *unlocking script* that should
@@ -56,16 +64,24 @@ done later, at the point that its containing block is committed to the chain.
 
 At a high level, this adds a new request/response pair to the state service:
 
-- `Request::AwaitUtxo(OutPoint)` requests a `transparent::Output` specified by `OutPoint` from the state layer;
-- `Response::Utxo(transparent::Output)` supplies requested the `transparent::Output`.
+- `Request::AwaitSpendableUtxo { output: OutPoint, ..conditions }`
+   requests a spendable `transparent::Output`, looked up using `OutPoint`.
+- `Response::SpendableUtxo(Utxo)` supplies the requested `transparent::Output`
+   as part of a new `Utxo` type,
+   if the output is spendable based on `conditions`;
 
 Note that this request is named differently from the other requests,
-`AwaitUtxo` rather than `GetUtxo` or similar. This is because the request has
-rather different behavior: the request does not complete until the state
-service learns about a UTXO matching the request, which could be never. For
-instance, if the transaction output was already spent, the service is not
-required to return a response. The caller is responsible for using a timeout
-layer or some other mechanism.
+`AwaitSpendableUtxo` rather than `GetUtxo` or similar. This is because the
+request has rather different behavior:
+- the request does not complete until the state service learns about a UTXO
+  matching the request, which could be never. For instance, if the transaction
+  output was already spent, the service is not required to return a response.
+- the request does not complete until the output is spendable, based on the
+  `conditions` in the request.
+
+The state service does not cancel long-running UTXO requests. Instead, the caller
+is responsible for deciding when a request is unlikely to complete. (For example,
+using a timeout layer.)
 
 This allows a script verifier to asynchronously obtain information about
 previous transaction outputs and start verifying scripts as soon as the data
@@ -82,17 +98,178 @@ parallelism.
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-We add a `Request::AwaitUtxo(OutPoint)` and
-`Response::Utxo(transparent::Output)` to the state protocol. As described
-above, the request name is intended to indicate the request's behavior: the
-request does not resolve until the state layer learns of a UTXO described by
-the request.
+## Data structures
+[data-structures]: #data-structures
+
+We add the following request and response to the state protocol:
+```rust
+enum Request::AwaitSpendableUtxo {
+    outpoint: OutPoint,
+    spend_height: Height,
+    spend_restriction: SpendRestriction,
+}
+
+/// Consensus rule:
+/// "A transaction with one or more transparent inputs from coinbase transactions
+/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0)."
+enum SpendRestriction {
+    /// The UTXO is spent in a transaction with transparent outputs
+    SomeTransparentOutputs,
+    /// The UTXO is spent in a transaction with all shielded outputs
+    AllShieldedOutputs,
+}
+```
+
+As described above, the request name is intended to indicate the request's behavior.
+The request does not resolve until:
+- the state layer learns of a UTXO described by the request, and
+- the output is spendable at `height` with `spend_restriction`.
+
+The new `Utxo` type adds a coinbase flag and height to `transparent::Output`s
+that we look up in the state, or get from newly commited blocks:
+```rust
+enum Response::SpendableUtxo(Utxo)
+
+pub struct Utxo {
+    /// The output itself.
+    pub output: transparent::Output,
+
+    /// The height at which the output was created.
+    pub height: block::Height,
+
+    /// Whether the output originated in a coinbase transaction.
+    pub from_coinbase: bool,
+}
+```
+
+## Transparent coinbase consensus rules
+[transparent-coinbase-consensus-rules]: #transparent-coinbase-consensus-rules
+
+Specifically, if the UTXO is a transparent coinbase output,
+the service is not required to return a response if:
+- `spend_height` is less than `MIN_TRANSPARENT_COINBASE_MATURITY` (100) blocks after the `Utxo.height`, or
+- `spend_restriction` is `SomeTransparentOutputs`.
+
+This implements the following consensus rules:
+
+> A transaction MUST NOT spend a transparent output of a coinbase transaction
+> from a block less than 100 blocks prior to the spend.
+>
+> Note that transparent outputs of coinbase transactions include Founders’ Reward
+> outputs and transparent funding stream outputs.
+
+> A transaction with one or more transparent inputs from coinbase transactions
+> MUST have no transparent outputs (i.e.tx_out_count MUST be 0).
+>
+> Inputs from coinbase transactions include Founders’ Reward outputs and funding
+> stream outputs.
+
+https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+
+## Parallel coinbase checks
+[parallel-coinbase-checks]: #parallel-coinbase-checks
+
+We can perform these coinbase checks asynchronously, in the presence of multiple chain forks,
+as long as the following conditions both hold:
+
+1. We don't mistakenly accept or reject spends to the transparent pool.
+
+2. We don't mistakenly accept or reject mature spends.
+
+### Parallel coinbase justification
+[parallel-coinbase-justification]: #parallel-coinbase-justification
+
+There are two parts to a spend restriction:
+- the `from_coinbase` flag, and
+- if the `from_coinbase` flag is true, the coinbase `height`.
+
+If a particular transaction hash `h` always has the same `from_coinbase` value,
+and `h` exists in multiple chains, then regardless of which `Utxo` arrives first,
+the outputs of `h` always get the same `from_coinbase` value during validation.
+So spends can not be mistakenly accepted or rejected due to a different coinbase flag.
+
+Similarly, if a particular coinbase transaction hash `h` always has the same `height` value,
+and `h` exists in multiple chains, then regardless of which `Utxo` arrives first,
+the outputs of `h` always get the same `height` value during validation.
+So coinbase spends can not be mistakenly accepted or rejected due to a different `height` value.
+(The heights of non-coinbase outputs are irrelevant, because they are never checked.)
+
+These conditions hold as long as the following multi-chain properties are satisfied:
+- `from_coinbase`: across all chains, the set of coinbase transaction hashes is disjoint from
+  the set of non-coinbase transaction hashes, and
+- coinbase `height`: across all chains, duplicate coinbase transaction hashes can only occur at
+  exactly the same height.
+
+### Parallel coinbase consensus rules
+[parallel-coinbase-consensus]: #parallel-coinbase-consensus
+
+These multi-chain properties can be derived from the following consensus rules:
+
+Transaction versions 1-4:
+
+> [Pre-Sapling ] If effectiveVersion = 1 or nJoinSplit = 0, then both tx_in_count and tx_out_count MUST be nonzero.
+> ...
+> [Sapling onward] If effectiveVersion < 5, then at least one of tx_in_count, nSpendsSapling, and nJoinSplit MUST be nonzero.
+
+> A coinbase transaction for a block at block height greater than 0
+> MUST have a script that, as its first item, encodes the *block height* height as follows.
+>
+> For height in the range {1 .. 16}, the encoding is a single byte of value 0x50 + height.
+>
+> Otherwise, let heightBytes be the signed little-endian representation of height,
+> using the minimum nonzero number of bytes such that the most significant byte is < 0x80.
+> The length of heightBytes MUST be in the range {1 .. 8}.
+> Then the encoding is the length of heightBytes encoded as one byte, followed by heightBytes itself.
+
+https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+
+> The transaction ID of a version 4 or earlier transaction is the SHA-256d hash of the transaction encoding in the
+> pre-v5 format described above.
+
+https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
+
+Transaction version 5:
+
+> [NU5 onward] If effectiveVersion ≥ 5, then this condition must hold: tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1).
+> ...
+> [NU5 onward] The nExpiryHeight field of a coinbase transaction MUST be equal to its block height.
+
+https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+
+> non-malleable transaction identifiers ... commit to all transaction data except for attestations to transaction validity
+> ...
+> A new transaction digest algorithm is defined that constructs the identifier for a transaction from a tree of hashes
+> ...
+> A BLAKE2b-256 hash of the following values:
+> ...
+> T.1e: expiry_height       (4-byte little-endian block height)
+
+https://zips.z.cash/zip-0244#t-1-header-digest
+
+Since:
+- coinbase transaction hashes commit to the block `Height`,
+- non-coinbase transaction hashes commit to their inputs, and
+- double-spends are not allowed;
+
+Therefore:
+- coinbase transaction hashes are unique for distinct heights in any chain,
+- coinbase transaction hashes are unique in a single chain, and
+- non-coinbase transaction hashes are unique in a single chain,
+  because they recursively commit to unique inputs.
+
+So the required parallel verification conditions are satisfied.
+
+## Script verification
+[script-verification]: #script-verification
 
 To verify scripts, a script verifier requests the relevant UTXOs from the
 state service and waits for all of them to resolve, or fails verification
 with a timeout error. Currently, we outsource script verification to
 `zcash_consensus`, which does FFI into the same C++ code as `zcashd` uses.
 **We need to ensure this code is thread-safe**.
+
+## Database implementation
+[database-implementation]: #database-implementation
 
 Implementing the state request correctly requires considering two sets of behaviors:
 
@@ -129,6 +306,9 @@ synchronous or asynchronous, we ensure that writes cannot race each other.
 Asynchronous reads are guaranteed to read at least the state present at the
 time the request was processed, or a later state.
 
+## Lookup states
+[lookup-states]: #lookup-states
+
 Now, returning to the UTXO lookup problem, we can map out the possible states
 with this restriction in mind. This description assumes that UTXO storage is
 split into disjoint sets, one in-memory (e.g., blocks after the reorg limit)
@@ -136,7 +316,7 @@ and the other in rocksdb (e.g., blocks after the reorg limit). The details of
 this storage are not important for this design, only that the two sets are
 disjoint.
 
-When the state service processes a `Request::AwaitUtxo(OutPoint)` referencing
+When the state service processes a `Request::AwaitSpendableUtxo` referencing
 some UTXO `u`, there are three disjoint possibilities:
 
 1. `u` is already contained in an in-memory block storage;
@@ -151,22 +331,33 @@ in the rocksdb UTXO set when the request was processed, the only way that an
 async read would not return `u` is if the UTXO were spent, in which case the
 service is not required to return a response.
 
+## Lookup implementation
+[lookup-implementation]: #lookup-implementation
+
 This behavior can be encapsulated into a `PendingUtxos`
 structure described below.
 
 ```rust
 // sketch
 #[derive(Default, Debug)]
-struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<transparent::Output>>);
+struct PendingUtxos(HashMap<OutPoint, oneshot::Sender<Utxo>>);
 
 impl PendingUtxos {
     // adds the outpoint and returns (wrapped) rx end of oneshot
+    // checks the spend height and restriction before sending the utxo response
     // return can be converted to `Service::Future`
-    pub fn queue(&mut self, outpoint: OutPoint) -> impl Future<Output=Result<Response, ...>>;
+    pub fn queue(
+        &mut self,
+        outpoint: OutPoint,
+        spend_height: Height,
+        spend_restriction: SpendRestriction,
+    ) -> impl Future<Output=Result<Response, ...>>;
 
     // if outpoint is a hashmap key, remove the entry and send output on the channel
     pub fn respond(&mut self, outpoint: OutPoint, output: transparent::Output);
 
+    /// check the list of pending UTXO requests against the supplied `utxos`
+    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, Utxo>);
 
     // scans the hashmap and removes any entries with closed senders
     pub fn prune(&mut self);
@@ -175,23 +366,34 @@ impl PendingUtxos {
 
 The state service should maintain an `Arc<Mutex<PendingUtxos>>`, used as follows:
 
-1. In `Service::call(Request::AwaitUtxo(u))`, the service should:
+1. In `Service::call(Request::AwaitSpendableUtxo { outpoint: u, .. }`, the service should:
   - call `PendingUtxos::queue(u)` to get a future `f` to return to the caller;
-  spawn a task that does a rocksdb lookup for `u`, calling `PendingUtxos::respond(u, output)` if present;
+  - spawn a task that does a rocksdb lookup for `u`, calling `PendingUtxos::respond(u, output)` if present;
   - check the in-memory storage for `u`, calling `PendingUtxos::respond(u, output)` if present;
   - return `f` to the caller (it may already be ready).
-  The common case is that `u` references an old UTXO, so spawning the lookup
+  The common case is that `u` references an old spendable UTXO, so spawning the lookup
   task first means that we don't wait to check in-memory storage for `u`
   before starting the rocksdb lookup.
 
-2. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
-  - call `PendingUtxos::check_block(block.as_ref())`;
-  - do any other transactional checks before committing a block as normal.
-  Because the `AwaitUtxo` request is informational, there's no need to do
-  the transactional checks before matching against pending UTXO requests,
-  and doing so upfront potentially notifies other tasks earlier.
+2. In `f`, the future returned by `PendingUtxos::queue(u)`, the service should
+  check that the `Utxo` is spendable before returning it:
+  - if `Utxo.from_coinbase` is false, return the utxo;
+  - if `Utxo.from_coinbase` is true, check that:
+    - `spend_restriction` is `AllShieldedOutputs`, and
+    - `spend_height` is greater than or equal to
+      `MIN_TRANSPARENT_COINBASE_MATURITY` plus the `Utxo.height`,
+    - if both checks pass, return the utxo.
+    - if any check fails, drop the utxo, and let the request timeout.
 
-3. In `Service::poll_ready()`, the service should call
+3. In `Service::call(Request::CommitBlock(block, ..))`, the service should:
+  - [check for double-spends of each UTXO in the block](https://github.com/ZcashFoundation/zebra/issues/2231),
+    and
+  - do any other transactional checks before committing a block as normal.
+  Because the `AwaitSpendableUtxo` request is informational, there's no need to do
+  the transactional checks before matching against pending UTXO requests,
+  and doing so upfront can run expensive verification earlier than needed.
+
+4. In `Service::poll_ready()`, the service should call
   `PendingUtxos::prune()` at least *some* of the time. This is required because
   when a consumer uses a timeout layer, the cancelled requests should be
   flushed from the queue to avoid a resource leak. However, doing this on every
@@ -220,3 +422,16 @@ cleaner and the cost is probably not too large.
 - We need to pick a timeout for UTXO lookup. This should be long enough to
 account for the fact that we may start verifying blocks before all of their
 ancestors are downloaded.
+
+These optimisations can be delayed until after the initial implementation is
+complete, and covered by tests:
+
+- Should we stop storing heights for non-coinbase UTXOs? (#2455)
+
+- Should we avoid storing any extra data for UTXOs, and just lookup the coinbase
+  flag and height using `outpoint.hash` and `tx_by_hash`? (#2455)
+
+- The maturity check can be skipped for UTXOs from the finalized state,
+because Zebra only finalizes mature UTXOs. We could implement this
+optimisation by adding a `Utxo::MatureCoinbase { output: transparent::Output }`
+variant, which only performs the spend checks. (#2455)
