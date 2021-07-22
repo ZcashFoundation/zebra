@@ -4523,6 +4523,7 @@ dependencies = [
  "spandoc",
  "subtle",
  "thiserror",
+ "tokio 0.3.6",
  "tracing",
  "uint",
  "x25519-dalek",

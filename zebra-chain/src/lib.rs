@@ -21,6 +21,7 @@ extern crate serde;
 extern crate bitflags;
 
 pub mod amount;
+pub mod best_tip_height;
 pub mod block;
 pub mod fmt;
 pub mod history_tree;

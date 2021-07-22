@@ -47,6 +47,7 @@ bigint = "4"
 uint = "0.9.1"
 bls12_381 = "0.5.0"
 incrementalmerkletree = "0.1.0"
+tokio = { version = "0.3.6" }
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
