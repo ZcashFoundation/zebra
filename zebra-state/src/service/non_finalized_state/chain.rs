@@ -189,14 +189,10 @@ impl Chain {
             forked.pop_tip();
         }
 
-        // Rebuild the note commitment trees and anchor sets,
-        // starting from the finalized tip tree.
+        // Rebuild the note commitment trees, starting from the finalized tip tree.
         // TODO: change to a more efficient approach by removing nodes
         // from the tree of the original chain (in `pop_tip()`).
         // See https://github.com/ZcashFoundation/zebra/issues/2378
-        forked.sprout_anchors = HashMultiSet::new();
-        forked.sapling_anchors = HashMultiSet::new();
-        forked.orchard_anchors = HashMultiSet::new();
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
@@ -217,15 +213,6 @@ impl Chain {
                         .expect("must work since it was already appended before the fork");
                 }
             }
-            let root = forked.sprout_note_commitment_tree.hash();
-            forked.sprout_anchors.insert(root);
-            forked.sprout_anchors_by_height.insert(block.height, root);
-            let root = forked.sapling_note_commitment_tree.root();
-            forked.sapling_anchors.insert(root);
-            forked.sapling_anchors_by_height.insert(block.height, root);
-            let root = forked.orchard_note_commitment_tree.root();
-            forked.orchard_anchors.insert(root);
-            forked.orchard_anchors_by_height.insert(block.height, root);
         }
 
         Ok(Some(forked))
