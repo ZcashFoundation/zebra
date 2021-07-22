@@ -110,7 +110,7 @@ proptest! {
             // the block data is in the non-finalized state
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
 
-            // the non-finalized state has the spent its own UTXO
+            // the non-finalized state has created and spent the UTXO
             prop_assert_eq!(state.mem.chain_set.len(), 1);
             prop_assert!(!state
                 .mem
