@@ -19,6 +19,7 @@ use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 pub(crate) mod difficulty;
 pub(crate) mod nullifier;
+pub(crate) mod utxo;
 
 #[cfg(test)]
 mod tests;
