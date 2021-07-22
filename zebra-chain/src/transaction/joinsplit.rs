@@ -15,7 +15,8 @@ use crate::{
 /// JoinSplit data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
-    /// The first JoinSplit description, using proofs of type `P`.
+    /// The first JoinSplit description in the transaction,
+    /// using proofs of type `P`.
     ///
     /// Storing this separately from `rest` ensures that it is impossible
     /// to construct an invalid `JoinSplitData` with no `JoinSplit`s.
@@ -28,7 +29,8 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
         deserialize = "JoinSplit<P>: Deserialize<'de>"
     ))]
     pub first: JoinSplit<P>,
-    /// The rest of the JoinSplit descriptions, using proofs of type `P`.
+    /// The rest of the JoinSplit descriptions, using proofs of type `P`,
+    /// in the order they appear in the transaction.
     ///
     /// The [`JoinSplitData::joinsplits`] method provides an iterator over
     /// all `JoinSplit`s.
@@ -44,7 +46,8 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
 }
 
 impl<P: ZkSnarkProof> JoinSplitData<P> {
-    /// Iterate over the [`JoinSplit`]s in `self`.
+    /// Iterate over the [`JoinSplit`]s in `self`, in the order they appear
+    /// in the transaction.
     pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
@@ -55,7 +58,8 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
             .flat_map(|joinsplit| joinsplit.nullifiers.iter())
     }
 
-    /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s.
+    /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s,
+    /// in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &sprout::commitment::NoteCommitment> {
         self.joinsplits()
             .flat_map(|joinsplit| &joinsplit.commitments)

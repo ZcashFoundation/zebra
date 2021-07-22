@@ -33,14 +33,15 @@ pub struct ShieldedData {
     pub shared_anchor: tree::Root,
     /// The aggregated zk-SNARK proof for all the actions in this transaction.
     pub proof: Halo2Proof,
-    /// The Orchard Actions.
+    /// The Orchard Actions, in the order they appear in the transaction.
     pub actions: AtLeastOne<AuthorizedAction>,
     /// A signature on the transaction `sighash`.
     pub binding_sig: Signature<Binding>,
 }
 
 impl ShieldedData {
-    /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this transaction.
+    /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
+    /// transaction, in the order they appear in it.
     pub fn actions(&self) -> impl Iterator<Item = &Action> {
         self.actions.actions()
     }
@@ -51,7 +52,7 @@ impl ShieldedData {
     }
 
     /// Collect the cm_x's for this transaction, if it contains [`Action`]s with
-    /// outputs.
+    /// outputs, in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
         self.actions().map(|action| &action.cm_x)
     }
