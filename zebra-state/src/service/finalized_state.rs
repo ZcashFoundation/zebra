@@ -260,17 +260,9 @@ impl FinalizedState {
             );
         }
 
-        // TODO: decide if they will always exist or only when reaching the correct height
-        // (in that case they will turn into Option's)
-        let mut sprout_note_commitment_tree = self
-            .sprout_note_commitment_tree()
-            .unwrap_or_else(Default::default);
-        let mut sapling_note_commitment_tree = self
-            .sapling_note_commitment_tree()
-            .unwrap_or_else(Default::default);
-        let mut orchard_note_commitment_tree = self
-            .orchard_note_commitment_tree()
-            .unwrap_or_else(Default::default);
+        let mut sprout_note_commitment_tree = self.sprout_note_commitment_tree();
+        let mut sapling_note_commitment_tree = self.sapling_note_commitment_tree();
+        let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
 
         // We use a closure so we can use an early return for control flow in
         // the genesis case
@@ -286,7 +278,6 @@ impl FinalizedState {
             // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
-                // TODO: see comment above regarding if the trees will always exist or not
                 batch.zs_insert(
                     sprout_note_commitment_tree_cf,
                     height,
@@ -502,46 +493,43 @@ impl FinalizedState {
 
     /// Returns the Sprout note commitment tree for a given `block::Height`
     /// if it is present.
-    pub fn sprout_note_commitment_tree(&self) -> Option<sprout::tree::NoteCommitmentTree> {
-        // TODO: decide to use None or empty tree as default
+    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
-            None => return Some(Default::default()),
+            None => return Default::default(),
         };
         let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
         self.db
             .zs_get(sprout_note_commitment_tree, &height)
-            .or_else(Default::default)
+            .unwrap_or_else(Default::default)
     }
 
     /// Returns the Sapling note commitment tree for a given `block::Height`
     /// if it is present.
-    pub fn sapling_note_commitment_tree(&self) -> Option<sapling::tree::NoteCommitmentTree> {
-        // TODO: decide to use None or empty tree as default
+    pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
-            None => return Some(Default::default()),
+            None => return Default::default(),
         };
         let sapling_note_commitment_tree =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
         self.db
             .zs_get(sapling_note_commitment_tree, &height)
-            .or_else(Default::default)
+            .unwrap_or_else(Default::default)
     }
 
     /// Returns the Orchard note commitment tree for a given `block::Height`
     /// if it is present.
-    pub fn orchard_note_commitment_tree(&self) -> Option<orchard::tree::NoteCommitmentTree> {
-        // TODO: decide to use None or empty tree as default
+    pub fn orchard_note_commitment_tree(&self) -> orchard::tree::NoteCommitmentTree {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
-            None => return Some(Default::default()),
+            None => return Default::default(),
         };
         let orchard_note_commitment_tree =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
         self.db
             .zs_get(orchard_note_commitment_tree, &height)
-            .or_else(Default::default)
+            .unwrap_or_else(Default::default)
     }
 
     /// If the database is `ephemeral`, delete it.

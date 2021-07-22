@@ -351,9 +351,9 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
-        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
     ) -> Result<Box<Chain>, ValidateContextError> {
         match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // An existing chain in the non-finalized state

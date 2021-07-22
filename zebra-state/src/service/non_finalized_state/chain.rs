@@ -33,9 +33,9 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(super) spent_utxos: HashSet<transparent::OutPoint>,
 
-    pub(super) sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
-    pub(super) sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
-    pub(super) orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+    pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+    pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
 
     /// The sprout anchors created by `blocks`.
     ///
@@ -62,9 +62,9 @@ pub struct Chain {
 
 impl Chain {
     pub(crate) fn new(
-        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
-        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
     ) -> Self {
         Self {
             blocks: Default::default(),
@@ -171,9 +171,9 @@ impl Chain {
     pub fn fork(
         &self,
         fork_tip: block::Hash,
-        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
-        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
     ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
@@ -202,42 +202,30 @@ impl Chain {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
                     forked
                         .sprout_note_commitment_tree
-                        .as_mut()
-                        .expect("Sprout note commitment tree must exist")
                         .append(sprout_note_commitment);
                 }
                 for sapling_note_commitment in transaction.sapling_note_commitments() {
                     forked
                         .sapling_note_commitment_tree
-                        .as_mut()
-                        .expect("Sapling note commitment tree must exist")
                         .append(*sapling_note_commitment)
                         .expect("must work since it was already appended before the fork");
                 }
                 for orchard_note_commitment in transaction.orchard_note_commitments() {
                     forked
                         .orchard_note_commitment_tree
-                        .as_mut()
-                        .expect("Orchard note commitment tree must exist")
                         .append(*orchard_note_commitment)
                         .expect("must work since it was already appended before the fork");
                 }
             }
-            if let Some(tree) = &forked.sprout_note_commitment_tree {
-                let root = tree.hash();
-                forked.sprout_anchors.insert(root);
-                forked.sprout_anchors_by_height.insert(block.height, root);
-            }
-            if let Some(tree) = &forked.sapling_note_commitment_tree {
-                let root = tree.root();
-                forked.sapling_anchors.insert(root);
-                forked.sapling_anchors_by_height.insert(block.height, root);
-            }
-            if let Some(tree) = &forked.orchard_note_commitment_tree {
-                let root = tree.root();
-                forked.orchard_anchors.insert(root);
-                forked.orchard_anchors_by_height.insert(block.height, root);
-            }
+            let root = forked.sprout_note_commitment_tree.hash();
+            forked.sprout_anchors.insert(root);
+            forked.sprout_anchors_by_height.insert(block.height, root);
+            let root = forked.sapling_note_commitment_tree.root();
+            forked.sapling_anchors.insert(root);
+            forked.sapling_anchors_by_height.insert(block.height, root);
+            let root = forked.orchard_note_commitment_tree.root();
+            forked.orchard_anchors.insert(root);
+            forked.orchard_anchors_by_height.insert(block.height, root);
         }
 
         Ok(Some(forked))
@@ -286,9 +274,9 @@ impl Chain {
     /// Useful when forking, where the trees are rebuilt anyway.
     fn with_trees(
         &self,
-        sprout_note_commitment_tree: Option<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: Option<sapling::tree::NoteCommitmentTree>,
-        orchard_note_commitment_tree: Option<orchard::tree::NoteCommitmentTree>,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
     ) -> Self {
         Chain {
             blocks: self.blocks.clone(),
@@ -420,22 +408,15 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the treestates of this block.
-        // TODO: create trees when required?
-        if let Some(tree) = &self.sprout_note_commitment_tree {
-            let root = tree.hash();
-            self.sprout_anchors.insert(root);
-            self.sprout_anchors_by_height.insert(height, root);
-        }
-        if let Some(tree) = &self.sapling_note_commitment_tree {
-            let root = tree.root();
-            self.sapling_anchors.insert(root);
-            self.sapling_anchors_by_height.insert(height, root);
-        }
-        if let Some(tree) = &self.orchard_note_commitment_tree {
-            let root = tree.root();
-            self.orchard_anchors.insert(root);
-            self.orchard_anchors_by_height.insert(height, root);
-        }
+        let root = self.sprout_note_commitment_tree.hash();
+        self.sprout_anchors.insert(root);
+        self.sprout_anchors_by_height.insert(height, root);
+        let root = self.sapling_note_commitment_tree.root();
+        self.sapling_anchors.insert(root);
+        self.sapling_anchors_by_height.insert(height, root);
+        let root = self.orchard_note_commitment_tree.root();
+        self.orchard_anchors.insert(root);
+        self.orchard_anchors_by_height.insert(height, root);
 
         Ok(())
     }
@@ -585,10 +566,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
             for cm in joinsplit_data.note_commitments() {
-                self.sprout_note_commitment_tree
-                    .as_mut()
-                    .expect("Sprout note commitment tree must exist")
-                    .append(cm);
+                self.sprout_note_commitment_tree.append(cm);
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -633,10 +611,7 @@ where
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for cm_u in sapling_shielded_data.note_commitments() {
-                self.sapling_note_commitment_tree
-                    .as_mut()
-                    .expect("Sapling note commitment tree must exist")
-                    .append(*cm_u)?;
+                self.sapling_note_commitment_tree.append(*cm_u)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -678,10 +653,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for cm_x in orchard_shielded_data.note_commitments() {
-                self.orchard_note_commitment_tree
-                    .as_mut()
-                    .expect("Orchard note commitment tree must exist")
-                    .append(*cm_x)?;
+                self.orchard_note_commitment_tree.append(*cm_x)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
@@ -806,11 +778,6 @@ impl Eq for Chain {}
 
 impl Default for Chain {
     fn default() -> Self {
-        Self::new(
-            // TODO: decide if we want to default to None or empty tree
-            Some(Default::default()),
-            Some(Default::default()),
-            Some(Default::default()),
-        )
+        Self::new(Default::default(), Default::default(), Default::default())
     }
 }
