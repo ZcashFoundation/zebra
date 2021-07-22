@@ -32,7 +32,7 @@ where
     pub fn from_transparent_amount(transparent_amount: Amount<C>) -> Self {
         ValueBalance {
             transparent: transparent_amount,
-            ..Default::default()
+            ..ValueBalance::zero()
         }
     }
 
@@ -40,7 +40,7 @@ where
     pub fn from_sprout_amount(sprout_amount: Amount<C>) -> Self {
         ValueBalance {
             sprout: sprout_amount,
-            ..Default::default()
+            ..ValueBalance::zero()
         }
     }
 
@@ -48,7 +48,7 @@ where
     pub fn from_sapling_amount(sapling_amount: Amount<C>) -> Self {
         ValueBalance {
             sapling: sapling_amount,
-            ..Default::default()
+            ..ValueBalance::zero()
         }
     }
 
@@ -56,7 +56,7 @@ where
     pub fn from_orchard_amount(orchard_amount: Amount<C>) -> Self {
         ValueBalance {
             orchard: orchard_amount,
-            ..Default::default()
+            ..ValueBalance::zero()
         }
     }
 
@@ -110,13 +110,8 @@ where
         self.orchard = orchard_value_balance.orchard;
         self
     }
-}
 
-impl<C> Default for ValueBalance<C>
-where
-    C: Constraint + Copy,
-{
-    fn default() -> Self {
+    fn zero() -> Self {
         let zero = Amount::zero();
         Self {
             transparent: zero,
