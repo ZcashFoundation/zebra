@@ -239,10 +239,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -488,10 +485,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -738,10 +732,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
