@@ -24,11 +24,15 @@ pub use sighash::HashType;
 pub use sighash::SigHash;
 
 use crate::{
-    amount, block, orchard,
+    amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
+    block, orchard,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout, transparent,
+    value_balance::ValueBalance,
 };
+
+use std::collections::HashMap;
 
 /// A Zcash transaction.
 ///
@@ -300,9 +304,7 @@ impl Transaction {
     ///
     /// This value is removed from the transparent value pool of this transaction, and added to the
     /// sprout value pool.
-    pub fn sprout_pool_added_values(
-        &self,
-    ) -> Box<dyn Iterator<Item = &amount::Amount<amount::NonNegative>> + '_> {
+    pub fn sprout_pool_added_values(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
         match self {
             // JoinSplits with Bctv14 Proofs
             Transaction::V2 {
@@ -540,4 +542,147 @@ impl Transaction {
         self.orchard_shielded_data()
             .map(|orchard_shielded_data| orchard_shielded_data.flags)
     }
+
+    // value pool
+
+    /// Get all the value pools for this transaction
+    pub fn value_balance(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+        match self {
+            Transaction::V1 {
+                inputs, outputs, ..
+            } => {
+                let transparent = transparent_value_pool(inputs, outputs, utxos);
+
+                let mut value_balance = ValueBalance::zero();
+                value_balance.set_transparent_value_balance(transparent?);
+                Ok(value_balance)
+            }
+            Transaction::V2 {
+                inputs,
+                outputs,
+                joinsplit_data,
+                ..
+            } => {
+                let transparent = transparent_value_pool(inputs, outputs, utxos);
+                let sprout = sprout_value_pool(joinsplit_data);
+
+                let mut value_balance = ValueBalance::zero();
+                value_balance.set_transparent_value_balance(transparent?);
+                value_balance.set_sprout_value_balance(sprout?);
+                Ok(value_balance)
+            }
+            Transaction::V3 {
+                inputs,
+                outputs,
+                joinsplit_data,
+                ..
+            } => {
+                let transparent = transparent_value_pool(inputs, outputs, utxos);
+                let sprout = sprout_value_pool(joinsplit_data);
+
+                let mut value_balance = ValueBalance::zero();
+                value_balance.set_transparent_value_balance(transparent?);
+                value_balance.set_sprout_value_balance(sprout?);
+                Ok(value_balance)
+            }
+            Transaction::V4 {
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data,
+                ..
+            } => {
+                let transparent = transparent_value_pool(inputs, outputs, utxos);
+                let sprout = sprout_value_pool(joinsplit_data);
+                let sapling = sapling_value_pool(sapling_shielded_data);
+
+                let mut value_balance = ValueBalance::zero();
+                value_balance.set_transparent_value_balance(transparent?);
+                value_balance.set_sprout_value_balance(sprout?);
+                value_balance.set_sapling_value_balance(sapling?);
+                Ok(value_balance)
+            }
+            Transaction::V5 {
+                inputs,
+                outputs,
+                sapling_shielded_data,
+                orchard_shielded_data,
+                ..
+            } => {
+                let transparent = transparent_value_pool(inputs, outputs, utxos);
+                let sapling = sapling_value_pool(sapling_shielded_data);
+                let orchard = orchard_value_pool(orchard_shielded_data);
+
+                let mut value_balance = ValueBalance::zero();
+                value_balance.set_transparent_value_balance(transparent?);
+                value_balance.set_sapling_value_balance(sapling?);
+                value_balance.set_orchard_value_balance(orchard?);
+                Ok(value_balance)
+            }
+        }
+    }
+}
+
+// Value pool utility functions
+
+/// Return the transparent value pool
+fn transparent_value_pool(
+    inputs: &[transparent::Input],
+    outputs: &[transparent::Output],
+    utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+    if inputs.is_empty() && outputs.is_empty() {
+        return Ok(ValueBalance::zero());
+    }
+
+    let input_value_balance: Amount = inputs
+        .iter()
+        .flat_map(|i| i.value_balance(utxos))
+        .sum::<Result<Amount, AmountError>>()?;
+
+    let output_value_balance: Amount<NegativeAllowed> = outputs
+        .iter()
+        .map(|o| o.value_balance())
+        .sum::<Result<Amount, AmountError>>()?;
+
+    Ok(ValueBalance::from_transparent_amount(
+        (input_value_balance - output_value_balance)?,
+    ))
+}
+
+use crate::primitives::ZkSnarkProof;
+fn sprout_value_pool<P: ZkSnarkProof>(
+    joinsplit_data: &Option<JoinSplitData<P>>,
+) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+    let sprout = joinsplit_data
+        .iter()
+        .flat_map(|j| j.value_balance())
+        .sum::<Result<Amount, AmountError>>()?;
+
+    Ok(ValueBalance::from_sprout_amount(sprout))
+}
+
+fn sapling_value_pool<P: sapling::AnchorVariant + Clone>(
+    sapling_shielded_data: &Option<sapling::ShieldedData<P>>,
+) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+    let sapling = sapling_shielded_data
+        .iter()
+        .map(|s| s.value_balance())
+        .sum::<Result<Amount, AmountError>>()?;
+
+    Ok(ValueBalance::from_sapling_amount(sapling))
+}
+
+fn orchard_value_pool(
+    orchard_shielded_data: &Option<orchard::ShieldedData>,
+) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+    let orchard = orchard_shielded_data
+        .iter()
+        .map(|o| o.value_balance())
+        .sum::<Result<Amount, AmountError>>()?;
+
+    Ok(ValueBalance::from_orchard_amount(orchard))
 }
