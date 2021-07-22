@@ -38,7 +38,15 @@ fn forked_equals_pushed() -> Result<()> {
                 full_chain = full_chain.push(block.clone())?;
             }
 
-            let forked = full_chain.fork(fork_tip_hash, Default::default(), Default::default(), Default::default()).expect("fork works").expect("hash is present");
+            let forked = full_chain
+                .fork(
+                    fork_tip_hash,
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                )
+                .expect("fork works")
+                .expect("hash is present");
 
             // the first check is redundant, but it's useful for debugging
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
@@ -66,7 +74,11 @@ fn finalized_equals_pushed() -> Result<()> {
         for block in chain.iter().take(finalized_count) {
             full_chain = full_chain.push(block.clone())?;
         }
-        let mut partial_chain = Chain::new(full_chain.sprout_note_commitment_tree.clone(), full_chain.sapling_note_commitment_tree.clone(), full_chain.orchard_note_commitment_tree.clone());
+        let mut partial_chain = Chain::new(
+            full_chain.sprout_note_commitment_tree.clone(),
+            full_chain.sapling_note_commitment_tree.clone(),
+            full_chain.orchard_note_commitment_tree.clone(),
+        );
         for block in chain.iter().skip(finalized_count) {
             partial_chain = partial_chain.push(block.clone())?;
         }
