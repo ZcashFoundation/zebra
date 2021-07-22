@@ -253,10 +253,11 @@ mod test {
                         orchard,
                     })
                 ),
-                _ => {
-                    let error_string = format!("{:?}", (value_balance1 + value_balance2));
-                    prop_assert_eq!(error_string.contains("AmountError"), true)
-                }
+                _ => prop_assert!(
+                    matches!(
+                        value_balance1 + value_balance2, Err(ValueBalanceError::AmountError(_))
+                    )
+                ),
             }
         }
         #[test]
@@ -281,10 +282,11 @@ mod test {
                         orchard,
                     })
                 ),
-                _ => {
-                    let error_string = format!("{:?}", (value_balance1 - value_balance2));
-                    prop_assert_eq!(error_string.contains("AmountError"), true)
-                }
+                _ => prop_assert!(
+                    matches!(
+                        value_balance1 - value_balance2, Err(ValueBalanceError::AmountError(_))
+                    )
+                ),
             }
         }
     }
