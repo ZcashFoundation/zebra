@@ -112,7 +112,7 @@ impl Chain {
             self.spent_utxos == other.spent_utxos &&
 
             // note commitment trees
-            self.sprout_note_commitment_tree.hash() == other.sprout_note_commitment_tree.hash() &&
+            self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
 
@@ -403,7 +403,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the treestates of this block.
-        let root = self.sprout_note_commitment_tree.hash();
+        let root = self.sprout_note_commitment_tree.root();
         self.sprout_anchors.insert(root);
         self.sprout_anchors_by_height.insert(height, root);
         let root = self.sapling_note_commitment_tree.root();

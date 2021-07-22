@@ -356,7 +356,7 @@ impl FinalizedState {
             }
 
             // Compute the new anchors and index them
-            batch.zs_insert(sprout_anchors, height, sprout_note_commitment_tree.hash());
+            batch.zs_insert(sprout_anchors, height, sprout_note_commitment_tree.root());
             batch.zs_insert(sapling_anchors, height, sapling_note_commitment_tree.root());
             batch.zs_insert(orchard_anchors, height, orchard_note_commitment_tree.root());
 

@@ -176,7 +176,7 @@ impl From<Vec<NoteCommitment>> for NoteCommitmentTree {
 impl NoteCommitmentTree {
     /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
     /// commitment notes.
-    pub fn hash(&self) -> Root {
+    pub fn root(&self) -> Root {
         self.root
     }
 
@@ -294,7 +294,7 @@ mod tests {
 
             let tree = NoteCommitmentTree::from(leaves.clone());
 
-            assert_eq!(hex::encode(<[u8; 32]>::from(tree.hash())), roots[i]);
+            assert_eq!(hex::encode(<[u8; 32]>::from(tree.root())), roots[i]);
         }
     }
 }
