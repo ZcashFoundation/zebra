@@ -175,17 +175,6 @@ fn state_behaves_when_blocks_are_committed_in_order() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn state_behaves_when_blocks_are_committed_out_of_order() -> Result<()> {
-    zebra_test::init();
-
-    proptest!(|(blocks in out_of_order_committing_strategy())| {
-        populate_and_check(blocks).unwrap();
-    });
-
-    Ok(())
-}
-
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 2;
 const BLOCKS_AFTER_NU5: u32 = 101;
 
@@ -196,6 +185,14 @@ proptest! {
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES))
     )]
+
+    /// Test out of order commits of continuous block test vectors from genesis onward.
+    #[test]
+    fn state_behaves_when_blocks_are_committed_out_of_order(blocks in out_of_order_committing_strategy()) {
+        zebra_test::init();
+
+        populate_and_check(blocks).unwrap();
+    }
 
     /// Test blocks that are less than the NU5 activation height.
     #[test]
