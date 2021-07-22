@@ -111,10 +111,18 @@ impl Chain {
             self.created_utxos == other.created_utxos &&
             self.spent_utxos == other.spent_utxos &&
 
+            // note commitment trees
+            self.sprout_note_commitment_tree.hash() == other.sprout_note_commitment_tree.hash() &&
+            self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
+            self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
+
             // anchors
             self.sprout_anchors == other.sprout_anchors &&
+            self.sprout_anchors_by_height == other.sprout_anchors_by_height &&
             self.sapling_anchors == other.sapling_anchors &&
+            self.sapling_anchors_by_height == other.sapling_anchors_by_height &&
             self.orchard_anchors == other.orchard_anchors &&
+            self.orchard_anchors_by_height == other.orchard_anchors_by_height &&
 
             // nullifiers
             self.sprout_nullifiers == other.sprout_nullifiers &&

@@ -227,10 +227,18 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.created_utxos = chain2.created_utxos.clone();
                 chain1.spent_utxos = chain2.spent_utxos.clone();
 
+                // note commitment trees
+                chain1.sprout_note_commitment_tree = chain2.sprout_note_commitment_tree.clone();
+                chain1.sapling_note_commitment_tree = chain2.sapling_note_commitment_tree.clone();
+                chain1.orchard_note_commitment_tree = chain2.orchard_note_commitment_tree.clone();
+
                 // anchors
                 chain1.sprout_anchors = chain2.sprout_anchors.clone();
+                chain1.sprout_anchors_by_height = chain2.sprout_anchors_by_height.clone();
                 chain1.sapling_anchors = chain2.sapling_anchors.clone();
+                chain1.sapling_anchors_by_height = chain2.sapling_anchors_by_height.clone();
                 chain1.orchard_anchors = chain2.orchard_anchors.clone();
+                chain1.orchard_anchors_by_height = chain2.orchard_anchors_by_height.clone();
 
                 // nullifiers
                 chain1.sprout_nullifiers = chain2.sprout_nullifiers.clone();
