@@ -528,7 +528,7 @@ impl Transaction {
         // This function returns a boxed iterator because the different
         // transaction variants end up having different iterator types
         match self {
-            // Spends with Groth Proofs
+            // Spends with Groth16 Proofs
             Transaction::V4 {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
