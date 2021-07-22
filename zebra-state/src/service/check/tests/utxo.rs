@@ -1,6 +1,6 @@
 //! Randomised property tests for UTXO contextual validation
 
-use std::{convert::TryInto, sync::Arc};
+use std::{convert::TryInto, env, sync::Arc};
 
 use proptest::prelude::*;
 
@@ -30,7 +30,16 @@ use crate::{
 // because we're only interested in spend validation,
 // (and passing various other state checks).
 
+const DEFAULT_UTXO_PROPTEST_CASES: u32 = 16;
+
 proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_UTXO_PROPTEST_CASES))
+    )]
+
     /// Make sure an arbitrary transparent spend from a previous transaction in this block
     /// is accepted by state contextual validation.
     ///
