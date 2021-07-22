@@ -1,6 +1,12 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
+use crate::amount::{Amount, Constraint, Error, NonNegative};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+
+#[cfg(test)]
+mod tests;
 
 /// An amount spread between different Zcash pools.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -175,119 +181,5 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn sub(self, rhs: ValueBalance<C>) -> Self::Output {
         self? - rhs
-    }
-}
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest::prelude::*;
-#[cfg(any(test, feature = "proptest-impl"))]
-impl Arbitrary for ValueBalance<NegativeAllowed> {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<Amount>(),
-            any::<Amount>(),
-            any::<Amount>(),
-            any::<Amount>(),
-        )
-            .prop_map(|(transparent, sprout, sapling, orchard)| Self {
-                transparent,
-                sprout,
-                sapling,
-                orchard,
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(any(test, feature = "proptest-impl"))]
-impl Arbitrary for ValueBalance<NonNegative> {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<Amount<NonNegative>>(),
-            any::<Amount<NonNegative>>(),
-            any::<Amount<NonNegative>>(),
-            any::<Amount<NonNegative>>(),
-        )
-            .prop_map(|(transparent, sprout, sapling, orchard)| Self {
-                transparent,
-                sprout,
-                sapling,
-                orchard,
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    proptest! {
-        #[test]
-        fn test_add(
-            value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
-            value_balance2 in any::<ValueBalance<NegativeAllowed>>())
-        {
-            zebra_test::init();
-
-            let transparent = value_balance1.transparent + value_balance2.transparent;
-            let sprout = value_balance1.sprout + value_balance2.sprout;
-            let sapling = value_balance1.sapling + value_balance2.sapling;
-            let orchard = value_balance1.orchard + value_balance2.orchard;
-
-            match (transparent, sprout, sapling, orchard) {
-                (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard)) => prop_assert_eq!(
-                    value_balance1 + value_balance2,
-                    Ok(ValueBalance {
-                        transparent,
-                        sprout,
-                        sapling,
-                        orchard,
-                    })
-                ),
-                _ => prop_assert!(
-                    matches!(
-                        value_balance1 + value_balance2, Err(ValueBalanceError::AmountError(_))
-                    )
-                ),
-            }
-        }
-        #[test]
-        fn test_sub(
-            value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
-            value_balance2 in any::<ValueBalance<NegativeAllowed>>())
-        {
-            zebra_test::init();
-
-            let transparent = value_balance1.transparent - value_balance2.transparent;
-            let sprout = value_balance1.sprout - value_balance2.sprout;
-            let sapling = value_balance1.sapling - value_balance2.sapling;
-            let orchard = value_balance1.orchard - value_balance2.orchard;
-
-            match (transparent, sprout, sapling, orchard) {
-                (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard)) => prop_assert_eq!(
-                    value_balance1 - value_balance2,
-                    Ok(ValueBalance {
-                        transparent,
-                        sprout,
-                        sapling,
-                        orchard,
-                    })
-                ),
-                _ => prop_assert!(
-                    matches!(
-                        value_balance1 - value_balance2, Err(ValueBalanceError::AmountError(_))
-                    )
-                ),
-            }
-        }
     }
 }
