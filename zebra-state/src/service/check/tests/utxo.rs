@@ -112,30 +112,15 @@ proptest! {
 
             // the non-finalized state has created and spent the UTXO
             prop_assert_eq!(state.mem.chain_set.len(), 1);
-            prop_assert!(!state
+            let chain = state
                 .mem
                 .chain_set
                 .iter()
                 .next()
-                .unwrap()
-                .unspent_utxos()
-                .contains_key(&expected_outpoint));
-            prop_assert!(state
-                .mem
-                .chain_set
-                .iter()
-                .next()
-                .unwrap()
-                .created_utxos
-                .contains_key(&expected_outpoint));
-            prop_assert!(state
-                .mem
-                .chain_set
-                .iter()
-                .next()
-                .unwrap()
-                .spent_utxos
-                .contains(&expected_outpoint));
+                .unwrap();
+            prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
+            prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
+            prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
 
             // the finalized state does not have the UTXO
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
@@ -207,61 +192,25 @@ proptest! {
 
             // the UTXO is spent
             prop_assert_eq!(state.mem.chain_set.len(), 1);
-            prop_assert!(!state
+            let chain = state
                 .mem
                 .chain_set
                 .iter()
                 .next()
-                .unwrap()
-                .unspent_utxos()
-                .contains_key(&expected_outpoint));
+                .unwrap();
+            prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
 
             if use_finalized_state_output {
                 // the chain has spent the UTXO from the finalized state
-                prop_assert!(!state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .created_utxos
-                    .contains_key(&expected_outpoint));
-                prop_assert!(state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .spent_utxos
-                    .contains(&expected_outpoint));
+                prop_assert!(!chain.created_utxos.contains_key(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state has the UTXO, but it will get deleted on commit
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
             } else {
                 // the chain has spent its own UTXO
-                prop_assert!(!state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .unspent_utxos()
-                    .contains_key(&expected_outpoint));
-                prop_assert!(state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .created_utxos
-                    .contains_key(&expected_outpoint));
-                prop_assert!(state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .spent_utxos
-                    .contains(&expected_outpoint));
+                prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
+                prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state does not have the UTXO
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
             }
@@ -385,15 +334,14 @@ proptest! {
             // the non-finalized state has no chains (so it can't have the UTXO)
             prop_assert!(state.mem.chain_set.iter().next().is_none());
         } else {
-            // the non-finalized state has the UTXO
-            prop_assert!(state
+            let chain = state
                 .mem
                 .chain_set
                 .iter()
                 .next()
-                .unwrap()
-                .unspent_utxos()
-                .contains_key(&expected_outpoint));
+                .unwrap();
+            // the non-finalized state has the UTXO
+            prop_assert!(chain.unspent_utxos().contains_key(&expected_outpoint));
             // the finalized state does not have the UTXO
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         }
@@ -461,15 +409,14 @@ proptest! {
             // the non-finalized state has no chains (so it can't have the UTXO)
             prop_assert!(state.mem.chain_set.iter().next().is_none());
         } else {
-            // the non-finalized state has the UTXO
-            prop_assert!(state
+            let chain = state
                 .mem
                 .chain_set
                 .iter()
                 .next()
-                .unwrap()
-                .unspent_utxos()
-                .contains_key(&expected_outpoint));
+                .unwrap();
+            // the non-finalized state has the UTXO
+            prop_assert!(chain.unspent_utxos().contains_key(&expected_outpoint));
             // the finalized state does not have the UTXO
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         }
@@ -553,45 +500,23 @@ proptest! {
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
 
             prop_assert_eq!(state.mem.chain_set.len(), 1);
+            let chain = state
+                .mem
+                .chain_set
+                .iter()
+                .next()
+                .unwrap();
 
             if use_finalized_state_output {
                 // the finalized state has the unspent UTXO
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
                 // the non-finalized state has spent the UTXO
-                prop_assert!(state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .spent_utxos
-                    .contains(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
             } else {
                 // the non-finalized state has created and spent the UTXO
-                prop_assert!(!state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .unspent_utxos()
-                    .contains_key(&expected_outpoint));
-                prop_assert!(state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .created_utxos
-                    .contains_key(&expected_outpoint));
-                prop_assert!(state
-                    .mem
-                    .chain_set
-                    .iter()
-                    .next()
-                    .unwrap()
-                    .spent_utxos
-                    .contains(&expected_outpoint));
+                prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
+                prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state does not have the UTXO
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
             }
