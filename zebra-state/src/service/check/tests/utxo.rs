@@ -64,10 +64,7 @@ proptest! {
 
         block1
             .transactions
-            .push(output_transaction.into());
-        block1
-            .transactions
-            .push(spend_transaction.into());
+            .extend([output_transaction.into(), spend_transaction.into()]);
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
