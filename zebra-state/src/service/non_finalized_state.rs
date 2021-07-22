@@ -348,6 +348,9 @@ impl NonFinalizedState {
     ///
     /// The chain can be an existing chain in the non-finalized state or a freshly
     /// created fork, if needed.
+    ///
+    /// The note commitment trees must be the trees of the finalized tip.
+    /// They are used to recreate the trees if a fork is needed.
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,

@@ -33,27 +33,32 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(super) spent_utxos: HashSet<transparent::OutPoint>,
 
+    /// The Sprout note commitment tree of the tip of this Chain.
     pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+    /// The Sapling note commitment tree of the tip of this Chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    /// The Orchard note commitment tree of the tip of this Chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
 
-    /// The sprout anchors created by `blocks`.
-    ///
-    /// TODO: does this include intersitial anchors?
+    /// The Sprout anchors created by `blocks`.
+    /// This does this include interstitial anchors.
     pub(super) sprout_anchors: HashMultiSet<sprout::tree::Root>,
+    /// The Sprout anchors created by each block in the chain.
     pub(super) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
-    /// The sapling anchors created by `blocks`.
+    /// The Sapling anchors created by `blocks`.
     pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
+    /// The Sapling anchors created by each block in the chain.
     pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
-    /// The orchard anchors created by `blocks`.
+    /// The Orchard anchors created by `blocks`.
     pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
+    /// The Orchard anchors created by each block in the chain.
     pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
-    /// The sprout nullifiers revealed by `blocks`.
+    /// The Sprout nullifiers revealed by `blocks`.
     pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
-    /// The sapling nullifiers revealed by `blocks`.
+    /// The Sapling nullifiers revealed by `blocks`.
     pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
-    /// The orchard nullifiers revealed by `blocks`.
+    /// The Orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
     /// The cumulative work represented by this partial non-finalized chain.
@@ -61,6 +66,7 @@ pub struct Chain {
 }
 
 impl Chain {
+    // Create a new Chain with the given note commitment trees.
     pub(crate) fn new(
         sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
@@ -176,6 +182,8 @@ impl Chain {
 
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
+    ///
+    /// The note commitment trees must be the trees of the finalized tip.
     pub fn fork(
         &self,
         fork_tip: block::Hash,
