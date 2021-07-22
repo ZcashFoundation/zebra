@@ -3,8 +3,7 @@
 use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
 
 /// An amount spread between different Zcash pools.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(bound = "C: Constraint")]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ValueBalance<C = NegativeAllowed> {
     transparent: Amount<C>,
     sprout: Amount<C>,
