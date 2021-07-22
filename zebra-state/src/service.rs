@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
+    best_tip_height::BestTipHeight,
     block::{self, Block},
     parameters::POW_AVERAGING_WINDOW,
     parameters::{Network, NetworkUpgrade},
@@ -59,12 +60,17 @@ struct StateService {
     network: Network,
     /// Instant tracking the last time `pending_utxos` was pruned
     last_prune: Instant,
+    /// The height of the best chain tip.
+    best_tip_height: BestTipHeight,
 }
 
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> Self {
+        let (best_tip_height, finalized_tip_height, non_finalized_tip_height) =
+            BestTipHeight::new();
+
         let disk = FinalizedState::new(&config, network);
 
         let mem = NonFinalizedState::new(network);
@@ -78,6 +84,7 @@ impl StateService {
             pending_utxos,
             network,
             last_prune: Instant::now(),
+            best_tip_height,
         };
 
         tracing::info!("starting legacy chain check");
@@ -282,6 +289,12 @@ impl StateService {
         }
 
         Some(hashes)
+    }
+
+    /// Return a [`watch::Receiver`] to access the best tip height in both finalized and
+    /// non-finalized states.
+    pub fn best_tip_height(&self) -> BestTipHeight {
+        self.best_tip_height.clone()
     }
 
     /// Return the tip of the current best chain.
