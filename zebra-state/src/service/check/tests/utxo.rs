@@ -218,10 +218,7 @@ proptest! {
 
         block1
             .transactions
-            .push(output_transaction.into());
-        block1
-            .transactions
-            .push(spend_transaction.into());
+            .extend([output_transaction.into(), spend_transaction.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -339,10 +336,7 @@ proptest! {
 
         block2
             .transactions
-            .push(spend_transaction1.into());
-        block2
-            .transactions
-            .push(spend_transaction2.into());
+            .extend([spend_transaction1.into(), spend_transaction2.into()]);
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = state.validate_and_commit(block2);
