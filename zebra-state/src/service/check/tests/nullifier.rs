@@ -1,6 +1,6 @@
 //! Randomised property tests for nullifier contextual validation
 
-use std::{convert::TryInto, sync::Arc};
+use std::{convert::TryInto, env, sync::Arc};
 
 use itertools::Itertools;
 use proptest::prelude::*;
@@ -34,9 +34,18 @@ use crate::{
 // because we're only interested in spend validation,
 // (and passing various other state checks).
 
-// sprout
+const DEFAULT_NULLIFIER_PROPTEST_CASES: u32 = 16;
 
 proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_NULLIFIER_PROPTEST_CASES))
+    )]
+
+// sprout
+
     /// Make sure an arbitrary sprout nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
@@ -341,11 +350,9 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
 
 // sapling
 
-proptest! {
     /// Make sure an arbitrary sapling nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
@@ -593,11 +600,9 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
 
 // orchard
 
-proptest! {
     /// Make sure an arbitrary orchard nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
