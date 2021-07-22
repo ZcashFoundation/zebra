@@ -19,7 +19,9 @@ use crate::{
     },
     tests::Prepare,
     FinalizedBlock,
-    ValidateContextError::{DuplicateTransparentSpend, MissingTransparentOutput},
+    ValidateContextError::{
+        DuplicateTransparentSpend, EarlyTransparentSpend, MissingTransparentOutput,
+    },
 };
 
 // These tests use the `Arbitrary` trait to easily generate complex types,
@@ -49,7 +51,7 @@ proptest! {
     /// It also covers a potential edge case where later transactions can spend outputs
     /// of previous transactions in a block, but earlier transactions can not spend later outputs.
     #[test]
-    fn accept_arbitrary_transparent_spend_from_this_block(
+    fn accept_later_transparent_spend_from_this_block(
         output in TypeNameToDebug::<transparent::Output>::arbitrary(),
         mut prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
         use_finalized_state in any::<bool>(),
@@ -574,6 +576,60 @@ proptest! {
             Err(MissingTransparentOutput {
                 outpoint: expected_outpoint,
                 location: "the non-finalized and finalized chain",
+            }.into())
+        );
+        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+
+        // the non-finalized state did not change
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+
+        // the finalized state does not have the UTXO
+        prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+    }
+
+    /// Make sure transparent output spends are rejected by state contextual validation,
+    /// if they spend an output in the same or later transaction in the block.
+    ///
+    /// This test covers a potential edge case where later transactions can spend outputs
+    /// of previous transactions in a block, but earlier transactions can not spend later outputs.
+    #[test]
+    fn reject_earlier_transparent_spend_from_this_block(
+        output in TypeNameToDebug::<transparent::Output>::arbitrary(),
+        mut prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
+    ) {
+        zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        // create an output
+        let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
+
+        // create a spend
+        let expected_outpoint = transparent::OutPoint { hash: output_transaction.hash(), index: 0 };
+        prevout_input.set_outpoint(expected_outpoint);
+        let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
+
+        // convert the coinbase transaction to a version that the non-finalized state will accept
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+
+        // put the spend transaction before the output transaction in the block
+        block1
+            .transactions
+            .extend([spend_transaction.into(), output_transaction.into()]);
+
+        let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
+
+        let block1 = Arc::new(block1).prepare();
+        let commit_result = state.validate_and_commit(block1);
+
+        // the block was rejected
+        prop_assert_eq!(
+            commit_result,
+            Err(EarlyTransparentSpend {
+                outpoint: expected_outpoint,
             }.into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
