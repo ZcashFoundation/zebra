@@ -4,7 +4,7 @@ use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
 
 /// An amount spread between different Zcash pools.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ValueBalance<C = NegativeAllowed> {
+pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
     sapling: Amount<C>,
@@ -233,8 +233,8 @@ mod test {
     proptest! {
         #[test]
         fn test_add(
-            value_balance1 in any::<ValueBalance>(),
-            value_balance2 in any::<ValueBalance>())
+            value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
+            value_balance2 in any::<ValueBalance<NegativeAllowed>>())
         {
             zebra_test::init();
 
@@ -261,8 +261,8 @@ mod test {
         }
         #[test]
         fn test_sub(
-            value_balance1 in any::<ValueBalance>(),
-            value_balance2 in any::<ValueBalance>())
+            value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
+            value_balance2 in any::<ValueBalance<NegativeAllowed>>())
         {
             zebra_test::init();
 
