@@ -539,6 +539,51 @@ proptest! {
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         }
     }
+
+    /// Make sure a transparent spend with a missing UTXO
+    /// is rejected by state contextual validation.
+    #[test]
+    fn reject_missing_transparent_spend(
+        prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
+    ) {
+        zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let expected_outpoint = prevout_input.outpoint().unwrap();
+        let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
+
+        // convert the coinbase transaction to a version that the non-finalized state will accept
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+
+        block1
+            .transactions
+            .push(spend_transaction.into());
+
+        let (mut state, genesis) = new_state_with_mainnet_genesis();
+        let previous_mem = state.mem.clone();
+
+        let block1 = Arc::new(block1).prepare();
+        let commit_result = state.validate_and_commit(block1);
+
+        // the block was rejected
+        prop_assert_eq!(
+            commit_result,
+            Err(MissingTransparentOutput {
+                outpoint: expected_outpoint,
+                location: "the non-finalized and finalized chain",
+            }.into())
+        );
+        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+
+        // the non-finalized state did not change
+        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+
+        // the finalized state does not have the UTXO
+        prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+    }
 }
 
 /// State associated with transparent UTXO tests.

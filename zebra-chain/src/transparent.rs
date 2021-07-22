@@ -104,6 +104,16 @@ pub enum Input {
 }
 
 impl Input {
+    /// If this is a `PrevOut` input, returns this input's outpoint.
+    /// Otherwise, returns `None`.
+    pub fn outpoint(&self) -> Option<OutPoint> {
+        if let Input::PrevOut { outpoint, .. } = self {
+            Some(*outpoint)
+        } else {
+            None
+        }
+    }
+
     /// Set this input's outpoint.
     ///
     /// Should only be called on `PrevOut` inputs.
