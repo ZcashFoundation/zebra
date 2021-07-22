@@ -161,6 +161,16 @@ where
 
             if tx.is_coinbase() {
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+            } else {
+                // check the value pool for non-coinbase transactions
+                if tx
+                    .value_balance(&req.known_utxos())
+                    .unwrap()
+                    .remaining_transaction_value()
+                    .is_err()
+                {
+                    return Err(TransactionError::InvalidValueBalance);
+                }
             }
 
             // [Canopy onward]: `vpub_old` MUST be zero.

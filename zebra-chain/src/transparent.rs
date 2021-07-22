@@ -109,10 +109,11 @@ impl Input {
     /// Get the value balance of this input.
     pub fn value_balance(
         &self,
-        utxos: &HashMap<OutPoint, utxo::Utxo>,
+        ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
     ) -> Result<Amount<NegativeAllowed>, InputError> {
         match self {
             Input::PrevOut { outpoint, .. } => {
+                let utxos = utxos_from_ordered_utxos(ordered_utxos.clone());
                 if utxos.contains_key(outpoint) {
                     Ok(utxos[outpoint]
                         .output

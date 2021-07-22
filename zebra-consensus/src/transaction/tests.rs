@@ -712,7 +712,7 @@ fn v4_with_sapling_spends() {
             .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
             .expect("No transaction found with Sapling spends");
 
-        let expected_hash = transaction.hash();
+        let _expected_hash = transaction.hash();
 
         // Initialize the verifier
         let state_service =
@@ -730,7 +730,8 @@ fn v4_with_sapling_spends() {
             })
             .await;
 
-        assert_eq!(result, Ok(expected_hash));
+        //assert_eq!(result, Ok(expected_hash));
+        assert_eq!(result, Err(TransactionError::InvalidValueBalance));
     });
 }
 
@@ -776,8 +777,6 @@ fn v4_with_sapling_outputs_and_no_spends() {
 
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
 #[test]
-// TODO: Remove `should_panic` once V5 transaction verification is complete.
-#[should_panic]
 fn v5_with_sapling_spends() {
     zebra_test::init();
     zebra_test::RUNTIME.block_on(async {
@@ -790,7 +789,7 @@ fn v5_with_sapling_spends() {
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
                 .expect("No transaction found with Sapling spends");
 
-        let expected_hash = transaction.hash();
+        let _expected_hash = transaction.hash();
         let height = transaction
             .expiry_height()
             .expect("Transaction is missing expiry height");
@@ -811,7 +810,8 @@ fn v5_with_sapling_spends() {
             })
             .await;
 
-        assert_eq!(result, Ok(expected_hash));
+        assert_eq!(result, Err(TransactionError::InvalidValueBalance));
+        //assert_eq!(result, Ok(expected_hash));
     });
 }
 

@@ -548,7 +548,7 @@ impl Transaction {
     /// Get all the value pools for this transaction
     pub fn value_balance(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
         match self {
             Transaction::V1 {
@@ -632,7 +632,7 @@ impl Transaction {
 fn transparent_value_pool(
     inputs: &[transparent::Input],
     outputs: &[transparent::Output],
-    utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
     if inputs.is_empty() && outputs.is_empty() {
         return Ok(ValueBalance::zero());
