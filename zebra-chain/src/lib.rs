@@ -33,6 +33,7 @@ pub mod shutdown;
 pub mod sprout;
 pub mod transaction;
 pub mod transparent;
+pub mod value_balance;
 pub mod work;
 
 #[cfg(any(test, feature = "proptest-impl"))]
