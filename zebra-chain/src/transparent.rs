@@ -20,9 +20,11 @@ mod arbitrary;
 mod prop;
 
 use crate::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block, transaction,
 };
+
+use std::collections::HashMap;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -103,6 +105,39 @@ pub enum Input {
     },
 }
 
+impl Input {
+    /// Get the value balance of this input.
+    pub fn value_balance(
+        &self,
+        utxos: &HashMap<OutPoint, utxo::Utxo>,
+    ) -> Result<Amount<NegativeAllowed>, InputError> {
+        match self {
+            Input::PrevOut { outpoint, .. } => {
+                if utxos.contains_key(outpoint) {
+                    Ok(utxos[outpoint]
+                        .output
+                        .value
+                        .constrain()
+                        .expect("conversion from NonNegative to NegativeAllowed is always valid"))
+                } else {
+                    Err(InputError::NotEnoughUtxos)
+                }
+            }
+            Input::Coinbase { .. } => Err(InputError::NoCoinBaseAllowed),
+        }
+    }
+}
+
+#[allow(dead_code, missing_docs)]
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub enum InputError {
+    #[error("utxos needed not found")]
+    NotEnoughUtxos,
+
+    #[error("transaction is coinbase")]
+    NoCoinBaseAllowed,
+}
+
 /// A transparent output from a transaction.
 ///
 /// The most fundamental building block of a transaction is a
@@ -124,4 +159,11 @@ pub struct Output {
 
     /// The lock script defines the conditions under which this output can be spent.
     pub lock_script: Script,
+}
+
+impl Output {
+    /// Get the value balance of this output
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+        self.value.constrain().expect("always correct")
+    }
 }

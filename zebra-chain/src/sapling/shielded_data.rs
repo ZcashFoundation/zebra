@@ -262,6 +262,11 @@ where
 
         key_bytes.into()
     }
+
+    /// Provide access to the `value_balance` field of the shielded data.
+    pub fn value_balance(&self) -> Amount {
+        self.value_balance
+    }
 }
 
 impl<AnchorV> TransferData<AnchorV>

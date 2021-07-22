@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    amount::{Amount, Error},
     primitives::{ed25519, ZkSnarkProof},
     sprout::{JoinSplit, Nullifier},
 };
+
+use std::convert::TryFrom;
 
 /// A bundle of [`JoinSplit`] descriptions and signature data.
 ///
@@ -53,5 +56,12 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.joinsplits()
             .flat_map(|joinsplit| joinsplit.nullifiers.iter())
+    }
+
+    /// Calculate and return the value balance for the joinsplits.
+    pub fn value_balance(&self) -> Result<Amount, Error> {
+        self.joinsplits()
+            .flat_map(|j| Amount::try_from(i64::from(j.vpub_old) - i64::from(j.vpub_new)))
+            .sum()
     }
 }

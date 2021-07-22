@@ -48,6 +48,11 @@ impl ShieldedData {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
     }
+
+    /// Provide access to the `value_balance` field of the shielded data.
+    pub fn value_balance(&self) -> Amount {
+        self.value_balance
+    }
 }
 
 impl AtLeastOne<AuthorizedAction> {
