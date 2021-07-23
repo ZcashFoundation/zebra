@@ -19,6 +19,7 @@
     - [Zebra Client](dev/rfcs/0009-zebra-client.md)
     - [V5 Transaction](dev/rfcs/0010-v5-transaction.md)
     - [Async Rust in Zebra](dev/rfcs/0011-async-rust-in-zebra.md)
+    - [Value Pools](dev/rfcs/0012-value-pools.md)
   - [Diagrams](dev/diagrams.md)
     - [Network Architecture](dev/diagrams/zebra-network.md)
   - [zebra-checkpoints](dev/zebra-checkpoints.md)

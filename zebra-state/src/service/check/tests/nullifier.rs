@@ -1,6 +1,6 @@
 //! Randomised property tests for nullifier contextual validation
 
-use std::{convert::TryInto, sync::Arc};
+use std::{convert::TryInto, env, sync::Arc};
 
 use itertools::Itertools;
 use proptest::prelude::*;
@@ -34,15 +34,24 @@ use crate::{
 // because we're only interested in spend validation,
 // (and passing various other state checks).
 
-// sprout
+const DEFAULT_NULLIFIER_PROPTEST_CASES: u32 = 16;
 
 proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_NULLIFIER_PROPTEST_CASES))
+    )]
+
+// sprout
+
     /// Make sure an arbitrary sprout nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_sprout_nullifiers(
+    fn accept_distinct_arbitrary_sprout_nullifiers_in_one_block(
         mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -230,10 +239,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -341,17 +347,15 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
 
 // sapling
 
-proptest! {
     /// Make sure an arbitrary sapling nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_sapling_nullifiers(
+    fn accept_distinct_arbitrary_sapling_nullifiers_in_one_block(
         spend in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
         sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -481,10 +485,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -593,17 +594,15 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
 
 // orchard
 
-proptest! {
     /// Make sure an arbitrary orchard nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_orchard_nullifiers(
+    fn accept_distinct_arbitrary_orchard_nullifiers_in_one_block(
         authorized_action in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
         orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -733,10 +732,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();

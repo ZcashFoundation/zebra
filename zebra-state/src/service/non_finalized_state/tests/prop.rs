@@ -14,7 +14,7 @@ use crate::{
     Config,
 };
 
-const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 32;
+const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 16;
 
 /// Check that a forked chain is the same as a chain that had the same blocks appended.
 #[test]
