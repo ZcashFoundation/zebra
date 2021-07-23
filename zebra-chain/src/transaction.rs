@@ -652,7 +652,7 @@ fn transparent_value_pool(
 
     let input_value_balance: Amount = inputs
         .iter()
-        .flat_map(|i| i.value_balance(utxos))
+        .map(|i| i.value_balance(utxos))
         .sum::<Result<Amount, AmountError>>()?;
 
     let output_value_balance: Amount<NegativeAllowed> = outputs

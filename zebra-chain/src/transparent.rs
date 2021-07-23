@@ -139,33 +139,23 @@ impl Input {
     pub fn value_balance(
         &self,
         ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
-    ) -> Result<Amount<NegativeAllowed>, InputError> {
+    ) -> Amount<NegativeAllowed> {
         match self {
             Input::PrevOut { outpoint, .. } => {
                 let utxos = utxos_from_ordered_utxos(ordered_utxos.clone());
                 if utxos.contains_key(outpoint) {
-                    Ok(utxos[outpoint]
+                    utxos[outpoint]
                         .output
                         .value
                         .constrain()
-                        .expect("conversion from NonNegative to NegativeAllowed is always valid"))
+                        .expect("conversion from NonNegative to NegativeAllowed is always valid")
                 } else {
-                    Err(InputError::NotEnoughUtxos)
+                    panic!("Provided Utxos don't have transaction Outpoint")
                 }
             }
-            Input::Coinbase { .. } => Err(InputError::NoCoinBaseAllowed),
+            Input::Coinbase { .. } => Amount::zero(),
         }
     }
-}
-
-#[allow(dead_code, missing_docs)]
-#[derive(thiserror::Error, Debug, PartialEq)]
-pub enum InputError {
-    #[error("utxos needed not found")]
-    NotEnoughUtxos,
-
-    #[error("transaction is coinbase")]
-    NoCoinBaseAllowed,
 }
 
 /// A transparent output from a transaction.
@@ -194,6 +184,8 @@ pub struct Output {
 impl Output {
     /// Get the value balance of this output
     pub fn value_balance(&self) -> Amount<NegativeAllowed> {
-        self.value.constrain().expect("always correct")
+        self.value
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid")
     }
 }
