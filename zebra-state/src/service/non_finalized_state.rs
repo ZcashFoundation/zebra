@@ -25,7 +25,7 @@ use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
 use self::chain::Chain;
 
-use super::finalized_state::FinalizedState;
+use super::{check, finalized_state::FinalizedState};
 
 /// The state of the chains in memory, incuding queued blocks.
 #[derive(Debug, Clone)]
@@ -178,9 +178,14 @@ impl NonFinalizedState {
         &self,
         parent_chain: Chain,
         prepared: PreparedBlock,
-        _finalized_state: &FinalizedState,
+        finalized_state: &FinalizedState,
     ) -> Result<Chain, ValidateContextError> {
-        // TODO: insert validation of `prepared` block and `parent_chain` here
+        check::utxo::transparent_double_spends(
+            &prepared,
+            &parent_chain.unspent_utxos(),
+            &parent_chain.spent_utxos,
+            finalized_state,
+        )?;
 
         parent_chain.push(prepared)
     }
@@ -313,7 +318,7 @@ impl NonFinalizedState {
     }
 
     /// Returns `true` if the best chain contains `sprout_nullifier`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn best_contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.sprout_nullifiers.contains(sprout_nullifier))
@@ -321,7 +326,7 @@ impl NonFinalizedState {
     }
 
     /// Returns `true` if the best chain contains `sapling_nullifier`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn best_contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
@@ -329,7 +334,7 @@ impl NonFinalizedState {
     }
 
     /// Returns `true` if the best chain contains `orchard_nullifier`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn best_contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))

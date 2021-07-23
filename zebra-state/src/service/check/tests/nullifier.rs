@@ -1,6 +1,6 @@
-//! Randomised property tests for state contextual validation
+//! Randomised property tests for nullifier contextual validation
 
-use std::{convert::TryInto, sync::Arc};
+use std::{convert::TryInto, env, sync::Arc};
 
 use itertools::Itertools;
 use proptest::prelude::*;
@@ -9,7 +9,7 @@ use zebra_chain::{
     block::{Block, Height},
     fmt::TypeNameToDebug,
     orchard,
-    parameters::{Network::*, NetworkUpgrade::Nu5},
+    parameters::NetworkUpgrade::Nu5,
     primitives::Groth16Proof,
     sapling::{self, FieldNotPresent, PerSpendAnchor, TransferData::*},
     serialization::ZcashDeserializeInto,
@@ -18,8 +18,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    config::Config,
-    service::StateService,
+    service::arbitrary::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     tests::Prepare,
     FinalizedBlock,
     ValidateContextError::{
@@ -35,15 +34,24 @@ use crate::{
 // because we're only interested in spend validation,
 // (and passing various other state checks).
 
-// sprout
+const DEFAULT_NULLIFIER_PROPTEST_CASES: u32 = 16;
 
 proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_NULLIFIER_PROPTEST_CASES))
+    )]
+
+// sprout
+
     /// Make sure an arbitrary sprout nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_sprout_nullifiers(
+    fn accept_distinct_arbitrary_sprout_nullifiers_in_one_block(
         mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
         joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -231,10 +239,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -342,17 +347,15 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
 
 // sapling
 
-proptest! {
     /// Make sure an arbitrary sapling nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_sapling_nullifiers(
+    fn accept_distinct_arbitrary_sapling_nullifiers_in_one_block(
         spend in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
         sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -482,10 +485,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -594,17 +594,15 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
 
 // orchard
 
-proptest! {
     /// Make sure an arbitrary orchard nullifier is accepted by state contextual validation.
     ///
     /// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
     /// (And that the test infrastructure generally works.)
     #[test]
-    fn accept_distinct_arbitrary_orchard_nullifiers(
+    fn accept_distinct_arbitrary_orchard_nullifiers_in_one_block(
         authorized_action in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
         orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
         use_finalized_state in any::<bool>(),
@@ -734,10 +732,7 @@ proptest! {
 
         block1
             .transactions
-            .push(transaction1.into());
-        block1
-            .transactions
-            .push(transaction2.into());
+            .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -846,28 +841,6 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
-}
-
-/// Return a new `StateService` containing the mainnet genesis block.
-/// Also returns the finalized genesis block itself.
-fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
-    let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into::<Arc<Block>>()
-        .expect("block should deserialize");
-
-    let mut state = StateService::new(Config::ephemeral(), Mainnet);
-
-    assert_eq!(None, state.best_tip());
-
-    let genesis = FinalizedBlock::from(genesis);
-    state
-        .disk
-        .commit_finalized_direct(genesis.clone(), "test")
-        .expect("unexpected invalid genesis block test vector");
-
-    assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-
-    (state, genesis)
 }
 
 /// Make sure the supplied nullifiers are distinct, modifying them if necessary.
@@ -1040,26 +1013,5 @@ fn transaction_v5_with_orchard_shielded_data(
         expiry_height: Height(0),
         sapling_shielded_data: None,
         orchard_shielded_data,
-    }
-}
-
-/// Return a `Transaction::V4` with the coinbase data from `coinbase`.
-///
-/// Used to convert a coinbase transaction to a version that the non-finalized state will accept.
-fn transaction_v4_from_coinbase(coinbase: &Transaction) -> Transaction {
-    assert!(
-        !coinbase.has_sapling_shielded_data(),
-        "conversion assumes sapling shielded data is None"
-    );
-
-    Transaction::V4 {
-        inputs: coinbase.inputs().to_vec(),
-        outputs: coinbase.outputs().to_vec(),
-        lock_time: coinbase.lock_time(),
-        // `Height(0)` means that the expiry height is ignored
-        expiry_height: coinbase.expiry_height().unwrap_or(Height(0)),
-        // invalid for coinbase transactions
-        joinsplit_data: None,
-        sapling_shielded_data: None,
     }
 }

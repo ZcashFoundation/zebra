@@ -3,7 +3,9 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, orchard, sapling, sprout, work::difficulty::CompactDifficulty};
+use zebra_chain::{
+    block, orchard, sapling, sprout, transparent, work::difficulty::CompactDifficulty,
+};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -74,6 +76,24 @@ pub enum ValidateContextError {
         difficulty_threshold: CompactDifficulty,
         expected_difficulty: CompactDifficulty,
     },
+
+    #[error("transparent double-spend: {outpoint:?} is spent twice in {location:?}")]
+    #[non_exhaustive]
+    DuplicateTransparentSpend {
+        outpoint: transparent::OutPoint,
+        location: &'static str,
+    },
+
+    #[error("missing transparent output: possible double-spend of {outpoint:?} in {location:?}")]
+    #[non_exhaustive]
+    MissingTransparentOutput {
+        outpoint: transparent::OutPoint,
+        location: &'static str,
+    },
+
+    #[error("out-of-order transparent spend: {outpoint:?} is created by a later transaction in the same block")]
+    #[non_exhaustive]
+    EarlyTransparentSpend { outpoint: transparent::OutPoint },
 
     #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
