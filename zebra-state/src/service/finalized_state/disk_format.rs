@@ -311,7 +311,7 @@ pub trait DiskSerialize {
         K: IntoDisk + Debug,
         V: IntoDisk;
 
-    /// Remove the given key form rocksdb column family if it exits.
+    /// Remove the given key form rocksdb column family if it exists.
     fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
     where
         K: IntoDisk + Debug;

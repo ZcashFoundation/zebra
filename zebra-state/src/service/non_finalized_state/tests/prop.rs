@@ -28,8 +28,8 @@ fn forked_equals_pushed() -> Result<()> {
         |((chain, fork_at_count, _network) in PreparedChain::default())| {
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
-            let mut full_chain = Chain::default();
-            let mut partial_chain = Chain::default();
+            let mut full_chain = Chain::new(Default::default(), Default::default(), Default::default());
+            let mut partial_chain = Chain::new(Default::default(), Default::default(), Default::default());
 
             for block in chain.iter().take(fork_at_count) {
                 partial_chain = partial_chain.push(block.clone())?;
@@ -69,7 +69,7 @@ fn finalized_equals_pushed() -> Result<()> {
     |((chain, end_count, _network) in PreparedChain::default())| {
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
-        let mut full_chain = Chain::default();
+        let mut full_chain = Chain::new(Default::default(), Default::default(), Default::default());
 
         for block in chain.iter().take(finalized_count) {
             full_chain = full_chain.push(block.clone())?;
@@ -192,8 +192,8 @@ fn different_blocks_different_chains() -> Result<()> {
       .prop_flat_map(|block_strategy| (block_strategy.clone(), block_strategy))
       .prop_map(|(block1, block2)| (DisplayToDebug(block1), DisplayToDebug(block2)))
     )| {
-        let chain1 = Chain::default();
-        let chain2 = Chain::default();
+        let chain1 = Chain::new(Default::default(), Default::default(), Default::default());
+        let chain2 = Chain::new(Default::default(), Default::default(), Default::default());
 
         let block1 = Arc::new(block1.0).prepare();
         let block2 = Arc::new(block2.0).prepare();

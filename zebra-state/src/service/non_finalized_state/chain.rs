@@ -793,9 +793,3 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
-
-impl Default for Chain {
-    fn default() -> Self {
-        Self::new(Default::default(), Default::default(), Default::default())
-    }
-}
