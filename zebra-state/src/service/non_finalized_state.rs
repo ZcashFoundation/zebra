@@ -115,6 +115,11 @@ impl NonFinalizedState {
             }
         }
 
+        // notify if the non-finalized state has no best tip
+        if self.chain_set.is_empty() {
+            let _ = self.best_tip_height.send(None);
+        }
+
         self.update_metrics_for_chains();
 
         finalizing.into()
@@ -390,6 +395,9 @@ impl NonFinalizedState {
         {
             metrics::counter!("state.memory.best.committed.block.count", 1);
             metrics::gauge!("state.memory.best.committed.block.height", height.0 as _);
+
+            // notify new best tip height
+            let _ = self.best_tip_height.send(Some(height));
         }
 
         self.update_metrics_for_chains();
