@@ -1,6 +1,7 @@
 //! Module defining exactly how to move types in and out of rocksdb
 use std::{convert::TryInto, fmt::Debug, sync::Arc};
 
+use bincode::Options;
 use zebra_chain::{
     block,
     block::Block,
@@ -256,17 +257,27 @@ impl IntoDisk for orchard::tree::Root {
     }
 }
 
+// The following implementations for the note commitment trees use `serde` and
+// `bincode` because currently the inner Merkle tree frontier (from
+// `incrementalmerkletree`) only supports `serde` for serialization. `bincode`
+// was chosen because it is small and fast. We explicitly use `DefaultOptions`
+// in particular to disallow trailing bytes; see
+// https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
+
 impl IntoDisk for sprout::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::serialize(self).expect("serialization to vec doesn't fail")
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sprout::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::deserialize(bytes.as_ref())
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -275,13 +286,16 @@ impl IntoDisk for sapling::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::serialize(self).expect("serialization to vec doesn't fail")
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sapling::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::deserialize(bytes.as_ref())
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -290,13 +304,16 @@ impl IntoDisk for orchard::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::serialize(self).expect("serialization to vec doesn't fail")
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for orchard::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::deserialize(bytes.as_ref())
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }

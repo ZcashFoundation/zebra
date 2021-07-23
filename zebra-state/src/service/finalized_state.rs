@@ -260,6 +260,8 @@ impl FinalizedState {
             );
         }
 
+        // Read the current note commitment trees. If there are no blocks in the
+        // state, these will contain the empty trees.
         let mut sprout_note_commitment_tree = self.sprout_note_commitment_tree();
         let mut sapling_note_commitment_tree = self.sapling_note_commitment_tree();
         let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
@@ -278,6 +280,10 @@ impl FinalizedState {
             // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
+                // Insert empty note commitment trees. Note that these can't be
+                // used too early (e.g. the Orchard tree before Nu5 activates)
+                // since the block validation will make sure only appropriate
+                // transactions are allowed in a block.
                 batch.zs_insert(
                     sprout_note_commitment_tree_cf,
                     height,
@@ -491,8 +497,8 @@ impl FinalizedState {
             })
     }
 
-    /// Returns the Sprout note commitment tree for a given `block::Height`
-    /// if it is present.
+    /// Returns the Sprout note commitment tree of the finalized tip
+    /// or the empty tree if the state is empty.
     pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -501,11 +507,11 @@ impl FinalizedState {
         let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
         self.db
             .zs_get(sprout_note_commitment_tree, &height)
-            .unwrap_or_else(Default::default)
+            .expect("note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Sapling note commitment tree for a given `block::Height`
-    /// if it is present.
+    /// Returns the Sapling note commitment tree of the finalized tip
+    /// or the empty tree if the state is empty.
     pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -515,11 +521,11 @@ impl FinalizedState {
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
         self.db
             .zs_get(sapling_note_commitment_tree, &height)
-            .unwrap_or_else(Default::default)
+            .expect("note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Orchard note commitment tree for a given `block::Height`
-    /// if it is present.
+    /// Returns the Orchard note commitment tree of the finalized tip
+    /// or the empty tree if the state is empty.
     pub fn orchard_note_commitment_tree(&self) -> orchard::tree::NoteCommitmentTree {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -529,7 +535,7 @@ impl FinalizedState {
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
         self.db
             .zs_get(orchard_note_commitment_tree, &height)
-            .unwrap_or_else(Default::default)
+            .expect("note commitment tree must exist if there is a finalized tip")
     }
 
     /// If the database is `ephemeral`, delete it.
