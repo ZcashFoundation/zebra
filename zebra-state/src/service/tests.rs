@@ -23,7 +23,7 @@ async fn populated_state(
 
     let config = Config::ephemeral();
     let network = Network::Mainnet;
-    let mut state = init(config, network);
+    let (mut state, _) = init(config, network);
 
     let mut responses = FuturesUnordered::new();
 
@@ -154,7 +154,7 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
 
     let config = Config::ephemeral();
     let network = Network::Mainnet;
-    let state = init(config, network);
+    let (state, _) = init(config, network);
 
     transcript.check(state).await?;
 

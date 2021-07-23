@@ -755,8 +755,14 @@ impl Service<Request> for StateService {
 /// possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
-pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
-    BoxService::new(StateService::new(config, network))
+pub fn init(
+    config: Config,
+    network: Network,
+) -> (BoxService<Request, Response, BoxError>, BestTipHeight) {
+    let service = StateService::new(config, network);
+    let best_tip_height = service.best_tip_height();
+
+    (BoxService::new(service), best_tip_height)
 }
 
 /// Check if zebra is following a legacy chain and return an error if so.
