@@ -71,7 +71,8 @@ impl StartCmd {
             .buffer(20)
             .service(Inbound::new(setup_rx, state.clone(), verifier.clone()));
 
-        let (peer_set, address_book) = zebra_network::init(config.network.clone(), inbound).await;
+        let (peer_set, address_book) =
+            zebra_network::init(config.network.clone(), inbound, best_tip_height).await;
         setup_tx
             .send((peer_set.clone(), address_book))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;

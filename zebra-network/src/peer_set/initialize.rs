@@ -25,7 +25,7 @@ use crate::{
     BoxError, Config, Request, Response,
 };
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{best_tip_height::BestTipHeight, parameters::Network};
 
 use super::CandidateSet;
 use super::PeerSet;
@@ -59,6 +59,7 @@ type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 pub async fn init<S>(
     config: Config,
     inbound_service: S,
+    best_tip_height: BestTipHeight,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -87,6 +88,7 @@ where
             .with_timestamp_collector(timestamp_collector)
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
+            .with_best_tip_height(best_tip_height)
             .want_transactions(true)
             .finish()
             .expect("configured all required parameters");
