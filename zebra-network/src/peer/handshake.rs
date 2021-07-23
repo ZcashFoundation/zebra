@@ -572,6 +572,8 @@ pub async fn negotiate_version(
         Err(HandshakeError::NonceReuse)?;
     }
 
+    // SECURITY: Reject connections to peers on old versions, because they might not know about all
+    // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = Version::min_remote_for_height(config.network, *best_tip_height.borrow());
     if remote_version < min_version {
         // Disconnect if peer is using an obsolete version.
