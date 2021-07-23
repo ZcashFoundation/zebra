@@ -223,6 +223,18 @@ impl Transaction {
         }
     }
 
+    /// Modify the transparent inputs of this transaction, regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn inputs_mut(&mut self) -> &mut Vec<transparent::Input> {
+        match self {
+            Transaction::V1 { ref mut inputs, .. } => inputs,
+            Transaction::V2 { ref mut inputs, .. } => inputs,
+            Transaction::V3 { ref mut inputs, .. } => inputs,
+            Transaction::V4 { ref mut inputs, .. } => inputs,
+            Transaction::V5 { ref mut inputs, .. } => inputs,
+        }
+    }
+
     /// Access the transparent outputs of this transaction, regardless of version.
     pub fn outputs(&self) -> &[transparent::Output] {
         match self {
