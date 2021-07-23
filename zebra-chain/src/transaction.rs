@@ -274,7 +274,6 @@ impl Transaction {
             .iter()
             .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
     }
-
     // sprout
 
     /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
@@ -397,6 +396,32 @@ impl Transaction {
         }
     }
 
+    /// Returns the `JoinSplitData` in this transaction, regardless of version.
+    pub fn joinsplit_data(&self) -> Option<&JoinSplitData<impl ZkSnarkProof>> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data),
+            // JoinSplits with Groth16 Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data),
+            // No JoinSplits with Groth16 Proofs
+            Transaction::V1 { .. }
+            | Transaction::V2 { joinsplit_data: None, .. }
+            | Transaction::V3 { joinsplit_data: None, .. }
+            | Transaction::V4 { joinsplit_data: None, .. }
+            | Transaction::V5 { .. } => None,
+        }
+    }
+
     // sapling
 
     /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,
@@ -510,6 +535,30 @@ impl Transaction {
         }
     }
 
+    /// Return if the transaction has any Sapling shielded data.
+    pub fn sapling_shielded_data(&self) -> Option<&sapling::ShieldedData<impl sapling::AnchorVariant>> {
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => { 
+                Some(sapling_shielded_data)
+            },
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => { 
+                Some(sapling_shielded_data)
+            },
+            // No Sapling shielded data
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { sapling_shielded_data: None, .. }
+            | Transaction::V5 { sapling_shielded_data: None,.. } => None,
+        }
+    }
+
     // orchard
 
     /// Access the [`orchard::ShieldedData`] in this transaction, if there are any,
@@ -562,6 +611,11 @@ impl Transaction {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+        
+        let inputs = self.inputs();
+        let outputs = self.outputs();
+        let joinsplit_data = self.joinsplit_data();
+        
         match self {
             Transaction::V1 {
                 inputs, outputs, ..
