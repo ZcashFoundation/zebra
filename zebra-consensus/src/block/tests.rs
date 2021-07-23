@@ -20,6 +20,8 @@ use zebra_chain::{
 };
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
+use crate::tests::util::create_state_service;
+
 static VALID_BLOCK_TRANSCRIPT: Lazy<
     Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
 > = Lazy::new(|| {
@@ -117,10 +119,7 @@ async fn check_transcripts() -> Result<(), Report> {
     zebra_test::init();
 
     let network = Network::Mainnet;
-    let state_service = Buffer::new(
-        zebra_state::init(zebra_state::Config::ephemeral(), network),
-        1,
-    );
+    let state_service = create_state_service(network);
 
     let block_verifier = Buffer::new(BlockVerifier::new(network, state_service.clone()), 1);
 

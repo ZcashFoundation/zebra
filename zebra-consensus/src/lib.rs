@@ -53,6 +53,9 @@ pub mod chain;
 #[allow(missing_docs)]
 pub mod error;
 
+#[cfg(test)]
+mod tests;
+
 pub use checkpoint::MAX_CHECKPOINT_BYTE_COUNT;
 pub use checkpoint::MAX_CHECKPOINT_HEIGHT_GAP;
 pub use config::Config;
