@@ -14,6 +14,8 @@ use tower::{
     Service,
 };
 
+use zebra_chain::best_tip_height::BestTipHeight;
+
 use crate::{peer, BoxError, Config, Request, Response};
 use peer::ConnectedAddr;
 
@@ -49,12 +51,14 @@ pub fn connect_isolated(
         Box<dyn std::error::Error + Send + Sync + 'static>,
     >,
 > {
+    let (best_tip_height, _, _) = BestTipHeight::new();
     let handshake = peer::Handshake::builder()
         .with_config(Config::default())
         .with_inbound_service(tower::service_fn(|_req| async move {
             Ok::<Response, Box<dyn std::error::Error + Send + Sync + 'static>>(Response::Nil)
         }))
         .with_user_agent(user_agent)
+        .with_best_tip_height(best_tip_height)
         .finish()
         .expect("provided mandatory builder parameters");
 
