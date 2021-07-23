@@ -111,7 +111,8 @@ fn rejection_restores_internal_state() -> Result<()> {
                     )
                 }
                 ))| {
-                  let mut state = NonFinalizedState::new(network);
+                  let (sender, _receiver) = tokio::sync::watch::channel(None);
+                  let mut state = NonFinalizedState::new(network, sender);
                   let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
                   // use `valid_count` as the number of valid blocks before an invalid block

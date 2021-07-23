@@ -314,7 +314,8 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 }
 
 fn create_state(network: Network) -> (NonFinalizedState, FinalizedState) {
-    let non_finalized_state = NonFinalizedState::new(network);
+    let (sender, _receiver) = tokio::sync::watch::channel(None);
+    let non_finalized_state = NonFinalizedState::new(network, sender);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
     (non_finalized_state, finalized_state)

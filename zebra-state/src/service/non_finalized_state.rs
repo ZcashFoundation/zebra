@@ -12,6 +12,8 @@ pub use queued_blocks::QueuedBlocks;
 
 use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
+use tokio::sync::watch;
+
 use zebra_chain::{
     block::{self, Block},
     orchard,
@@ -39,14 +41,21 @@ pub struct NonFinalizedState {
     //
     // Note: this field is currently unused, but it's useful for debugging.
     pub network: Network,
+
+    /// The block height of the best tip.
+    best_tip_height: watch::Sender<Option<block::Height>>,
 }
 
 impl NonFinalizedState {
     /// Returns a new non-finalized state for `network`.
-    pub fn new(network: Network) -> NonFinalizedState {
+    pub fn new(
+        network: Network,
+        best_tip_height: watch::Sender<Option<block::Height>>,
+    ) -> NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network,
+            best_tip_height,
         }
     }
 
@@ -396,9 +405,12 @@ impl NonFinalizedState {
 #[cfg(any(test, feature = "proptest-impl"))]
 impl Clone for NonFinalizedState {
     fn clone(&self) -> Self {
+        let (best_tip_height, _) = watch::channel(None);
+
         NonFinalizedState {
             chain_set: self.chain_set.clone(),
             network: self.network,
+            best_tip_height,
         }
     }
 }

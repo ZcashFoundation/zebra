@@ -73,7 +73,7 @@ impl StateService {
 
         let disk = FinalizedState::new(&config, network);
 
-        let mem = NonFinalizedState::new(network);
+        let mem = NonFinalizedState::new(network, non_finalized_tip_height);
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
