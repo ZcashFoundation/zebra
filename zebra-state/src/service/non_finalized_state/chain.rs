@@ -499,15 +499,30 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             self.revert_chain_state_with(orchard_shielded_data);
         }
-        if let Some(anchor) = &self.sprout_anchors_by_height.remove(&height) {
-            self.sprout_anchors.remove(anchor);
-        }
-        if let Some(anchor) = &self.sapling_anchors_by_height.remove(&height) {
-            self.sapling_anchors.remove(anchor);
-        }
-        if let Some(anchor) = &self.orchard_anchors_by_height.remove(&height) {
-            self.orchard_anchors.remove(anchor);
-        }
+        let anchor = self
+            .sprout_anchors_by_height
+            .remove(&height)
+            .expect("Sprout anchor must be present if block was added to chain");
+        assert!(
+            self.sprout_anchors.remove(&anchor),
+            "Sprout anchor must be present if block was added to chain"
+        );
+        let anchor = self
+            .sapling_anchors_by_height
+            .remove(&height)
+            .expect("Sapling anchor must be present if block was added to chain");
+        assert!(
+            self.sapling_anchors.remove(&anchor),
+            "Sapling anchor must be present if block was added to chain"
+        );
+        let anchor = self
+            .orchard_anchors_by_height
+            .remove(&height)
+            .expect("Orchard anchor must be present if block was added to chain");
+        assert!(
+            self.orchard_anchors.remove(&anchor),
+            "Orchard anchor must be present if block was added to chain"
+        );
     }
 }
 

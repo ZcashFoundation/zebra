@@ -29,6 +29,7 @@ tempdir = "0.3.7"
 chrono = "0.4.19"
 rlimit = "0.5.4"
 # TODO: this crate is not maintained anymore. Replace it?
+# https://github.com/ZcashFoundation/zebra/issues/2523
 multiset = "0.0.5"
 
 [dev-dependencies]

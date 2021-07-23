@@ -369,7 +369,6 @@ impl NonFinalizedState {
                         chain
                             .fork(
                                 parent_hash,
-                                // TODO: can clone be avoided?
                                 sprout_note_commitment_tree.clone(),
                                 sapling_note_commitment_tree.clone(),
                                 orchard_note_commitment_tree.clone(),
