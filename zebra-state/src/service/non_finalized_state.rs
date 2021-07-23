@@ -28,7 +28,7 @@ use self::chain::Chain;
 use super::{check, finalized_state::FinalizedState};
 
 /// The state of the chains in memory, incuding queued blocks.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
@@ -390,5 +390,15 @@ impl NonFinalizedState {
     fn update_metrics_for_chains(&self) {
         metrics::gauge!("state.memory.chain.count", self.chain_set.len() as _);
         metrics::gauge!("state.memory.best.chain.length", self.best_chain_len() as _);
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl Clone for NonFinalizedState {
+    fn clone(&self) -> Self {
+        NonFinalizedState {
+            chain_set: self.chain_set.clone(),
+            network: self.network,
+        }
     }
 }
