@@ -86,6 +86,8 @@ impl FinalizedState {
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
+            let _ = new_state.finalized_tip_height.send(tip_height);
+
             if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
                     .debug_stop_at_height
@@ -340,7 +342,14 @@ impl FinalizedState {
     /// [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedFinalized) {
         let (finalized, rsp_tx) = queued_block;
+        let height = finalized.height;
+
         let result = self.commit_finalized_direct(finalized, "CommitFinalized request");
+
+        if result.is_ok() {
+            let _ = self.finalized_tip_height.send(height);
+        }
+
         let _ = rsp_tx.send(result.map_err(Into::into));
     }
 
