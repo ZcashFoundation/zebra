@@ -89,7 +89,7 @@ pub enum TransactionError {
     DisabledAddToSproutPool,
 
     #[error("remaining value in the transparent transaction value pool MUST be nonnegative")]
-    InvalidValueBalance,
+    InvalidRemainingTransparentValue,
 }
 
 impl From<BoxError> for TransactionError {

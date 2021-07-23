@@ -731,7 +731,10 @@ fn v4_with_sapling_spends() {
             .await;
 
         //assert_eq!(result, Ok(expected_hash));
-        assert_eq!(result, Err(TransactionError::InvalidValueBalance));
+        assert_eq!(
+            result,
+            Err(TransactionError::InvalidRemainingTransparentValue)
+        );
     });
 }
 
@@ -810,7 +813,10 @@ fn v5_with_sapling_spends() {
             })
             .await;
 
-        assert_eq!(result, Err(TransactionError::InvalidValueBalance));
+        assert_eq!(
+            result,
+            Err(TransactionError::InvalidRemainingTransparentValue)
+        );
         //assert_eq!(result, Ok(expected_hash));
     });
 }

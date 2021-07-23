@@ -169,7 +169,7 @@ where
                     .remaining_transaction_value()
                     .is_err()
                 {
-                    return Err(TransactionError::InvalidValueBalance);
+                    return Err(TransactionError::InvalidRemainingTransparentValue);
                 }
             }
 
