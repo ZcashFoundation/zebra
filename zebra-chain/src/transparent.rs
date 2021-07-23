@@ -106,6 +106,35 @@ pub enum Input {
 }
 
 impl Input {
+    /// If this is a `PrevOut` input, returns this input's outpoint.
+    /// Otherwise, returns `None`.
+    pub fn outpoint(&self) -> Option<OutPoint> {
+        if let Input::PrevOut { outpoint, .. } = self {
+            Some(*outpoint)
+        } else {
+            None
+        }
+    }
+
+    /// Set this input's outpoint.
+    ///
+    /// Should only be called on `PrevOut` inputs.
+    ///
+    /// # Panics
+    ///
+    /// If `self` is a coinbase input.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_outpoint(&mut self, new_outpoint: OutPoint) {
+        if let Input::PrevOut {
+            ref mut outpoint, ..
+        } = self
+        {
+            *outpoint = new_outpoint;
+        } else {
+            unreachable!("unexpected variant: Coinbase Inputs do not have OutPoints");
+        }
+    }
+
     /// Get the value balance of this input.
     pub fn value_balance(
         &self,
