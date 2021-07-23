@@ -27,7 +27,7 @@ use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
     parameters::NetworkUpgrade,
-    primitives::{Bctv14Proof, Groth16Proof},
+    primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
     sapling, sprout, transparent,
     value_balance::ValueBalance,
 };
@@ -557,7 +557,7 @@ impl Transaction {
 
     // value pool
 
-    /// Get all the value pools for this transaction
+    /// Get all the value balances for this transaction
     pub fn value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
@@ -665,7 +665,6 @@ fn transparent_value_pool(
     ))
 }
 
-use crate::primitives::ZkSnarkProof;
 fn sprout_value_pool<P: ZkSnarkProof>(
     joinsplit_data: &Option<JoinSplitData<P>>,
 ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
