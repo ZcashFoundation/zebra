@@ -22,7 +22,8 @@ fn blocks_with_v5_transactions() -> Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, count, network) in PreparedChain::default())| {
-            let mut state = FinalizedState::new(&Config::ephemeral(), network);
+            let (finalized_height, _) = tokio::sync::watch::channel(Height(0));
+            let mut state = FinalizedState::new(&Config::ephemeral(), network, finalized_height);
             let mut height = Height(0);
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {

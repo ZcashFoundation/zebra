@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::{self, Block},
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+};
 use zebra_test::prelude::*;
 
 use crate::{
@@ -314,9 +318,12 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 }
 
 fn create_state(network: Network) -> (NonFinalizedState, FinalizedState) {
-    let (sender, _receiver) = tokio::sync::watch::channel(None);
-    let non_finalized_state = NonFinalizedState::new(network, sender);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let (non_finalized_height_sender, _receiver) = tokio::sync::watch::channel(None);
+    let (finalized_height_sender, _receiver) = tokio::sync::watch::channel(block::Height(0));
+
+    let non_finalized_state = NonFinalizedState::new(network, non_finalized_height_sender);
+    let finalized_state =
+        FinalizedState::new(&Config::ephemeral(), network, finalized_height_sender);
 
     (non_finalized_state, finalized_state)
 }

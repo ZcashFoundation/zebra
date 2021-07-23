@@ -71,7 +71,7 @@ impl StateService {
         let (best_tip_height, finalized_tip_height, non_finalized_tip_height) =
             BestTipHeight::new();
 
-        let disk = FinalizedState::new(&config, network);
+        let disk = FinalizedState::new(&config, network, finalized_tip_height);
 
         let mem = NonFinalizedState::new(network, non_finalized_tip_height);
         let queued_blocks = QueuedBlocks::default();

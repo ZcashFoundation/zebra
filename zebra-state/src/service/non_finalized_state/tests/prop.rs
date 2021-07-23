@@ -1,8 +1,15 @@
 use std::{env, sync::Arc};
 
+use tokio::sync::watch;
+
 use zebra_test::prelude::*;
 
-use zebra_chain::{block::Block, fmt::DisplayToDebug, parameters::NetworkUpgrade::*, LedgerState};
+use zebra_chain::{
+    block::{self, Block},
+    fmt::DisplayToDebug,
+    parameters::NetworkUpgrade::*,
+    LedgerState,
+};
 
 use crate::{
     service::{
@@ -111,9 +118,12 @@ fn rejection_restores_internal_state() -> Result<()> {
                     )
                 }
                 ))| {
-                  let (sender, _receiver) = tokio::sync::watch::channel(None);
-                  let mut state = NonFinalizedState::new(network, sender);
-                  let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+                  let (non_finalized_height_sender, _receiver) = watch::channel(None);
+                  let (finalized_height_sender, _receiver) = watch::channel(block::Height(0));
+
+                  let mut state = NonFinalizedState::new(network, non_finalized_height_sender);
+                  let finalized_state =
+                      FinalizedState::new(&Config::ephemeral(), network, finalized_height_sender);
 
                   // use `valid_count` as the number of valid blocks before an invalid block
                   let valid_tip_height = chain[valid_count - 1].height;

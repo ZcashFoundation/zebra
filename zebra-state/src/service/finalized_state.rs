@@ -7,6 +7,8 @@ mod tests;
 
 use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
+use tokio::sync::watch;
+
 use zebra_chain::{
     block::{self, Block},
     orchard,
@@ -36,10 +38,17 @@ pub struct FinalizedState {
     ephemeral: bool,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
+
+    /// The height of the finalized tip.
+    finalized_tip_height: watch::Sender<block::Height>,
 }
 
 impl FinalizedState {
-    pub fn new(config: &Config, network: Network) -> Self {
+    pub fn new(
+        config: &Config,
+        network: Network,
+        finalized_tip_height: watch::Sender<block::Height>,
+    ) -> Self {
         let (path, db_options) = config.db_config(network);
         let column_families = vec![
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
@@ -73,6 +82,7 @@ impl FinalizedState {
             db,
             ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            finalized_tip_height,
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
