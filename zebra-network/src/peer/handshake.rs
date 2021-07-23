@@ -19,7 +19,7 @@ use tower::Service;
 use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
 
-use zebra_chain::{block, parameters::Network};
+use zebra_chain::{best_tip_height::BestTipHeight, block, parameters::Network};
 
 use crate::{
     constants,
@@ -53,6 +53,7 @@ pub struct Handshake<S> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
+    best_tip_height: BestTipHeight,
 }
 
 /// The peer address that we are handshaking with.
@@ -302,6 +303,7 @@ pub struct Builder<S> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    best_tip_height: Option<BestTipHeight>,
 }
 
 impl<S> Builder<S>
@@ -361,6 +363,12 @@ where
         self
     }
 
+    /// Provide the receiver of the state's best tip height.
+    pub fn with_best_tip_height(mut self, best_tip_height: BestTipHeight) -> Self {
+        self.best_tip_height = Some(best_tip_height);
+        self
+    }
+
     /// Whether to request that peers relay transactions to our node.  Optional.
     ///
     /// If this is unset, the node will not request transactions.
@@ -381,6 +389,9 @@ where
             let (tx, _) = broadcast::channel(100);
             tx
         });
+        let best_tip_height = self
+            .best_tip_height
+            .ok_or("did not provide best tip height endpoint")?;
         let timestamp_collector = self.timestamp_collector.unwrap_or_else(|| {
             // No timestamp collector was passed, so create a stub channel.
             // Dropping the receiver means sends will fail, but we don't care.
@@ -402,6 +413,7 @@ where
             our_services,
             relay,
             parent_span: Span::current(),
+            best_tip_height,
         })
     }
 }
@@ -424,6 +436,7 @@ where
             our_services: None,
             relay: None,
             inv_collector: None,
+            best_tip_height: None,
         }
     }
 }
