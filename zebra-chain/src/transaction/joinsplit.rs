@@ -6,8 +6,6 @@ use crate::{
     sprout::{JoinSplit, Nullifier},
 };
 
-use std::convert::TryFrom;
-
 /// A bundle of [`JoinSplit`] descriptions and signature data.
 ///
 /// JoinSplit descriptions are optional, but Zcash transactions must include a
@@ -61,7 +59,7 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// Calculate and return the value balance for the joinsplits.
     pub fn value_balance(&self) -> Result<Amount, Error> {
         self.joinsplits()
-            .flat_map(|j| Amount::try_from(i64::from(j.vpub_old) - i64::from(j.vpub_new)))
-            .sum()
+            .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)
+            .sum::<Result<Amount, Error>>()
     }
 }
