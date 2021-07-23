@@ -183,6 +183,7 @@ impl NoteCommitmentTree {
     /// Add a note commitment to the tree.
     pub fn append(&mut self, _cm: &NoteCommitment) {
         // TODO: https://github.com/ZcashFoundation/zebra/issues/2485
+        todo!("implement sprout note commitment trees #2485");
     }
 }
 
