@@ -396,47 +396,6 @@ impl Transaction {
         }
     }
 
-    /// Access the Sprout note commitments in this transaction, regardless of version.
-    pub fn sprout_note_commitments(
-        &self,
-    ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
-        // This function returns a boxed iterator because the different
-        // transaction variants end up having different iterator types
-        // (we could extract bctv and groth as separate iterators, then chain
-        // them together, but that would be much harder to read and maintain)
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.note_commitments()),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.note_commitments()),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
     // sapling
 
     /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,

@@ -233,14 +233,6 @@ impl IntoDisk for transparent::OutPoint {
     }
 }
 
-impl IntoDisk for sprout::tree::Root {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.into()
-    }
-}
-
 impl IntoDisk for sapling::tree::Root {
     type Bytes = [u8; 32];
 
@@ -263,24 +255,6 @@ impl IntoDisk for orchard::tree::Root {
 // was chosen because it is small and fast. We explicitly use `DefaultOptions`
 // in particular to disallow trailing bytes; see
 // https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
-
-impl IntoDisk for sprout::tree::NoteCommitmentTree {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for sprout::tree::NoteCommitmentTree {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
 
 impl IntoDisk for sapling::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
