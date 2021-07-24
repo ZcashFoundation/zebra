@@ -396,32 +396,6 @@ impl Transaction {
         }
     }
 
-    /// Returns the `JoinSplitData` in this transaction, regardless of version.
-    pub fn joinsplit_data(&self) -> Option<&JoinSplitData<impl ZkSnarkProof>> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data),
-            // JoinSplits with Groth16 Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data),
-            // No JoinSplits with Groth16 Proofs
-            Transaction::V1 { .. }
-            | Transaction::V2 { joinsplit_data: None, .. }
-            | Transaction::V3 { joinsplit_data: None, .. }
-            | Transaction::V4 { joinsplit_data: None, .. }
-            | Transaction::V5 { .. } => None,
-        }
-    }
-
     // sapling
 
     /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,
@@ -535,30 +509,6 @@ impl Transaction {
         }
     }
 
-    /// Return if the transaction has any Sapling shielded data.
-    pub fn sapling_shielded_data(&self) -> Option<&sapling::ShieldedData<impl sapling::AnchorVariant>> {
-        match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => { 
-                Some(sapling_shielded_data)
-            },
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => { 
-                Some(sapling_shielded_data)
-            },
-            // No Sapling shielded data
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { sapling_shielded_data: None, .. }
-            | Transaction::V5 { sapling_shielded_data: None,.. } => None,
-        }
-    }
-
     // orchard
 
     /// Access the [`orchard::ShieldedData`] in this transaction, if there are any,
@@ -611,81 +561,50 @@ impl Transaction {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
-        
         let inputs = self.inputs();
         let outputs = self.outputs();
-        let joinsplit_data = self.joinsplit_data();
-        
+        let orchard_shielded_data = self.orchard_shielded_data();
+
+        let transparent = transparent_value_pool(inputs, outputs, utxos);
+        let orchard = orchard_value_pool(orchard_shielded_data);
+
+        let mut value_balance = ValueBalance::zero();
+
+        value_balance.set_transparent_value_balance(transparent?);
+        value_balance.set_orchard_value_balance(orchard?);
+
+        // We can't build methods for joinsplits and sapling shielded data as they
+        // can return different types, so we match the transaction explicity.
         match self {
-            Transaction::V1 {
-                inputs, outputs, ..
-            } => {
-                let transparent = transparent_value_pool(inputs, outputs, utxos);
-
-                let mut value_balance = ValueBalance::zero();
-                value_balance.set_transparent_value_balance(transparent?);
-                Ok(value_balance)
-            }
-            Transaction::V2 {
-                inputs,
-                outputs,
-                joinsplit_data,
-                ..
-            } => {
-                let transparent = transparent_value_pool(inputs, outputs, utxos);
+            Transaction::V1 { .. } => Ok(value_balance),
+            Transaction::V2 { joinsplit_data, .. } => {
                 let sprout = sprout_value_pool(joinsplit_data);
-
-                let mut value_balance = ValueBalance::zero();
-                value_balance.set_transparent_value_balance(transparent?);
                 value_balance.set_sprout_value_balance(sprout?);
                 Ok(value_balance)
             }
-            Transaction::V3 {
-                inputs,
-                outputs,
-                joinsplit_data,
-                ..
-            } => {
-                let transparent = transparent_value_pool(inputs, outputs, utxos);
+            Transaction::V3 { joinsplit_data, .. } => {
                 let sprout = sprout_value_pool(joinsplit_data);
-
-                let mut value_balance = ValueBalance::zero();
-                value_balance.set_transparent_value_balance(transparent?);
                 value_balance.set_sprout_value_balance(sprout?);
                 Ok(value_balance)
             }
             Transaction::V4 {
-                inputs,
-                outputs,
                 joinsplit_data,
                 sapling_shielded_data,
                 ..
             } => {
-                let transparent = transparent_value_pool(inputs, outputs, utxos);
                 let sprout = sprout_value_pool(joinsplit_data);
                 let sapling = sapling_value_pool(sapling_shielded_data);
 
-                let mut value_balance = ValueBalance::zero();
-                value_balance.set_transparent_value_balance(transparent?);
                 value_balance.set_sprout_value_balance(sprout?);
                 value_balance.set_sapling_value_balance(sapling?);
                 Ok(value_balance)
             }
             Transaction::V5 {
-                inputs,
-                outputs,
                 sapling_shielded_data,
-                orchard_shielded_data,
                 ..
             } => {
-                let transparent = transparent_value_pool(inputs, outputs, utxos);
                 let sapling = sapling_value_pool(sapling_shielded_data);
-                let orchard = orchard_value_pool(orchard_shielded_data);
-
-                let mut value_balance = ValueBalance::zero();
-                value_balance.set_transparent_value_balance(transparent?);
                 value_balance.set_sapling_value_balance(sapling?);
-                value_balance.set_orchard_value_balance(orchard?);
                 Ok(value_balance)
             }
         }
@@ -742,7 +661,7 @@ fn sapling_value_pool<P: sapling::AnchorVariant + Clone>(
 }
 
 fn orchard_value_pool(
-    orchard_shielded_data: &Option<orchard::ShieldedData>,
+    orchard_shielded_data: Option<&orchard::ShieldedData>,
 ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
     let orchard = orchard_shielded_data
         .iter()
