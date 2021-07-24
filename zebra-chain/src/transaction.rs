@@ -274,6 +274,7 @@ impl Transaction {
             .iter()
             .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
     }
+
     // sprout
 
     /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
@@ -676,17 +677,12 @@ impl Transaction {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let transparent = self.transparent_value_pool(utxos);
-        let sprout = self.sprout_value_pool();
-        let sapling = self.sapling_value_pool();
-        let orchard = self.orchard_value_pool();
-
         let mut value_balance = ValueBalance::zero();
 
-        value_balance.set_transparent_value_balance(transparent?);
-        value_balance.set_sprout_value_balance(sprout?);
-        value_balance.set_sapling_value_balance(sapling?);
-        value_balance.set_orchard_value_balance(orchard?);
+        value_balance.set_transparent_value_balance(self.transparent_value_pool(utxos)?);
+        value_balance.set_sprout_value_balance(self.sprout_value_pool()?);
+        value_balance.set_sapling_value_balance(self.sapling_value_pool()?);
+        value_balance.set_orchard_value_balance(self.orchard_value_pool()?);
 
         Ok(value_balance)
     }
