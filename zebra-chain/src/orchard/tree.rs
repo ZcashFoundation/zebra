@@ -111,6 +111,12 @@ impl From<Root> for [u8; 32] {
     }
 }
 
+impl From<&Root> for [u8; 32] {
+    fn from(root: &Root) -> Self {
+        (*root).into()
+    }
+}
+
 impl Hash for Root {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.to_bytes().hash(state)

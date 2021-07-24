@@ -552,4 +552,9 @@ impl Transaction {
         self.orchard_shielded_data()
             .map(|orchard_shielded_data| orchard_shielded_data.flags)
     }
+
+    /// Return if the transaction has any Orchard shielded data.
+    pub fn has_orchard_shielded_data(&self) -> bool {
+        self.orchard_shielded_data().is_some()
+    }
 }
