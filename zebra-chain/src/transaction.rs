@@ -619,10 +619,6 @@ fn transparent_value_pool(
     outputs: &[transparent::Output],
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
-    if inputs.is_empty() && outputs.is_empty() {
-        return Ok(ValueBalance::zero());
-    }
-
     let input_value_balance: Amount = inputs
         .iter()
         .map(|i| i.value_balance(utxos))
