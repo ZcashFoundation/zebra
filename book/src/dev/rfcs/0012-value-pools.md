@@ -126,63 +126,100 @@ https://zips.z.cash/protocol/protocol.pdf#orchardbalance
 - We will use `Default` to represent a totally empty `ValueBalance`, this is the state of all pools at the genesis block.
 
 ```rust
-#[serde(bound = "C: Constraint")]
-struct ValueBalance<C = NegativeAllowed> {
+pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
     sapling: Amount<C>,
     orchard: Amount<C>,
 }
 
-impl ValueBalance {
-    /// [Consensus rule]: The remaining value in the transparent transaction value pool MUST be nonnegative.
+impl<C> ValueBalance<C>
+where
+    C: Constraint,
+{
+    /// [Consensus rule]: The remaining value in the transparent transaction value pool MUST
+    /// be nonnegative.
     ///
     /// This rule applies to Block and Mempool transactions.
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
-    fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Err> {
-        // This rule checks the transparent value balance minus the sum of the sprout, sapling, and orchard
-        // value balances in a transaction is nonnegative
-        self.transparent - [self.sprout + self.sapling + self.orchard].sum()
+    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
+        // This rule checks the transparent value balance minus the sum of the sprout,
+        // sapling, and orchard value balances in a transaction is nonnegative.
+        (self.transparent - (self.sprout + self.sapling + self.orchard)?)?
+            .constrain::<NonNegative>()
     }
+
+    /// Creates a [`ValueBalance`] from the given transparent amount.
+    pub fn from_transparent_amount(transparent_amount: Amount<C>) -> Self { }
+
+    /// Creates a [`ValueBalance`] from the given sprout amount.
+    pub fn from_sprout_amount(sprout_amount: Amount<C>) -> Self { }
+
+    /// Creates a [`ValueBalance`] from the given sapling amount.
+    pub fn from_sapling_amount(sapling_amount: Amount<C>) -> Self { }
+
+    /// Creates a [`ValueBalance`] from the given orchard amount.
+    pub fn from_orchard_amount(orchard_amount: Amount<C>) -> Self { }
+
+    /// Get the transparent amount from the [`ValueBalance`].
+    pub fn transparent_amount(&self) -> Amount<C> { }
+
+    /// Insert a transparent value balance into a given [`ValueBalance`]
+    /// leaving the other values untouched.
+    pub fn set_transparent_value_balance(&mut self, transparent_value_balance: ValueBalance<C>) -> &Self { }
+
+    /// Get the sprout amount from the [`ValueBalance`].
+    pub fn sprout_amount(&self) -> Amount<C> { }
+
+    /// Insert a sprout value balance into a given [`ValueBalance`]
+    /// leaving the other values untouched.
+    pub fn set_sprout_value_balance(&mut self, sprout_value_balance: ValueBalance<C>) -> &Self { }
+
+    /// Get the sapling amount from the [`ValueBalance`].
+    pub fn sapling_amount(&self) -> Amount<C> { }
+
+    /// Insert a sapling value balance into a given [`ValueBalance`]
+    /// leaving the other values untouched.
+    pub fn set_sapling_value_balance(&mut self, sapling_value_balance: ValueBalance<C>) -> &Self { }
+
+    /// Get the orchard amount from the [`ValueBalance`].
+    pub fn orchard_amount(&self) -> Amount<C> { }
+
+    /// Insert an orchard value balance into a given [`ValueBalance`]
+    /// leaving the other values untouched.
+    pub fn set_orchard_value_balance(&mut self, orchard_value_balance: ValueBalance<C>) -> &Self { }
+
+    /// Creates a [`ValueBalance`] where all the pools are zero.
+    pub fn zero() -> Self { }
 }
 
-impl Add for Result<ValueBalance<C>>
+/// Errors that can be returned when validating a [`ValueBalance`].
+pub enum ValueBalanceError {
+    #[error("value balance contains invalid amounts")]
+    /// Any error related to [`Amount`]s inside the [`ValueBalance`]
+    AmountError(#[from] Error),
+}
+
+impl<C> std::ops::Add for ValueBalance<C>
 where
     C: Constraint,
 {
 
 }
-
-impl Sub for Result<ValueBalance<C>>
+impl<C> std::ops::Add<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
 where
     C: Constraint,
 {
 
 }
-
-impl AddAssign for Result<ValueBalance<C>>
+impl<C> std::ops::Sub for ValueBalance<C>
 where
     C: Constraint,
 {
 
 }
-
-impl SubAssign for Result<ValueBalance<C>>
-where
-    C: Constraint,
-{
-
-}
-
-impl Sum for Result<ValueBalance<C>>
-where
-    C: Constraint,
-{
-
-}
-
-impl Default for ValueBalance<C>
+impl<C> std::ops::Sub<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
 where
     C: Constraint,
 {
@@ -194,7 +231,7 @@ where
 
 We first add `value_balance()` methods in all the modules we need and use them to get the value balance for the whole transaction.
 
-#### Create a method in `Input` that returns `ValueBalance<NegativeAllowed>`
+#### Create a method in `Input` that returns `Amount<NegativeAllowed>`
 
 - Method location is at `zebra-chain/src/transparent.rs`.
 - Method need `utxos`, this information is available in `verify_transparent_inputs_and_outputs`.
@@ -202,50 +239,50 @@ We first add `value_balance()` methods in all the modules we need and use them t
 
 ```rust
 impl Input {
-    fn value_balance(&self, utxos: &HashMap<OutPoint, Utxo>) -> ValueBalance<NegativeAllowed> {
+    fn value_balance(&self, utxos: &HashMap<OutPoint, utxo::OrderedUtxo>) -> Amount<NegativeAllowed> {
 
     }
 }
 ```
 
-#### Create a method in `Output` that returns `ValueBalance<NegativeAllowed>`
+#### Create a method in `Output` that returns `Amount<NegativeAllowed>`
 
 - Method location is at `zebra-chain/src/transparent.rs`.
 
 ```rust
 impl Output {
-    fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+    fn value_balance(&self) -> Amount<NegativeAllowed> {
 
     }
 }
 ```
 
-#### Create a method in `JoinSplitData` that returns `ValueBalance<NegativeAllowed>`
+#### Create a method in `JoinSplitData` that returns `Result<Amount, amount::Error>`
 
 - Method location is at `zebra-chain/src/transaction/joinsplit.rs`
 
 ```rust
-pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+pub fn value_balance(&self) ->  Result<Amount, amount::Error> {
 
 }
 ```
 
-#### Create a method in `sapling::ShieldedData` that returns `ValueBalance<NegativeAllowed>`
+#### Create a method in `sapling::ShieldedData` that returns `Amount<NegativeAllowed>`
 
 - Method location is at `zebra-chain/src/transaction/sapling/shielded_data.rs`
 
 ```rust
-pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+pub fn value_balance(&self) -> Amount<NegativeAllowed> {
 
 }
 ```
 
-#### Create a method in `orchard::ShieldedData` that returns `ValueBalance<NegativeAllowed>`
+#### Create a method in `orchard::ShieldedData` that returns `Amount<NegativeAllowed>`
 
 - Method location is at `zebra-chain/src/transaction/orchard/shielded_data.rs`
 
 ```rust
-pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
+pub fn value_balance(&self) -> Amount<NegativeAllowed> {
 
 }
 ```
@@ -256,11 +293,25 @@ pub fn value_balance(&self) -> ValueBalance<NegativeAllowed> {
 - Method will use all the `value_balances()` we created until now.
 
 ```rust
-/// utxos must contain the utxos of every input in the transaction,
-/// including UTXOs created by earlier transactions in this block.
-pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> ValueBalance<NegativeAllowed> {
+/// Get all the value balances for this transaction
+pub fn value_balance(
+    &self,
+    utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> Result<ValueBalance<NegativeAllowed>, amount::Error> {
 
 }
+```
+
+### Check the remaining transaction value consensus rule
+
+- Do the check in `zebra-consensus/src/transaction.rs`
+- Make the check part of the [basic checks](https://github.com/ZcashFoundation/zebra/blob/f817df638b1ba8cf8c261c536a30599c805cf04c/zebra-consensus/src/transaction.rs#L168-L177)
+
+```rust
+..
+// Check the remaining transaction value consensus rule:
+tx.value_balance().remaining_transaction_value()?;
+..
 ```
 
 ### Create a method in `Block` that returns `ValueBalance<NegativeAllowed>` for the block
@@ -278,18 +329,6 @@ pub fn value_balance(&self, utxos: &HashMap<transparent::OutPoint, Utxo>) -> Val
         .sum()
         .expect("Each block should have at least one coinbase transaction")
 }
-```
-
-### Check the remaining transaction value consensus rule
-
-- Do the check in `zebra-consensus/src/transaction.rs`
-- Make the check part of the [basic checks](https://github.com/ZcashFoundation/zebra/blob/f817df638b1ba8cf8c261c536a30599c805cf04c/zebra-consensus/src/transaction.rs#L168-L177)
-
-```rust
-..
-// Check the remaining transaction value consensus rule:
-tx.value_balance().remaining_transaction_value()?;
-..
 ```
 
 ### Pass the value balance for this block from the consensus into the state
