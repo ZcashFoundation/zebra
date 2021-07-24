@@ -27,7 +27,7 @@ use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
     parameters::NetworkUpgrade,
-    primitives::{Bctv14Proof, Groth16Proof, ZkSnarkProof},
+    primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout, transparent,
     value_balance::ValueBalance,
 };
@@ -556,113 +556,137 @@ impl Transaction {
 
     // value pool
 
+    /// Return the transparent value pool
+    fn transparent_value_pool(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let inputs = self.inputs();
+        let outputs = self.outputs();
+        let input_value_balance: Amount = inputs
+            .iter()
+            .map(|i| i.value_balance(utxos))
+            .sum::<Result<Amount, AmountError>>()?;
+
+        let output_value_balance: Amount<NegativeAllowed> = outputs
+            .iter()
+            .map(|o| o.value_balance())
+            .sum::<Result<Amount, AmountError>>()?;
+
+        Ok(ValueBalance::from_transparent_amount(
+            (input_value_balance - output_value_balance)?,
+        ))
+    }
+
+    /// Ret
+    fn sprout_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let joinsplit_data_bctv14 = match self {
+            Transaction::V2 { joinsplit_data, .. } => joinsplit_data.as_ref(),
+            Transaction::V3 { joinsplit_data, .. } => joinsplit_data.as_ref(),
+            Transaction::V1 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => None,
+        };
+
+        if joinsplit_data_bctv14.is_some() {
+            let sprout = joinsplit_data_bctv14
+                .iter()
+                .flat_map(|j| j.value_balance())
+                .sum::<Result<Amount, AmountError>>()?;
+
+            return Ok(ValueBalance::from_sprout_amount(sprout));
+        }
+
+        let joinsplit_data_groth16 = match self {
+            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.as_ref(),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V5 { .. } => None,
+        };
+
+        if joinsplit_data_groth16.is_some() {
+            let sprout = joinsplit_data_groth16
+                .iter()
+                .flat_map(|j| j.value_balance())
+                .sum::<Result<Amount, AmountError>>()?;
+
+            return Ok(ValueBalance::from_sprout_amount(sprout));
+        }
+
+        Ok(ValueBalance::zero())
+    }
+
+    fn sapling_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let sapling_perspend = match self {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data.as_ref(),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V5 { .. } => None,
+        };
+
+        if sapling_perspend.is_some() {
+            let sapling = sapling_perspend
+                .iter()
+                .map(|s| s.value_balance())
+                .sum::<Result<Amount, AmountError>>()?;
+
+            return Ok(ValueBalance::from_sapling_amount(sapling));
+        }
+
+        let sapling_shared = match self {
+            Transaction::V5 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data.as_ref(),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+        };
+
+        if sapling_shared.is_some() {
+            let sapling = sapling_shared
+                .iter()
+                .map(|s| s.value_balance())
+                .sum::<Result<Amount, AmountError>>()?;
+
+            return Ok(ValueBalance::from_sapling_amount(sapling));
+        }
+
+        Ok(ValueBalance::zero())
+    }
+
+    /// Wat
+    fn orchard_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let orchard = self
+            .orchard_shielded_data()
+            .iter()
+            .map(|o| o.value_balance())
+            .sum::<Result<Amount, AmountError>>()?;
+
+        Ok(ValueBalance::from_orchard_amount(orchard))
+    }
+
     /// Get all the value balances for this transaction
     pub fn value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    ) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
-        let inputs = self.inputs();
-        let outputs = self.outputs();
-        let orchard_shielded_data = self.orchard_shielded_data();
-
-        let transparent = transparent_value_pool(inputs, outputs, utxos);
-        let orchard = orchard_value_pool(orchard_shielded_data);
+    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let transparent = self.transparent_value_pool(utxos);
+        let sprout = self.sprout_value_pool();
+        let sapling = self.sapling_value_pool();
+        let orchard = self.orchard_value_pool();
 
         let mut value_balance = ValueBalance::zero();
 
         value_balance.set_transparent_value_balance(transparent?);
+        value_balance.set_sprout_value_balance(sprout?);
+        value_balance.set_sapling_value_balance(sapling?);
         value_balance.set_orchard_value_balance(orchard?);
 
-        // We can't build methods for joinsplits and sapling shielded data as they
-        // can return different types, so we match the transaction explicity.
-        match self {
-            Transaction::V1 { .. } => Ok(value_balance),
-            Transaction::V2 { joinsplit_data, .. } => {
-                let sprout = sprout_value_pool(joinsplit_data);
-                value_balance.set_sprout_value_balance(sprout?);
-                Ok(value_balance)
-            }
-            Transaction::V3 { joinsplit_data, .. } => {
-                let sprout = sprout_value_pool(joinsplit_data);
-                value_balance.set_sprout_value_balance(sprout?);
-                Ok(value_balance)
-            }
-            Transaction::V4 {
-                joinsplit_data,
-                sapling_shielded_data,
-                ..
-            } => {
-                let sprout = sprout_value_pool(joinsplit_data);
-                let sapling = sapling_value_pool(sapling_shielded_data);
-
-                value_balance.set_sprout_value_balance(sprout?);
-                value_balance.set_sapling_value_balance(sapling?);
-                Ok(value_balance)
-            }
-            Transaction::V5 {
-                sapling_shielded_data,
-                ..
-            } => {
-                let sapling = sapling_value_pool(sapling_shielded_data);
-                value_balance.set_sapling_value_balance(sapling?);
-                Ok(value_balance)
-            }
-        }
+        Ok(value_balance)
     }
-}
-
-// Value pool utility functions
-
-/// Return the transparent value pool
-fn transparent_value_pool(
-    inputs: &[transparent::Input],
-    outputs: &[transparent::Output],
-    utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-    let input_value_balance: Amount = inputs
-        .iter()
-        .map(|i| i.value_balance(utxos))
-        .sum::<Result<Amount, AmountError>>()?;
-
-    let output_value_balance: Amount<NegativeAllowed> = outputs
-        .iter()
-        .map(|o| o.value_balance())
-        .sum::<Result<Amount, AmountError>>()?;
-
-    Ok(ValueBalance::from_transparent_amount(
-        (input_value_balance - output_value_balance)?,
-    ))
-}
-
-fn sprout_value_pool<P: ZkSnarkProof>(
-    joinsplit_data: &Option<JoinSplitData<P>>,
-) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-    let sprout = joinsplit_data
-        .iter()
-        .flat_map(|j| j.value_balance())
-        .sum::<Result<Amount, AmountError>>()?;
-
-    Ok(ValueBalance::from_sprout_amount(sprout))
-}
-
-fn sapling_value_pool<P: sapling::AnchorVariant + Clone>(
-    sapling_shielded_data: &Option<sapling::ShieldedData<P>>,
-) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-    let sapling = sapling_shielded_data
-        .iter()
-        .map(|s| s.value_balance())
-        .sum::<Result<Amount, AmountError>>()?;
-
-    Ok(ValueBalance::from_sapling_amount(sapling))
-}
-
-fn orchard_value_pool(
-    orchard_shielded_data: Option<&orchard::ShieldedData>,
-) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-    let orchard = orchard_shielded_data
-        .iter()
-        .map(|o| o.value_balance())
-        .sum::<Result<Amount, AmountError>>()?;
-
-    Ok(ValueBalance::from_orchard_amount(orchard))
 }
