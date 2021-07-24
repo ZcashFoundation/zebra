@@ -618,7 +618,7 @@ fn transparent_value_pool(
     inputs: &[transparent::Input],
     outputs: &[transparent::Output],
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
     let input_value_balance: Amount = inputs
         .iter()
         .map(|i| i.value_balance(utxos))
@@ -636,7 +636,7 @@ fn transparent_value_pool(
 
 fn sprout_value_pool<P: ZkSnarkProof>(
     joinsplit_data: &Option<JoinSplitData<P>>,
-) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
     let sprout = joinsplit_data
         .iter()
         .flat_map(|j| j.value_balance())
@@ -647,7 +647,7 @@ fn sprout_value_pool<P: ZkSnarkProof>(
 
 fn sapling_value_pool<P: sapling::AnchorVariant + Clone>(
     sapling_shielded_data: &Option<sapling::ShieldedData<P>>,
-) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
     let sapling = sapling_shielded_data
         .iter()
         .map(|s| s.value_balance())
@@ -658,7 +658,7 @@ fn sapling_value_pool<P: sapling::AnchorVariant + Clone>(
 
 fn orchard_value_pool(
     orchard_shielded_data: Option<&orchard::ShieldedData>,
-) -> Result<ValueBalance<NegativeAllowed>, Box<dyn std::error::Error>> {
+) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
     let orchard = orchard_shielded_data
         .iter()
         .map(|o| o.value_balance())
