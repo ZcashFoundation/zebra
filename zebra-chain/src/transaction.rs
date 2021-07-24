@@ -578,7 +578,7 @@ impl Transaction {
         ))
     }
 
-    /// Ret
+    /// Return the sprout value pool
     fn sprout_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let joinsplit_data_bctv14 = match self {
             Transaction::V2 { joinsplit_data, .. } => joinsplit_data.as_ref(),
@@ -615,6 +615,7 @@ impl Transaction {
         Ok(ValueBalance::zero())
     }
 
+    /// Return the sapling value pool
     fn sapling_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let sapling_perspend = match self {
             Transaction::V4 {
@@ -659,7 +660,7 @@ impl Transaction {
         Ok(ValueBalance::zero())
     }
 
-    /// Wat
+    /// Return the orchard value pool
     fn orchard_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let orchard = self
             .orchard_shielded_data()
