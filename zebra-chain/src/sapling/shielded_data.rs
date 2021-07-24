@@ -7,7 +7,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    amount::Amount,
+    amount::{Amount, NegativeAllowed},
     primitives::{
         redjubjub::{Binding, Signature},
         Groth16Proof,
@@ -264,7 +264,7 @@ where
     }
 
     /// Provide access to the `value_balance` field of the shielded data.
-    pub fn value_balance(&self) -> Amount {
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
         self.value_balance
     }
 }

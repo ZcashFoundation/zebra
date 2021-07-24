@@ -1,7 +1,7 @@
 //! Orchard shielded data for `V5` `Transaction`s.
 
 use crate::{
-    amount::Amount,
+    amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
     orchard::{tree, Action, Nullifier},
     primitives::{
@@ -50,7 +50,7 @@ impl ShieldedData {
     }
 
     /// Provide access to the `value_balance` field of the shielded data.
-    pub fn value_balance(&self) -> Amount {
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
         self.value_balance
     }
 }
