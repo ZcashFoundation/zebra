@@ -66,7 +66,10 @@ proptest! {
         let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
 
         // create a spend
-        let expected_outpoint = transparent::OutPoint { hash: output_transaction.hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: output_transaction.hash(),
+            index: 0,
+        };
         prevout_input.set_outpoint(expected_outpoint);
         let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
 
@@ -98,8 +101,7 @@ proptest! {
             prop_assert!(state.mem.any_utxo(&expected_outpoint).is_none());
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -108,11 +110,17 @@ proptest! {
             // the block data is in the non-finalized state
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
 
-            // the non-finalized state has the spent its own UTXO
+            // the non-finalized state has created and spent the UTXO
             prop_assert_eq!(state.mem.chain_set.len(), 1);
-            prop_assert!(!state.mem.chain_set.iter().next().unwrap().unspent_utxos().contains_key(&expected_outpoint));
-            prop_assert!(state.mem.chain_set.iter().next().unwrap().created_utxos.contains_key(&expected_outpoint));
-            prop_assert!(state.mem.chain_set.iter().next().unwrap().spent_utxos.contains(&expected_outpoint));
+            let chain = state
+                .mem
+                .chain_set
+                .iter()
+                .next()
+                .unwrap();
+            prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
+            prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
+            prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
 
             // the finalized state does not have the UTXO
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
@@ -140,10 +148,15 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        let TestState { mut state, block1, .. } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        let TestState {
+            mut state, block1, ..
+        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
         let previous_mem = state.mem.clone();
 
-        let expected_outpoint = transparent::OutPoint { hash: block1.transactions[1].hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: block1.transactions[1].hash(),
+            index: 0,
+        };
         prevout_input.set_outpoint(expected_outpoint);
 
         let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
@@ -151,9 +164,7 @@ proptest! {
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block2
-            .transactions
-            .push(spend_transaction.into());
+        block2.transactions.push(spend_transaction.into());
 
         if use_finalized_state_spend {
             let block2 = FinalizedBlock::from(Arc::new(block2));
@@ -170,8 +181,7 @@ proptest! {
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         } else {
             let block2 = Arc::new(block2).prepare();
-            let commit_result =
-                state.validate_and_commit(block2.clone());
+            let commit_result = state.validate_and_commit(block2.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -182,19 +192,25 @@ proptest! {
 
             // the UTXO is spent
             prop_assert_eq!(state.mem.chain_set.len(), 1);
-            prop_assert!(!state.mem.chain_set.iter().next().unwrap().unspent_utxos().contains_key(&expected_outpoint));
+            let chain = state
+                .mem
+                .chain_set
+                .iter()
+                .next()
+                .unwrap();
+            prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
 
             if use_finalized_state_output {
                 // the chain has spent the UTXO from the finalized state
-                prop_assert!(!state.mem.chain_set.iter().next().unwrap().created_utxos.contains_key(&expected_outpoint));
-                prop_assert!(state.mem.chain_set.iter().next().unwrap().spent_utxos.contains(&expected_outpoint));
+                prop_assert!(!chain.created_utxos.contains_key(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state has the UTXO, but it will get deleted on commit
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
             } else {
                 // the chain has spent its own UTXO
-                prop_assert!(!state.mem.chain_set.iter().next().unwrap().unspent_utxos().contains_key(&expected_outpoint));
-                prop_assert!(state.mem.chain_set.iter().next().unwrap().created_utxos.contains_key(&expected_outpoint));
-                prop_assert!(state.mem.chain_set.iter().next().unwrap().spent_utxos.contains(&expected_outpoint));
+                prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
+                prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state does not have the UTXO
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
             }
@@ -218,11 +234,15 @@ proptest! {
 
         let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
 
-        let expected_outpoint = transparent::OutPoint { hash: output_transaction.hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: output_transaction.hash(),
+            index: 0,
+        };
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
-        let spend_transaction = transaction_v4_with_transparent_data([prevout_input1.0, prevout_input2.0], []);
+        let spend_transaction =
+            transaction_v4_with_transparent_data([prevout_input1.0, prevout_input2.0], []);
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -243,7 +263,8 @@ proptest! {
             Err(DuplicateTransparentSpend {
                 outpoint: expected_outpoint,
                 location: "the same block",
-            }.into())
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
 
@@ -270,21 +291,25 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        let TestState { mut state, block1, .. } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        let TestState {
+            mut state, block1, ..
+        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
         let previous_mem = state.mem.clone();
 
-        let expected_outpoint = transparent::OutPoint { hash: block1.transactions[1].hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: block1.transactions[1].hash(),
+            index: 0,
+        };
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
-        let spend_transaction = transaction_v4_with_transparent_data([prevout_input1.0, prevout_input2.0], []);
+        let spend_transaction =
+            transaction_v4_with_transparent_data([prevout_input1.0, prevout_input2.0], []);
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block2
-            .transactions
-            .push(spend_transaction.into());
+        block2.transactions.push(spend_transaction.into());
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = state.validate_and_commit(block2);
@@ -295,7 +320,8 @@ proptest! {
             Err(DuplicateTransparentSpend {
                 outpoint: expected_outpoint,
                 location: "the same block",
-            }.into())
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(1), block1.hash())), state.best_tip());
 
@@ -308,8 +334,14 @@ proptest! {
             // the non-finalized state has no chains (so it can't have the UTXO)
             prop_assert!(state.mem.chain_set.iter().next().is_none());
         } else {
+            let chain = state
+                .mem
+                .chain_set
+                .iter()
+                .next()
+                .unwrap();
             // the non-finalized state has the UTXO
-            prop_assert!(state.mem.chain_set.iter().next().unwrap().unspent_utxos().contains_key(&expected_outpoint));
+            prop_assert!(chain.unspent_utxos().contains_key(&expected_outpoint));
             // the finalized state does not have the UTXO
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         }
@@ -332,10 +364,15 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        let TestState { mut state, block1, .. } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        let TestState {
+            mut state, block1, ..
+        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
         let previous_mem = state.mem.clone();
 
-        let expected_outpoint = transparent::OutPoint { hash: block1.transactions[1].hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: block1.transactions[1].hash(),
+            index: 0,
+        };
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
@@ -358,7 +395,8 @@ proptest! {
             Err(DuplicateTransparentSpend {
                 outpoint: expected_outpoint,
                 location: "the same block",
-            }.into())
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(1), block1.hash())), state.best_tip());
 
@@ -371,8 +409,14 @@ proptest! {
             // the non-finalized state has no chains (so it can't have the UTXO)
             prop_assert!(state.mem.chain_set.iter().next().is_none());
         } else {
+            let chain = state
+                .mem
+                .chain_set
+                .iter()
+                .next()
+                .unwrap();
             // the non-finalized state has the UTXO
-            prop_assert!(state.mem.chain_set.iter().next().unwrap().unspent_utxos().contains_key(&expected_outpoint));
+            prop_assert!(chain.unspent_utxos().contains_key(&expected_outpoint));
             // the finalized state does not have the UTXO
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         }
@@ -405,10 +449,15 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        let TestState { mut state, block1, .. } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        let TestState {
+            mut state, block1, ..
+        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
         let mut previous_mem = state.mem.clone();
 
-        let expected_outpoint = transparent::OutPoint { hash: block1.transactions[1].hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: block1.transactions[1].hash(),
+            index: 0,
+        };
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
@@ -419,12 +468,8 @@ proptest! {
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
         block3.transactions[0] = transaction_v4_from_coinbase(&block3.transactions[0]).into();
 
-        block2
-            .transactions
-            .push(spend_transaction1.into());
-        block3
-            .transactions
-            .push(spend_transaction2.into());
+        block2.transactions.push(spend_transaction1.into());
+        block3.transactions.push(spend_transaction2.into());
 
         let block2 = Arc::new(block2);
 
@@ -455,45 +500,23 @@ proptest! {
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
 
             prop_assert_eq!(state.mem.chain_set.len(), 1);
+            let chain = state
+                .mem
+                .chain_set
+                .iter()
+                .next()
+                .unwrap();
 
             if use_finalized_state_output {
                 // the finalized state has the unspent UTXO
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
                 // the non-finalized state has spent the UTXO
-                prop_assert!(state
-                             .mem
-                             .chain_set
-                             .iter()
-                             .next()
-                             .unwrap()
-                             .spent_utxos
-                             .contains(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
             } else {
                 // the non-finalized state has created and spent the UTXO
-                prop_assert!(!state
-                             .mem
-                             .chain_set
-                             .iter()
-                             .next()
-                             .unwrap()
-                             .unspent_utxos()
-                             .contains_key(&expected_outpoint));
-                prop_assert!(state
-                             .mem
-                             .chain_set
-                             .iter()
-                             .next()
-                             .unwrap()
-                             .created_utxos
-                             .contains_key(&expected_outpoint));
-                prop_assert!(state
-                             .mem
-                             .chain_set
-                             .iter()
-                             .next()
-                             .unwrap()
-                             .spent_utxos
-                             .contains(&expected_outpoint));
+                prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
+                prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state does not have the UTXO
                 prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
             }
@@ -511,7 +534,8 @@ proptest! {
                 Err(MissingTransparentOutput {
                     outpoint: expected_outpoint,
                     location: "the non-finalized and finalized chain",
-                }.into())
+                }
+                .into())
             );
         } else {
             prop_assert_eq!(
@@ -519,7 +543,8 @@ proptest! {
                 Err(DuplicateTransparentSpend {
                     outpoint: expected_outpoint,
                     location: "the non-finalized chain",
-                }.into())
+                }
+                .into())
             );
         }
         prop_assert_eq!(Some((Height(2), block2.hash())), state.best_tip());
@@ -560,9 +585,7 @@ proptest! {
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(spend_transaction.into());
+        block1.transactions.push(spend_transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -576,7 +599,8 @@ proptest! {
             Err(MissingTransparentOutput {
                 outpoint: expected_outpoint,
                 location: "the non-finalized and finalized chain",
-            }.into())
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
 
@@ -607,7 +631,10 @@ proptest! {
         let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
 
         // create a spend
-        let expected_outpoint = transparent::OutPoint { hash: output_transaction.hash(), index: 0 };
+        let expected_outpoint = transparent::OutPoint {
+            hash: output_transaction.hash(),
+            index: 0,
+        };
         prevout_input.set_outpoint(expected_outpoint);
         let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
 
@@ -630,7 +657,8 @@ proptest! {
             commit_result,
             Err(EarlyTransparentSpend {
                 outpoint: expected_outpoint,
-            }.into())
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
 
