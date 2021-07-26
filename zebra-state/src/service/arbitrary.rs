@@ -7,13 +7,9 @@ use proptest::{
     test_runner::TestRunner,
 };
 
-use zebra_chain::{
-    block::{Block, Height},
-    fmt::SummaryDebug,
-    parameters::{Network::*, NetworkUpgrade},
-    serialization::ZcashDeserializeInto,
-    LedgerState,
-};
+use zebra_chain::{block::Block, fmt::SummaryDebug, parameters::NetworkUpgrade, LedgerState};
+#[cfg(test)]
+use zebra_chain::{block::Height, parameters::Network::*, serialization::ZcashDeserializeInto};
 
 use crate::arbitrary::Prepare;
 
@@ -107,6 +103,7 @@ impl Strategy for PreparedChain {
 ///
 /// Returns:
 /// A generated arbitrary strategy for the provided arguments.
+#[cfg(test)]
 pub(crate) fn partial_nu5_chain_strategy(
     transaction_version_override: u32,
     transaction_has_valid_network_upgrade: bool,
@@ -151,6 +148,7 @@ pub(crate) fn partial_nu5_chain_strategy(
 
 /// Return a new `StateService` containing the mainnet genesis block.
 /// Also returns the finalized genesis block itself.
+#[cfg(test)]
 pub(super) fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
@@ -174,6 +172,7 @@ pub(super) fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock)
 /// Return a `Transaction::V4` with the coinbase data from `coinbase`.
 ///
 /// Used to convert a coinbase transaction to a version that the non-finalized state will accept.
+#[cfg(test)]
 pub(super) fn transaction_v4_from_coinbase(coinbase: &Transaction) -> Transaction {
     assert!(
         !coinbase.has_sapling_shielded_data(),
