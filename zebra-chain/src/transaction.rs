@@ -27,7 +27,11 @@ use crate::{
     amount, block, orchard,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
-    sapling, sprout, transparent,
+    sapling, sprout,
+    transparent::{
+        self,
+        CoinbaseSpendRestriction::{self, *},
+    },
 };
 
 /// A Zcash transaction.
@@ -269,6 +273,15 @@ impl Transaction {
         self.inputs()
             .iter()
             .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
+    }
+
+    /// Returns the [`CoinbaseSpendRestriction`] for this transaction.
+    pub fn coinbase_spend_restriction(&self) -> CoinbaseSpendRestriction {
+        if self.outputs().is_empty() {
+            AllShieldedOutputs
+        } else {
+            SomeTransparentOutputs
+        }
     }
 
     // sprout
