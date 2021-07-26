@@ -581,84 +581,48 @@ impl Transaction {
 
     /// Return the sprout value pool
     fn sprout_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let joinsplit_data_bctv14 = match self {
-            Transaction::V2 { joinsplit_data, .. } => joinsplit_data.as_ref(),
-            Transaction::V3 { joinsplit_data, .. } => joinsplit_data.as_ref(),
-            Transaction::V1 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => None,
+        let joinsplit_amounts = match self {
+            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
+                joinsplit_data.as_ref().map(JoinSplitData::value_balance)
+            }
+            Transaction::V4 { joinsplit_data, .. } => {
+                joinsplit_data.as_ref().map(JoinSplitData::value_balance)
+            }
+            Transaction::V1 { .. } | Transaction::V5 { .. } => None,
         };
 
-        if joinsplit_data_bctv14.is_some() {
-            let sprout = joinsplit_data_bctv14
-                .iter()
-                .flat_map(|j| j.value_balance())
-                .sum::<Result<Amount, AmountError>>()?;
-
-            return Ok(ValueBalance::from_sprout_amount(sprout));
-        }
-
-        let joinsplit_data_groth16 = match self {
-            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.as_ref(),
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V5 { .. } => None,
-        };
-
-        if joinsplit_data_groth16.is_some() {
-            let sprout = joinsplit_data_groth16
-                .iter()
-                .flat_map(|j| j.value_balance())
-                .sum::<Result<Amount, AmountError>>()?;
-
-            return Ok(ValueBalance::from_sprout_amount(sprout));
-        }
-
-        Ok(ValueBalance::zero())
+        joinsplit_amounts
+            .into_iter()
+            .fold(Ok(Amount::zero()), |accumulator, value| {
+                accumulator.and_then(|sum| sum + value)
+            })
+            .map(ValueBalance::from_sprout_amount)
     }
 
     /// Return the sapling value pool
     fn sapling_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let sapling_perspend = match self {
+        let sapling_amounts = match self {
             Transaction::V4 {
                 sapling_shielded_data,
                 ..
-            } => sapling_shielded_data.as_ref(),
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V5 { .. } => None,
-        };
-
-        if sapling_perspend.is_some() {
-            let sapling = sapling_perspend
-                .iter()
-                .map(|s| s.value_balance())
-                .sum::<Result<Amount, AmountError>>()?;
-
-            return Ok(ValueBalance::from_sapling_amount(sapling));
-        }
-
-        let sapling_shared = match self {
+            } => sapling_shielded_data
+                .as_ref()
+                .map(sapling::ShieldedData::value_balance),
             Transaction::V5 {
                 sapling_shielded_data,
                 ..
-            } => sapling_shielded_data.as_ref(),
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
+            } => sapling_shielded_data
+                .as_ref()
+                .map(sapling::ShieldedData::value_balance),
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => None,
         };
 
-        if sapling_shared.is_some() {
-            let sapling = sapling_shared
-                .iter()
-                .map(|s| s.value_balance())
-                .sum::<Result<Amount, AmountError>>()?;
-
-            return Ok(ValueBalance::from_sapling_amount(sapling));
-        }
-
-        Ok(ValueBalance::zero())
+        sapling_amounts
+            .into_iter()
+            .fold(Ok(Amount::zero()), |accumulator, value| {
+                accumulator.and_then(|sum| sum + value)
+            })
+            .map(ValueBalance::from_sapling_amount)
     }
 
     /// Return the orchard value pool
