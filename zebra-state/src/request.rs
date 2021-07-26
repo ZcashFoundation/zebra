@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
-    transaction, transparent,
+    transaction,
+    transparent::{self, CoinbaseSpendRestriction},
 };
 
 // Allow *only* this unused import, so that rustdoc link resolution
@@ -264,19 +265,36 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
-    /// Request a UTXO identified by the given Outpoint, waiting until it becomes
-    /// available if it is unknown.
+    /// Requests a spendable [`Utxo`] identified by the given Outpoint.
+    /// If the UTXO is unknown or unspendable, waits until it becomes available
+    /// and spendable.
     ///
     /// This request is purely informational, and there are no guarantees about
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
     /// Its purpose is to allow asynchronous script verification.
+    ///
+    /// However, the spendability of a UTXO can not change, because
+    /// [coinbase transaction IDs commit to the relevant data](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0004-asynchronous-script-verification.md#parallel-coinbase-checks).
     ///
     /// # Correctness
     ///
     /// UTXO requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    AwaitSpendableUtxo(transparent::OutPoint),
+    AwaitSpendableUtxo {
+        /// The output pointer used to look up the [`Utxo`].
+        outpoint: transparent::OutPoint,
+
+        /// The height at which the [`Utxo`] is spent.
+        ///
+        /// Only relevant if the [`Utxo`] is a coinbase transaction output.
+        spend_height: block::Height,
+
+        /// The spend restriction which applies to the [`Utxo`].
+        ///
+        /// Only relevant if the [`Utxo`] is a coinbase transaction output.
+        spend_restriction: CoinbaseSpendRestriction,
+    },
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
     /// Returns a list of hashes that follow that intersection, from the best chain.

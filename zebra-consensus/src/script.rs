@@ -3,7 +3,11 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use tower::timeout::Timeout;
 use tracing::Instrument;
 
-use zebra_chain::{parameters::NetworkUpgrade, transparent};
+use zebra_chain::{
+    block,
+    parameters::{Network, NetworkUpgrade},
+    transparent::{self, CoinbaseSpendRestriction},
+};
 use zebra_script::CachedFfiTransaction;
 
 use crate::BoxError;
@@ -51,19 +55,42 @@ impl<ZS> Verifier<ZS> {
 pub struct Request {
     /// A cached transaction, in the format required by the script verifier FFI interface.
     pub cached_ffi_transaction: Arc<CachedFfiTransaction>,
+
     /// The index of an input in `cached_ffi_transaction`, used for verifying this request
     ///
     /// Coinbase inputs are rejected by the script verifier, because they do not spend a UTXO.
     pub input_index: usize,
+
     /// A set of additional UTXOs known in the context of this verification request.
     ///
     /// This allows specifying additional UTXOs that are not already known to the chain state.
     pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+
+    /// The spend restriction for any coinbase [`Utxo`]s spent by this input.
+    ///
+    /// Used to  verify the [`Utxo`] spend rules.
+    pub spend_restriction: CoinbaseSpendRestriction,
+
+    /// The Zcash network for this request.
+    ///
+    /// Used to look up the current network upgrade.
+    pub network: Network,
+
+    /// The block height used to verify this request.
+    ///
+    /// Used to look up the current network upgrade, and verify the [`Utxo`]
+    /// spend rules.
+    pub height: block::Height,
+}
+
+impl Request {
     /// The network upgrade active in the context of this verification request.
     ///
     /// Because the consensus branch ID changes with each network upgrade,
     /// it has to be specified on a per-request basis.
-    pub upgrade: NetworkUpgrade,
+    pub fn network_upgrade(&self) -> NetworkUpgrade {
+        NetworkUpgrade::current(self.network, self.height)
+    }
 }
 
 impl<ZS> tower::Service<Request> for Verifier<ZS>
@@ -86,16 +113,19 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         use futures_util::FutureExt;
 
+        let branch_id = req
+            .network_upgrade()
+            .branch_id()
+            .expect("post-Sapling NUs have a consensus branch ID");
         let Request {
             cached_ffi_transaction,
             input_index,
             known_utxos,
-            upgrade,
+            spend_restriction,
+            height,
+            ..
         } = req;
         let input = &cached_ffi_transaction.inputs()[input_index];
-        let branch_id = upgrade
-            .branch_id()
-            .expect("post-Sapling NUs have a consensus branch ID");
 
         match input {
             transparent::Input::PrevOut { outpoint, .. } => {
@@ -103,13 +133,19 @@ where
 
                 // Avoid calling the state service if the utxo is already known
                 let span = tracing::trace_span!("script", ?outpoint);
-                let query =
-                    span.in_scope(|| self.state.call(zebra_state::Request::AwaitSpendableUtxo(outpoint)));
+                let query = span.in_scope(|| {
+                    self.state.call(zebra_state::Request::AwaitSpendableUtxo {
+                        outpoint,
+                        spend_restriction,
+                        spend_height: height,
+                    })
+                });
 
                 async move {
                     tracing::trace!("awaiting outpoint lookup");
                     let utxo = if let Some(output) = known_utxos.get(&outpoint) {
                         tracing::trace!("UXTO in known_utxos, discarding query");
+                        // TODO: check spend rules here
                         output.utxo.clone()
                     } else if let zebra_state::Response::SpendableUtxo(utxo) = query.await? {
                         utxo

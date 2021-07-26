@@ -689,7 +689,7 @@ impl Service<Request> for StateService {
                 let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
-            Request::AwaitSpendableUtxo(outpoint) => {
+            Request::AwaitSpendableUtxo { outpoint, .. } => {
                 metrics::counter!("state.requests", 1, "type" => "await_spendable_utxo");
 
                 let fut = self.pending_utxos.queue(outpoint);
