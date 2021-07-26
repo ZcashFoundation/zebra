@@ -11,7 +11,7 @@ pub use address::Address;
 pub use script::Script;
 pub use utxo::{
     new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, CoinbaseSpendRestriction,
-    OrderedUtxo, Utxo,
+    OrderedUtxo, Utxo, MIN_TRANSPARENT_COINBASE_MATURITY,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
