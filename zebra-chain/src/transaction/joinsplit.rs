@@ -60,6 +60,6 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn value_balance(&self) -> Result<Amount, Error> {
         self.joinsplits()
             .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)
-            .sum::<Result<Amount, Error>>()
+            .sum()
     }
 }
