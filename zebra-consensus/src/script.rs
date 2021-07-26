@@ -122,7 +122,6 @@ where
             input_index,
             known_utxos,
             spend_restriction,
-            height,
             ..
         } = req;
         let input = &cached_ffi_transaction.inputs()[input_index];
@@ -137,7 +136,6 @@ where
                     self.state.call(zebra_state::Request::AwaitSpendableUtxo {
                         outpoint,
                         spend_restriction,
-                        spend_height: height,
                     })
                 });
 

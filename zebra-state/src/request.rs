@@ -285,11 +285,6 @@ pub enum Request {
         /// The output pointer used to look up the [`Utxo`].
         outpoint: transparent::OutPoint,
 
-        /// The height at which the [`Utxo`] is spent.
-        ///
-        /// Only relevant if the [`Utxo`] is a coinbase transaction output.
-        spend_height: block::Height,
-
         /// The spend restriction which applies to the [`Utxo`].
         ///
         /// Only relevant if the [`Utxo`] is a coinbase transaction output.
