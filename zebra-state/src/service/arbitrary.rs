@@ -15,7 +15,7 @@ use zebra_chain::{
     LedgerState,
 };
 
-use crate::tests::Prepare;
+use crate::arbitrary::Prepare;
 
 use super::*;
 
