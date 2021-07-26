@@ -94,7 +94,7 @@ async fn test_populated_state_responds_correctly(
                         from_coinbase,
                     };
 
-                    transcript.push((Request::AwaitUtxo(outpoint), Ok(Response::Utxo(utxo))));
+                    transcript.push((Request::AwaitSpendableUtxo(outpoint), Ok(Response::SpendableUtxo(utxo))));
                 }
             }
         }
