@@ -39,8 +39,6 @@ impl PendingUtxos {
     /// Notify all requests waiting for the [`Utxo`] pointed to by the given
     /// [`transparent::OutPoint`] that the [`Utxo`] has arrived.
     pub fn respond(&mut self, outpoint: &transparent::OutPoint, utxo: transparent::Utxo) {
-        // TODO: check spend rules here
-
         if let Some(sender) = self.0.remove(outpoint) {
             // Adding the outpoint as a field lets us crossreference
             // with the trace of the verification that made the request.
