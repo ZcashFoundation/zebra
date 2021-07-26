@@ -68,6 +68,26 @@ impl OrderedUtxo {
     }
 }
 
+/// A restriction that must be checked before spending a transparent output of a
+/// coinbase transaction.
+///
+/// See [`CoinbaseSpendRestriction::check_spend`] for the consensus rules.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
+pub enum CoinbaseSpendRestriction {
+    /// The UTXO is spent in a transaction with one or more transparent outputs
+    SomeTransparentOutputs,
+
+    /// The UTXO is spent in a transaction which only has shielded outputs
+    OnlyShieldedOutputs {
+        /// The height at which the UTXO is spent
+        spend_height: block::Height,
+    },
+}
+
 /// Compute an index of [`Utxo`]s, given an index of [`OrderedUtxo`]s.
 pub fn utxos_from_ordered_utxos(
     ordered_utxos: HashMap<transparent::OutPoint, OrderedUtxo>,
