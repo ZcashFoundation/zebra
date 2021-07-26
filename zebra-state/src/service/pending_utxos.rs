@@ -30,7 +30,7 @@ impl PendingUtxos {
             receiver
                 .recv()
                 .await
-                .map(Response::Utxo)
+                .map(Response::SpendableUtxo)
                 .map_err(BoxError::from)
         }
     }

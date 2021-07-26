@@ -104,17 +104,17 @@ where
                 // Avoid calling the state service if the utxo is already known
                 let span = tracing::trace_span!("script", ?outpoint);
                 let query =
-                    span.in_scope(|| self.state.call(zebra_state::Request::AwaitUtxo(outpoint)));
+                    span.in_scope(|| self.state.call(zebra_state::Request::AwaitSpendableUtxo(outpoint)));
 
                 async move {
                     tracing::trace!("awaiting outpoint lookup");
                     let utxo = if let Some(output) = known_utxos.get(&outpoint) {
                         tracing::trace!("UXTO in known_utxos, discarding query");
                         output.utxo.clone()
-                    } else if let zebra_state::Response::Utxo(utxo) = query.await? {
+                    } else if let zebra_state::Response::SpendableUtxo(utxo) = query.await? {
                         utxo
                     } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
+                        unreachable!("AwaitSpendableUtxo always responds with SpendableUtxo")
                     };
                     tracing::trace!(?utxo, "got UTXO");
 

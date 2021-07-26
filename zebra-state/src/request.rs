@@ -276,7 +276,7 @@ pub enum Request {
     /// UTXO requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    AwaitUtxo(transparent::OutPoint),
+    AwaitSpendableUtxo(transparent::OutPoint),
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
     /// Returns a list of hashes that follow that intersection, from the best chain.
