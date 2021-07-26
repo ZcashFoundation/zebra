@@ -10,29 +10,6 @@ use zebra_chain::{
 
 use super::*;
 
-/// Mocks computation done during semantic validation
-pub trait Prepare {
-    fn prepare(self) -> PreparedBlock;
-}
-
-impl Prepare for Arc<Block> {
-    fn prepare(self) -> PreparedBlock {
-        let block = self;
-        let hash = block.hash();
-        let height = block.coinbase_height().unwrap();
-        let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, transaction_hashes.as_slice());
-
-        PreparedBlock {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-        }
-    }
-}
-
 /// Helper trait for constructing "valid" looking chains of blocks
 pub trait FakeChainHelper {
     fn make_fake_child(&self) -> Arc<Block>;
