@@ -273,7 +273,7 @@ pub enum Request {
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
     /// Its purpose is to allow asynchronous script verification.
     ///
-    /// However, the spendability of a UTXO can not change, because
+    /// However, the spendability of a valid UTXO should not change, because
     /// [coinbase transaction IDs commit to the relevant data](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0004-asynchronous-script-verification.md#parallel-coinbase-checks).
     ///
     /// # Correctness
