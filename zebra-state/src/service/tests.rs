@@ -93,19 +93,22 @@ async fn test_populated_state_responds_correctly(
                         hash: transaction_hash,
                         index: index as _,
                     };
+
                     let utxo = transparent::Utxo {
                         output,
                         height,
                         from_coinbase,
                     };
 
+                    // Use the minimum possible spend height
+                    let spend_height = block::Height(
+                        u32::try_from(ind).unwrap() + MIN_TRANSPARENT_COINBASE_MATURITY,
+                    );
+
                     transcript.push((
                         Request::AwaitSpendableUtxo {
                             outpoint,
-                            spend_height: block::Height(
-                                u32::try_from(ind).unwrap() + MIN_TRANSPARENT_COINBASE_MATURITY,
-                            ),
-                            spend_restriction: AllShieldedOutputs,
+                            spend_restriction: AllShieldedOutputs { spend_height },
                         },
                         Ok(Response::SpendableUtxo(utxo)),
                     ));
