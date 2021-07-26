@@ -383,7 +383,9 @@ where
                         cached_ffi_transaction: cached_ffi_transaction.clone(),
                         input_index,
                         known_utxos: known_utxos.clone(),
-                        spend_restriction: request.transaction().coinbase_spend_restriction(),
+                        spend_restriction: request
+                            .transaction()
+                            .coinbase_spend_restriction(request.height()),
                         network,
                         height: request.height(),
                     };
