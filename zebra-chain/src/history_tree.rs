@@ -57,6 +57,56 @@ pub struct HistoryTree {
 }
 
 impl HistoryTree {
+    /// Recreate a HistoryTree from previously saved data.
+    ///
+    /// The parameters must com from the values of [HistoryTree::size],
+    /// [HistoryTree::peaks] and [HistoryTree::current_height] of a HistoryTree.
+    pub fn from_cache(
+        network: Network,
+        size: u32,
+        peaks: BTreeMap<u32, Entry>,
+        current_height: Height,
+    ) -> Result<Self, io::Error> {
+        let network_upgrade = NetworkUpgrade::current(network, current_height);
+        let inner = match network_upgrade {
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom => {
+                panic!("HistoryTree does not exist for pre-Heartwood upgrades")
+            }
+            NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
+                let tree = Tree::<V1>::new_from_cache(
+                    network,
+                    network_upgrade,
+                    size,
+                    &peaks,
+                    &Default::default(),
+                )?;
+                InnerHistoryTree::V1(tree)
+            }
+            NetworkUpgrade::Nu5 => {
+                let tree = Tree::<V2>::new_from_cache(
+                    network,
+                    network_upgrade,
+                    size,
+                    &peaks,
+                    &Default::default(),
+                )?;
+                InnerHistoryTree::V2(tree)
+            }
+        };
+        Ok(Self {
+            network,
+            network_upgrade,
+            inner,
+            size,
+            peaks,
+            current_height,
+        })
+    }
+
     /// Create a new history tree with a single block.
     ///
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
@@ -271,6 +321,21 @@ impl HistoryTree {
             InnerHistoryTree::V1(tree) => tree.hash(),
             InnerHistoryTree::V2(tree) => tree.hash(),
         }
+    }
+
+    /// Return the peaks of the tree.
+    pub fn peaks(&self) -> &BTreeMap<u32, Entry> {
+        &self.peaks
+    }
+
+    /// Return the (total) number of nodes in the tree.
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
+    /// Return the height of the last added block.
+    pub fn current_height(&self) -> Height {
+        self.current_height
     }
 }
 
