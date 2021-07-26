@@ -68,6 +68,26 @@ impl OrderedUtxo {
     }
 }
 
+/// A restriction that must be checked before spending a transparent output of a
+/// coinbase transaction.
+///
+/// "A transaction with one or more transparent inputs from coinbase transactions
+/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0)."
+///
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
+pub enum CoinbaseSpendRestriction {
+    /// The UTXO is spent in a transaction with one or more transparent outputs
+    SomeTransparentOutputs,
+
+    /// The UTXO is spent in a transaction with all shielded outputs
+    AllShieldedOutputs,
+}
+
 /// Compute an index of [`Utxo`]s, given an index of [`OrderedUtxo`]s.
 pub fn utxos_from_ordered_utxos(
     ordered_utxos: HashMap<transparent::OutPoint, OrderedUtxo>,
