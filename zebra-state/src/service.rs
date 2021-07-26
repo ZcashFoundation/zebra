@@ -28,7 +28,7 @@ use crate::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
-mod check;
+pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
@@ -689,10 +689,13 @@ impl Service<Request> for StateService {
                 let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
-            Request::AwaitSpendableUtxo { outpoint, .. } => {
+            Request::AwaitSpendableUtxo {
+                outpoint,
+                spend_restriction,
+            } => {
                 metrics::counter!("state.requests", 1, "type" => "await_spendable_utxo");
 
-                let fut = self.pending_utxos.queue(outpoint);
+                let fut = self.pending_utxos.queue(outpoint, spend_restriction);
 
                 if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);

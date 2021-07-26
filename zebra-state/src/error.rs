@@ -7,6 +7,8 @@ use zebra_chain::{
     block, orchard, sapling, sprout, transparent, work::difficulty::CompactDifficulty,
 };
 
+use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
+
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
 #[derive(Debug, Error, Clone)]
@@ -94,6 +96,19 @@ pub enum ValidateContextError {
     #[error("out-of-order transparent spend: {outpoint:?} is created by a later transaction in the same block")]
     #[non_exhaustive]
     EarlyTransparentSpend { outpoint: transparent::OutPoint },
+
+    #[error("unshielded transparent coinbase spend: {outpoint:?} must be spent in a transaction with all shielded outputs")]
+    #[non_exhaustive]
+    UnshieldedTransparentCoinbaseSpend { outpoint: transparent::OutPoint },
+
+    #[error("immature transparent coinbase spend: attempt to spend {outpoint:?} at {spend_height:?}, but it must be spent after {min_spend_height:?}, at least {MIN_TRANSPARENT_COINBASE_MATURITY:?} blocks after it was created {created_height:?}")]
+    #[non_exhaustive]
+    ImmatureTransparentCoinbaseSpend {
+        outpoint: transparent::OutPoint,
+        spend_height: block::Height,
+        min_spend_height: block::Height,
+        created_height: block::Height,
+    },
 
     #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]

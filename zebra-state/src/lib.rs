@@ -34,6 +34,6 @@ pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
-pub use service::init;
+pub use service::{check::utxo::validate_transparent_coinbase_spend, init};
 
 pub(crate) use request::ContextuallyValidBlock;

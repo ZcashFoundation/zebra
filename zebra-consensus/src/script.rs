@@ -9,6 +9,7 @@ use zebra_chain::{
     transparent::{self, CoinbaseSpendRestriction},
 };
 use zebra_script::CachedFfiTransaction;
+use zebra_state::validate_transparent_coinbase_spend;
 
 use crate::BoxError;
 
@@ -143,8 +144,11 @@ where
                     tracing::trace!("awaiting outpoint lookup");
                     let utxo = if let Some(output) = known_utxos.get(&outpoint) {
                         tracing::trace!("UXTO in known_utxos, discarding query");
-                        // TODO: check spend rules here
-                        output.utxo.clone()
+                        validate_transparent_coinbase_spend(
+                            outpoint,
+                            spend_restriction,
+                            output.utxo.clone(),
+                        )?
                     } else if let zebra_state::Response::SpendableUtxo(utxo) = query.await? {
                         utxo
                     } else {
