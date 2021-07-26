@@ -130,6 +130,15 @@ impl HistoryTree {
                 height, self.current_height
             );
         }
+        let network_upgrade = NetworkUpgrade::current(self.network, height);
+        if network_upgrade != self.network_upgrade {
+            // This is the activation block of a network upgrade.
+            // Create a new tree.
+            let new_tree = Self::from_block(self.network, block, sapling_root, orchard_root)?;
+            *self = new_tree;
+            assert_eq!(self.network_upgrade, network_upgrade);
+            return Ok(());
+        }
 
         let new_entries = match &mut self.inner {
             InnerHistoryTree::V1(tree) => tree
@@ -145,7 +154,6 @@ impl HistoryTree {
             self.size += 1;
         }
         self.prune()?;
-        // TODO: implement network upgrade logic: drop previous history, start new history
         self.current_height = height;
         Ok(())
     }
