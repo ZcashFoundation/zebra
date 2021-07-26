@@ -107,52 +107,97 @@ pub fn transparent_double_spends(
                 });
             }
 
-            // check spends occur in chain order
+            let utxo = transparent_spend_chain_order(
+                *spend,
+                spend_tx_index_in_block,
+                &prepared.new_outputs,
+                non_finalized_chain_unspent_utxos,
+                non_finalized_chain_spent_utxos,
+                finalized_state,
+            )?;
+
+            // Re-do the coinbase spend restriction checks, as a defence in depth.
             //
-            // because we are in the non-finalized state, we need to check spends within the same block,
-            // spent non-finalized UTXOs, and unspent non-finalized and finalized UTXOs.
+            // The spendability of valid UTXOs should not change, because
+            // coinbase transaction IDs commit to the block height, and
+            // transaction IDs are unique:
+            // https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0004-asynchronous-script-verification.md#parallel-coinbase-checks
+            //
+            // But the state service returns UTXOs from pending blocks,
+            // which can be rejected by later contextual checks.
+            // This is a particular issue for v5 transactions,
+            // because their authorizing data is only bound to the block data
+            // during contextual validation (#2336).
+            //
+            // To avoid issues like this, we re-check spendability using known valid UTXOs.
 
-            if let Some(output) = prepared.new_outputs.get(spend) {
-                // reject the spend if it uses an output from this block,
-                // but the output was not created by an earlier transaction
-                //
-                // we know the spend is invalid, because transaction IDs are unique
-                //
-                // (transaction IDs also commit to transaction inputs,
-                // so it should be cryptographically impossible for a transaction
-                // to spend its own outputs)
-                if output.tx_index_in_block >= spend_tx_index_in_block {
-                    return Err(EarlyTransparentSpend { outpoint: *spend });
-                } else {
-                    // a unique spend of a previous transaction's output is ok
-                    continue;
-                }
-            }
-
-            if non_finalized_chain_spent_utxos.contains(spend) {
-                // reject the spend if its UTXO is already spent in the
-                // non-finalized parent chain
-                return Err(DuplicateTransparentSpend {
-                    outpoint: *spend,
-                    location: "the non-finalized chain",
-                });
-            }
-
-            if !non_finalized_chain_unspent_utxos.contains_key(spend)
-                && finalized_state.utxo(spend).is_none()
-            {
-                // we don't keep spent UTXOs in the finalized state,
-                // so all we can say is that it's missing from both
-                // the finalized and non-finalized chains
-                // (it might have been spent in the finalized state,
-                // or it might never have existed in this chain)
-                return Err(MissingTransparentOutput {
-                    outpoint: *spend,
-                    location: "the non-finalized and finalized chain",
-                });
+            let spend_restriction = transaction.coinbase_spend_restriction(prepared.height);
+            if cfg!(not(test)) {
+                // TODO: fix proptests to produce valid UTXO spends (#ticket TODO)
+                //       and unconditionally enable this check
+                validate_transparent_coinbase_spend(*spend, spend_restriction, utxo)?;
             }
         }
     }
 
     Ok(())
+}
+
+/// Check that transparent spends occur in chain order.
+///
+/// Because we are in the non-finalized state, we need to check spends within the same block,
+/// spent non-finalized UTXOs, and unspent non-finalized and finalized UTXOs.
+fn transparent_spend_chain_order(
+    spend: transparent::OutPoint,
+    spend_tx_index_in_block: usize,
+    block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
+    finalized_state: &FinalizedState,
+) -> Result<transparent::Utxo, ValidateContextError> {
+    if let Some(output) = block_new_outputs.get(&spend) {
+        // reject the spend if it uses an output from this block,
+        // but the output was not created by an earlier transaction
+        //
+        // we know the spend is invalid, because transaction IDs are unique
+        //
+        // (transaction IDs also commit to transaction inputs,
+        // so it should be cryptographically impossible for a transaction
+        // to spend its own outputs)
+        if output.tx_index_in_block >= spend_tx_index_in_block {
+            return Err(EarlyTransparentSpend { outpoint: spend });
+        } else {
+            // a unique spend of a previous transaction's output is ok
+            return Ok(output.utxo.clone());
+        }
+    }
+
+    if non_finalized_chain_spent_utxos.contains(&spend) {
+        // reject the spend if its UTXO is already spent in the
+        // non-finalized parent chain
+        return Err(DuplicateTransparentSpend {
+            outpoint: spend,
+            location: "the non-finalized chain",
+        });
+    }
+
+    match (
+        non_finalized_chain_unspent_utxos.get(&spend),
+        finalized_state.utxo(&spend),
+    ) {
+        (None, None) => {
+            // we don't keep spent UTXOs in the finalized state,
+            // so all we can say is that it's missing from both
+            // the finalized and non-finalized chains
+            // (it might have been spent in the finalized state,
+            // or it might never have existed in this chain)
+            Err(MissingTransparentOutput {
+                outpoint: spend,
+                location: "the non-finalized and finalized chain",
+            })
+        }
+
+        (Some(utxo), _) => Ok(utxo.clone()),
+        (_, Some(utxo)) => Ok(utxo),
+    }
 }
