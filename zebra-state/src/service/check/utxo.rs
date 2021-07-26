@@ -2,15 +2,62 @@
 
 use std::collections::{HashMap, HashSet};
 
-use zebra_chain::transparent;
+use zebra_chain::{
+    block,
+    transparent::{self, CoinbaseSpendRestriction::*},
+};
 
 use crate::{
+    constants::MIN_TRANSPARENT_COINBASE_MATURITY,
     service::finalized_state::FinalizedState,
     PreparedBlock,
     ValidateContextError::{
-        self, DuplicateTransparentSpend, EarlyTransparentSpend, MissingTransparentOutput,
+        self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
+        MissingTransparentOutput, UnshieldedTransparentCoinbaseSpend,
     },
 };
+
+/// Check that `utxo` is spendable, based on the coinbase `spend_restriction`.
+///
+/// "A transaction with one or more transparent inputs from coinbase transactions
+/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0)."
+///
+/// "A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// from a block less than 100 blocks prior to the spend.
+///
+/// Note that transparent outputs of coinbase transactions include Founders’
+/// Reward outputs and transparent funding stream outputs."
+///
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+pub fn validate_transparent_coinbase_spend(
+    outpoint: transparent::OutPoint,
+    spend_restriction: transparent::CoinbaseSpendRestriction,
+    utxo: transparent::Utxo,
+) -> Result<transparent::Utxo, ValidateContextError> {
+    if !utxo.from_coinbase {
+        return Ok(utxo);
+    }
+
+    match spend_restriction {
+        AllShieldedOutputs { spend_height } => {
+            let min_spend_height = utxo.height + block::Height(MIN_TRANSPARENT_COINBASE_MATURITY);
+            // TODO: allow full u32 range of block heights (#1113)
+            let min_spend_height =
+                min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
+            if spend_height >= min_spend_height {
+                Ok(utxo)
+            } else {
+                Err(ImmatureTransparentCoinbaseSpend {
+                    outpoint,
+                    spend_height,
+                    min_spend_height,
+                    created_height: utxo.height,
+                })
+            }
+        }
+        SomeTransparentOutputs => Err(UnshieldedTransparentCoinbaseSpend { outpoint }),
+    }
+}
 
 /// Reject double-spends of transparent outputs:
 /// - duplicate spends that are both in this block,
