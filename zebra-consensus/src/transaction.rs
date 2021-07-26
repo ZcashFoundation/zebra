@@ -375,16 +375,17 @@ where
             // the script_verifier also checks transparent sighashes, using its own implementation
             let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
             let known_utxos = request.known_utxos();
-            let upgrade = request.upgrade(network);
 
             let script_checks = (0..inputs.len())
                 .into_iter()
                 .map(move |input_index| {
                     let request = script::Request {
-                        upgrade,
-                        known_utxos: known_utxos.clone(),
                         cached_ffi_transaction: cached_ffi_transaction.clone(),
                         input_index,
+                        known_utxos: known_utxos.clone(),
+                        spend_restriction: request.transaction().coinbase_spend_restriction(),
+                        network,
+                        height: request.height(),
                     };
 
                     script_verifier.clone().oneshot(request)
