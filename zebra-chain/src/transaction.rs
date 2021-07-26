@@ -275,10 +275,14 @@ impl Transaction {
             .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
     }
 
-    /// Returns the [`CoinbaseSpendRestriction`] for this transaction.
-    pub fn coinbase_spend_restriction(&self) -> CoinbaseSpendRestriction {
+    /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
+    /// assuming it is mined at `spend_height`.
+    pub fn coinbase_spend_restriction(
+        &self,
+        spend_height: block::Height,
+    ) -> CoinbaseSpendRestriction {
         if self.outputs().is_empty() {
-            AllShieldedOutputs
+            AllShieldedOutputs { spend_height }
         } else {
             SomeTransparentOutputs
         }
