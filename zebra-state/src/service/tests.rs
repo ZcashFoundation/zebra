@@ -10,9 +10,7 @@ use zebra_chain::{
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
-use crate::{
-    init, service::arbitrary::partial_nu5_chain_strategy, BoxError, Config, Request, Response,
-};
+use crate::{init, tests::setup::partial_nu5_chain_strategy, BoxError, Config, Request, Response};
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 

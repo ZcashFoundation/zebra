@@ -19,7 +19,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::arbitrary::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
+    tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
         DuplicateOrchardNullifier, DuplicateSaplingNullifier, DuplicateSproutNullifier,

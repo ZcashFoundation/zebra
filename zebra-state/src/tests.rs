@@ -10,6 +10,8 @@ use zebra_chain::{
 
 use super::*;
 
+pub mod setup;
+
 /// Helper trait for constructing "valid" looking chains of blocks
 pub trait FakeChainHelper {
     fn make_fake_child(&self) -> Arc<Block>;
