@@ -66,7 +66,11 @@ pub struct Entry {
 
 impl Entry {
     /// Create a leaf Entry for the given block, its network, and the root of its
-    /// Sapling note commitment tree.
+    /// note commitment trees.
+    ///
+    /// `sapling_root` is the root of the Sapling note commitment tree of the block.
+    /// `orchard_root` is the root of the Orchard note commitment tree of the block;
+    ///  (ignored for V1 trees).
     fn new_leaf<V: Version>(
         block: Arc<Block>,
         network: Network,
