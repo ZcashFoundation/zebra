@@ -11,7 +11,9 @@ use crate::{
     LedgerState,
 };
 
-use super::super::{serialize::MAX_BLOCK_BYTES, *};
+use super::super::{
+    arbitrary::allow_all_transparent_coinbase_spends, serialize::MAX_BLOCK_BYTES, *,
+};
 
 const DEFAULT_BLOCK_ROUNDTRIP_PROPTEST_CASES: u32 = 16;
 
@@ -163,8 +165,13 @@ fn block_genesis_strategy() -> Result<()> {
 fn partial_chain_strategy() -> Result<()> {
     zebra_test::init();
 
-    let strategy = LedgerState::genesis_strategy(None, None, false)
-        .prop_flat_map(|init| Block::partial_chain_strategy(init, MAX_ARBITRARY_ITEMS));
+    let strategy = LedgerState::genesis_strategy(None, None, false).prop_flat_map(|init| {
+        Block::partial_chain_strategy(
+            init,
+            MAX_ARBITRARY_ITEMS,
+            allow_all_transparent_coinbase_spends,
+        )
+    });
 
     proptest!(|(chain in strategy)| {
         let mut height = Height(0);
@@ -188,7 +195,13 @@ fn arbitrary_height_partial_chain_strategy() -> Result<()> {
 
     let strategy = any::<Height>()
         .prop_flat_map(|height| LedgerState::height_strategy(height, None, None, false))
-        .prop_flat_map(|init| Block::partial_chain_strategy(init, MAX_ARBITRARY_ITEMS));
+        .prop_flat_map(|init| {
+            Block::partial_chain_strategy(
+                init,
+                MAX_ARBITRARY_ITEMS,
+                allow_all_transparent_coinbase_spends,
+            )
+        });
 
     proptest!(|(chain in strategy)| {
         let mut height = None;

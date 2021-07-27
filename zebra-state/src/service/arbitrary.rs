@@ -15,7 +15,7 @@ use zebra_chain::{
     LedgerState,
 };
 
-use crate::tests::Prepare;
+use crate::{service::check, tests::Prepare};
 
 use super::*;
 
@@ -68,7 +68,11 @@ impl Strategy for PreparedChain {
                 .prop_flat_map(|ledger| {
                     (
                         Just(ledger.network),
-                        Block::partial_chain_strategy(ledger, MAX_PARTIAL_CHAIN_BLOCKS),
+                        Block::partial_chain_strategy(
+                            ledger,
+                            MAX_PARTIAL_CHAIN_BLOCKS,
+                            check::utxo::transparent_coinbase_spend,
+                        ),
                     )
                 })
                 .prop_map(|(network, vec)| {
@@ -143,7 +147,11 @@ pub(crate) fn partial_nu5_chain_strategy(
                 transaction_has_valid_network_upgrade,
             )
             .prop_flat_map(move |init| {
-                Block::partial_chain_strategy(init, blocks_after_nu_activation as usize)
+                Block::partial_chain_strategy(
+                    init,
+                    blocks_after_nu_activation as usize,
+                    check::utxo::transparent_coinbase_spend,
+                )
             })
             .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
         })
