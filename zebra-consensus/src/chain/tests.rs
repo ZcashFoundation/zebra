@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
-use tower::{layer::Layer, timeout::TimeoutLayer, Service, ServiceBuilder};
+use tower::{layer::Layer, timeout::TimeoutLayer, Service};
 
 use zebra_chain::{
     block::{self, Block},
@@ -63,9 +63,7 @@ async fn verifiers_from_network(
         + Clone
         + 'static,
 ) {
-    let state_service = ServiceBuilder::new()
-        .buffer(1)
-        .service(zs::init(zs::Config::ephemeral(), network));
+    let state_service = zs::init_test(network);
     let chain_verifier =
         crate::chain::init(Config::default(), network, state_service.clone()).await;
 
@@ -155,14 +153,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
 
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
-    let chain_verifier = super::init(
-        config.clone(),
-        network,
-        ServiceBuilder::new()
-            .buffer(1)
-            .service(zs::init(zs::Config::ephemeral(), network)),
-    )
-    .await;
+    let chain_verifier = super::init(config.clone(), network, zs::init_test(network)).await;
 
     // Add a timeout layer
     let chain_verifier =
