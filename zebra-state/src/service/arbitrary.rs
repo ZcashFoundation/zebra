@@ -62,7 +62,11 @@ impl Strategy for PreparedChain {
                 .prop_flat_map(|ledger| {
                     (
                         Just(ledger.network),
-                        Block::partial_chain_strategy(ledger, MAX_PARTIAL_CHAIN_BLOCKS),
+                        Block::partial_chain_strategy(
+                            ledger,
+                            MAX_PARTIAL_CHAIN_BLOCKS,
+                            check::utxo::transparent_coinbase_spend,
+                        ),
                     )
                 })
                 .prop_map(|(network, vec)| {

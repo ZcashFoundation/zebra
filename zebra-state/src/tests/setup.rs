@@ -12,7 +12,10 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use crate::{service::StateService, Config, FinalizedBlock};
+use crate::{
+    service::{check, StateService},
+    Config, FinalizedBlock,
+};
 
 /// Generate a chain that allows us to make tests for the legacy chain rules.
 ///
@@ -63,7 +66,11 @@ pub(crate) fn partial_nu5_chain_strategy(
                 transaction_has_valid_network_upgrade,
             )
             .prop_flat_map(move |init| {
-                Block::partial_chain_strategy(init, blocks_after_nu_activation as usize)
+                Block::partial_chain_strategy(
+                    init,
+                    blocks_after_nu_activation as usize,
+                    check::utxo::transparent_coinbase_spend,
+                )
             })
             .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
         })
