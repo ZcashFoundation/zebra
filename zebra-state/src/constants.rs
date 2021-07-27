@@ -26,7 +26,7 @@ pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
 /// The database format version, incremented each time the database format changes.
-pub const DATABASE_FORMAT_VERSION: u32 = 5;
+pub const DATABASE_FORMAT_VERSION: u32 = 6;
 
 use lazy_static::lazy_static;
 use regex::Regex;
