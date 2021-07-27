@@ -381,15 +381,18 @@ impl Block {
                                 .unwrap_or_else(orchard::Flags::empty)
                                 .contains(orchard::Flags::ENABLE_SPENDS))
                     {
-                        // add the created UTXOs
-                        // these outputs can be spent from the next transaction in this block onwards
-                        // see `new_outputs` for details
-                        let hash = transaction.hash();
-                        for output_index_in_transaction in 0..transaction.outputs().len() {
-                            utxos.insert(transparent::OutPoint {
-                                hash,
-                                index: output_index_in_transaction.try_into().unwrap(),
-                            });
+                        // skip genesis created UTXOs, just like the state does
+                        if block.header.previous_block_hash != GENESIS_PREVIOUS_BLOCK_HASH {
+                            // add the created UTXOs
+                            // these outputs can be spent from the next transaction in this block onwards
+                            // see `new_outputs` for details
+                            let hash = transaction.hash();
+                            for output_index_in_transaction in 0..transaction.outputs().len() {
+                                utxos.insert(transparent::OutPoint {
+                                    hash,
+                                    index: output_index_in_transaction.try_into().unwrap(),
+                                });
+                            }
                         }
 
                         // and keep the transaction
