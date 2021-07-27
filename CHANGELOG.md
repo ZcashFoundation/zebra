@@ -4,6 +4,42 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.14) - _TODO:Add actual release date_
+
+Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5.
+
+### Added
+
+- Reject UTXO double spends (#2511)
+- Add a ValueBalance type (#2505)
+- Implement Sum for Amount (#2500)
+- Add an OrderedUtxo type for transparent spend validation (#2502)
+- Pass the finalized state to chain contextual validation (#2503)
+- Calculate incremental note commitment trees (#2407)
+
+#### Documentation
+
+- Add value pools design to book summary (#2520)
+
+#### Testing
+
+- Run `rustfmt` inside nullifier and utxo property tests (#2515)
+- Test consensus-critical Amount deserialization (#2487)
+- Add more details to test coverage increase entry (#2499)
+
+### Changed
+
+- Decrease number of tests in finalized state (#2521)
+- Make nullifier tests faster and consistent with UTXO tests (#2513)
+- Rename the nullifier test module (#2504)
+
+### Fixed
+
+- Clarify indexes in new_ordered_outputs (#2510)
+- Reject duplicate Sapling and Orchard nullifiers (#2497)
+- Orchard implementation: fixes, refactor, and more test vectors (#2445)
+- clippy: remove a needless borrow (#2501)
+
 ## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - 2021-07-15
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5. New validation
