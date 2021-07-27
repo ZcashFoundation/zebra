@@ -730,9 +730,6 @@ impl Service<Request> for StateService {
                     .collect();
                 async move { Ok(Response::BlockHeaders(res)) }.boxed()
             }
-            Request::AwaitSproutAnchor(_) => todo!(),
-            Request::AwaitSaplingAnchor(_) => todo!(),
-            Request::AwaitOrchardAnchor(_) => todo!(),
         }
     }
 }

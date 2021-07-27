@@ -40,13 +40,4 @@ pub enum Response {
 
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
-
-    /// The response to a `AwaitSproutAnchor` request.
-    SproutAnchor(zebra_chain::sprout::tree::Root),
-
-    /// The response to a `AwaitSaplingAnchor` request.
-    SaplingAnchor(zebra_chain::sapling::tree::Root),
-
-    /// The response to a `AwaitOrchardAnchor` request.
-    OrchardAnchor(zebra_chain::orchard::tree::Root),
 }
