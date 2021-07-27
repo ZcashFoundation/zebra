@@ -26,6 +26,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Run `rustfmt` inside nullifier and utxo property tests (#2515)
 - Test consensus-critical Amount deserialization (#2487)
 - Add more details to test coverage increase entry (#2499)
+- Update to use new GitHub action names in Google Cloud workflows (#2533)
 
 ### Changed
 
