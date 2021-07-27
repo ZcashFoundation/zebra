@@ -3,7 +3,7 @@ use proptest::{
     prelude::*,
 };
 
-use std::{collections::HashSet, convert::TryInto, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     block,
@@ -15,7 +15,7 @@ use crate::{
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization,
-    transparent::Input::*,
+    transparent::{new_transaction_ordered_outputs, Input::*},
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -324,16 +324,16 @@ impl Block {
 
         // generate block strategies with the correct heights
         for _ in 0..count {
-            vec.push(Block::arbitrary_with(current));
+            vec.push((Just(current.height), Block::arbitrary_with(current)));
             current.height.0 += 1;
         }
 
         // after the vec strategy generates blocks, fixup invalid parts of the blocks
         vec.prop_map(|mut vec| {
             let mut previous_block_hash = None;
-            let mut utxos = HashSet::<transparent::OutPoint>::new();
+            let mut utxos = HashSet::new();
 
-            for block in vec.iter_mut() {
+            for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
                 if let Some(previous_block_hash) = previous_block_hash {
                     block.header.previous_block_hash = previous_block_hash;
@@ -342,7 +342,7 @@ impl Block {
 
                 // fixup the transparent spends
                 let mut new_transactions = Vec::new();
-                for transaction in block.transactions.drain(..) {
+                for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
                     let mut transaction = (*transaction).clone();
                     let mut new_inputs = Vec::new();
 
@@ -384,15 +384,17 @@ impl Block {
                         // skip genesis created UTXOs, just like the state does
                         if block.header.previous_block_hash != GENESIS_PREVIOUS_BLOCK_HASH {
                             // add the created UTXOs
-                            // these outputs can be spent from the next transaction in this block onwards
-                            // see `new_outputs` for details
-                            let hash = transaction.hash();
-                            for output_index_in_transaction in 0..transaction.outputs().len() {
-                                utxos.insert(transparent::OutPoint {
-                                    hash,
-                                    index: output_index_in_transaction.try_into().unwrap(),
-                                });
-                            }
+                            // non-coinbase outputs can be spent from the next transaction in this block onwards
+                            // coinbase outputs have to wait 100 blocks, and be shielded
+                            utxos.extend(
+                                new_transaction_ordered_outputs(
+                                    &transaction,
+                                    transaction.hash(),
+                                    tx_index_in_block,
+                                    *height,
+                                )
+                                .keys(),
+                            );
                         }
 
                         // and keep the transaction
@@ -405,7 +407,11 @@ impl Block {
 
                 // TODO: fixup the history and authorizing data commitments, if needed
             }
-            SummaryDebug(vec.into_iter().map(Arc::new).collect())
+            SummaryDebug(
+                vec.into_iter()
+                    .map(|(_height, block)| Arc::new(block))
+                    .collect(),
+            )
         })
         .boxed()
     }
