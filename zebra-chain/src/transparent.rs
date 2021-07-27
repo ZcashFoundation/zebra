@@ -147,18 +147,14 @@ impl Input {
         ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
     ) -> Amount<NegativeAllowed> {
         match self {
-            Input::PrevOut { outpoint, .. } => {
-                let utxos = utxos_from_ordered_utxos(ordered_utxos.clone());
-                if utxos.contains_key(outpoint) {
-                    utxos[outpoint]
-                        .output
-                        .value
-                        .constrain()
-                        .expect("conversion from NonNegative to NegativeAllowed is always valid")
-                } else {
-                    panic!("Provided Utxos don't have transaction Outpoint")
-                }
-            }
+            Input::PrevOut { outpoint, .. } => ordered_utxos
+                .get(outpoint)
+                .expect("Provided Utxos don't have transaction Outpoint")
+                .utxo
+                .output
+                .value
+                .constrain()
+                .expect("conversion from NonNegative to NegativeAllowed is always valid"),
             Input::Coinbase { .. } => Amount::zero(),
         }
     }
