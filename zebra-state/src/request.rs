@@ -323,4 +323,37 @@ pub enum Request {
         /// Optionally, the hash of the last header to request.
         stop: Option<block::Hash>,
     },
+
+    /// Request a Sprout anchor (a previously-validated root of the Sprout note
+    /// commitment tree) identified by the given `sprout::tree::Root`, waiting
+    /// until it becomes available if it is unknown.
+    ///
+    /// # Correctness
+    ///
+    /// Anchor requests should be wrapped in a timeout, so that out-of-order and
+    /// invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
+    AwaitSproutAnchor(zebra_chain::sprout::tree::Root),
+
+    /// Request a Sapling anchor (a previously-validated root of the Sapling
+    /// note commitment tree) identified by the given `sapling::tree::Root`,
+    /// waiting until it becomes available if it is unknown.
+    ///
+    /// # Correctness
+    ///
+    /// Anchor requests should be wrapped in a timeout, so that out-of-order and
+    /// invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
+    AwaitSaplingAnchor(zebra_chain::sapling::tree::Root),
+
+    /// Request an Orchard anchor (a previously-validated root of the Orchard
+    /// note commitment tree) identified by the given `orchard::tree::Root`,
+    /// waiting until it becomes available if it is unknown.
+    ///
+    /// # Correctness
+    ///
+    /// Anchor requests should be wrapped in a timeout, so that out-of-order and
+    /// invalid requests do not hang indefinitely. See the [`crate`]
+    /// documentation for details.
+    AwaitOrchardAnchor(zebra_chain::orchard::tree::Root),
 }
