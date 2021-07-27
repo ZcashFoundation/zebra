@@ -44,7 +44,7 @@ proptest! {
             .unwrap_or(DEFAULT_NULLIFIER_PROPTEST_CASES))
     )]
 
-// sprout
+    // sprout
 
     /// Make sure an arbitrary sprout nullifier is accepted by state contextual validation.
     ///
@@ -52,8 +52,8 @@ proptest! {
     /// (And that the test infrastructure generally works.)
     #[test]
     fn accept_distinct_arbitrary_sprout_nullifiers_in_one_block(
-        mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        mut joinsplit in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
@@ -70,9 +70,7 @@ proptest! {
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -90,12 +88,15 @@ proptest! {
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
 
             // the finalized state has the nullifiers
-            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[1]));
+            prop_assert!(state
+                .disk
+                .contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state
+                .disk
+                .contains_sprout_nullifier(&expected_nullifiers[1]));
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -106,8 +107,12 @@ proptest! {
 
             // the non-finalized state has the nullifiers
             prop_assert_eq!(state.mem.chain_set.len(), 1);
-            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[1]));
+            prop_assert!(state
+                .mem
+                .best_contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state
+                .mem
+                .best_contains_sprout_nullifier(&expected_nullifiers[1]));
         }
     }
 
@@ -115,8 +120,8 @@ proptest! {
     /// if they come from the same JoinSplit.
     #[test]
     fn reject_duplicate_sprout_nullifiers_in_joinsplit(
-        mut joinsplit in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        mut joinsplit in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -133,27 +138,23 @@ proptest! {
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         // if the random proptest data produces other errors,
         // we might need to just check `is_err()` here
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSproutNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateSproutNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         // block was rejected
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
@@ -164,9 +165,9 @@ proptest! {
     /// if they come from different JoinSplits in the same JoinSplitData/Transaction.
     #[test]
     fn reject_duplicate_sprout_nullifiers_in_transaction(
-        mut joinsplit1 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit2 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        joinsplit_data in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        mut joinsplit1 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        mut joinsplit2 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -174,38 +175,37 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        make_distinct_nullifiers(&mut joinsplit1.nullifiers.iter_mut().chain(joinsplit2.nullifiers.iter_mut()));
+        make_distinct_nullifiers(
+            &mut joinsplit1
+                .nullifiers
+                .iter_mut()
+                .chain(joinsplit2.nullifiers.iter_mut()),
+        );
 
         // create a double-spend across two joinsplits
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        let transaction = transaction_v4_with_joinsplit_data(
-            joinsplit_data.0,
-            [joinsplit1.0, joinsplit2.0]
-        );
+        let transaction =
+            transaction_v4_with_joinsplit_data(joinsplit_data.0, [joinsplit1.0, joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSproutNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateSproutNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
@@ -215,10 +215,10 @@ proptest! {
     /// if they come from different transactions in the same block.
     #[test]
     fn reject_duplicate_sprout_nullifiers_in_block(
-        mut joinsplit1 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit2 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        joinsplit_data1 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
-        joinsplit_data2 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        mut joinsplit1 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        mut joinsplit2 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        joinsplit_data1 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
+        joinsplit_data2 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -226,7 +226,12 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        make_distinct_nullifiers(&mut joinsplit1.nullifiers.iter_mut().chain(joinsplit2.nullifiers.iter_mut()));
+        make_distinct_nullifiers(
+            &mut joinsplit1
+                .nullifiers
+                .iter_mut()
+                .chain(joinsplit2.nullifiers.iter_mut()),
+        );
 
         // create a double-spend across two transactions
         let duplicate_nullifier = joinsplit1.nullifiers[0];
@@ -245,17 +250,15 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSproutNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateSproutNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
@@ -265,10 +268,10 @@ proptest! {
     /// if they come from different blocks in the same chain.
     #[test]
     fn reject_duplicate_sprout_nullifiers_in_chain(
-        mut joinsplit1 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        mut joinsplit2 in TypeNameToDebug::<JoinSplit::<Groth16Proof>>::arbitrary(),
-        joinsplit_data1 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
-        joinsplit_data2 in TypeNameToDebug::<JoinSplitData::<Groth16Proof>>::arbitrary(),
+        mut joinsplit1 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        mut joinsplit2 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        joinsplit_data1 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
+        joinsplit_data2 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
@@ -280,7 +283,12 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        make_distinct_nullifiers(&mut joinsplit1.nullifiers.iter_mut().chain(joinsplit2.nullifiers.iter_mut()));
+        make_distinct_nullifiers(
+            &mut joinsplit1
+                .nullifiers
+                .iter_mut()
+                .chain(joinsplit2.nullifiers.iter_mut()),
+        );
         let expected_nullifiers = joinsplit1.nullifiers;
 
         // create a double-spend across two blocks
@@ -293,12 +301,8 @@ proptest! {
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction1.into());
-        block2
-            .transactions
-            .push(transaction2.into());
+        block1.transactions.push(transaction1.into());
+        block2.transactions.push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let mut previous_mem = state.mem.clone();
@@ -312,43 +316,48 @@ proptest! {
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
             prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state.disk.contains_sprout_nullifier(&expected_nullifiers[1]));
+            prop_assert!(state
+                .disk
+                .contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state
+                .disk
+                .contains_sprout_nullifier(&expected_nullifiers[1]));
 
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state.mem.best_contains_sprout_nullifier(&expected_nullifiers[1]));
+            prop_assert!(state
+                .mem
+                .best_contains_sprout_nullifier(&expected_nullifiers[0]));
+            prop_assert!(state
+                .mem
+                .best_contains_sprout_nullifier(&expected_nullifiers[1]));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result =
-            state.validate_and_commit(block2);
+        let commit_result = state.validate_and_commit(block2);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSproutNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: duplicate_in_finalized_state,
-                }.into()
-            )
+            Err(DuplicateSproutNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: duplicate_in_finalized_state,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
 
-// sapling
+    // sapling
 
     /// Make sure an arbitrary sapling nullifier is accepted by state contextual validation.
     ///
@@ -356,8 +365,8 @@ proptest! {
     /// (And that the test infrastructure generally works.)
     #[test]
     fn accept_distinct_arbitrary_sapling_nullifiers_in_one_block(
-        spend in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
+        spend in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
@@ -368,17 +377,13 @@ proptest! {
 
         let expected_nullifier = spend.nullifier;
 
-        let transaction = transaction_v4_with_sapling_shielded_data(
-            sapling_shielded_data.0,
-            [spend.0]
-        );
+        let transaction =
+            transaction_v4_with_sapling_shielded_data(sapling_shielded_data.0, [spend.0]);
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -394,13 +399,14 @@ proptest! {
             prop_assert!(state.disk.contains_sapling_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_sapling_nullifier(&expected_nullifier));
+            prop_assert!(state
+                .mem
+                .best_contains_sapling_nullifier(&expected_nullifier));
         }
     }
 
@@ -408,9 +414,9 @@ proptest! {
     /// if they come from different Spends in the same sapling::ShieldedData/Transaction.
     #[test]
     fn reject_duplicate_sapling_nullifiers_in_transaction(
-        spend1 in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        mut spend2 in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
+        spend1 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        mut spend2 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -429,25 +435,21 @@ proptest! {
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSaplingNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateSaplingNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
@@ -457,10 +459,10 @@ proptest! {
     /// if they come from different transactions in the same block.
     #[test]
     fn reject_duplicate_sapling_nullifiers_in_block(
-        spend1 in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        mut spend2 in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        sapling_shielded_data1 in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
-        sapling_shielded_data2 in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
+        spend1 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        mut spend2 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data1 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data2 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
     ) {
         zebra_test::init();
 
@@ -472,14 +474,10 @@ proptest! {
         let duplicate_nullifier = spend1.nullifier;
         spend2.nullifier = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_sapling_shielded_data(
-            sapling_shielded_data1.0,
-            [spend1.0]
-        );
-        let transaction2 = transaction_v4_with_sapling_shielded_data(
-            sapling_shielded_data2.0,
-            [spend2.0]
-        );
+        let transaction1 =
+            transaction_v4_with_sapling_shielded_data(sapling_shielded_data1.0, [spend1.0]);
+        let transaction2 =
+            transaction_v4_with_sapling_shielded_data(sapling_shielded_data2.0, [spend2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
@@ -491,17 +489,15 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSaplingNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateSaplingNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
@@ -511,10 +507,10 @@ proptest! {
     /// if they come from different blocks in the same chain.
     #[test]
     fn reject_duplicate_sapling_nullifiers_in_chain(
-        spend1 in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        mut spend2 in TypeNameToDebug::<sapling::Spend::<PerSpendAnchor>>::arbitrary(),
-        sapling_shielded_data1 in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
-        sapling_shielded_data2 in TypeNameToDebug::<sapling::ShieldedData::<PerSpendAnchor>>::arbitrary(),
+        spend1 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        mut spend2 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data1 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data2 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
         zebra_test::init();
@@ -530,24 +526,16 @@ proptest! {
         let duplicate_nullifier = spend1.nullifier;
         spend2.nullifier = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_sapling_shielded_data(
-            sapling_shielded_data1.0,
-            [spend1.0]
-        );
-        let transaction2 = transaction_v4_with_sapling_shielded_data(
-            sapling_shielded_data2.0,
-            [spend2.0]
-        );
+        let transaction1 =
+            transaction_v4_with_sapling_shielded_data(sapling_shielded_data1.0, [spend1.0]);
+        let transaction2 =
+            transaction_v4_with_sapling_shielded_data(sapling_shielded_data2.0, [spend2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction1.into());
-        block2
-            .transactions
-            .push(transaction2.into());
+        block1.transactions.push(transaction1.into());
+        block2.transactions.push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let mut previous_mem = state.mem.clone();
@@ -566,36 +554,35 @@ proptest! {
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_sapling_nullifier(&duplicate_nullifier));
+            prop_assert!(state
+                .mem
+                .best_contains_sapling_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result =
-            state.validate_and_commit(block2);
+        let commit_result = state.validate_and_commit(block2);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateSaplingNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: duplicate_in_finalized_state,
-                }.into()
-            )
+            Err(DuplicateSaplingNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: duplicate_in_finalized_state,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
     }
 
-// orchard
+    // orchard
 
     /// Make sure an arbitrary orchard nullifier is accepted by state contextual validation.
     ///
@@ -617,15 +604,13 @@ proptest! {
 
         let transaction = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data.0,
-            [authorized_action.0]
+            [authorized_action.0],
         );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
@@ -641,13 +626,14 @@ proptest! {
             prop_assert!(state.disk.contains_orchard_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_orchard_nullifier(&expected_nullifier));
+            prop_assert!(state
+                .mem
+                .best_contains_orchard_nullifier(&expected_nullifier));
         }
     }
 
@@ -676,25 +662,21 @@ proptest! {
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction.into());
+        block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateOrchardNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateOrchardNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
@@ -721,11 +703,11 @@ proptest! {
 
         let transaction1 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
-            [authorized_action1.0]
+            [authorized_action1.0],
         );
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
-            [authorized_action2.0]
+            [authorized_action2.0],
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -738,17 +720,15 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result =
-            state.validate_and_commit(block1);
+        let commit_result = state.validate_and_commit(block1);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateOrchardNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: false,
-                }.into()
-            )
+            Err(DuplicateOrchardNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: false,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));
@@ -779,22 +759,18 @@ proptest! {
 
         let transaction1 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
-            [authorized_action1.0]
+            [authorized_action1.0],
         );
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
-            [authorized_action2.0]
+            [authorized_action2.0],
         );
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block1
-            .transactions
-            .push(transaction1.into());
-        block2
-            .transactions
-            .push(transaction2.into());
+        block1.transactions.push(transaction1.into());
+        block2.transactions.push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
         let mut previous_mem = state.mem.clone();
@@ -813,30 +789,29 @@ proptest! {
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result =
-                state.validate_and_commit(block1.clone());
+            let commit_result = state.validate_and_commit(block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.mem.best_contains_orchard_nullifier(&duplicate_nullifier));
+            prop_assert!(state
+                .mem
+                .best_contains_orchard_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
             previous_mem = state.mem.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result =
-            state.validate_and_commit(block2);
+        let commit_result = state.validate_and_commit(block2);
 
         prop_assert_eq!(
             commit_result,
-            Err(
-                DuplicateOrchardNullifier {
-                    nullifier: duplicate_nullifier,
-                    in_finalized_state: duplicate_in_finalized_state,
-                }.into()
-            )
+            Err(DuplicateOrchardNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: duplicate_in_finalized_state,
+            }
+            .into())
         );
         prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
         prop_assert!(state.mem.eq_internal_state(&previous_mem));

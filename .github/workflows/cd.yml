@@ -34,7 +34,7 @@ jobs:
 
     # Setup gcloud CLI
     - name: Set up gcloud SDK environment
-      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+      uses: google-github-actions/setup-gcloud@master
       with:
         version: '295.0.0'
         project_id: ${{ env.PROJECT_ID }}
@@ -69,7 +69,7 @@ jobs:
 
       # Setup gcloud CLI
       - name: Set up gcloud SDK environment
-        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        uses: google-github-actions/setup-gcloud@master
         with:
           version: '295.0.0'
           project_id: ${{ env.PROJECT_ID }}
