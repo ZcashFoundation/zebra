@@ -14,6 +14,7 @@ pub use utxo::{
     OrderedUtxo, Utxo,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) use utxo::new_transaction_ordered_outputs;
 
 #[cfg(any(test, feature = "proptest-impl"))]
