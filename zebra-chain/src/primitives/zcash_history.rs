@@ -316,7 +316,7 @@ impl Version for V2 {
     /// Convert a Block into a V1::NodeData used in the MMR tree.
     ///
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
-    /// `sapling_root` is the root of the Orchard note commitment tree of the block.
+    /// `orchard_root` is the root of the Orchard note commitment tree of the block.
     fn block_to_history_node(
         block: Arc<Block>,
         network: Network,
