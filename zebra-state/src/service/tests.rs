@@ -8,7 +8,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction,
-    transparent::{self, CoinbaseSpendRestriction::AllShieldedOutputs},
+    transparent::{self, CoinbaseSpendRestriction::OnlyShieldedOutputs},
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
@@ -108,7 +108,7 @@ async fn test_populated_state_responds_correctly(
                     transcript.push((
                         Request::AwaitSpendableUtxo {
                             outpoint,
-                            spend_restriction: AllShieldedOutputs { spend_height },
+                            spend_restriction: OnlyShieldedOutputs { spend_height },
                         },
                         Ok(Response::SpendableUtxo(utxo)),
                     ));

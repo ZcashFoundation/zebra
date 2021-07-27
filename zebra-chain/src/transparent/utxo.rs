@@ -81,8 +81,8 @@ pub enum CoinbaseSpendRestriction {
     /// The UTXO is spent in a transaction with one or more transparent outputs
     SomeTransparentOutputs,
 
-    /// The UTXO is spent in a transaction with all shielded outputs
-    AllShieldedOutputs {
+    /// The UTXO is spent in a transaction which only has shielded outputs
+    OnlyShieldedOutputs {
         /// The height at which the UTXO is spent
         spend_height: block::Height,
     },

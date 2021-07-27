@@ -282,7 +282,7 @@ impl Transaction {
         spend_height: block::Height,
     ) -> CoinbaseSpendRestriction {
         if self.outputs().is_empty() {
-            AllShieldedOutputs { spend_height }
+            OnlyShieldedOutputs { spend_height }
         } else {
             SomeTransparentOutputs
         }

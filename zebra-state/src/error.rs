@@ -97,7 +97,10 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     EarlyTransparentSpend { outpoint: transparent::OutPoint },
 
-    #[error("unshielded transparent coinbase spend: {outpoint:?} must be spent in a transaction with all shielded outputs")]
+    #[error(
+        "unshielded transparent coinbase spend: {outpoint:?} \
+         must be spent in a transaction which only has shielded outputs"
+    )]
     #[non_exhaustive]
     UnshieldedTransparentCoinbaseSpend { outpoint: transparent::OutPoint },
 

@@ -39,7 +39,7 @@ pub fn validate_transparent_coinbase_spend(
     }
 
     match spend_restriction {
-        AllShieldedOutputs { spend_height } => {
+        OnlyShieldedOutputs { spend_height } => {
             let min_spend_height = utxo.height + block::Height(MIN_TRANSPARENT_COINBASE_MATURITY);
             // TODO: allow full u32 range of block heights (#1113)
             let min_spend_height =
