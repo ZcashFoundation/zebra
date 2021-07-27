@@ -109,11 +109,21 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     );
 
     // Add note commitments in Block 1 to the tree
+    let mut appended_count = 0;
     for transaction in block1.transactions.iter() {
         for sapling_note_commitment in transaction.sapling_note_commitments() {
             tree.append(*sapling_note_commitment)
                 .expect("test vector is correct");
+            appended_count += 1;
         }
+    }
+    // We also want to make sure that sapling_note_commitments() is returning
+    // the commitments in the right order. But this will only be actually tested
+    // if there are more than one note commitment in a block.
+    // In the test vectors this applies only for the block 1 in mainnet,
+    // so we make this explicit in this assert.
+    if network == Network::Mainnet {
+        assert!(appended_count > 1);
     }
 
     // Check if root is correct
