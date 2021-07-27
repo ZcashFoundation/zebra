@@ -101,7 +101,13 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     UnshieldedTransparentCoinbaseSpend { outpoint: transparent::OutPoint },
 
-    #[error("immature transparent coinbase spend: attempt to spend {outpoint:?} at {spend_height:?}, but it must be spent after {min_spend_height:?}, at least {MIN_TRANSPARENT_COINBASE_MATURITY:?} blocks after it was created {created_height:?}")]
+    #[error(
+        "immature transparent coinbase spend: \
+        attempt to spend {outpoint:?} at {spend_height:?}, \
+        but spends are invalid before {min_spend_height:?}, \
+        which is {MIN_TRANSPARENT_COINBASE_MATURITY:?} blocks \
+        after it was created at {created_height:?}"
+    )]
     #[non_exhaustive]
     ImmatureTransparentCoinbaseSpend {
         outpoint: transparent::OutPoint,
