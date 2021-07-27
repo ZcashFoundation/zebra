@@ -77,11 +77,7 @@ pub fn transparent_spend(
             // using known valid UTXOs during non-finalized chain validation.
 
             let spend_restriction = transaction.coinbase_spend_restriction(prepared.height);
-            if cfg!(not(test)) {
-                // TODO: fix proptests to produce valid UTXO spends (#ticket TODO)
-                //       and unconditionally enable this check
-                transparent_coinbase_spend(*spend, spend_restriction, utxo)?;
-            }
+            transparent_coinbase_spend(*spend, spend_restriction, utxo)?;
         }
     }
 
