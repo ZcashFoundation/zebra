@@ -657,7 +657,10 @@ impl Transaction {
         Ok(ValueBalance::from_orchard_amount(-orchard))
     }
 
-    /// Get all the value balances for this transaction
+    /// Get all the value balances for this transaction.
+    ///
+    /// `utxos` must contain the utxos of every input in the transaction,
+    /// including UTXOs created by earlier transactions in this block.
     pub fn value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
