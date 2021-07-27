@@ -136,6 +136,12 @@ impl Input {
     }
 
     /// Get the value balance of this input.
+    ///
+    /// Needed to calculate the transparent value balance.
+    ///
+    /// # Panics
+    ///
+    /// If the provided Utxos don't have the transaction outpoint.
     pub fn value_balance(
         &self,
         ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
@@ -182,7 +188,9 @@ pub struct Output {
 }
 
 impl Output {
-    /// Get the value balance of this output
+    /// Get the value balance of this output.
+    ///
+    /// Needed to calculate the transparent value balance.
     pub fn value_balance(&self) -> Amount<NegativeAllowed> {
         self.value
             .constrain()

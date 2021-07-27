@@ -50,6 +50,8 @@ impl ShieldedData {
     }
 
     /// Provide access to the `value_balance` field of the shielded data.
+    ///
+    /// Needed to calculate the sapling value balance.
     pub fn value_balance(&self) -> Amount<NegativeAllowed> {
         self.value_balance
     }

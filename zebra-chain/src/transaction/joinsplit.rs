@@ -57,6 +57,8 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     }
 
     /// Calculate and return the value balance for the joinsplits.
+    ///
+    /// Needed to calculate the sprout value balance.
     pub fn value_balance(&self) -> Result<Amount, Error> {
         self.joinsplits()
             .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)

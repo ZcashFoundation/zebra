@@ -555,10 +555,16 @@ impl Transaction {
             .map(|orchard_shielded_data| orchard_shielded_data.flags)
     }
 
-    // value pool
+    // value balances
 
-    /// Return the transparent value pool
-    fn transparent_value_pool(
+    /// Return the transparent value balance.
+    ///
+    /// The change in the value of the transparent pool.
+    /// The sum of the outputs spent by transparent inputs in `tx_in` fields,
+    /// minus the sum of newly created outputs in `tx_out` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn transparent_value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
@@ -579,8 +585,13 @@ impl Transaction {
         ))
     }
 
-    /// Return the sprout value pool
-    fn sprout_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+    /// Return the sprout value balance
+    ///
+    /// The change in the sprout value pool.
+    /// The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let joinsplit_amounts = match self {
             Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
                 joinsplit_data.as_ref().map(JoinSplitData::value_balance)
@@ -599,8 +610,13 @@ impl Transaction {
             .map(ValueBalance::from_sprout_amount)
     }
 
-    /// Return the sapling value pool
-    fn sapling_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+    /// Return the sapling value balance.
+    ///
+    /// The change in the sapling value pool.
+    /// The negation of the sum of all `valueBalanceSapling` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sapling_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let sapling_amounts = match self {
             Transaction::V4 {
                 sapling_shielded_data,
@@ -622,18 +638,23 @@ impl Transaction {
             .fold(Ok(Amount::zero()), |accumulator, value| {
                 accumulator.and_then(|sum| sum + value)
             })
-            .map(ValueBalance::from_sapling_amount)
+            .map(|amount| ValueBalance::from_sapling_amount(-amount))
     }
 
-    /// Return the orchard value pool
-    fn orchard_value_pool(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+    /// Return the orchard value balance.
+    ///
+    /// The change in the orchard value pool.
+    /// The negation of the sum of all `valueBalanceOrchard` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn orchard_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let orchard = self
             .orchard_shielded_data()
             .iter()
             .map(|o| o.value_balance())
             .sum::<Result<Amount, AmountError>>()?;
 
-        Ok(ValueBalance::from_orchard_amount(orchard))
+        Ok(ValueBalance::from_orchard_amount(-orchard))
     }
 
     /// Get all the value balances for this transaction
@@ -643,10 +664,10 @@ impl Transaction {
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let mut value_balance = ValueBalance::zero();
 
-        value_balance.set_transparent_value_balance(self.transparent_value_pool(utxos)?);
-        value_balance.set_sprout_value_balance(self.sprout_value_pool()?);
-        value_balance.set_sapling_value_balance(self.sapling_value_pool()?);
-        value_balance.set_orchard_value_balance(self.orchard_value_pool()?);
+        value_balance.set_transparent_value_balance(self.transparent_value_balance(utxos)?);
+        value_balance.set_sprout_value_balance(self.sprout_value_balance()?);
+        value_balance.set_sapling_value_balance(self.sapling_value_balance()?);
+        value_balance.set_orchard_value_balance(self.orchard_value_balance()?);
 
         Ok(value_balance)
     }
