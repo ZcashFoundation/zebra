@@ -364,7 +364,6 @@ impl Block {
                 if let Some(previous_block_hash) = previous_block_hash {
                     block.header.previous_block_hash = previous_block_hash;
                 }
-                previous_block_hash = Some(block.hash());
 
                 // fixup the transparent spends
                 let mut new_transactions = Vec::new();
@@ -482,6 +481,10 @@ impl Block {
                 block.transactions = new_transactions;
 
                 // TODO: fixup the history and authorizing data commitments, if needed
+
+                // now that we've made all the changes, calculate our block hash,
+                // so the next block can use it
+                previous_block_hash = Some(block.hash());
             }
             SummaryDebug(
                 vec.into_iter()
