@@ -250,6 +250,28 @@ impl Transaction {
         }
     }
 
+    /// Modify the transparent outputs of this transaction, regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn outputs_mut(&mut self) -> &mut Vec<transparent::Output> {
+        match self {
+            Transaction::V1 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V2 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V3 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V4 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V5 {
+                ref mut outputs, ..
+            } => outputs,
+        }
+    }
+
     /// Returns `true` if this transaction is a coinbase transaction.
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
