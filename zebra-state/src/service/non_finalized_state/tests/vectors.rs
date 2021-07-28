@@ -4,11 +4,12 @@ use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeseria
 use zebra_test::prelude::*;
 
 use crate::{
+    arbitrary::Prepare,
     service::{
         finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState},
     },
-    tests::{FakeChainHelper, Prepare},
+    tests::FakeChainHelper,
     Config,
 };
 

@@ -5,7 +5,8 @@ authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+proptest-impl = ["proptest", "zebra-test"]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
@@ -31,6 +32,9 @@ rlimit = "0.5.4"
 # TODO: this crate is not maintained anymore. Replace it?
 # https://github.com/ZcashFoundation/zebra/issues/2523
 multiset = "0.0.5"
+
+proptest = { version = "0.10.1", optional = true }
+zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

@@ -5,12 +5,12 @@ use zebra_test::prelude::*;
 use zebra_chain::{block::Block, fmt::DisplayToDebug, parameters::NetworkUpgrade::*, LedgerState};
 
 use crate::{
+    arbitrary::Prepare,
     service::{
         arbitrary::PreparedChain,
         finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState},
     },
-    tests::Prepare,
     Config,
 };
 
