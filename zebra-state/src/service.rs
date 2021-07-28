@@ -28,6 +28,7 @@ use crate::{
     FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
 };
 
+mod best_tip_height;
 pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
