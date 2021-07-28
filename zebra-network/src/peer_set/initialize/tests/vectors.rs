@@ -15,9 +15,10 @@
 
 use std::{collections::HashSet, net::SocketAddr};
 
+use tokio::sync::watch;
 use tower::service_fn;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{block, parameters::Network};
 use zebra_test::net::random_known_port;
 
 use crate::Config;
@@ -110,7 +111,8 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book) = init(config, inbound_service).await;
+    let (_, best_tip_height) = watch::channel(block::Height(0));
+    let (_peer_service, address_book) = init(config, inbound_service, best_tip_height).await;
     let local_listener = address_book.lock().unwrap().local_listener_meta_addr();
 
     if listen_addr.port() == 0 {
