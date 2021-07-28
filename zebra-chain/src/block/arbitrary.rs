@@ -374,8 +374,7 @@ impl Block {
         // after the vec strategy generates blocks, fixup invalid parts of the blocks
         vec.prop_map(move |mut vec| {
             let mut previous_block_hash = None;
-            let mut utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo> =
-                HashMap::new();
+            let mut utxos = HashMap::new();
 
             for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
@@ -383,99 +382,15 @@ impl Block {
                     block.header.previous_block_hash = previous_block_hash;
                 }
 
-                // fixup the transparent spends
                 let mut new_transactions = Vec::new();
                 for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
-                    let mut transaction = (*transaction).clone();
-                    let mut spend_restriction = transaction.coinbase_spend_restriction(*height);
-                    let has_shielded_outputs = transaction.has_shielded_outputs();
-
-                    let mut new_inputs = Vec::new();
-
-                    for mut input in transaction.inputs().to_vec().into_iter() {
-                        if input.outpoint().is_some() {
-                            let mut selected_outpoint = None;
-                            let mut attempts: usize = 0;
-
-                            // choose an arbitrary spendable UTXO, in hash set order
-                            while let Some((candidate_outpoint, candidate_utxo)) =
-                                utxos.iter().next()
-                            {
-                                let candidate_utxo = candidate_utxo.clone().utxo;
-
-                                attempts += 1;
-
-                                // Avoid O(n^2) algorithmic complexity by giving up early,
-                                // rather than exhausively checking the entire UTXO set
-                                if attempts > 100 {
-                                    break;
-                                }
-
-                                // try the utxo as-is, then try it with deleted transparent outputs
-                                if check_transparent_coinbase_spend(
-                                    *candidate_outpoint,
-                                    spend_restriction,
-                                    candidate_utxo.clone(),
-                                )
-                                .is_ok()
-                                {
-                                    selected_outpoint = Some(*candidate_outpoint);
-                                    break;
-                                } else if has_shielded_outputs {
-                                    let delete_transparent_outputs =
-                                        CoinbaseSpendRestriction::OnlyShieldedOutputs {
-                                            spend_height: *height,
-                                        };
-
-                                    if check_transparent_coinbase_spend(
-                                        *candidate_outpoint,
-                                        delete_transparent_outputs,
-                                        candidate_utxo.clone(),
-                                    )
-                                    .is_ok()
-                                    {
-                                        *transaction.outputs_mut() = Vec::new();
-                                        spend_restriction = delete_transparent_outputs;
-
-                                        selected_outpoint = Some(*candidate_outpoint);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if let Some(selected_outpoint) = selected_outpoint {
-                                input.set_outpoint(selected_outpoint);
-                                new_inputs.push(input);
-
-                                utxos.remove(&selected_outpoint);
-                            }
-                            // otherwise, drop the invalid input, because it has no valid UTXOs to spend
-                        } else {
-                            // preserve coinbase inputs
-                            new_inputs.push(input.clone());
-                        }
-                    }
-
-                    // delete invalid inputs
-                    *transaction.inputs_mut() = new_inputs;
-
-                    // keep transactions with valid input counts
-                    // coinbase transactions will never fail this check
-                    if transaction.has_transparent_or_shielded_inputs() {
-                        // skip genesis created UTXOs, just like the state does
-                        if block.header.previous_block_hash != GENESIS_PREVIOUS_BLOCK_HASH {
-                            // add the created UTXOs
-                            // non-coinbase outputs can be spent from the next transaction in this block onwards
-                            // coinbase outputs have to wait 100 blocks, and be shielded
-                            utxos.extend(new_transaction_ordered_outputs(
-                                &transaction,
-                                transaction.hash(),
-                                tx_index_in_block,
-                                *height,
-                            ));
-                        }
-
-                        // and keep the transaction
+                    if let Some(transaction) = fix_generated_transaction(
+                        (*transaction).clone(),
+                        tx_index_in_block,
+                        *height,
+                        &mut utxos,
+                        check_transparent_coinbase_spend,
+                    ) {
                         new_transactions.push(Arc::new(transaction));
                     }
                 }
@@ -499,6 +414,140 @@ impl Block {
         })
         .boxed()
     }
+}
+
+/// Fix `transaction` so it obeys more consensus rules.
+///
+/// Spends [`OutPoint`]s from `utxos`, and adds newly created outputs.
+///
+/// If the transaction can't be fixed, returns `None`.
+pub fn fix_generated_transaction<F, T, E>(
+    mut transaction: Transaction,
+    tx_index_in_block: usize,
+    height: Height,
+    utxos: &mut HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    check_transparent_coinbase_spend: F,
+) -> Option<Transaction>
+where
+    F: Fn(
+            transparent::OutPoint,
+            transparent::CoinbaseSpendRestriction,
+            transparent::Utxo,
+        ) -> Result<T, E>
+        + Copy
+        + 'static,
+{
+    let mut spend_restriction = transaction.coinbase_spend_restriction(height);
+    let mut new_inputs = Vec::new();
+
+    // fixup the transparent spends
+    for mut input in transaction.inputs().to_vec().into_iter() {
+        if input.outpoint().is_some() {
+            if let Some(selected_outpoint) = find_valid_utxo_for_spend(
+                &mut transaction,
+                &mut spend_restriction,
+                height,
+                utxos,
+                check_transparent_coinbase_spend,
+            ) {
+                input.set_outpoint(selected_outpoint);
+                new_inputs.push(input);
+
+                utxos.remove(&selected_outpoint);
+            }
+            // otherwise, drop the invalid input, because it has no valid UTXOs to spend
+        } else {
+            // preserve coinbase inputs
+            new_inputs.push(input.clone());
+        }
+    }
+
+    // delete invalid inputs
+    *transaction.inputs_mut() = new_inputs;
+
+    // keep transactions with valid input counts
+    // coinbase transactions will never fail this check
+    if transaction.has_transparent_or_shielded_inputs() {
+        // skip genesis created UTXOs
+        if height > Height(0) {
+            // non-coinbase outputs can be spent from the next transaction in this block onwards
+            // coinbase outputs have to wait 100 blocks, and be shielded
+            utxos.extend(new_transaction_ordered_outputs(
+                &transaction,
+                transaction.hash(),
+                tx_index_in_block,
+                height,
+            ));
+        }
+
+        Some(transaction)
+    } else {
+        None
+    }
+}
+
+/// Find a valid [`OutPoint`] in `utxos` to spend in `transaction`.
+///
+/// Modifies `transaction` and updates `spend_restriction` if needed.
+///
+/// If there is no valid output, or many search attempts have failed, returns `None`.
+pub fn find_valid_utxo_for_spend<F, T, E>(
+    transaction: &mut Transaction,
+    spend_restriction: &mut CoinbaseSpendRestriction,
+    spend_height: Height,
+    utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    check_transparent_coinbase_spend: F,
+) -> Option<transparent::OutPoint>
+where
+    F: Fn(
+            transparent::OutPoint,
+            transparent::CoinbaseSpendRestriction,
+            transparent::Utxo,
+        ) -> Result<T, E>
+        + Copy
+        + 'static,
+{
+    let has_shielded_outputs = transaction.has_shielded_outputs();
+    let delete_transparent_outputs = CoinbaseSpendRestriction::OnlyShieldedOutputs { spend_height };
+    let mut attempts: usize = 0;
+
+    // choose an arbitrary spendable UTXO, in hash set order
+    while let Some((candidate_outpoint, candidate_utxo)) = utxos.iter().next() {
+        let candidate_utxo = candidate_utxo.clone().utxo;
+
+        attempts += 1;
+
+        // Avoid O(n^2) algorithmic complexity by giving up early,
+        // rather than exhausively checking the entire UTXO set
+        if attempts > 100 {
+            return None;
+        }
+
+        // try the utxo as-is, then try it with deleted transparent outputs
+        if check_transparent_coinbase_spend(
+            *candidate_outpoint,
+            *spend_restriction,
+            candidate_utxo.clone(),
+        )
+        .is_ok()
+        {
+            return Some(*candidate_outpoint);
+        } else if has_shielded_outputs
+            && check_transparent_coinbase_spend(
+                *candidate_outpoint,
+                delete_transparent_outputs,
+                candidate_utxo.clone(),
+            )
+            .is_ok()
+        {
+            *transaction.outputs_mut() = Vec::new();
+            *spend_restriction = delete_transparent_outputs;
+
+            return Some(*candidate_outpoint);
+        }
+    }
+
+    None
 }
 
 impl Arbitrary for Commitment {
