@@ -13,7 +13,12 @@ use futures::{
     channel::{mpsc, oneshot},
     future, FutureExt, SinkExt, StreamExt,
 };
-use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use tokio::{
+    net::TcpStream,
+    sync::{broadcast, watch},
+    task::JoinError,
+    time::timeout,
+};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
@@ -53,6 +58,7 @@ pub struct Handshake<S> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
+    best_tip_height: watch::Receiver<Option<block::Height>>,
 }
 
 /// The peer address that we are handshaking with.
@@ -302,6 +308,7 @@ pub struct Builder<S> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 impl<S> Builder<S>
@@ -361,6 +368,18 @@ where
         self
     }
 
+    /// Provide a realtime endpoint to obtain the current best chain tip block height. Optional.
+    ///
+    /// If this is unset, the minimum accepted protocol version for peer connections is kept
+    /// constant over network upgrade activations.
+    pub fn with_best_tip_height(
+        mut self,
+        best_tip_height: watch::Receiver<Option<block::Height>>,
+    ) -> Self {
+        self.best_tip_height = Some(best_tip_height);
+        self
+    }
+
     /// Whether to request that peers relay transactions to our node.  Optional.
     ///
     /// If this is unset, the node will not request transactions.
@@ -391,6 +410,10 @@ where
         let user_agent = self.user_agent.unwrap_or_else(|| "".to_string());
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
+        let best_tip_height = self.best_tip_height.unwrap_or_else(|| {
+            let (_sender, receiver) = watch::channel(None);
+            receiver
+        });
 
         Ok(Handshake {
             config,
@@ -402,6 +425,7 @@ where
             our_services,
             relay,
             parent_span: Span::current(),
+            best_tip_height,
         })
     }
 }
@@ -424,6 +448,7 @@ where
             our_services: None,
             relay: None,
             inv_collector: None,
+            best_tip_height: None,
         }
     }
 }
