@@ -30,6 +30,7 @@ use crate::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
+mod best_tip_height;
 mod check;
 mod finalized_state;
 mod non_finalized_state;
