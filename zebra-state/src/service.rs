@@ -188,6 +188,9 @@ impl StateService {
             self.mem.commit_block(prepared, &self.disk)?;
         }
 
+        self.best_tip_height
+            .set_best_non_finalized_height(self.mem.best_tip().map(|(height, _hash)| height));
+
         Ok(())
     }
 
