@@ -10,7 +10,6 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     block,
     fmt::SummaryDebug,
-    orchard,
     parameters::{
         Network,
         NetworkUpgrade::{self, *},
@@ -389,13 +388,7 @@ impl Block {
                 for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
                     let mut transaction = (*transaction).clone();
                     let mut spend_restriction = transaction.coinbase_spend_restriction(*height);
-                    let has_shielded_outputs = transaction.joinsplit_count() > 0
-                        || transaction.sapling_outputs().count() > 0
-                        || (transaction.orchard_actions().count() > 0
-                            && transaction
-                                .orchard_flags()
-                                .unwrap_or_else(orchard::Flags::empty)
-                                .contains(orchard::Flags::ENABLE_OUTPUTS));
+                    let has_shielded_outputs = transaction.has_shielded_outputs();
 
                     let mut new_inputs = Vec::new();
 
@@ -428,18 +421,18 @@ impl Block {
                                 {
                                     selected_outpoint = Some(*candidate_outpoint);
                                     break;
-                                } else {
+                                } else if has_shielded_outputs {
                                     let delete_transparent_outputs =
                                         CoinbaseSpendRestriction::OnlyShieldedOutputs {
                                             spend_height: *height,
                                         };
+
                                     if check_transparent_coinbase_spend(
                                         *candidate_outpoint,
                                         delete_transparent_outputs,
                                         candidate_utxo.clone(),
                                     )
                                     .is_ok()
-                                        && has_shielded_outputs
                                     {
                                         *transaction.outputs_mut() = Vec::new();
                                         spend_restriction = delete_transparent_outputs;
@@ -468,16 +461,7 @@ impl Block {
 
                     // keep transactions with valid input counts
                     // coinbase transactions will never fail this check
-                    // this is the input check from `has_inputs_and_outputs`
-                    if !transaction.inputs().is_empty()
-                        || transaction.joinsplit_count() > 0
-                        || transaction.sapling_spends_per_anchor().count() > 0
-                        || (transaction.orchard_actions().count() > 0
-                            && transaction
-                                .orchard_flags()
-                                .unwrap_or_else(orchard::Flags::empty)
-                                .contains(orchard::Flags::ENABLE_SPENDS))
-                    {
+                    if transaction.has_transparent_or_shielded_inputs() {
                         // skip genesis created UTXOs, just like the state does
                         if block.header.previous_block_hash != GENESIS_PREVIOUS_BLOCK_HASH {
                             // add the created UTXOs
@@ -499,7 +483,9 @@ impl Block {
                 // delete invalid transactions
                 block.transactions = new_transactions;
 
-                // TODO: fixup the history and authorizing data commitments, if needed
+                // TODO: if needed, fixup:
+                // - transaction output counts (currently 0..=16, consensus rules require 1..)
+                // - history and authorizing data commitments
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it

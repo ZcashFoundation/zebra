@@ -155,6 +155,75 @@ impl Transaction {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
 
+    // other properties
+
+    /// Does this transaction have transparent or shielded inputs?
+    ///
+    /// "[Sapling onward] If effectiveVersion < 5, then at least one of tx_in_count,
+    /// nSpendsSapling, and nJoinSplit MUST be nonzero.
+    ///
+    /// [NU5 onward] If effectiveVersion ≥ 5 then this condition MUST hold:
+    /// tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1)."
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    pub fn has_transparent_or_shielded_inputs(&self) -> bool {
+        !self.inputs().is_empty() || self.has_shielded_inputs()
+    }
+
+    /// Does this transaction have shielded inputs?
+    ///
+    /// See [`has_transparent_or_shielded_inputs`] for details.
+    pub fn has_shielded_inputs(&self) -> bool {
+        self.joinsplit_count() > 0
+            || self.sapling_spends_per_anchor().count() > 0
+            || (self.orchard_actions().count() > 0
+                && self
+                    .orchard_flags()
+                    .unwrap_or_else(orchard::Flags::empty)
+                    .contains(orchard::Flags::ENABLE_SPENDS))
+    }
+
+    /// Does this transaction have transparent or shielded outputs?
+    ///
+    /// "[Sapling onward] If effectiveVersion < 5, then at least one of tx_out_count,
+    /// nOutputsSapling, and nJoinSplit MUST be nonzero.
+    ///
+    /// [NU5 onward] If effectiveVersion ≥ 5 then this condition MUST hold:
+    /// tx_out_count > 0 or nOutputsSapling > 0 or (nActionsOrchard > 0 and enableOutputsOrchard = 1)."
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
+        !self.outputs().is_empty() || self.has_shielded_outputs()
+    }
+
+    /// Does this transaction have shielded outputs?
+    ///
+    /// See [`has_transparent_or_shielded_outputs`] for details.
+    pub fn has_shielded_outputs(&self) -> bool {
+        self.joinsplit_count() > 0
+            || self.sapling_outputs().count() > 0
+            || (self.orchard_actions().count() > 0
+                && self
+                    .orchard_flags()
+                    .unwrap_or_else(orchard::Flags::empty)
+                    .contains(orchard::Flags::ENABLE_OUTPUTS))
+    }
+
+    /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
+    /// assuming it is mined at `spend_height`.
+    pub fn coinbase_spend_restriction(
+        &self,
+        spend_height: block::Height,
+    ) -> CoinbaseSpendRestriction {
+        if self.outputs().is_empty() {
+            // we know this transaction must have shielded outputs,
+            // because of other consensus rules
+            OnlyShieldedOutputs { spend_height }
+        } else {
+            SomeTransparentOutputs
+        }
+    }
+
     // header
 
     /// Return if the `fOverwintered` flag of this transaction is set.
@@ -295,19 +364,6 @@ impl Transaction {
         self.inputs()
             .iter()
             .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
-    }
-
-    /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
-    /// assuming it is mined at `spend_height`.
-    pub fn coinbase_spend_restriction(
-        &self,
-        spend_height: block::Height,
-    ) -> CoinbaseSpendRestriction {
-        if self.outputs().is_empty() {
-            OnlyShieldedOutputs { spend_height }
-        } else {
-            SomeTransparentOutputs
-        }
     }
 
     // sprout
