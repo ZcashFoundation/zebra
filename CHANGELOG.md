@@ -23,23 +23,20 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 
 #### Testing
 
-- Run `rustfmt` inside nullifier and utxo property tests (#2515)
 - Test consensus-critical Amount deserialization (#2487)
 - Add more details to test coverage increase entry (#2499)
 - Update to use new GitHub action names in Google Cloud workflows (#2533)
 
 ### Changed
 
-- Decrease number of tests in finalized state (#2521)
-- Make nullifier tests faster and consistent with UTXO tests (#2513)
-- Rename the nullifier test module (#2504)
+- Decrease the number of randomised test cases in zebra-state (#2521, #2513)
+- Make nullifier tests consistent with UTXO tests (#2513)
 
 ### Fixed
 
-- Clarify indexes in new_ordered_outputs (#2510)
+- Clarify a variable name and check for overflow in new_ordered_outputs (#2510)
 - Reject duplicate Sapling and Orchard nullifiers (#2497)
-- Orchard implementation: fixes, refactor, and more test vectors (#2445)
-- clippy: remove a needless borrow (#2501)
+- Update Orchard keys, hashes, and note commitments to match Zcash test vectors (#2445)
 
 ## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - 2021-07-15
 
