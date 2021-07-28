@@ -451,6 +451,7 @@ where
 ///
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
+#[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version(
     peer_conn: &mut Framed<TcpStream, Codec>,
     connected_addr: &ConnectedAddr,
@@ -459,6 +460,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
+    best_tip_height: watch::Receiver<block::Height>,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -635,6 +637,7 @@ where
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
+        let best_tip_height = self.best_tip_height.clone();
 
         let fut = async move {
             debug!(
@@ -665,6 +668,7 @@ where
                     user_agent,
                     our_services,
                     relay,
+                    best_tip_height,
                 ),
             )
             .await??;
