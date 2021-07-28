@@ -9,7 +9,7 @@ use std::{
 use check::difficulty::POW_MEDIAN_BLOCK_SPAN;
 use futures::future::FutureExt;
 use non_finalized_state::{NonFinalizedState, QueuedBlocks};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 #[cfg(any(test, feature = "proptest-impl"))]
 use tower::buffer::Buffer;
 use tower::{util::BoxService, Service};
@@ -72,8 +72,8 @@ pub(crate) struct StateService {
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub fn new(config: Config, network: Network) -> Self {
-        let (best_tip_height, _best_tip_height_receiver) = BestTipHeight::new();
+    pub fn new(config: Config, network: Network) -> (Self, watch::Receiver<Option<block::Height>>) {
+        let (best_tip_height, best_tip_height_receiver) = BestTipHeight::new();
         let disk = FinalizedState::new(&config, network);
 
         let mem = NonFinalizedState::new(network);
@@ -114,7 +114,7 @@ impl StateService {
         }
         tracing::info!("no legacy chain found");
 
-        state
+        (state, best_tip_height_receiver)
     }
 
     /// Queue a non finalized block for verification and check if any queued
@@ -754,8 +754,16 @@ impl Service<Request> for StateService {
 /// possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
-pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
-    BoxService::new(StateService::new(config, network))
+pub fn init(
+    config: Config,
+    network: Network,
+) -> (
+    BoxService<Request, Response, BoxError>,
+    watch::Receiver<Option<block::Height>>,
+) {
+    let (state_service, best_tip_height) = StateService::new(config, network);
+
+    (BoxService::new(state_service), best_tip_height)
 }
 
 /// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.
@@ -763,7 +771,7 @@ pub fn init(config: Config, network: Network) -> BoxService<Request, Response, B
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let state_service = StateService::new(Config::ephemeral(), network);
+    let (state_service, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
 }
