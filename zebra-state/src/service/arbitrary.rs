@@ -8,7 +8,7 @@ use proptest::{
 };
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::{self, Block, Height},
     fmt::SummaryDebug,
     parameters::{Network::*, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
