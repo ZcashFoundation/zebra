@@ -1,6 +1,8 @@
 //! History tree (Merkle mountain range) structure that contains information about
 //! the block history as specified in ZIP-221.
 
+mod tests;
+
 use std::{
     collections::{BTreeMap, HashSet},
     io,
