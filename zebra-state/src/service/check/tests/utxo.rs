@@ -1,26 +1,93 @@
-//! Randomised property tests for UTXO contextual validation
+//! Test vectors and randomised property tests for UTXO contextual validation
 
 use std::{convert::TryInto, env, sync::Arc};
 
 use proptest::prelude::*;
 
 use zebra_chain::{
+    amount::Amount,
     block::{Block, Height},
     fmt::TypeNameToDebug,
     serialization::ZcashDeserializeInto,
-    transaction::{LockTime, Transaction},
+    transaction::{self, LockTime, Transaction},
     transparent,
 };
 
 use crate::{
     arbitrary::Prepare,
+    constants::MIN_TRANSPARENT_COINBASE_MATURITY,
+    service::check,
     service::StateService,
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
-        DuplicateTransparentSpend, EarlyTransparentSpend, MissingTransparentOutput,
+        DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
+        MissingTransparentOutput, UnshieldedTransparentCoinbaseSpend,
     },
 };
+
+/// Check that non-shielded spends of coinbase transparent outputs fail.
+#[test]
+fn reject_unshielded_coinbase_utxo_spend() {
+    zebra_test::init();
+
+    let created_height = Height(1);
+    let outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0u8; 32]),
+        index: 0,
+    };
+    let output = transparent::Output {
+        value: Amount::zero(),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let utxo = transparent::Utxo {
+        output,
+        height: created_height,
+        from_coinbase: true,
+    };
+
+    let spend_restriction = transparent::CoinbaseSpendRestriction::SomeTransparentOutputs;
+
+    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo);
+    assert_eq!(result, Err(UnshieldedTransparentCoinbaseSpend { outpoint }))
+}
+
+/// Check that early spends of coinbase transparent outputs fail.
+#[test]
+fn reject_immature_coinbase_utxo_spend() {
+    zebra_test::init();
+
+    let created_height = Height(1);
+    let outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0u8; 32]),
+        index: 0,
+    };
+    let output = transparent::Output {
+        value: Amount::zero(),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let utxo = transparent::Utxo {
+        output,
+        height: created_height,
+        from_coinbase: true,
+    };
+
+    let min_spend_height = Height(created_height.0 + MIN_TRANSPARENT_COINBASE_MATURITY);
+    let spend_height = Height(min_spend_height.0 - 1);
+    let spend_restriction =
+        transparent::CoinbaseSpendRestriction::OnlyShieldedOutputs { spend_height };
+
+    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo);
+    assert_eq!(
+        result,
+        Err(ImmatureTransparentCoinbaseSpend {
+            outpoint,
+            spend_height,
+            min_spend_height,
+            created_height
+        })
+    )
+}
 
 // These tests use the `Arbitrary` trait to easily generate complex types,
 // then modify those types to cause an error (or to ensure success).
