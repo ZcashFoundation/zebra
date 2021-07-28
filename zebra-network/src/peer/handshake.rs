@@ -467,7 +467,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-    best_tip_height: watch::Receiver<block::Height>,
+    best_tip_height: watch::Receiver<Option<block::Height>>,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -579,17 +579,9 @@ pub async fn negotiate_version(
         Err(HandshakeError::NonceReuse)?;
     }
 
-    // TODO: Reject connections with nodes that don't know about the current network upgrade (#1334)
-    //       Use the latest non-finalized block height, rather than the minimum
-    if remote_version
-        < Version::min_remote_for_height(
-            config.network,
-            // This code will be replaced in #1334
-            constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-                .activation_height(config.network)
-                .expect("minimum network protocol network upgrade has an activation height"),
-        )
-    {
+    let height = best_tip_height.borrow().unwrap_or(block::Height(0));
+    let min_version = Version::min_remote_for_height(config.network, height);
+    if remote_version < min_version {
         // Disconnect if peer is using an obsolete version.
         Err(HandshakeError::ObsoleteVersion(remote_version))?;
     }
