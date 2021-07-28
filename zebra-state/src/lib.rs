@@ -17,6 +17,8 @@
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 mod config;
 pub mod constants;
 mod error;
