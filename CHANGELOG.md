@@ -17,6 +17,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Pass the finalized state to chain contextual validation (#2503)
 - Calculate incremental note commitment trees (#2407)
 - Reject duplicate Sapling and Orchard nullifiers (#2497)
+- Add `proptest-impl` feature to `zebra-state` crate to help simplify tests(#2529)
 
 #### Documentation
 
