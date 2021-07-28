@@ -42,8 +42,8 @@ fn push_and_prune_for_network_upgrade(
     };
     let height = network_upgrade.activation_height(network).unwrap().0;
 
-    // Load Block 0 (activation block of the given network upgrade)
-    let block0 = Arc::new(
+    // Load first block (activation block of the given network upgrade)
+    let first_block = Arc::new(
         blocks
             .get(&height)
             .expect("test vector exists")
@@ -52,28 +52,33 @@ fn push_and_prune_for_network_upgrade(
     );
 
     // Check its commitment
-    let commitment0 = block0.commitment(network)?;
+    let first_commitment = first_block.commitment(network)?;
     if network_upgrade == NetworkUpgrade::Heartwood {
         // Heartwood is the only upgrade that has a reserved value.
         // (For other upgrades we could compare with the expected commitment,
         // but we haven't calculated them.)
-        assert_eq!(commitment0, ChainHistoryActivationReserved);
+        assert_eq!(first_commitment, ChainHistoryActivationReserved);
     }
 
-    // Build initial history tree tree with only Block 0
-    let sapling_root0 =
+    // Build initial history tree tree with only the first block
+    let first_sapling_root =
         sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
-    let mut tree = HistoryTree::from_block(network, block0, &sapling_root0, &Default::default())?;
+    let mut tree = HistoryTree::from_block(
+        network,
+        first_block,
+        &first_sapling_root,
+        &Default::default(),
+    )?;
 
     assert_eq!(tree.size(), 1);
     assert_eq!(tree.peaks().len(), 1);
     assert_eq!(tree.current_height().0, height);
 
     // Compute root hash of the history tree, which will be included in the next block
-    let hash0 = tree.hash();
+    let first_root = tree.hash();
 
-    // Load Block 1 (activation + 1)
-    let block1 = Arc::new(
+    // Load second block (activation + 1)
+    let second_block = Arc::new(
         blocks
             .get(&(height + 1))
             .expect("test vector exists")
@@ -82,16 +87,16 @@ fn push_and_prune_for_network_upgrade(
     );
 
     // Check its commitment
-    let commitment1 = block1.commitment(network)?;
-    assert_eq!(commitment1, Commitment::ChainHistoryRoot(hash0));
+    let second_commitment = second_block.commitment(network)?;
+    assert_eq!(second_commitment, Commitment::ChainHistoryRoot(first_root));
 
-    // Append Block to history tree
-    let sapling_root1 = sapling::tree::Root(
+    // Append second block to history tree
+    let second_sapling_root = sapling::tree::Root(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
     );
-    tree.push(block1, &sapling_root1, &Default::default())
+    tree.push(second_block, &second_sapling_root, &Default::default())
         .unwrap();
 
     // Adding a second block will produce a 3-node tree (one parent and two leafs).
@@ -121,7 +126,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     };
     let height = network_upgrade.activation_height(network).unwrap().0;
 
-    // Load Block -1 (the block before the activation block of the given network upgrade)
+    // Load previous block (the block before the activation block of the given network upgrade)
     let block_prev = Arc::new(
         blocks
             .get(&(height - 1))
@@ -130,7 +135,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
             .expect("block is structurally valid"),
     );
 
-    // Build a history tree with only Block "-1" (activation height - 1)
+    // Build a history tree with only the previous block (activation height - 1)
     // This tree will not match the actual tree (which has all the blocks since the previous
     // network upgrade), so we won't be able to check if its root is correct.
     let sapling_root_prev =
@@ -142,8 +147,8 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     assert_eq!(tree.peaks().len(), 1);
     assert_eq!(tree.current_height().0, height - 1);
 
-    // Load Block 0 (activation height + 0)
-    let block0 = Arc::new(
+    // Load block of the activation height
+    let activation_block = Arc::new(
         blocks
             .get(&height)
             .expect("test vector exists")
@@ -151,15 +156,19 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
             .expect("block is structurally valid"),
     );
 
-    // Append Block to history tree. This must trigger a upgrade of the tree,
+    // Append block to history tree. This must trigger a upgrade of the tree,
     // which should be recreated.
-    let sapling_root0 = sapling::tree::Root(
+    let activation_sapling_root = sapling::tree::Root(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
     );
-    tree.push(block0, &sapling_root0, &Default::default())
-        .unwrap();
+    tree.push(
+        activation_block,
+        &activation_sapling_root,
+        &Default::default(),
+    )
+    .unwrap();
 
     // Check if the tree has a single node, i.e. it has been recreated.
     assert_eq!(tree.size(), 1);
