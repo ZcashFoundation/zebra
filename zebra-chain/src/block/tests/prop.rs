@@ -12,7 +12,9 @@ use crate::{
 };
 
 use super::super::{
-    arbitrary::allow_all_transparent_coinbase_spends, serialize::MAX_BLOCK_BYTES, *,
+    arbitrary::{allow_all_transparent_coinbase_spends, PREVOUTS_CHAIN_HEIGHT},
+    serialize::MAX_BLOCK_BYTES,
+    *,
 };
 
 const DEFAULT_BLOCK_ROUNDTRIP_PROPTEST_CASES: u32 = 16;
@@ -159,10 +161,12 @@ fn block_genesis_strategy() -> Result<()> {
     Ok(())
 }
 
-/// Make sure our partial chain strategy generates a chain with the correct coinbase
-/// heights and previous block hashes.
+/// Make sure our genesis partial chain strategy generates a chain with:
+/// - correct coinbase heights
+/// - correct previous block hashes
+/// - no transparent spends in the genesis block, because genesis transparent outputs are ignored
 #[test]
-fn partial_chain_strategy() -> Result<()> {
+fn genesis_partial_chain_strategy() -> Result<()> {
     zebra_test::init();
 
     let strategy = LedgerState::genesis_strategy(None, None, false).prop_flat_map(|init| {
@@ -176,9 +180,27 @@ fn partial_chain_strategy() -> Result<()> {
     proptest!(|(chain in strategy)| {
         let mut height = Height(0);
         let mut previous_block_hash = GENESIS_PREVIOUS_BLOCK_HASH;
+
         for block in chain {
             prop_assert_eq!(block.coinbase_height(), Some(height));
             prop_assert_eq!(block.header.previous_block_hash, previous_block_hash);
+
+            // block 1 can have spends of transparent outputs
+            // of previous transactions in the same block
+            if height == Height(0) {
+                prop_assert_eq!(
+                    block
+                        .transactions
+                        .iter()
+                        .flat_map(|t| t.inputs())
+                        .filter_map(|i| i.outpoint())
+                        .count(),
+                    0,
+                    "unexpected transparent prevout inputs at height {:?}: genesis transparent outputs are ignored",
+                    height,
+                );
+            }
+
             height = Height(height.0 + 1);
             previous_block_hash = block.hash();
         }
@@ -187,8 +209,10 @@ fn partial_chain_strategy() -> Result<()> {
     Ok(())
 }
 
-/// Make sure our block height strategy generates a chain with the correct coinbase
-/// heights and hashes.
+/// Make sure our block height strategy generates a chain with:
+/// - correct coinbase heights
+/// - correct previous block hashes
+/// - at least one transparent PrevOut input in the entire chain
 #[test]
 fn arbitrary_height_partial_chain_strategy() -> Result<()> {
     zebra_test::init();
@@ -198,7 +222,7 @@ fn arbitrary_height_partial_chain_strategy() -> Result<()> {
         .prop_flat_map(|init| {
             Block::partial_chain_strategy(
                 init,
-                MAX_ARBITRARY_ITEMS,
+                PREVOUTS_CHAIN_HEIGHT,
                 allow_all_transparent_coinbase_spends,
             )
         });
@@ -206,6 +230,8 @@ fn arbitrary_height_partial_chain_strategy() -> Result<()> {
     proptest!(|(chain in strategy)| {
         let mut height = None;
         let mut previous_block_hash = None;
+        let mut has_prevouts = false;
+
         for block in chain {
             if height.is_none() {
                 prop_assert!(block.coinbase_height().is_some());
@@ -215,8 +241,19 @@ fn arbitrary_height_partial_chain_strategy() -> Result<()> {
                 prop_assert_eq!(block.coinbase_height(), height);
                 prop_assert_eq!(Some(block.header.previous_block_hash), previous_block_hash);
             }
+
+            has_prevouts |= block
+                .transactions
+                .iter()
+                .flat_map(|t| t.inputs())
+                .find_map(|i| i.outpoint())
+                .is_some();
+
             previous_block_hash = Some(block.hash());
         }
+
+        // this assertion checks that we're covering transparent spends
+        prop_assert!(has_prevouts, "unexpected missing prevouts in entire chain");
     });
 
     Ok(())

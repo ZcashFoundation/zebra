@@ -21,6 +21,23 @@ use crate::{
 
 use super::*;
 
+/// The chain height used to test for prevout inputs.
+///
+/// This impacts the probability of `has_prevouts` failures in
+/// `arbitrary_height_partial_chain_strategy`.
+///
+/// The failure probability calculation is:
+/// ```text
+/// shielded_input = shielded_pool_count / pool_count
+/// expected_transactions = expected_inputs = MAX_ARBITRARY_ITEMS/2
+/// proptest_cases = 256
+/// shielded_input^(expected_transactions * expected_inputs * PREVOUTS_CHAIN_HEIGHT) * proptest_cases
+/// ```
+///
+/// `PREVOUTS_CHAIN_HEIGHT` should be increased, and `proptest_cases` should be reduced,
+/// so that the failure probability is less than 1 in 1 million.
+pub const PREVOUTS_CHAIN_HEIGHT: usize = 20;
+
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 /// The configuration data for proptest when generating arbitrary chains
