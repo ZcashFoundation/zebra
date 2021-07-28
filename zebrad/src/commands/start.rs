@@ -49,10 +49,8 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let state = ServiceBuilder::new().buffer(20).service(zebra_state::init(
-            config.state.clone(),
-            config.network.network,
-        ));
+        let (state_service, _) = zebra_state::init(config.state.clone(), config.network.network);
+        let state = ServiceBuilder::new().buffer(20).service(state_service);
 
         info!("initializing verifiers");
         let verifier = zebra_consensus::chain::init(
