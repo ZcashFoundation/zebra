@@ -10,7 +10,7 @@ mod serialize;
 pub mod merkle;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
+pub mod arbitrary;
 #[cfg(any(test, feature = "bench"))]
 pub mod tests;
 

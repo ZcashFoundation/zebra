@@ -1,3 +1,5 @@
+//! Randomised property testing for [`Block`]s
+
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
@@ -331,7 +333,7 @@ impl Arbitrary for Block {
 }
 
 /// Skip checking transparent coinbase spends in [`Block::partial_chain_strategy`].
-#[allow(dead_code)]
+#[allow(clippy::result_unit_err)]
 pub fn allow_all_transparent_coinbase_spends(
     _: transparent::OutPoint,
     _: transparent::CoinbaseSpendRestriction,
