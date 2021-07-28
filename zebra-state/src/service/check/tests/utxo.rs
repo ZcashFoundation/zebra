@@ -13,11 +13,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{
-        arbitrary::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-        StateService,
-    },
-    tests::Prepare,
+    arbitrary::Prepare,
+    service::StateService,
+    tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
         DuplicateTransparentSpend, EarlyTransparentSpend, MissingTransparentOutput,

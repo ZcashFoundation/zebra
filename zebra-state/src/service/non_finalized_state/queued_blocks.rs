@@ -164,7 +164,7 @@ mod tests {
     use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
     use zebra_test::prelude::*;
 
-    use crate::tests::{FakeChainHelper, Prepare};
+    use crate::{arbitrary::Prepare, tests::FakeChainHelper};
 
     use self::assert_eq;
     use super::*;
