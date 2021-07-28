@@ -161,16 +161,6 @@ where
 
             if tx.is_coinbase() {
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-            } else {
-                // check the value pool for non-coinbase transactions
-                let value_balance = tx.value_balance(&req.known_utxos());
-                match value_balance {
-                    Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(_) => Ok(()),
-                        Err(_) => Err(TransactionError::InvalidRemainingTransparentValue),
-                    },
-                    Err(_) => Err(TransactionError::InvalidRemainingTransparentValue),
-                }?;
             }
 
             // [Canopy onward]: `vpub_old` MUST be zero.

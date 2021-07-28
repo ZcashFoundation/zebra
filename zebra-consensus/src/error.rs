@@ -87,9 +87,6 @@ pub enum TransactionError {
 
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,
-
-    #[error("remaining value in the transparent transaction value pool MUST be nonnegative")]
-    InvalidRemainingTransparentValue,
 }
 
 impl From<BoxError> for TransactionError {
