@@ -176,7 +176,7 @@ fn state_behaves_when_blocks_are_committed_in_order() -> Result<()> {
 }
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 2;
-const BLOCKS_AFTER_NU5: u32 = 101;
+const BLOCKS_AFTER_NU5: u32 = arbitrary::MAX_PARTIAL_CHAIN_BLOCKS as u32;
 
 proptest! {
     #![proptest_config(

@@ -15,11 +15,15 @@ use zebra_chain::{
     LedgerState,
 };
 
-use crate::{service::check, tests::Prepare};
+use crate::{constants, service::check, tests::Prepare};
 
 use super::*;
 
-const MAX_PARTIAL_CHAIN_BLOCKS: usize = 102;
+/// The minimum height required for reliable non-finalized state property tests.
+///
+/// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
+pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
+    constants::MIN_TRANSPARENT_COINBASE_MATURITY as usize + block::arbitrary::PREVOUTS_CHAIN_HEIGHT;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
