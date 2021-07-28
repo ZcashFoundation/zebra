@@ -231,75 +231,6 @@ impl<V: Version> Tree<V> {
     }
 }
 
-// Extract all data required to build a history node.
-//
-// Returns:
-//
-// - a NodeData used for V1 nodes
-// - the number of Orchard trasactions in the block (required for V2 nodes);
-//   or 0 if pre-Orchard.
-fn block_to_history_node(
-    block: Arc<Block>,
-    network: Network,
-    sapling_root: &sapling::tree::Root,
-) -> (zcash_history::NodeData, u64) {
-    let height = block
-        .coinbase_height()
-        .expect("block must have coinbase height during contextual verification");
-    let network_upgrade = NetworkUpgrade::current(network, height);
-    let branch_id = network_upgrade
-        .branch_id()
-        .expect("must have branch ID for chain history network upgrades");
-    let block_hash = block.hash().0;
-    let time: u32 = block
-        .header
-        .time
-        .timestamp()
-        .try_into()
-        .expect("deserialized and generated timestamps are u32 values");
-    let target = block.header.difficulty_threshold.0;
-    let sapling_root: [u8; 32] = sapling_root.into();
-    let work = block
-        .header
-        .difficulty_threshold
-        .to_work()
-        .expect("work must be valid during contextual verification");
-    // There is no direct `std::primitive::u128` to `bigint::U256` conversion
-    let work = bigint::U256::from_big_endian(&work.as_u128().to_be_bytes());
-
-    let sapling_tx_count = count_sapling_transactions(block.clone());
-    let orchard_tx_count = count_orchard_transactions(block);
-
-    match network_upgrade {
-        NetworkUpgrade::Genesis
-        | NetworkUpgrade::BeforeOverwinter
-        | NetworkUpgrade::Overwinter
-        | NetworkUpgrade::Sapling
-        | NetworkUpgrade::Blossom => {
-            panic!("HistoryTree does not exist for pre-Heartwood upgrades")
-        }
-        // Nu5 is included because this function is called by the V2 implementation
-        // since the V1::NodeData is included inside the V2::NodeData.
-        NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy | NetworkUpgrade::Nu5 => (
-            zcash_history::NodeData {
-                consensus_branch_id: branch_id.into(),
-                subtree_commitment: block_hash,
-                start_time: time,
-                end_time: time,
-                start_target: target,
-                end_target: target,
-                start_sapling_root: sapling_root,
-                end_sapling_root: sapling_root,
-                subtree_total_work: work,
-                start_height: height.0 as u64,
-                end_height: height.0 as u64,
-                sapling_tx: sapling_tx_count,
-            },
-            orchard_tx_count,
-        ),
-    }
-}
-
 impl Version for zcash_history::V1 {
     /// Convert a Block into a V1::NodeData used in the MMR tree.
     ///
@@ -311,8 +242,59 @@ impl Version for zcash_history::V1 {
         sapling_root: &sapling::tree::Root,
         _orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData {
-        let (node_data, _) = block_to_history_node(block, network, sapling_root);
-        node_data
+        let height = block
+            .coinbase_height()
+            .expect("block must have coinbase height during contextual verification");
+        let network_upgrade = NetworkUpgrade::current(network, height);
+        let branch_id = network_upgrade
+            .branch_id()
+            .expect("must have branch ID for chain history network upgrades");
+        let block_hash = block.hash().0;
+        let time: u32 = block
+            .header
+            .time
+            .timestamp()
+            .try_into()
+            .expect("deserialized and generated timestamps are u32 values");
+        let target = block.header.difficulty_threshold.0;
+        let sapling_root: [u8; 32] = sapling_root.into();
+        let work = block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("work must be valid during contextual verification");
+        // There is no direct `std::primitive::u128` to `bigint::U256` conversion
+        let work = bigint::U256::from_big_endian(&work.as_u128().to_be_bytes());
+
+        let sapling_tx_count = block.sapling_transactions_count();
+
+        match network_upgrade {
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom => {
+                panic!("HistoryTree does not exist for pre-Heartwood upgrades")
+            }
+            // Nu5 is included because this function is called by the V2 implementation
+            // since the V1::NodeData is included inside the V2::NodeData.
+            NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy | NetworkUpgrade::Nu5 => {
+                zcash_history::NodeData {
+                    consensus_branch_id: branch_id.into(),
+                    subtree_commitment: block_hash,
+                    start_time: time,
+                    end_time: time,
+                    start_target: target,
+                    end_target: target,
+                    start_sapling_root: sapling_root,
+                    end_sapling_root: sapling_root,
+                    subtree_total_work: work,
+                    start_height: height.0 as u64,
+                    end_height: height.0 as u64,
+                    sapling_tx: sapling_tx_count,
+                }
+            }
+        }
     }
 }
 
@@ -327,7 +309,8 @@ impl Version for V2 {
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData {
-        let (node_data_v1, orchard_tx_count) = block_to_history_node(block, network, sapling_root);
+        let orchard_tx_count = block.orchard_transactions_count();
+        let node_data_v1 = V1::block_to_history_node(block, network, sapling_root, orchard_root);
         let orchard_root: [u8; 32] = orchard_root.into();
         Self::NodeData {
             v1: node_data_v1,
@@ -336,30 +319,4 @@ impl Version for V2 {
             orchard_tx: orchard_tx_count,
         }
     }
-}
-
-/// Count how many Sapling transactions exist in a block,
-/// i.e. transactions "where either of vSpendsSapling or vOutputsSapling is non-empty"
-/// (https://zips.z.cash/zip-0221#tree-node-specification).
-fn count_sapling_transactions(block: Arc<Block>) -> u64 {
-    block
-        .transactions
-        .iter()
-        .filter(|tx| tx.has_sapling_shielded_data())
-        .count()
-        .try_into()
-        .expect("number of transactions must fit u64")
-}
-
-/// Count how many Orchard transactions exist in a block,
-/// i.e. transactions "where vActionsOrchard is non-empty."
-/// (https://zips.z.cash/zip-0221#tree-node-specification).
-fn count_orchard_transactions(block: Arc<Block>) -> u64 {
-    block
-        .transactions
-        .iter()
-        .filter(|tx| tx.has_orchard_shielded_data())
-        .count()
-        .try_into()
-        .expect("number of transactions must fit u64")
 }

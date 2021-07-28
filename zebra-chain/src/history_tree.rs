@@ -59,7 +59,7 @@ pub struct HistoryTree {
 impl HistoryTree {
     /// Recreate a HistoryTree from previously saved data.
     ///
-    /// The parameters must com from the values of [HistoryTree::size],
+    /// The parameters must come from the values of [HistoryTree::size],
     /// [HistoryTree::peaks] and [HistoryTree::current_height] of a HistoryTree.
     pub fn from_cache(
         network: Network,
@@ -185,6 +185,7 @@ impl HistoryTree {
             // This is the activation block of a network upgrade.
             // Create a new tree.
             let new_tree = Self::from_block(self.network, block, sapling_root, orchard_root)?;
+            // Replaces self with the new tree
             *self = new_tree;
             assert_eq!(self.network_upgrade, network_upgrade);
             return Ok(());
