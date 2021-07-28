@@ -167,10 +167,13 @@ impl StateService {
                 .expect("expected that disk errors would not occur");
         }
 
-        self.queued_blocks
-            .prune_by_height(self.disk.finalized_tip_height().expect(
+        let finalized_tip_height = self.disk.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
-        ));
+        );
+
+        self.queued_blocks.prune_by_height(finalized_tip_height);
+        self.best_tip_height
+            .set_finalized_height(finalized_tip_height);
 
         tracing::trace!("finished processing queued block");
         rsp_rx
