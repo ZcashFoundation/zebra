@@ -69,48 +69,48 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
         .unwrap()
         .0;
 
-    // Load Block 0 (activation block of the given network upgrade)
-    let block0 = Arc::new(
+    // Build empty note commitment tree
+    let mut tree = sapling::tree::NoteCommitmentTree::default();
+
+    // Load first block (activation block of the given network upgrade)
+    let first_block = Arc::new(
         blocks
             .get(&height)
             .expect("test vector exists")
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid"),
     );
-    // Build initial MMR tree with only Block 0
-    let sapling_root0 =
-        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
 
-    let mut tree = sapling::tree::NoteCommitmentTree::default();
-
-    // Add note commitments in Block 0 to the tree
-    for transaction in block0.transactions.iter() {
+    // Add note commitments in the first block to the tree
+    for transaction in first_block.transactions.iter() {
         for sapling_note_commitment in transaction.sapling_note_commitments() {
             tree.append(*sapling_note_commitment)
                 .expect("test vector is correct");
         }
     }
 
-    // Check if root is correct
-    assert_eq!(sapling_root0, tree.root());
+    // Check if root of the first block is correct
+    let first_sapling_root =
+        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+    assert_eq!(first_sapling_root, tree.root());
 
-    // Load Block 1 (activation + 1)
-    let block1 = Arc::new(
+    // Load second block (activation + 1)
+    let second_block = Arc::new(
         blocks
             .get(&(height + 1))
             .expect("test vector exists")
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid"),
     );
-    let sapling_root1 = sapling::tree::Root(
+    let second_sapling_root = sapling::tree::Root(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
     );
 
-    // Add note commitments in Block 1 to the tree
+    // Add note commitments in second block to the tree
     let mut appended_count = 0;
-    for transaction in block1.transactions.iter() {
+    for transaction in second_block.transactions.iter() {
         for sapling_note_commitment in transaction.sapling_note_commitments() {
             tree.append(*sapling_note_commitment)
                 .expect("test vector is correct");
@@ -126,8 +126,8 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
         assert!(appended_count > 1);
     }
 
-    // Check if root is correct
-    assert_eq!(sapling_root1, tree.root());
+    // Check if root of the second block is correct
+    assert_eq!(second_sapling_root, tree.root());
 
     Ok(())
 }
