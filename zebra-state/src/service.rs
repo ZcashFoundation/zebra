@@ -23,6 +23,7 @@ use zebra_chain::{
     transparent,
 };
 
+use self::best_tip_height::BestTipHeight;
 use crate::{
     constants, request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config,
     FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
@@ -64,12 +65,15 @@ pub(crate) struct StateService {
     network: Network,
     /// Instant tracking the last time `pending_utxos` was pruned
     last_prune: Instant,
+    /// The current best chain tip height.
+    best_tip_height: BestTipHeight,
 }
 
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> Self {
+        let (best_tip_height, _best_tip_height_receiver) = BestTipHeight::new();
         let disk = FinalizedState::new(&config, network);
 
         let mem = NonFinalizedState::new(network);
@@ -83,6 +87,7 @@ impl StateService {
             pending_utxos,
             network,
             last_prune: Instant::now(),
+            best_tip_height,
         };
 
         tracing::info!("starting legacy chain check");
