@@ -46,9 +46,9 @@ pub type QueuedFinalized = (
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
-struct StateService {
+pub(crate) struct StateService {
     /// Holds data relating to finalized chain state.
-    disk: FinalizedState,
+    pub(crate) disk: FinalizedState,
     /// Holds data relating to non-finalized chain state.
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
@@ -500,7 +500,7 @@ impl StateService {
     }
 }
 
-struct Iter<'a> {
+pub(crate) struct Iter<'a> {
     service: &'a StateService,
     state: IterState,
 }
