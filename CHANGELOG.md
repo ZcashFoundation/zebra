@@ -16,6 +16,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Add an OrderedUtxo type for transparent spend validation (#2502)
 - Pass the finalized state to chain contextual validation (#2503)
 - Calculate incremental note commitment trees (#2407)
+- Reject duplicate Sapling and Orchard nullifiers (#2497)
 
 #### Documentation
 
@@ -34,7 +35,6 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 ### Fixed
 
 - Clarify a variable name and check for overflow in new_ordered_outputs (#2510)
-- Reject duplicate Sapling and Orchard nullifiers (#2497)
 - Update Orchard keys, hashes, and note commitments to match Zcash test vectors (#2445)
 
 ## [Zebra 1.0.0-alpha.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.13) - 2021-07-15
