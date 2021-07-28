@@ -8,11 +8,13 @@ use std::{
 
 use futures::future::{FutureExt, TryFutureExt};
 
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::watch};
 use tower::{
     util::{BoxService, Oneshot},
     Service,
 };
+
+use zebra_chain::block;
 
 use crate::{peer, BoxError, Config, Request, Response};
 use peer::ConnectedAddr;
@@ -49,12 +51,14 @@ pub fn connect_isolated(
         Box<dyn std::error::Error + Send + Sync + 'static>,
     >,
 > {
+    let (_, best_tip_height) = watch::channel(block::Height(0));
     let handshake = peer::Handshake::builder()
         .with_config(Config::default())
         .with_inbound_service(tower::service_fn(|_req| async move {
             Ok::<Response, Box<dyn std::error::Error + Send + Sync + 'static>>(Response::Nil)
         }))
         .with_user_agent(user_agent)
+        .with_best_tip_height(best_tip_height)
         .finish()
         .expect("provided mandatory builder parameters");
 
