@@ -9,7 +9,13 @@ mod utxo;
 
 pub use address::Address;
 pub use script::Script;
-pub use utxo::{new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, OrderedUtxo, Utxo};
+pub use utxo::{
+    new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, CoinbaseSpendRestriction,
+    OrderedUtxo, Utxo,
+};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub(crate) use utxo::new_transaction_ordered_outputs;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -20,9 +26,11 @@ mod arbitrary;
 mod prop;
 
 use crate::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block, transaction,
 };
+
+use std::collections::HashMap;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -132,6 +140,25 @@ impl Input {
             unreachable!("unexpected variant: Coinbase Inputs do not have OutPoints");
         }
     }
+
+    /// Get the value spent by this input.
+    /// This amount is added to the transaction value pool by this input.
+    ///
+    /// # Panics
+    ///
+    /// If the provided Utxos don't have the transaction outpoint.
+    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NegativeAllowed> {
+        match self {
+            Input::PrevOut { outpoint, .. } => utxos
+                .get(outpoint)
+                .expect("Provided Utxos don't have transaction Outpoint")
+                .output
+                .value
+                .constrain()
+                .expect("conversion from NonNegative to NegativeAllowed is always valid"),
+            Input::Coinbase { .. } => Amount::zero(),
+        }
+    }
 }
 
 /// A transparent output from a transaction.
@@ -155,4 +182,14 @@ pub struct Output {
 
     /// The lock script defines the conditions under which this output can be spent.
     pub lock_script: Script,
+}
+
+impl Output {
+    /// Get the value contained in this output.
+    /// This amount is subtracted from the transaction value pool by this output.
+    pub fn value(&self) -> Amount<NegativeAllowed> {
+        self.value
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid")
+    }
 }

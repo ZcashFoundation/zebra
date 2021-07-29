@@ -301,6 +301,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2132,6 +2141,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "multiset"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce8738c9ddd350996cb8b8b718192851df960803764bcdaa3afb44a63b1ddb5c"
+
+[[package]]
 name = "net2"
 version = "0.2.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3746,7 +3761,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -3766,7 +3781,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "futures-core",
  "pin-project 0.4.28",
@@ -4482,7 +4497,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 dependencies = [
  "aes",
  "bech32",
@@ -4537,7 +4552,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4573,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4608,7 +4623,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4621,17 +4636,21 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 dependencies = [
+ "bincode",
  "chrono",
  "color-eyre",
  "dirs",
  "displaydoc",
  "futures 0.3.15",
+ "halo2",
  "hex",
  "itertools 0.10.1",
+ "jubjub",
  "lazy_static",
  "metrics",
+ "multiset",
  "once_cell",
  "proptest",
  "proptest-derive",
@@ -4651,7 +4670,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-alpha.12"
+version = "1.0.0-alpha.13"
 dependencies = [
  "color-eyre",
  "futures 0.3.15",
@@ -4675,7 +4694,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4690,7 +4709,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 dependencies = [
  "abscissa_core",
  "atty",

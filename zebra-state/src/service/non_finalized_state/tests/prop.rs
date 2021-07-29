@@ -2,7 +2,12 @@ use std::{env, sync::Arc};
 
 use zebra_test::prelude::*;
 
-use zebra_chain::{block::Block, fmt::DisplayToDebug, parameters::NetworkUpgrade::*, LedgerState};
+use zebra_chain::{
+    block::{self, Block},
+    fmt::DisplayToDebug,
+    parameters::NetworkUpgrade::*,
+    LedgerState,
+};
 
 use crate::{
     arbitrary::Prepare,
@@ -14,9 +19,13 @@ use crate::{
     Config,
 };
 
-const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 16;
+const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 
 /// Check that a forked chain is the same as a chain that had the same blocks appended.
+///
+/// Also check for:
+/// - no transparent spends in the genesis block, because genesis transparent outputs are ignored
+/// - at least one transparent PrevOut input in the entire chain
 #[test]
 fn forked_equals_pushed() -> Result<()> {
     zebra_test::init();
@@ -28,21 +37,58 @@ fn forked_equals_pushed() -> Result<()> {
         |((chain, fork_at_count, _network) in PreparedChain::default())| {
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
-            let mut full_chain = Chain::default();
-            let mut partial_chain = Chain::default();
+
+            let mut full_chain = Chain::new(Default::default(), Default::default());
+            let mut partial_chain = Chain::new(Default::default(), Default::default());
+            let mut has_prevouts = false;
 
             for block in chain.iter().take(fork_at_count) {
                 partial_chain = partial_chain.push(block.clone())?;
             }
             for block in chain.iter() {
                 full_chain = full_chain.push(block.clone())?;
+
+                // check some other properties of generated chains
+                if block.height == block::Height(0) {
+                    prop_assert_eq!(
+                        block
+                            .block
+                            .transactions
+                            .iter()
+                            .flat_map(|t| t.inputs())
+                            .filter_map(|i| i.outpoint())
+                            .count(),
+                        0,
+                        "unexpected transparent prevout inputs at height {:?}: genesis transparent outputs are ignored",
+                        block.height,
+                    );
+                }
+
+                has_prevouts |= block
+                    .block
+                    .transactions
+                    .iter()
+                    .flat_map(|t| t.inputs())
+                    .find_map(|i| i.outpoint())
+                    .is_some();
             }
 
-            let forked = full_chain.fork(fork_tip_hash).expect("fork works").expect("hash is present");
+            let forked = full_chain
+                .fork(
+                    fork_tip_hash,
+                    Default::default(),
+                    Default::default(),
+                )
+                .expect("fork works")
+                .expect("hash is present");
 
             // the first check is redundant, but it's useful for debugging
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
             prop_assert!(forked.eq_internal_state(&partial_chain));
+
+            // this assertion checks that we're still generating some transparent spends,
+            // after proptests remove unshielded and immature transparent coinbase spends
+            prop_assert!(has_prevouts, "no blocks in chain had prevouts");
         });
 
     Ok(())
@@ -61,13 +107,19 @@ fn finalized_equals_pushed() -> Result<()> {
     |((chain, end_count, _network) in PreparedChain::default())| {
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
-        let mut full_chain = Chain::default();
-        let mut partial_chain = Chain::default();
+        let mut full_chain = Chain::new(Default::default(), Default::default());
 
+        for block in chain.iter().take(finalized_count) {
+            full_chain = full_chain.push(block.clone())?;
+        }
+        let mut partial_chain = Chain::new(
+            full_chain.sapling_note_commitment_tree.clone(),
+            full_chain.orchard_note_commitment_tree.clone(),
+        );
         for block in chain.iter().skip(finalized_count) {
             partial_chain = partial_chain.push(block.clone())?;
         }
-        for block in chain.iter() {
+        for block in chain.iter().skip(finalized_count) {
             full_chain = full_chain.push(block.clone())?;
         }
 
@@ -177,8 +229,8 @@ fn different_blocks_different_chains() -> Result<()> {
       .prop_flat_map(|block_strategy| (block_strategy.clone(), block_strategy))
       .prop_map(|(block1, block2)| (DisplayToDebug(block1), DisplayToDebug(block2)))
     )| {
-        let chain1 = Chain::default();
-        let chain2 = Chain::default();
+        let chain1 = Chain::new(Default::default(), Default::default());
+        let chain2 = Chain::new(Default::default(), Default::default());
 
         let block1 = Arc::new(block1.0).prepare();
         let block2 = Arc::new(block2.0).prepare();
@@ -212,10 +264,15 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.created_utxos = chain2.created_utxos.clone();
                 chain1.spent_utxos = chain2.spent_utxos.clone();
 
+                // note commitment trees
+                chain1.sapling_note_commitment_tree = chain2.sapling_note_commitment_tree.clone();
+                chain1.orchard_note_commitment_tree = chain2.orchard_note_commitment_tree.clone();
+
                 // anchors
-                chain1.sprout_anchors = chain2.sprout_anchors.clone();
                 chain1.sapling_anchors = chain2.sapling_anchors.clone();
+                chain1.sapling_anchors_by_height = chain2.sapling_anchors_by_height.clone();
                 chain1.orchard_anchors = chain2.orchard_anchors.clone();
+                chain1.orchard_anchors_by_height = chain2.orchard_anchors_by_height.clone();
 
                 // nullifiers
                 chain1.sprout_nullifiers = chain2.sprout_nullifiers.clone();

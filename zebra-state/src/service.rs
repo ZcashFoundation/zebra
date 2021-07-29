@@ -28,12 +28,14 @@ use crate::{
     FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
 };
 
-#[cfg(any(test, feature = "proptest-impl"))]
-pub mod arbitrary;
-mod check;
+pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
+
 #[cfg(test)]
 mod tests;
 
