@@ -166,7 +166,7 @@ impl Transaction {
         ledger_state.has_coinbase = false;
         let remainder = vec(
             Transaction::arbitrary_with(ledger_state).prop_map(Arc::new),
-            len,
+            0..=len,
         );
 
         (coinbase, remainder)
