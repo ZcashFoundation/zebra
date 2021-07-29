@@ -60,4 +60,32 @@ proptest! {
             ),
         }
     }
+
+    #[test]
+    fn test_sum(
+        value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
+        value_balance2 in any::<ValueBalance<NegativeAllowed>>(),
+    ) {
+        zebra_test::init();
+
+        let collection = vec![value_balance1, value_balance2];
+
+        let transparent = value_balance1.transparent + value_balance2.transparent;
+        let sprout = value_balance1.sprout + value_balance2.sprout;
+        let sapling = value_balance1.sapling + value_balance2.sapling;
+        let orchard = value_balance1.orchard + value_balance2.orchard;
+
+        match (transparent, sprout, sapling, orchard) {
+            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard)) => prop_assert_eq!(
+                collection.iter().sum::<Result<ValueBalance<NegativeAllowed>, ValueBalanceError>>(),
+                Ok(ValueBalance {
+                    transparent,
+                    sprout,
+                    sapling,
+                    orchard,
+                })
+            ),
+            _ => prop_assert!(matches!(collection.iter().sum(), Err(ValueBalanceError::AmountError(_))))
+        }
+    }
 }
