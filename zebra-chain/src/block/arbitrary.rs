@@ -1,4 +1,4 @@
-//! Randomised property testing for [`Block`]s
+//! Randomised property testing for [`Block`]s.
 
 use proptest::{
     arbitrary::{any, Arbitrary},
