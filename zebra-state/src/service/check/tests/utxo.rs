@@ -26,6 +26,38 @@ use crate::{
     },
 };
 
+/// Check that shielded, mature spends of coinbase transparent outputs succeed.
+///
+/// This test makes sure there are no spurious rejections that might hide bugs in the other tests.
+/// (And that the test infrastructure generally works.)
+#[test]
+fn accept_shielded_mature_coinbase_utxo_spend() {
+    zebra_test::init();
+
+    let created_height = Height(1);
+    let outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0u8; 32]),
+        index: 0,
+    };
+    let output = transparent::Output {
+        value: Amount::zero(),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let utxo = transparent::Utxo {
+        output,
+        height: created_height,
+        from_coinbase: true,
+    };
+
+    let min_spend_height = Height(created_height.0 + MIN_TRANSPARENT_COINBASE_MATURITY);
+    let spend_restriction = transparent::CoinbaseSpendRestriction::OnlyShieldedOutputs {
+        spend_height: min_spend_height,
+    };
+
+    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo.clone());
+    assert_eq!(result, Ok(utxo));
+}
+
 /// Check that non-shielded spends of coinbase transparent outputs fail.
 #[test]
 fn reject_unshielded_coinbase_utxo_spend() {
@@ -49,7 +81,7 @@ fn reject_unshielded_coinbase_utxo_spend() {
     let spend_restriction = transparent::CoinbaseSpendRestriction::SomeTransparentOutputs;
 
     let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo);
-    assert_eq!(result, Err(UnshieldedTransparentCoinbaseSpend { outpoint }))
+    assert_eq!(result, Err(UnshieldedTransparentCoinbaseSpend { outpoint }));
 }
 
 /// Check that early spends of coinbase transparent outputs fail.
@@ -86,7 +118,7 @@ fn reject_immature_coinbase_utxo_spend() {
             min_spend_height,
             created_height
         })
-    )
+    );
 }
 
 // These tests use the `Arbitrary` trait to easily generate complex types,
