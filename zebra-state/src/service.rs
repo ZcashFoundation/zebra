@@ -73,8 +73,12 @@ impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> (Self, watch::Receiver<Option<block::Height>>) {
-        let (best_tip_height, best_tip_height_receiver) = BestTipHeight::new();
+        let (mut best_tip_height, best_tip_height_receiver) = BestTipHeight::new();
         let disk = FinalizedState::new(&config, network);
+
+        if let Some(finalized_height) = disk.finalized_tip_height() {
+            best_tip_height.set_finalized_height(finalized_height);
+        }
 
         let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();
