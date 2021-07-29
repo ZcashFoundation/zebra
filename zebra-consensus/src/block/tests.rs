@@ -117,10 +117,7 @@ async fn check_transcripts() -> Result<(), Report> {
     zebra_test::init();
 
     let network = Network::Mainnet;
-    let state_service = Buffer::new(
-        zebra_state::init(zebra_state::Config::ephemeral(), network),
-        1,
-    );
+    let state_service = zebra_state::init_test(network);
 
     let block_verifier = Buffer::new(BlockVerifier::new(network, state_service.clone()), 1);
 
