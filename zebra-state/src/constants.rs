@@ -27,6 +27,10 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 /// The database format version, incremented each time the database format changes.
 pub const DATABASE_FORMAT_VERSION: u32 = 6;
 
+/// The maximum number of blocks to check for NU5 transactions,
+/// before we assume we are on a pre-NU5 legacy chain.
+pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 100;
+
 use lazy_static::lazy_static;
 use regex::Regex;
 
