@@ -17,6 +17,8 @@
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 mod config;
 pub mod constants;
 mod error;
@@ -35,5 +37,7 @@ pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use service::init_test;
 
 pub(crate) use request::ContextuallyValidBlock;

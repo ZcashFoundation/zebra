@@ -10,6 +10,8 @@ use check::difficulty::POW_MEDIAN_BLOCK_SPAN;
 use futures::future::FutureExt;
 use non_finalized_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::oneshot;
+#[cfg(any(test, feature = "proptest-impl"))]
+use tower::buffer::Buffer;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
 use zebra_chain::{
@@ -46,9 +48,9 @@ pub type QueuedFinalized = (
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
-struct StateService {
+pub(crate) struct StateService {
     /// Holds data relating to finalized chain state.
-    disk: FinalizedState,
+    pub(crate) disk: FinalizedState,
     /// Holds data relating to non-finalized chain state.
     mem: NonFinalizedState,
     /// Blocks awaiting their parent blocks for contextual verification.
@@ -500,7 +502,7 @@ impl StateService {
     }
 }
 
-struct Iter<'a> {
+pub(crate) struct Iter<'a> {
     service: &'a StateService,
     state: IterState,
 }
@@ -744,6 +746,16 @@ impl Service<Request> for StateService {
 /// probably not what you want.
 pub fn init(config: Config, network: Network) -> BoxService<Request, Response, BoxError> {
     BoxService::new(StateService::new(config, network))
+}
+
+/// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.
+///
+/// This can be used to create a state service for testing. See also [`init`].
+#[cfg(any(test, feature = "proptest-impl"))]
+pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+    let state_service = StateService::new(Config::ephemeral(), network);
+
+    Buffer::new(BoxService::new(state_service), 1)
 }
 
 /// Check if zebra is following a legacy chain and return an error if so.
