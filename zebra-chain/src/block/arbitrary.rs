@@ -32,7 +32,8 @@ use super::*;
 /// shielded_input = shielded_pool_count / pool_count
 /// expected_transactions = expected_inputs = MAX_ARBITRARY_ITEMS/2
 /// proptest_cases = 256
-/// shielded_input^(expected_transactions * expected_inputs * PREVOUTS_CHAIN_HEIGHT) * proptest_cases
+/// number_of_proptests = 5 as of July 2021 (PREVOUTS_CHAIN_HEIGHT and PartialChain tests)
+/// shielded_input^(expected_transactions * expected_inputs * PREVOUTS_CHAIN_HEIGHT) * proptest_cases * number_of_proptests
 /// ```
 ///
 /// `PREVOUTS_CHAIN_HEIGHT` should be increased, and `proptest_cases` should be reduced,
