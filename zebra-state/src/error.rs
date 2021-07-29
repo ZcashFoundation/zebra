@@ -139,6 +139,13 @@ pub enum ValidateContextError {
         nullifier: orchard::Nullifier,
         in_finalized_state: bool,
     },
+
+    #[error("remaining value in the transparent transaction value pool MUST be nonnegative: {transaction_hash:?}, in finalized state: {in_finalized_state:?}")]
+    #[non_exhaustive]
+    InvalidRemainingTransparentValue {
+        transaction_hash: zebra_chain::transaction::Hash,
+        in_finalized_state: bool,
+    },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

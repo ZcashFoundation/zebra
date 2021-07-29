@@ -326,6 +326,15 @@ where
     }
 }
 
+impl std::ops::Neg for Amount<NegativeAllowed> {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Amount::try_from(-self.0)
+            .expect("a change in sign to any value inside Amount<NegativeAllowed> is always valid")
+    }
+}
+
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
