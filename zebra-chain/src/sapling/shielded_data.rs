@@ -7,7 +7,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    amount::Amount,
+    amount::{Amount, NegativeAllowed},
     primitives::{
         redjubjub::{Binding, Signature},
         Groth16Proof,
@@ -104,7 +104,7 @@ where
     pub value_balance: Amount,
 
     /// A bundle of spends and outputs, containing at least one spend or
-    /// output.
+    /// output, in the order they appear in the transaction.
     ///
     /// In V5 transactions, also contains a shared anchor, if there are any
     /// spends.
@@ -154,7 +154,8 @@ where
         /// [`Spend`]s in this `TransferData`.
         spends: AtLeastOne<Spend<AnchorV>>,
 
-        /// Maybe some outputs (can be empty).
+        /// Maybe some outputs (can be empty), in the order they appear in the
+        /// transaction.
         ///
         /// Use the [`ShieldedData::outputs`] method to get an iterator over the
         /// [`Outputs`]s in this `TransferData`.
@@ -167,7 +168,7 @@ where
     /// In Transaction::V5, if there are no spends, there must not be a shared
     /// anchor.
     JustOutputs {
-        /// At least one output.
+        /// At least one output, in the order they appear in the transaction.
         ///
         /// Use the [`ShieldedData::outputs`] method to get an iterator over the
         /// [`Outputs`]s in this `TransferData`.
@@ -205,7 +206,8 @@ where
         self.transfers.spends()
     }
 
-    /// Iterate over the [`Output`]s for this transaction.
+    /// Iterate over the [`Output`]s for this transaction, in the order they
+    /// appear in it.
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
         self.transfers.outputs()
     }
@@ -225,7 +227,8 @@ where
         self.spends().map(|spend| &spend.nullifier)
     }
 
-    /// Collect the cm_u's for this transaction, if it contains [`Output`]s.
+    /// Collect the cm_u's for this transaction, if it contains [`Output`]s,
+    /// in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &jubjub::Fq> {
         self.outputs().map(|output| &output.cm_u)
     }
@@ -261,6 +264,13 @@ where
         let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 
         key_bytes.into()
+    }
+
+    /// Provide access to the `value_balance` field of the shielded data.
+    ///
+    /// Needed to calculate the sapling value balance.
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+        self.value_balance
     }
 }
 

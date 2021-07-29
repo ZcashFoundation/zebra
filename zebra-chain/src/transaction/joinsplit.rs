@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    amount::{Amount, Error},
     primitives::{ed25519, ZkSnarkProof},
-    sprout::{JoinSplit, Nullifier},
+    sprout::{self, JoinSplit, Nullifier},
 };
 
 /// A bundle of [`JoinSplit`] descriptions and signature data.
@@ -15,7 +16,8 @@ use crate::{
 /// JoinSplit data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
-    /// The first JoinSplit description, using proofs of type `P`.
+    /// The first JoinSplit description in the transaction,
+    /// using proofs of type `P`.
     ///
     /// Storing this separately from `rest` ensures that it is impossible
     /// to construct an invalid `JoinSplitData` with no `JoinSplit`s.
@@ -28,7 +30,8 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
         deserialize = "JoinSplit<P>: Deserialize<'de>"
     ))]
     pub first: JoinSplit<P>,
-    /// The rest of the JoinSplit descriptions, using proofs of type `P`.
+    /// The rest of the JoinSplit descriptions, using proofs of type `P`,
+    /// in the order they appear in the transaction.
     ///
     /// The [`JoinSplitData::joinsplits`] method provides an iterator over
     /// all `JoinSplit`s.
@@ -44,7 +47,8 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
 }
 
 impl<P: ZkSnarkProof> JoinSplitData<P> {
-    /// Iterate over the [`JoinSplit`]s in `self`.
+    /// Iterate over the [`JoinSplit`]s in `self`, in the order they appear
+    /// in the transaction.
     pub fn joinsplits(&self) -> impl Iterator<Item = &JoinSplit<P>> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
@@ -53,5 +57,21 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.joinsplits()
             .flat_map(|joinsplit| joinsplit.nullifiers.iter())
+    }
+
+    /// Calculate and return the value balance for the joinsplits.
+    ///
+    /// Needed to calculate the sprout value balance.
+    pub fn value_balance(&self) -> Result<Amount, Error> {
+        self.joinsplits()
+            .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)
+            .sum()
+    }
+
+    /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s,
+    /// in the order they appear in the transaction.
+    pub fn note_commitments(&self) -> impl Iterator<Item = &sprout::commitment::NoteCommitment> {
+        self.joinsplits()
+            .flat_map(|joinsplit| &joinsplit.commitments)
     }
 }
