@@ -50,14 +50,14 @@ impl ShieldedData {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
     }
-  
+
     /// Provide access to the `value_balance` field of the shielded data.
     ///
     /// Needed to calculate the sapling value balance.
     pub fn value_balance(&self) -> Amount<NegativeAllowed> {
         self.value_balance
     }
-  
+
     /// Collect the cm_x's for this transaction, if it contains [`Action`]s with
     /// outputs, in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {

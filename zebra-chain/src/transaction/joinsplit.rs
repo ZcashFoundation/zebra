@@ -67,7 +67,7 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
             .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)
             .sum()
     }
-  
+
     /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s,
     /// in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &sprout::commitment::NoteCommitment> {
