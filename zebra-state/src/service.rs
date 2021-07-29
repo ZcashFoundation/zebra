@@ -672,9 +672,11 @@ impl Service<Request> for StateService {
                 metrics::counter!("state.requests", 1, "type" => "commit_finalized_block");
 
                 let (rsp_tx, rsp_rx) = oneshot::channel();
+                let finalized_height = finalized.height;
 
                 self.pending_utxos.check_against(&finalized.new_outputs);
                 self.disk.queue_and_commit_finalized((finalized, rsp_tx));
+                self.best_tip_height.set_finalized_height(finalized_height);
 
                 async move {
                     rsp_rx
