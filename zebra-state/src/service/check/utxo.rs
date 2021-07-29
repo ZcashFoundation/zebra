@@ -109,3 +109,39 @@ pub fn transparent_double_spends(
 
     Ok(())
 }
+
+/// Reject negative remaining transaction value.
+///
+/// Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#transactions
+#[allow(dead_code)]
+pub fn remaining_transaction_value(
+    prepared: &PreparedBlock,
+    utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+) -> Result<(), ValidateContextError> {
+    for transaction in prepared.block.transactions.iter() {
+        // This rule does not apply to coinbase transactions.
+        if transaction.is_coinbase() {
+            continue;
+        }
+
+        // Check the remaining transparent value pool for this transaction
+        let value_balance = transaction.value_balance(utxos);
+        match value_balance {
+            Ok(vb) => match vb.remaining_transaction_value() {
+                Ok(_) => Ok(()),
+                Err(_) => Err(ValidateContextError::InvalidRemainingTransparentValue {
+                    transaction_hash: transaction.hash(),
+                    in_finalized_state: false,
+                }),
+            },
+            Err(_) => Err(ValidateContextError::InvalidRemainingTransparentValue {
+                transaction_hash: transaction.hash(),
+                in_finalized_state: false,
+            }),
+        }?
+    }
+
+    Ok(())
+}
