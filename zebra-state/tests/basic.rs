@@ -7,7 +7,6 @@
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
-use tempdir::TempDir;
 use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
@@ -76,20 +75,10 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
         Network::Mainnet => mainnet_transcript,
         Network::Testnet => testnet_transcript,
     } {
-        let storage_guard = TempDir::new("")?;
-        let cache_dir = storage_guard.path().to_owned();
-        let service = zebra_state::init(
-            Config {
-                cache_dir,
-                ..Config::default()
-            },
-            network,
-        );
+        let service = zebra_state::init_test(network);
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;
-        // Delete the contents of the temp directory before going to the next case.
-        std::mem::drop(storage_guard);
     }
 
     Ok(())
