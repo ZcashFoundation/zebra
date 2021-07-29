@@ -4,7 +4,7 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-alpha.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.14) - _TODO:Add actual release date_
+## [Zebra 1.0.0-alpha.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.14) - 2021-07-29
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5.
 
