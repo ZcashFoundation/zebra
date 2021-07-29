@@ -18,6 +18,9 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Calculate incremental note commitment trees (#2407)
 - Reject duplicate Sapling and Orchard nullifiers (#2497)
 - Add `proptest-impl` feature to `zebra-state` crate to help simplify tests(#2529)
+- Track anchors and note commitment trees (#2458)
+- Validate spends of transparent coinbase outputs (#2525)
+- Calculate the remaining value in the transparent transaction value pool (#2486)
 
 #### Documentation
 
@@ -27,11 +30,16 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 
 - Test consensus-critical Amount deserialization (#2487)
 - Update to use new GitHub action names in Google Cloud workflows (#2533)
+- Add test intialization helper function for tests (#2539)
 
 ### Changed
 
 - Decrease the number of randomised test cases in zebra-state (#2521, #2513)
 - Make nullifier tests consistent with UTXO tests (#2513)
+
+#### Testing
+
+ - Disable Rust beta tests in CI, due to a Rust bug (#2542)
 
 ### Fixed
 
