@@ -1,7 +1,16 @@
 //! Orchard shielded data for `V5` `Transaction`s.
 
+use std::{
+    cmp::{Eq, PartialEq},
+    fmt::Debug,
+    io,
+};
+
+use byteorder::{ReadBytesExt, WriteBytesExt};
+use halo2::pasta::pallas;
+
 use crate::{
-    amount::Amount,
+    amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
     orchard::{tree, Action, Nullifier},
     primitives::{
@@ -11,14 +20,6 @@ use crate::{
     serialization::{
         AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
-};
-
-use byteorder::{ReadBytesExt, WriteBytesExt};
-
-use std::{
-    cmp::{Eq, PartialEq},
-    fmt::Debug,
-    io,
 };
 
 /// A bundle of [`Action`] descriptions and signature data.
@@ -32,14 +33,15 @@ pub struct ShieldedData {
     pub shared_anchor: tree::Root,
     /// The aggregated zk-SNARK proof for all the actions in this transaction.
     pub proof: Halo2Proof,
-    /// The Orchard Actions.
+    /// The Orchard Actions, in the order they appear in the transaction.
     pub actions: AtLeastOne<AuthorizedAction>,
     /// A signature on the transaction `sighash`.
     pub binding_sig: Signature<Binding>,
 }
 
 impl ShieldedData {
-    /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this transaction.
+    /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
+    /// transaction, in the order they appear in it.
     pub fn actions(&self) -> impl Iterator<Item = &Action> {
         self.actions.actions()
     }
@@ -47,6 +49,19 @@ impl ShieldedData {
     /// Collect the [`Nullifier`]s for this transaction.
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
+    }
+
+    /// Provide access to the `value_balance` field of the shielded data.
+    ///
+    /// Needed to calculate the sapling value balance.
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+        self.value_balance
+    }
+
+    /// Collect the cm_x's for this transaction, if it contains [`Action`]s with
+    /// outputs, in the order they appear in the transaction.
+    pub fn note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.actions().map(|action| &action.cm_x)
     }
 }
 

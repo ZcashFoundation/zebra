@@ -1,6 +1,7 @@
 //! Module defining exactly how to move types in and out of rocksdb
 use std::{convert::TryInto, fmt::Debug, sync::Arc};
 
+use bincode::Options;
 use zebra_chain::{
     block,
     block::Block,
@@ -232,6 +233,65 @@ impl IntoDisk for transparent::OutPoint {
     }
 }
 
+impl IntoDisk for sapling::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl IntoDisk for orchard::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+// The following implementations for the note commitment trees use `serde` and
+// `bincode` because currently the inner Merkle tree frontier (from
+// `incrementalmerkletree`) only supports `serde` for serialization. `bincode`
+// was chosen because it is small and fast. We explicitly use `DefaultOptions`
+// in particular to disallow trailing bytes; see
+// https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
+
+impl IntoDisk for sapling::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for sapling::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+impl IntoDisk for orchard::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for orchard::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
 /// defined format
 pub trait DiskSerialize {
@@ -241,6 +301,11 @@ pub trait DiskSerialize {
     where
         K: IntoDisk + Debug,
         V: IntoDisk;
+
+    /// Remove the given key form rocksdb column family if it exists.
+    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
+    where
+        K: IntoDisk + Debug;
 }
 
 impl DiskSerialize for rocksdb::WriteBatch {
@@ -252,6 +317,14 @@ impl DiskSerialize for rocksdb::WriteBatch {
         let key_bytes = key.as_bytes();
         let value_bytes = value.as_bytes();
         self.put_cf(cf, key_bytes, value_bytes);
+    }
+
+    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
+    where
+        K: IntoDisk + Debug,
+    {
+        let key_bytes = key.as_bytes();
+        self.delete_cf(cf, key_bytes);
     }
 }
 

@@ -7,6 +7,8 @@ use zebra_chain::{
     block, orchard, sapling, sprout, transparent, work::difficulty::CompactDifficulty,
 };
 
+use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
+
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
 #[derive(Debug, Error, Clone)]
@@ -95,6 +97,28 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     EarlyTransparentSpend { outpoint: transparent::OutPoint },
 
+    #[error(
+        "unshielded transparent coinbase spend: {outpoint:?} \
+         must be spent in a transaction which only has shielded outputs"
+    )]
+    #[non_exhaustive]
+    UnshieldedTransparentCoinbaseSpend { outpoint: transparent::OutPoint },
+
+    #[error(
+        "immature transparent coinbase spend: \
+        attempt to spend {outpoint:?} at {spend_height:?}, \
+        but spends are invalid before {min_spend_height:?}, \
+        which is {MIN_TRANSPARENT_COINBASE_MATURITY:?} blocks \
+        after it was created at {created_height:?}"
+    )]
+    #[non_exhaustive]
+    ImmatureTransparentCoinbaseSpend {
+        outpoint: transparent::OutPoint,
+        spend_height: block::Height,
+        min_spend_height: block::Height,
+        created_height: block::Height,
+    },
+
     #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
     DuplicateSproutNullifier {
@@ -115,6 +139,19 @@ pub enum ValidateContextError {
         nullifier: orchard::Nullifier,
         in_finalized_state: bool,
     },
+
+    #[error("remaining value in the transparent transaction value pool MUST be nonnegative: {transaction_hash:?}, in finalized state: {in_finalized_state:?}")]
+    #[non_exhaustive]
+    InvalidRemainingTransparentValue {
+        transaction_hash: zebra_chain::transaction::Hash,
+        in_finalized_state: bool,
+    },
+
+    #[error("error in Sapling note commitment tree")]
+    SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
+
+    #[error("error in Orchard note commitment tree")]
+    OrchardNoteCommitmentTreeError(#[from] zebra_chain::orchard::tree::NoteCommitmentTreeError),
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

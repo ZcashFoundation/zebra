@@ -27,7 +27,6 @@ mod response;
 mod service;
 mod util;
 
-// TODO: move these to integration tests.
 #[cfg(test)]
 mod tests;
 

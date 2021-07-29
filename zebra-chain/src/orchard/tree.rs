@@ -183,15 +183,36 @@ impl From<pallas::Base> for Node {
     }
 }
 
+impl serde::Serialize for Node {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.to_bytes().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Node {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = <[u8; 32]>::deserialize(deserializer)?;
+        Option::<pallas::Base>::from(pallas::Base::from_bytes(&bytes))
+            .map(Node)
+            .ok_or_else(|| serde::de::Error::custom("invalid Pallas field element"))
+    }
+}
+
 #[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,
 }
 
 /// Orchard Incremental Note Commitment Tree
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///

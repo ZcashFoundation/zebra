@@ -1,5 +1,6 @@
 //! Transactions and transaction-related structures.
 
+use halo2::pasta::pallas;
 use serde::{Deserialize, Serialize};
 
 mod hash;
@@ -24,11 +25,19 @@ pub use sighash::HashType;
 pub use sighash::SigHash;
 
 use crate::{
-    amount, block, orchard,
+    amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
+    block, orchard,
     parameters::NetworkUpgrade,
     primitives::{Bctv14Proof, Groth16Proof},
-    sapling, sprout, transparent,
+    sapling, sprout,
+    transparent::{
+        self,
+        CoinbaseSpendRestriction::{self, *},
+    },
+    value_balance::ValueBalance,
 };
+
+use std::collections::HashMap;
 
 /// A Zcash transaction.
 ///
@@ -151,6 +160,75 @@ impl Transaction {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
     }
 
+    // other properties
+
+    /// Does this transaction have transparent or shielded inputs?
+    ///
+    /// "[Sapling onward] If effectiveVersion < 5, then at least one of tx_in_count,
+    /// nSpendsSapling, and nJoinSplit MUST be nonzero.
+    ///
+    /// [NU5 onward] If effectiveVersion ≥ 5 then this condition MUST hold:
+    /// tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1)."
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    pub fn has_transparent_or_shielded_inputs(&self) -> bool {
+        !self.inputs().is_empty() || self.has_shielded_inputs()
+    }
+
+    /// Does this transaction have shielded inputs?
+    ///
+    /// See [`has_transparent_or_shielded_inputs`] for details.
+    pub fn has_shielded_inputs(&self) -> bool {
+        self.joinsplit_count() > 0
+            || self.sapling_spends_per_anchor().count() > 0
+            || (self.orchard_actions().count() > 0
+                && self
+                    .orchard_flags()
+                    .unwrap_or_else(orchard::Flags::empty)
+                    .contains(orchard::Flags::ENABLE_SPENDS))
+    }
+
+    /// Does this transaction have transparent or shielded outputs?
+    ///
+    /// "[Sapling onward] If effectiveVersion < 5, then at least one of tx_out_count,
+    /// nOutputsSapling, and nJoinSplit MUST be nonzero.
+    ///
+    /// [NU5 onward] If effectiveVersion ≥ 5 then this condition MUST hold:
+    /// tx_out_count > 0 or nOutputsSapling > 0 or (nActionsOrchard > 0 and enableOutputsOrchard = 1)."
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
+        !self.outputs().is_empty() || self.has_shielded_outputs()
+    }
+
+    /// Does this transaction have shielded outputs?
+    ///
+    /// See [`has_transparent_or_shielded_outputs`] for details.
+    pub fn has_shielded_outputs(&self) -> bool {
+        self.joinsplit_count() > 0
+            || self.sapling_outputs().count() > 0
+            || (self.orchard_actions().count() > 0
+                && self
+                    .orchard_flags()
+                    .unwrap_or_else(orchard::Flags::empty)
+                    .contains(orchard::Flags::ENABLE_OUTPUTS))
+    }
+
+    /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
+    /// assuming it is mined at `spend_height`.
+    pub fn coinbase_spend_restriction(
+        &self,
+        spend_height: block::Height,
+    ) -> CoinbaseSpendRestriction {
+        if self.outputs().is_empty() {
+            // we know this transaction must have shielded outputs,
+            // because of other consensus rules
+            OnlyShieldedOutputs { spend_height }
+        } else {
+            SomeTransparentOutputs
+        }
+    }
+
     // header
 
     /// Return if the `fOverwintered` flag of this transaction is set.
@@ -246,6 +324,28 @@ impl Transaction {
         }
     }
 
+    /// Modify the transparent outputs of this transaction, regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn outputs_mut(&mut self) -> &mut Vec<transparent::Output> {
+        match self {
+            Transaction::V1 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V2 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V3 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V4 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V5 {
+                ref mut outputs, ..
+            } => outputs,
+        }
+    }
+
     /// Returns `true` if this transaction is a coinbase transaction.
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
@@ -312,9 +412,7 @@ impl Transaction {
     ///
     /// This value is removed from the transparent value pool of this transaction, and added to the
     /// sprout value pool.
-    pub fn sprout_pool_added_values(
-        &self,
-    ) -> Box<dyn Iterator<Item = &amount::Amount<amount::NonNegative>> + '_> {
+    pub fn sprout_pool_added_values(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
         match self {
             // JoinSplits with Bctv14 Proofs
             Transaction::V2 {
@@ -493,6 +591,36 @@ impl Transaction {
         }
     }
 
+    /// Access the note commitments in this transaction, regardless of version.
+    pub fn sapling_note_commitments(&self) -> Box<dyn Iterator<Item = &jubjub::Fq> + '_> {
+        // This function returns a boxed iterator because the different
+        // transaction variants end up having different iterator types
+        match self {
+            // Spends with Groth16 Proofs
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.note_commitments()),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.note_commitments()),
+
+            // No Spends
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+        }
+    }
+
     /// Return if the transaction has any Sapling shielded data.
     pub fn has_sapling_shielded_data(&self) -> bool {
         match self {
@@ -546,6 +674,15 @@ impl Transaction {
             .flatten()
     }
 
+    /// Access the note commitments in this transaction, if there are any,
+    /// regardless of version.
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.orchard_shielded_data()
+            .into_iter()
+            .map(orchard::ShieldedData::note_commitments)
+            .flatten()
+    }
+
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
     pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
@@ -556,5 +693,125 @@ impl Transaction {
     /// Return if the transaction has any Orchard shielded data.
     pub fn has_orchard_shielded_data(&self) -> bool {
         self.orchard_shielded_data().is_some()
+    }
+
+    // value balances
+
+    /// Return the transparent value balance.
+    ///
+    /// The change in the value of the transparent pool.
+    /// The sum of the outputs spent by transparent inputs in `tx_in` fields,
+    /// minus the sum of newly created outputs in `tx_out` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn transparent_value_balance(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let inputs = self.inputs();
+        let outputs = self.outputs();
+        let input_value_balance: Amount = inputs
+            .iter()
+            .map(|i| i.value(utxos))
+            .sum::<Result<Amount, AmountError>>()?;
+
+        let output_value_balance: Amount<NegativeAllowed> = outputs
+            .iter()
+            .map(|o| o.value())
+            .sum::<Result<Amount, AmountError>>()?;
+
+        Ok(ValueBalance::from_transparent_amount(
+            (input_value_balance - output_value_balance)?,
+        ))
+    }
+
+    /// Return the sprout value balance
+    ///
+    /// The change in the sprout value pool.
+    /// The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let joinsplit_amounts = match self {
+            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
+                joinsplit_data.as_ref().map(JoinSplitData::value_balance)
+            }
+            Transaction::V4 { joinsplit_data, .. } => {
+                joinsplit_data.as_ref().map(JoinSplitData::value_balance)
+            }
+            Transaction::V1 { .. } | Transaction::V5 { .. } => None,
+        };
+
+        joinsplit_amounts
+            .into_iter()
+            .fold(Ok(Amount::zero()), |accumulator, value| {
+                accumulator.and_then(|sum| sum + value)
+            })
+            .map(ValueBalance::from_sprout_amount)
+    }
+
+    /// Return the sapling value balance.
+    ///
+    /// The change in the sapling value pool.
+    /// The negation of the sum of all `valueBalanceSapling` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sapling_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let sapling_amounts = match self {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data
+                .as_ref()
+                .map(sapling::ShieldedData::value_balance),
+            Transaction::V5 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data
+                .as_ref()
+                .map(sapling::ShieldedData::value_balance),
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => None,
+        };
+
+        sapling_amounts
+            .into_iter()
+            .fold(Ok(Amount::zero()), |accumulator, value| {
+                accumulator.and_then(|sum| sum + value)
+            })
+            .map(|amount| ValueBalance::from_sapling_amount(-amount))
+    }
+
+    /// Return the orchard value balance.
+    ///
+    /// The change in the orchard value pool.
+    /// The negation of the sum of all `valueBalanceOrchard` fields.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn orchard_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let orchard = self
+            .orchard_shielded_data()
+            .iter()
+            .map(|o| o.value_balance())
+            .sum::<Result<Amount, AmountError>>()?;
+
+        Ok(ValueBalance::from_orchard_amount(-orchard))
+    }
+
+    /// Get all the value balances for this transaction.
+    ///
+    /// `utxos` must contain the utxos of every input in the transaction,
+    /// including UTXOs created by earlier transactions in this block.
+    pub fn value_balance(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let mut value_balance = ValueBalance::zero();
+
+        value_balance.set_transparent_value_balance(self.transparent_value_balance(utxos)?);
+        value_balance.set_sprout_value_balance(self.sprout_value_balance()?);
+        value_balance.set_sapling_value_balance(self.sapling_value_balance()?);
+        value_balance.set_orchard_value_balance(self.orchard_value_balance()?);
+
+        Ok(value_balance)
     }
 }
