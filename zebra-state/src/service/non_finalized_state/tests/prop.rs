@@ -2,7 +2,12 @@ use std::{env, sync::Arc};
 
 use zebra_test::prelude::*;
 
-use zebra_chain::{block::Block, fmt::DisplayToDebug, parameters::NetworkUpgrade::*, LedgerState};
+use zebra_chain::{
+    block::{self, Block},
+    fmt::DisplayToDebug,
+    parameters::NetworkUpgrade::*,
+    LedgerState,
+};
 
 use crate::{
     arbitrary::Prepare,
@@ -17,6 +22,10 @@ use crate::{
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 
 /// Check that a forked chain is the same as a chain that had the same blocks appended.
+///
+/// Also check for:
+/// - no transparent spends in the genesis block, because genesis transparent outputs are ignored
+/// - at least one transparent PrevOut input in the entire chain
 #[test]
 fn forked_equals_pushed() -> Result<()> {
     zebra_test::init();
@@ -28,14 +37,40 @@ fn forked_equals_pushed() -> Result<()> {
         |((chain, fork_at_count, _network) in PreparedChain::default())| {
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
+
             let mut full_chain = Chain::new(Default::default(), Default::default());
             let mut partial_chain = Chain::new(Default::default(), Default::default());
+            let mut has_prevouts = false;
 
             for block in chain.iter().take(fork_at_count) {
                 partial_chain = partial_chain.push(block.clone())?;
             }
             for block in chain.iter() {
                 full_chain = full_chain.push(block.clone())?;
+
+                // check some other properties of generated chains
+                if block.height == block::Height(0) {
+                    prop_assert_eq!(
+                        block
+                            .block
+                            .transactions
+                            .iter()
+                            .flat_map(|t| t.inputs())
+                            .filter_map(|i| i.outpoint())
+                            .count(),
+                        0,
+                        "unexpected transparent prevout inputs at height {:?}: genesis transparent outputs are ignored",
+                        block.height,
+                    );
+                }
+
+                has_prevouts |= block
+                    .block
+                    .transactions
+                    .iter()
+                    .flat_map(|t| t.inputs())
+                    .find_map(|i| i.outpoint())
+                    .is_some();
             }
 
             let forked = full_chain
@@ -50,6 +85,10 @@ fn forked_equals_pushed() -> Result<()> {
             // the first check is redundant, but it's useful for debugging
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
             prop_assert!(forked.eq_internal_state(&partial_chain));
+
+            // this assertion checks that we're still generating some transparent spends,
+            // after proptests remove unshielded and immature transparent coinbase spends
+            prop_assert!(has_prevouts, "no blocks in chain had prevouts");
         });
 
     Ok(())

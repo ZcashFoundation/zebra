@@ -7,7 +7,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    amount::Amount,
+    amount::{Amount, NegativeAllowed},
     primitives::{
         redjubjub::{Binding, Signature},
         Groth16Proof,
@@ -264,6 +264,13 @@ where
         let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 
         key_bytes.into()
+    }
+
+    /// Provide access to the `value_balance` field of the shielded data.
+    ///
+    /// Needed to calculate the sapling value balance.
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+        self.value_balance
     }
 }
 

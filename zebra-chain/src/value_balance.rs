@@ -117,7 +117,8 @@ where
         self
     }
 
-    fn zero() -> Self {
+    /// Creates a [`ValueBalance`] where all the pools are zero.
+    pub fn zero() -> Self {
         let zero = Amount::zero();
         Self {
             transparent: zero,

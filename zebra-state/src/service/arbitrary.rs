@@ -7,13 +7,24 @@ use proptest::{
     test_runner::TestRunner,
 };
 
-use zebra_chain::{block::Block, fmt::SummaryDebug, parameters::NetworkUpgrade, LedgerState};
+use zebra_chain::{
+    block::{self, Block},
+    fmt::SummaryDebug,
+    parameters::NetworkUpgrade,
+    LedgerState,
+};
 
-use crate::arbitrary::Prepare;
+use crate::{arbitrary::Prepare, constants};
 
 use super::*;
 
-const MAX_PARTIAL_CHAIN_BLOCKS: usize = 102;
+/// The chain length for state proptests.
+///
+/// Shorter lengths increase the probability of proptest failures.
+///
+/// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
+pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
+    constants::MIN_TRANSPARENT_COINBASE_MATURITY as usize + block::arbitrary::PREVOUTS_CHAIN_HEIGHT;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
@@ -62,7 +73,11 @@ impl Strategy for PreparedChain {
                 .prop_flat_map(|ledger| {
                     (
                         Just(ledger.network),
-                        Block::partial_chain_strategy(ledger, MAX_PARTIAL_CHAIN_BLOCKS),
+                        Block::partial_chain_strategy(
+                            ledger,
+                            MAX_PARTIAL_CHAIN_BLOCKS,
+                            check::utxo::transparent_coinbase_spend,
+                        ),
                     )
                 })
                 .prop_map(|(network, vec)| {
