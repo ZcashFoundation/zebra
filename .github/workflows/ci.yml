@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
-        rust: [stable, beta]
+        rust: [stable]
     env:
       CARGO_INCREMENTAL: 0
       RUST_BACKTRACE: full
