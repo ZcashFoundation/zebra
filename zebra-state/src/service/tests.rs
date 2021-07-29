@@ -1,7 +1,7 @@
 use std::{env, sync::Arc};
 
 use futures::stream::FuturesUnordered;
-use tower::{util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use zebra_chain::{
     block::Block,
     parameters::{Network, NetworkUpgrade},
@@ -10,20 +10,19 @@ use zebra_chain::{
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
-use crate::{init, service::arbitrary, BoxError, Config, Request, Response};
+use crate::{init_test, tests::setup::partial_nu5_chain_strategy, BoxError, Request, Response};
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
 async fn populated_state(
     blocks: impl IntoIterator<Item = Arc<Block>>,
-) -> BoxService<Request, Response, BoxError> {
+) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     let requests = blocks
         .into_iter()
         .map(|block| Request::CommitFinalizedBlock(block.into()));
 
-    let config = Config::ephemeral();
     let network = Network::Mainnet;
-    let mut state = init(config, network);
+    let mut state = init_test(network);
 
     let mut responses = FuturesUnordered::new();
 
@@ -41,7 +40,7 @@ async fn populated_state(
 }
 
 async fn test_populated_state_responds_correctly(
-    mut state: BoxService<Request, Response, BoxError>,
+    mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
 ) -> Result<()> {
     let blocks = zebra_test::vectors::MAINNET_BLOCKS
         .range(0..=LAST_BLOCK_HEIGHT)
@@ -152,9 +151,8 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     .into_iter();
     let transcript = Transcript::from(iter);
 
-    let config = Config::ephemeral();
     let network = Network::Mainnet;
-    let state = init(config, network);
+    let state = init_test(network);
 
     transcript.check(state).await?;
 
@@ -197,7 +195,7 @@ proptest! {
     /// Test blocks that are less than the NU5 activation height.
     #[test]
     fn some_block_less_than_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
@@ -208,7 +206,7 @@ proptest! {
     /// Test the maximum amount of blocks to check before chain is declared to be legacy.
     #[test]
     fn no_transaction_with_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
@@ -222,7 +220,7 @@ proptest! {
     /// Test the `Block.check_transaction_network_upgrade()` error inside the legacy check.
     #[test]
     fn at_least_one_transaction_with_inconsistent_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, false, BLOCKS_AFTER_NU5, NetworkUpgrade::Canopy)
     ) {
         // this test requires that an invalid block is encountered
         // before a valid block (and before the check gives up),
@@ -262,7 +260,7 @@ proptest! {
     /// Test there is at least one transaction with a valid `network_upgrade` in the legacy check.
     #[test]
     fn at_least_one_transaction_with_valid_network_upgrade(
-        (network, nu_activation_height, chain) in arbitrary::partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, BLOCKS_AFTER_NU5/2, NetworkUpgrade::Canopy)
     ) {
         let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());

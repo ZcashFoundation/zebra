@@ -17,6 +17,8 @@
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 mod config;
 pub mod constants;
 mod error;
@@ -25,7 +27,6 @@ mod response;
 mod service;
 mod util;
 
-// TODO: move these to integration tests.
 #[cfg(test)]
 mod tests;
 
@@ -35,5 +36,7 @@ pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use service::init_test;
 
 pub(crate) use request::ContextuallyValidBlock;
