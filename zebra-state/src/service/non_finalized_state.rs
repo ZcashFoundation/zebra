@@ -14,13 +14,15 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    orchard,
     parameters::Network,
+    sapling,
     transaction::{self, Transaction},
     transparent,
 };
 
 #[cfg(test)]
-use zebra_chain::{orchard, sapling, sprout};
+use zebra_chain::sprout;
 
 use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
 
@@ -123,7 +125,11 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let parent_chain = self.parent_chain(parent_hash)?;
+        let parent_chain = self.parent_chain(
+            parent_hash,
+            finalized_state.sapling_note_commitment_tree(),
+            finalized_state.orchard_note_commitment_tree(),
+        )?;
 
         // We might have taken a chain, so all validation must happen within
         // validate_and_commit, so that the chain is restored correctly.
@@ -154,7 +160,10 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<(), ValidateContextError> {
-        let chain = Chain::default();
+        let chain = Chain::new(
+            finalized_state.sapling_note_commitment_tree(),
+            finalized_state.orchard_note_commitment_tree(),
+        );
         let (height, hash) = (prepared.height, prepared.hash);
 
         // if the block is invalid, drop the newly created chain fork
@@ -345,9 +354,14 @@ impl NonFinalizedState {
     ///
     /// The chain can be an existing chain in the non-finalized state or a freshly
     /// created fork, if needed.
+    ///
+    /// The note commitment trees must be the trees of the finalized tip.
+    /// They are used to recreate the trees if a fork is needed.
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
     ) -> Result<Box<Chain>, ValidateContextError> {
         match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // An existing chain in the non-finalized state
@@ -356,7 +370,15 @@ impl NonFinalizedState {
             None => Ok(Box::new(
                 self.chain_set
                     .iter()
-                    .find_map(|chain| chain.fork(parent_hash).transpose())
+                    .find_map(|chain| {
+                        chain
+                            .fork(
+                                parent_hash,
+                                sapling_note_commitment_tree.clone(),
+                                orchard_note_commitment_tree.clone(),
+                            )
+                            .transpose()
+                    })
                     .expect(
                         "commit_block is only called with blocks that are ready to be commited",
                     )?,
