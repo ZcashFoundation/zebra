@@ -135,22 +135,17 @@ impl Input {
         }
     }
 
-    /// Get the value balance of this input.
-    ///
-    /// Needed to calculate the transparent value balance.
+    /// Get the value spent by this input.
+    /// This amount is added to the transaction value pool by this input.
     ///
     /// # Panics
     ///
     /// If the provided Utxos don't have the transaction outpoint.
-    pub fn value_balance(
-        &self,
-        ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
-    ) -> Amount<NegativeAllowed> {
+    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NegativeAllowed> {
         match self {
-            Input::PrevOut { outpoint, .. } => ordered_utxos
+            Input::PrevOut { outpoint, .. } => utxos
                 .get(outpoint)
                 .expect("Provided Utxos don't have transaction Outpoint")
-                .utxo
                 .output
                 .value
                 .constrain()
@@ -184,10 +179,9 @@ pub struct Output {
 }
 
 impl Output {
-    /// Get the value balance of this output.
-    ///
-    /// Needed to calculate the transparent value balance.
-    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+    /// Get the value contained in this output.
+    /// This amount is subtracted from the transaction value pool by this output.
+    pub fn value(&self) -> Amount<NegativeAllowed> {
         self.value
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid")

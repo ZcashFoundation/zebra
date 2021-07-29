@@ -720,6 +720,7 @@ fn v4_with_sapling_spends() {
         let script_verifier = script::Verifier::new(state_service);
         let verifier = Verifier::new(network, script_verifier);
 
+        // Test the transaction verifier
         let result = verifier
             .clone()
             .oneshot(Request::Block {

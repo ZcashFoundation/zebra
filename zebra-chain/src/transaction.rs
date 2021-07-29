@@ -566,18 +566,18 @@ impl Transaction {
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn transparent_value_balance(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let inputs = self.inputs();
         let outputs = self.outputs();
         let input_value_balance: Amount = inputs
             .iter()
-            .map(|i| i.value_balance(utxos))
+            .map(|i| i.value(utxos))
             .sum::<Result<Amount, AmountError>>()?;
 
         let output_value_balance: Amount<NegativeAllowed> = outputs
             .iter()
-            .map(|o| o.value_balance())
+            .map(|o| o.value())
             .sum::<Result<Amount, AmountError>>()?;
 
         Ok(ValueBalance::from_transparent_amount(
@@ -663,7 +663,7 @@ impl Transaction {
     /// including UTXOs created by earlier transactions in this block.
     pub fn value_balance(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let mut value_balance = ValueBalance::zero();
 

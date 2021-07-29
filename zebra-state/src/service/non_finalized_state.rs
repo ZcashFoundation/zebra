@@ -179,8 +179,6 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        check::utxo::remaining_transaction_value(&prepared)?;
-
         parent_chain.push(prepared)
     }
 
