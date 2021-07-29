@@ -36,5 +36,7 @@ pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
 pub use service::init;
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use service::init_test;
 
 pub(crate) use request::ContextuallyValidBlock;
