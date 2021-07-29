@@ -18,7 +18,9 @@ use crate::{arbitrary::Prepare, constants};
 
 use super::*;
 
-/// The minimum height required for reliable non-finalized state property tests.
+/// The chain length for state proptests.
+///
+/// Shorter lengths increase the probability of proptest failures.
 ///
 /// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
 pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
