@@ -24,8 +24,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config, FinalizedBlock,
-    PreparedBlock, Request, Response, ValidateContextError,
+    constants, request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config,
+    FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
 };
 
 pub(crate) mod check;
@@ -769,8 +769,6 @@ fn legacy_chain_check<I>(
 where
     I: Iterator<Item = Arc<Block>>,
 {
-    const MAX_BLOCKS_TO_CHECK: usize = 100;
-
     for (count, block) in ancestors.enumerate() {
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
@@ -787,7 +785,7 @@ where
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
         // the Zebra instance that verified those blocks had no NU5 activation height.
-        if count >= MAX_BLOCKS_TO_CHECK {
+        if count >= constants::MAX_LEGACY_CHAIN_BLOCKS {
             return Err("giving up after checking too many blocks".into());
         }
 
