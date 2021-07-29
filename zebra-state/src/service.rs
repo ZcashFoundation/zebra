@@ -678,6 +678,10 @@ impl Service<Request> for StateService {
                 self.pending_utxos.check_against(&finalized.new_outputs);
                 self.disk.queue_and_commit_finalized((finalized, rsp_tx));
 
+                if let Some(finalized_height) = self.disk.finalized_tip_height() {
+                    self.best_tip_height.set_finalized_height(finalized_height);
+                }
+
                 async move {
                     rsp_rx
                         .await
