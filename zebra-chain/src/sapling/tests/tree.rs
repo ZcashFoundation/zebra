@@ -1,7 +1,17 @@
+use std::sync::Arc;
+
+use color_eyre::eyre;
+use eyre::Result;
 use hex::FromHex;
 
-use crate::sapling::tests::test_vectors;
-use crate::sapling::tree::*;
+use crate::block::Block;
+use crate::parameters::NetworkUpgrade;
+use crate::sapling::{self, tree::*};
+use crate::serialization::ZcashDeserializeInto;
+use crate::{parameters::Network, sapling::tests::test_vectors};
+use zebra_test::vectors::{
+    MAINNET_BLOCKS, MAINNET_FINAL_SAPLING_ROOTS, TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS,
+};
 
 #[test]
 fn empty_roots() {
@@ -40,4 +50,84 @@ fn incremental_roots() {
             test_vectors::ROOTS[i]
         );
     }
+}
+
+#[test]
+fn incremental_roots_with_blocks() -> Result<()> {
+    incremental_roots_with_blocks_for_network(Network::Mainnet)?;
+    incremental_roots_with_blocks_for_network(Network::Testnet)?;
+    Ok(())
+}
+
+fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
+    let (blocks, sapling_roots) = match network {
+        Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
+        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
+    };
+    let height = NetworkUpgrade::Sapling
+        .activation_height(network)
+        .unwrap()
+        .0;
+
+    // Build empty note commitment tree
+    let mut tree = sapling::tree::NoteCommitmentTree::default();
+
+    // Load Sapling activation block
+    let sapling_activation_block = Arc::new(
+        blocks
+            .get(&height)
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+
+    // Add note commitments from the Sapling activation block to the tree
+    for transaction in sapling_activation_block.transactions.iter() {
+        for sapling_note_commitment in transaction.sapling_note_commitments() {
+            tree.append(*sapling_note_commitment)
+                .expect("test vector is correct");
+        }
+    }
+
+    // Check if root of the tree of the activation block is correct
+    let sapling_activation_block_root =
+        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+    assert_eq!(sapling_activation_block_root, tree.root());
+
+    // Load the block immediately after Sapling activation (activation + 1)
+    let block_after_sapling_activation = Arc::new(
+        blocks
+            .get(&(height + 1))
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+    let block_after_sapling_activation_root = sapling::tree::Root(
+        **sapling_roots
+            .get(&(height + 1))
+            .expect("test vector exists"),
+    );
+
+    // Add note commitments from the block after Sapling activatoin to the tree
+    let mut appended_count = 0;
+    for transaction in block_after_sapling_activation.transactions.iter() {
+        for sapling_note_commitment in transaction.sapling_note_commitments() {
+            tree.append(*sapling_note_commitment)
+                .expect("test vector is correct");
+            appended_count += 1;
+        }
+    }
+    // We also want to make sure that sapling_note_commitments() is returning
+    // the commitments in the right order. But this will only be actually tested
+    // if there are more than one note commitment in a block.
+    // In the test vectors this applies only for the block 1 in mainnet,
+    // so we make this explicit in this assert.
+    if network == Network::Mainnet {
+        assert!(appended_count > 1);
+    }
+
+    // Check if root of the second block is correct
+    assert_eq!(block_after_sapling_activation_root, tree.root());
+
+    Ok(())
 }
