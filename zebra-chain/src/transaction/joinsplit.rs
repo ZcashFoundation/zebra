@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    amount::{Amount, Error},
     primitives::{ed25519, ZkSnarkProof},
     sprout::{JoinSplit, Nullifier},
 };
@@ -53,5 +54,14 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.joinsplits()
             .flat_map(|joinsplit| joinsplit.nullifiers.iter())
+    }
+
+    /// Calculate and return the value balance for the joinsplits.
+    ///
+    /// Needed to calculate the sprout value balance.
+    pub fn value_balance(&self) -> Result<Amount, Error> {
+        self.joinsplits()
+            .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)
+            .sum()
     }
 }

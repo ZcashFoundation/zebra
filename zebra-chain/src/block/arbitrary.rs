@@ -1,25 +1,44 @@
+//! Randomised property testing for [`Block`]s.
+
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
 
-use std::{collections::HashSet, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     block,
     fmt::SummaryDebug,
-    orchard,
     parameters::{
         Network,
         NetworkUpgrade::{self, *},
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization,
-    transparent::Input::*,
+    transparent::{new_transaction_ordered_outputs, CoinbaseSpendRestriction},
     work::{difficulty::CompactDifficulty, equihash},
 };
 
 use super::*;
+
+/// The chain height used to test for prevout inputs.
+///
+/// This impacts the probability of `has_prevouts` failures in
+/// `arbitrary_height_partial_chain_strategy`.
+///
+/// The failure probability calculation is:
+/// ```text
+/// shielded_input = shielded_pool_count / pool_count
+/// expected_transactions = expected_inputs = MAX_ARBITRARY_ITEMS/2
+/// proptest_cases = 256
+/// number_of_proptests = 5 as of July 2021 (PREVOUTS_CHAIN_HEIGHT and PartialChain tests)
+/// shielded_input^(expected_transactions * expected_inputs * PREVOUTS_CHAIN_HEIGHT) * proptest_cases * number_of_proptests
+/// ```
+///
+/// `PREVOUTS_CHAIN_HEIGHT` should be increased, and `proptest_cases` should be reduced,
+/// so that the failure probability is less than 1 in 1 million.
+pub const PREVOUTS_CHAIN_HEIGHT: usize = 20;
 
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -313,86 +332,66 @@ impl Arbitrary for Block {
     type Strategy = BoxedStrategy<Self>;
 }
 
+/// Skip checking transparent coinbase spends in [`Block::partial_chain_strategy`].
+#[allow(clippy::result_unit_err)]
+pub fn allow_all_transparent_coinbase_spends(
+    _: transparent::OutPoint,
+    _: transparent::CoinbaseSpendRestriction,
+    _: transparent::Utxo,
+) -> Result<(), ()> {
+    Ok(())
+}
+
 impl Block {
-    /// Returns a strategy for creating Vecs of blocks with increasing height of
-    /// the given length.
-    pub fn partial_chain_strategy(
+    /// Returns a strategy for creating vectors of blocks with increasing height.
+    ///
+    /// Each vector is `count` blocks long.
+    ///
+    /// `check_transparent_coinbase_spend` is used to check if
+    /// transparent coinbase UTXOs are valid, before using them in blocks.
+    /// Use [`allow_all_transparent_coinbase_spends`] to disable this check.
+    pub fn partial_chain_strategy<F, T, E>(
         mut current: LedgerState,
         count: usize,
-    ) -> BoxedStrategy<SummaryDebug<Vec<Arc<Self>>>> {
+        check_transparent_coinbase_spend: F,
+    ) -> BoxedStrategy<SummaryDebug<Vec<Arc<Self>>>>
+    where
+        F: Fn(
+                transparent::OutPoint,
+                transparent::CoinbaseSpendRestriction,
+                transparent::Utxo,
+            ) -> Result<T, E>
+            + Copy
+            + 'static,
+    {
         let mut vec = Vec::with_capacity(count);
 
         // generate block strategies with the correct heights
         for _ in 0..count {
-            vec.push(Block::arbitrary_with(current));
+            vec.push((Just(current.height), Block::arbitrary_with(current)));
             current.height.0 += 1;
         }
 
         // after the vec strategy generates blocks, fixup invalid parts of the blocks
-        vec.prop_map(|mut vec| {
+        vec.prop_map(move |mut vec| {
             let mut previous_block_hash = None;
-            let mut utxos = HashSet::<transparent::OutPoint>::new();
+            let mut utxos = HashMap::new();
 
-            for block in vec.iter_mut() {
+            for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
                 if let Some(previous_block_hash) = previous_block_hash {
                     block.header.previous_block_hash = previous_block_hash;
                 }
-                previous_block_hash = Some(block.hash());
 
-                // fixup the transparent spends
                 let mut new_transactions = Vec::new();
-                for transaction in block.transactions.drain(..) {
-                    let mut transaction = (*transaction).clone();
-                    let mut new_inputs = Vec::new();
-
-                    for mut input in transaction.inputs_mut().drain(..) {
-                        if let PrevOut {
-                            ref mut outpoint, ..
-                        } = input
-                        {
-                            // take a UTXO if available
-                            if utxos.remove(outpoint) {
-                                new_inputs.push(input);
-                            } else if let Some(arbitrary_utxo) = utxos.clone().iter().next() {
-                                *outpoint = *arbitrary_utxo;
-                                utxos.remove(arbitrary_utxo);
-                                new_inputs.push(input);
-                            }
-                            // otherwise, drop the invalid input, it has no UTXOs to spend
-                        } else {
-                            // preserve coinbase inputs
-                            new_inputs.push(input);
-                        }
-                    }
-
-                    // delete invalid inputs
-                    *transaction.inputs_mut() = new_inputs;
-
-                    // keep transactions with valid input counts
-                    // coinbase transactions will never fail this check
-                    // this is the input check from `has_inputs_and_outputs`
-                    if !transaction.inputs().is_empty()
-                        || transaction.joinsplit_count() > 0
-                        || transaction.sapling_spends_per_anchor().count() > 0
-                        || (transaction.orchard_actions().count() > 0
-                            && transaction
-                                .orchard_flags()
-                                .unwrap_or_else(orchard::Flags::empty)
-                                .contains(orchard::Flags::ENABLE_SPENDS))
-                    {
-                        // add the created UTXOs
-                        // these outputs can be spent from the next transaction in this block onwards
-                        // see `new_outputs` for details
-                        let hash = transaction.hash();
-                        for output_index_in_transaction in 0..transaction.outputs().len() {
-                            utxos.insert(transparent::OutPoint {
-                                hash,
-                                index: output_index_in_transaction.try_into().unwrap(),
-                            });
-                        }
-
-                        // and keep the transaction
+                for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
+                    if let Some(transaction) = fix_generated_transaction(
+                        (*transaction).clone(),
+                        tx_index_in_block,
+                        *height,
+                        &mut utxos,
+                        check_transparent_coinbase_spend,
+                    ) {
                         new_transactions.push(Arc::new(transaction));
                     }
                 }
@@ -400,12 +399,156 @@ impl Block {
                 // delete invalid transactions
                 block.transactions = new_transactions;
 
-                // TODO: fixup the history and authorizing data commitments, if needed
+                // TODO: if needed, fixup:
+                // - transaction output counts (currently 0..=16, consensus rules require 1..)
+                // - history and authorizing data commitments
+
+                // now that we've made all the changes, calculate our block hash,
+                // so the next block can use it
+                previous_block_hash = Some(block.hash());
             }
-            SummaryDebug(vec.into_iter().map(Arc::new).collect())
+            SummaryDebug(
+                vec.into_iter()
+                    .map(|(_height, block)| Arc::new(block))
+                    .collect(),
+            )
         })
         .boxed()
     }
+}
+
+/// Fix `transaction` so it obeys more consensus rules.
+///
+/// Spends [`OutPoint`]s from `utxos`, and adds newly created outputs.
+///
+/// If the transaction can't be fixed, returns `None`.
+pub fn fix_generated_transaction<F, T, E>(
+    mut transaction: Transaction,
+    tx_index_in_block: usize,
+    height: Height,
+    utxos: &mut HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    check_transparent_coinbase_spend: F,
+) -> Option<Transaction>
+where
+    F: Fn(
+            transparent::OutPoint,
+            transparent::CoinbaseSpendRestriction,
+            transparent::Utxo,
+        ) -> Result<T, E>
+        + Copy
+        + 'static,
+{
+    let mut spend_restriction = transaction.coinbase_spend_restriction(height);
+    let mut new_inputs = Vec::new();
+
+    // fixup the transparent spends
+    for mut input in transaction.inputs().to_vec().into_iter() {
+        if input.outpoint().is_some() {
+            if let Some(selected_outpoint) = find_valid_utxo_for_spend(
+                &mut transaction,
+                &mut spend_restriction,
+                height,
+                utxos,
+                check_transparent_coinbase_spend,
+            ) {
+                input.set_outpoint(selected_outpoint);
+                new_inputs.push(input);
+
+                utxos.remove(&selected_outpoint);
+            }
+            // otherwise, drop the invalid input, because it has no valid UTXOs to spend
+        } else {
+            // preserve coinbase inputs
+            new_inputs.push(input.clone());
+        }
+    }
+
+    // delete invalid inputs
+    *transaction.inputs_mut() = new_inputs;
+
+    // keep transactions with valid input counts
+    // coinbase transactions will never fail this check
+    if transaction.has_transparent_or_shielded_inputs() {
+        // skip genesis created UTXOs
+        if height > Height(0) {
+            // non-coinbase outputs can be spent from the next transaction in this block onwards
+            // coinbase outputs have to wait 100 blocks, and be shielded
+            utxos.extend(new_transaction_ordered_outputs(
+                &transaction,
+                transaction.hash(),
+                tx_index_in_block,
+                height,
+            ));
+        }
+
+        Some(transaction)
+    } else {
+        None
+    }
+}
+
+/// Find a valid [`OutPoint`] in `utxos` to spend in `transaction`.
+///
+/// Modifies `transaction` and updates `spend_restriction` if needed.
+///
+/// If there is no valid output, or many search attempts have failed, returns `None`.
+pub fn find_valid_utxo_for_spend<F, T, E>(
+    transaction: &mut Transaction,
+    spend_restriction: &mut CoinbaseSpendRestriction,
+    spend_height: Height,
+    utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    check_transparent_coinbase_spend: F,
+) -> Option<transparent::OutPoint>
+where
+    F: Fn(
+            transparent::OutPoint,
+            transparent::CoinbaseSpendRestriction,
+            transparent::Utxo,
+        ) -> Result<T, E>
+        + Copy
+        + 'static,
+{
+    let has_shielded_outputs = transaction.has_shielded_outputs();
+    let delete_transparent_outputs = CoinbaseSpendRestriction::OnlyShieldedOutputs { spend_height };
+    let mut attempts: usize = 0;
+
+    // choose an arbitrary spendable UTXO, in hash set order
+    while let Some((candidate_outpoint, candidate_utxo)) = utxos.iter().next() {
+        let candidate_utxo = candidate_utxo.clone().utxo;
+
+        attempts += 1;
+
+        // Avoid O(n^2) algorithmic complexity by giving up early,
+        // rather than exhausively checking the entire UTXO set
+        if attempts > 100 {
+            return None;
+        }
+
+        // try the utxo as-is, then try it with deleted transparent outputs
+        if check_transparent_coinbase_spend(
+            *candidate_outpoint,
+            *spend_restriction,
+            candidate_utxo.clone(),
+        )
+        .is_ok()
+        {
+            return Some(*candidate_outpoint);
+        } else if has_shielded_outputs
+            && check_transparent_coinbase_spend(
+                *candidate_outpoint,
+                delete_transparent_outputs,
+                candidate_utxo.clone(),
+            )
+            .is_ok()
+        {
+            *transaction.outputs_mut() = Vec::new();
+            *spend_restriction = delete_transparent_outputs;
+
+            return Some(*candidate_outpoint);
+        }
+    }
+
+    None
 }
 
 impl Arbitrary for Commitment {

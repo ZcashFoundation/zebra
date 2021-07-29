@@ -1,7 +1,7 @@
 //! Orchard shielded data for `V5` `Transaction`s.
 
 use crate::{
-    amount::Amount,
+    amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
     orchard::{tree, Action, Nullifier},
     primitives::{
@@ -47,6 +47,13 @@ impl ShieldedData {
     /// Collect the [`Nullifier`]s for this transaction.
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
+    }
+
+    /// Provide access to the `value_balance` field of the shielded data.
+    ///
+    /// Needed to calculate the sapling value balance.
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+        self.value_balance
     }
 }
 
