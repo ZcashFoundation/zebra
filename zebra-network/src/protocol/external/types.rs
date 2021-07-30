@@ -48,7 +48,11 @@ impl Version {
     /// # Panics
     ///
     /// If we are incompatible with our own minimum remote protocol version.
-    pub fn min_remote_for_height(network: Network, height: block::Height) -> Version {
+    pub fn min_remote_for_height(
+        network: Network,
+        height: impl Into<Option<block::Height>>,
+    ) -> Version {
+        let height = height.into().unwrap_or(block::Height(0));
         let min_spec = Version::min_specified_for_height(network, height);
 
         // shut down if our own version is too old
