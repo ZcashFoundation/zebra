@@ -65,8 +65,8 @@ jobs:
           "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git &&
           cd zebra/ &&
           docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test . &&
-          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet &&
-          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-testnet-1028500,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_testnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_testnet;
+          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" -e "RUSTFLAGS=-g" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --release --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet &&
+          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" -e "RUSTFLAGS=-g" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-testnet-1028500,target=/zebrad-cache zebrad-test:latest cargo test --release --verbose --features test_sync_past_mandatory_checkpoint_testnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_testnet;
           "
       # Clean up
       - name: Delete test instance
