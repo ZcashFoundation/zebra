@@ -12,6 +12,7 @@ ENV SHORT_SHA $SHORT_SHA
 
 ENV RUST_BACKTRACE full
 ENV CARGO_HOME /zebra/.cargo/
+ENV RUSTFLAGS -g
 
 RUN rustc -V; cargo -V; rustup -V
 
@@ -19,6 +20,6 @@ EXPOSE 8233 18233
 
 COPY . .
 
-RUN cargo test --all --no-run
+RUN cargo test --release --all --no-run
 
-CMD cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored
+CMD cargo test --release --workspace --no-fail-fast -- -Zunstable-options --include-ignored
