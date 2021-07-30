@@ -3,7 +3,7 @@ use proptest::prelude::*;
 
 proptest! {
     #[test]
-    fn test_add(
+    fn value_blance_add(
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>())
     {
@@ -32,7 +32,7 @@ proptest! {
         }
     }
     #[test]
-    fn test_sub(
+    fn value_balance_sub(
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>())
     {
@@ -62,7 +62,7 @@ proptest! {
     }
 
     #[test]
-    fn test_sum(
+    fn value_balance_sum(
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>(),
     ) {
@@ -90,7 +90,7 @@ proptest! {
     }
 
     #[test]
-    fn test_serialization(value_balance in any::<ValueBalance<NegativeAllowed>>()) {
+    fn value_balance_serialization(value_balance in any::<ValueBalance<NegativeAllowed>>()) {
         zebra_test::init();
 
         let bytes = value_balance.to_bytes();
