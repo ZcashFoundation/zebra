@@ -2,6 +2,7 @@ use std::{env, sync::Arc};
 
 use futures::stream::FuturesUnordered;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+
 use zebra_chain::{
     block::Block,
     parameters::{Network, NetworkUpgrade},
@@ -13,8 +14,9 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     constants, init_test,
+    service::StateService,
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, FinalizedBlock, PreparedBlock, Request, Response,
+    BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -276,6 +278,41 @@ proptest! {
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
+    }
+
+    /// Test that the best tip height is updated accordingly.
+    ///
+    /// 1. Generate a finalized chain and some non-finalized blocks.
+    /// 2. Check that initially the best tip height is empty.
+    /// 3. Commit the finalized blocks and check that the best tip height is updated accordingly.
+    /// 4. Commit the non-finalized blocks and check that the best tip height is also updated
+    ///    accordingly.
+    #[test]
+    fn best_tip_height_is_updated(
+        (network, finalized_blocks, non_finalized_blocks)
+            in continuous_empty_blocks_from_test_vectors(),
+    ) {
+        zebra_test::init();
+
+        let (mut state_service, best_tip_height) = StateService::new(Config::ephemeral(), network);
+
+        prop_assert_eq!(*best_tip_height.borrow(), None);
+
+        for block in finalized_blocks {
+            let expected_height = block.height;
+
+            state_service.queue_and_commit_finalized(block);
+
+            prop_assert_eq!(*best_tip_height.borrow(), Some(expected_height));
+        }
+
+        for block in non_finalized_blocks {
+            let expected_height = block.height;
+
+            state_service.queue_and_commit_non_finalized(block);
+
+            prop_assert_eq!(*best_tip_height.borrow(), Some(expected_height));
+        }
     }
 }
 
