@@ -1,17 +1,21 @@
 use std::{env, sync::Arc};
 
 use futures::stream::FuturesUnordered;
+use proptest::collection::vec;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+
 use zebra_chain::{
-    block::Block,
+    block::{arbitrary::allow_all_transparent_coinbase_spends, Block},
+    fmt::SummaryDebug,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
-    transaction, transparent,
+    transaction, transparent, LedgerState,
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
 use crate::{
-    constants, init_test, tests::setup::partial_nu5_chain_strategy, BoxError, Request, Response,
+    constants, init_test, tests::setup::partial_nu5_chain_strategy, BoxError, Config, Request,
+    Response,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -274,4 +278,119 @@ proptest! {
 
         prop_assert_eq!(response, Ok(()));
     }
+
+    /// Test that the best tip height is updated accordingly.
+    ///
+    /// 1. Generate a finalized chain and some non-finalized chains that continue the finalized
+    ///    chain.
+    /// 2. Commit the finalized blocks and check that the best tip height is updated accordingly.
+    /// 3. Commit all non-finalized blocks in all forks and check that the best tip height is
+    ///    also updated accordingly.
+    /// 4. Finally, select the first fork and commit all of its blocks, and check that the best tip
+    ///    height is updated, likely into a reduced height because the other forks are discarded.
+    #[test]
+    fn best_tip_height_is_updated(
+        network in any::<Network>(),
+        (finalized_blocks, non_finalized_chains) in ordered_blockchain_state_strategy(),
+    ) {
+        zebra_test::init();
+
+        let (mut state_service, best_tip_height) = crate::init(Config::ephemeral(), network);
+
+        prop_assert_eq!(*best_tip_height.borrow(), None);
+
+        let mut expected_height = None;
+
+        for block in finalized_blocks {
+            expected_height = Some(
+                block
+                    .coinbase_height()
+                    .expect("Missing coinbase height in a mocked block"),
+            );
+
+            todo!("Commit each finalized block");
+
+            prop_assert_eq!(*best_tip_height.borrow(), expected_height);
+        }
+
+        prop_assert_eq!(*best_tip_height.borrow(), expected_height);
+
+        let finalized_tip_height = expected_height;
+        let chain_to_finalize = non_finalized_chains.first().cloned();
+
+        for chain in non_finalized_chains {
+            for block in chain {
+                expected_height = expected_height.max(Some(
+                    block
+                        .coinbase_height()
+                        .expect("Missing coinbale height in a mocked block"),
+                ));
+
+                todo!("Commit each non-finalized block");
+
+                prop_assert_eq!(*best_tip_height.borrow(), expected_height);
+            }
+        }
+
+        prop_assert_eq!(*best_tip_height.borrow(), expected_height);
+
+        if let Some(blocks_to_finalize) = chain_to_finalize {
+            expected_height = blocks_to_finalize
+                .last()
+                .map(|block| {
+                    block
+                        .coinbase_height()
+                        .expect("Missing coinbase height in a mocked block")
+                })
+                .or(finalized_tip_height);
+
+            for block in blocks_to_finalize {
+                todo!("Finalize the block");
+
+                prop_assert_eq!(*best_tip_height.borrow(), expected_height);
+            }
+
+            prop_assert_eq!(*best_tip_height.borrow(), expected_height);
+        }
+    }
+}
+
+fn ordered_blockchain_state_strategy() -> impl Strategy<
+    Value = (
+        SummaryDebug<Vec<Arc<Block>>>,
+        Vec<SummaryDebug<Vec<Arc<Block>>>>,
+    ),
+> {
+    let finalized_blocks = ordered_blocks_strategy();
+
+    (finalized_blocks, vec(ordered_blocks_strategy(), 0..4)).prop_map(
+        |(finalized_blocks, mut non_finalized_chains)| {
+            // Attach non-finalized chains to the finalized chain
+            if let Some(last_finalized_block) = finalized_blocks.last() {
+                let finalized_tip_hash = last_finalized_block.hash();
+
+                for chain in &mut non_finalized_chains {
+                    if let Some(block) = chain.first_mut() {
+                        let block = Arc::get_mut(block).expect("Shared block pointer was cloned");
+
+                        block.header.previous_block_hash = finalized_tip_hash;
+                    }
+                }
+            }
+
+            (finalized_blocks, non_finalized_chains)
+        },
+    )
+}
+
+fn ordered_blocks_strategy() -> impl Strategy<Value = SummaryDebug<Vec<Arc<Block>>>> {
+    (LedgerState::coinbase_strategy(None, None, true), 0..10usize).prop_flat_map(
+        |(ledger_state, chain_length)| {
+            Block::partial_chain_strategy(
+                ledger_state,
+                chain_length,
+                allow_all_transparent_coinbase_spends,
+            )
+        },
+    )
 }
