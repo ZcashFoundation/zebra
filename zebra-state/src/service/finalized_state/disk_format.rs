@@ -3,11 +3,13 @@ use std::{convert::TryInto, fmt::Debug, sync::Arc};
 
 use bincode::Options;
 use zebra_chain::{
+    amount::NonNegative,
     block,
     block::Block,
     orchard, sapling,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transaction, transparent,
+    value_balance::ValueBalance,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -249,6 +251,20 @@ impl IntoDisk for orchard::tree::Root {
     }
 }
 
+impl IntoDisk for ValueBalance<NonNegative> {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for ValueBalance<NonNegative> {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        ValueBalance::from_bytes(bytes.as_ref().try_into().unwrap())
+    }
+}
+
 // The following implementations for the note commitment trees use `serde` and
 // `bincode` because currently the inner Merkle tree frontier (from
 // `incrementalmerkletree`) only supports `serde` for serialization. `bincode`
@@ -485,5 +501,12 @@ mod tests {
         zebra_test::init();
 
         proptest!(|(val in any::<transparent::Utxo>())| assert_value_properties(val));
+    }
+
+    #[test]
+    fn roundtrip_value_balance() {
+        zebra_test::init();
+
+        proptest!(|(val in any::<ValueBalance::<NonNegative>>())| assert_value_properties(val));
     }
 }

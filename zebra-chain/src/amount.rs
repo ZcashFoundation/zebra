@@ -48,6 +48,12 @@ impl<C> Amount<C> {
         buf
     }
 
+    /// From little endian byte array
+    pub fn from_bytes(bytes: [u8; 8]) -> Amount<C> {
+        let amount = i64::from_le_bytes(bytes);
+        Amount::<C>(amount, PhantomData)
+    }
+
     /// Create a zero `Amount`
     pub fn zero() -> Amount<C>
     where

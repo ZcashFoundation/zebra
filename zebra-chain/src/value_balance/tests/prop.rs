@@ -88,4 +88,14 @@ proptest! {
             _ => prop_assert!(matches!(collection.iter().sum(), Err(ValueBalanceError::AmountError(_))))
         }
     }
+
+    #[test]
+    fn test_serialization(value_balance in any::<ValueBalance<NegativeAllowed>>()) {
+        zebra_test::init();
+
+        let bytes = value_balance.to_bytes();
+        let serialized_value_balance = ValueBalance::from_bytes(bytes);
+
+        prop_assert_eq!(value_balance, serialized_value_balance);
+    }
 }
