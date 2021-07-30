@@ -340,6 +340,11 @@ impl HistoryTree {
     pub fn current_height(&self) -> Height {
         self.current_height
     }
+
+    /// Return the network where this tree is used.
+    pub fn network(&self) -> Network {
+        self.network
+    }
 }
 
 impl Clone for HistoryTree {
