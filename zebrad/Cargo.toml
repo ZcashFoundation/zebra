@@ -47,7 +47,7 @@ sentry = { version = "0.21.0", default-features = false, features = ["backtrace"
 sentry-tracing = { git = "https://github.com/kellpossible/sentry-tracing.git", rev = "f1a4a4a16b5ff1022ae60be779eb3fb928ce9b0f" }
 
 [build-dependencies]
-vergen = { version = "5.1.12", default-features = false, features = ["cargo", "git"] }
+vergen = { version = "5.1.14", default-features = false, features = ["cargo", "git"] }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
