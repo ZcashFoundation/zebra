@@ -20,7 +20,10 @@ use super::*;
 
 /// The chain length for state proptests.
 ///
-/// Shorter lengths increase the probability of proptest failures.
+/// Most generated chains will contain transparent spends at or before this height.
+///
+/// This height was chosen as a tradeoff between chains with no transparent spends,
+/// and chains which spend outputs created by previous spends.
 ///
 /// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
 pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =

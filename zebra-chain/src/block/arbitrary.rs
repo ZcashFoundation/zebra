@@ -22,23 +22,25 @@ use crate::{
 
 use super::*;
 
-/// The chain height used to test for prevout inputs.
+/// The chain length for zebra-chain proptests.
 ///
-/// This impacts the probability of `has_prevouts` failures in
-/// `arbitrary_height_partial_chain_strategy`.
+/// Most generated chains will contain transparent spends at or before this height.
 ///
-/// The failure probability calculation is:
+/// This height was chosen a tradeoff between chains with no spends,
+/// and chains which spend outputs created by previous spends.
+///
+/// The raw probability of having no spends during a test run is:
 /// ```text
 /// shielded_input = shielded_pool_count / pool_count
 /// expected_transactions = expected_inputs = MAX_ARBITRARY_ITEMS/2
-/// proptest_cases = 256
-/// number_of_proptests = 5 as of July 2021 (PREVOUTS_CHAIN_HEIGHT and PartialChain tests)
-/// shielded_input^(expected_transactions * expected_inputs * PREVOUTS_CHAIN_HEIGHT) * proptest_cases * number_of_proptests
+/// shielded_input^(expected_transactions * expected_inputs * (PREVOUTS_CHAIN_HEIGHT - 1))
 /// ```
 ///
-/// `PREVOUTS_CHAIN_HEIGHT` should be increased, and `proptest_cases` should be reduced,
-/// so that the failure probability is less than 1 in 1 million.
-pub const PREVOUTS_CHAIN_HEIGHT: usize = 20;
+/// This probability is approximately 3%. However, proptest generation and
+/// minimisation strategies can create additional chains with no transparent spends.
+///
+/// To increase the proportion of test runs with proptest spends, increase `PREVOUTS_CHAIN_HEIGHT`.
+pub const PREVOUTS_CHAIN_HEIGHT: usize = 4;
 
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -400,8 +402,10 @@ impl Block {
                 block.transactions = new_transactions;
 
                 // TODO: if needed, fixup:
-                // - transaction output counts (currently 0..=16, consensus rules require 1..)
+                // - transparent values and shielded value balances
+                // - transaction outputs (currently 0..=16 outputs, consensus rules require 1..)
                 // - history and authorizing data commitments
+                // - the transaction merkle root
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it
