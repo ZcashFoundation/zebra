@@ -2,6 +2,9 @@ use tokio::sync::watch;
 
 use zebra_chain::block;
 
+#[cfg(test)]
+mod tests;
+
 /// A helper type to determine the best chain tip block height.
 ///
 /// The block height is determined based on the current finalized block height and the current best
