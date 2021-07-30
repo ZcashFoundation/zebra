@@ -14,7 +14,7 @@ pub mod arbitrary;
 #[cfg(any(test, feature = "bench"))]
 pub mod tests;
 
-use std::{convert::TryInto, fmt};
+use std::{collections::HashMap, convert::TryInto, fmt};
 
 pub use commitment::{ChainHistoryMmrRootHash, Commitment, CommitmentError};
 pub use hash::Hash;
@@ -28,6 +28,7 @@ pub use arbitrary::LedgerState;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    amount::NegativeAllowed,
     fmt::DisplayToDebug,
     orchard,
     parameters::{Network, NetworkUpgrade},
@@ -36,6 +37,7 @@ use crate::{
     sprout,
     transaction::Transaction,
     transparent,
+    value_balance::{ValueBalance, ValueBalanceError},
 };
 
 /// A Zcash block, containing a header and a list of transactions.
@@ -166,6 +168,22 @@ impl Block {
             .count()
             .try_into()
             .expect("number of transactions must fit u64")
+    }
+
+    /// Get all the value balances from this block by summing all the value balances
+    /// in each transaction the block has.
+    ///
+    /// `utxos` must contain the utxos of every input in the block,
+    /// including UTXOs created by a transaction in this block,
+    /// then spent by a later transaction that's also in this block.
+    pub fn value_balance(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.transactions
+            .iter()
+            .flat_map(|t| t.value_balance(utxos))
+            .sum()
     }
 }
 
