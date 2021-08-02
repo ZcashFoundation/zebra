@@ -65,9 +65,10 @@ Each of the chain value pools can change its value with every block added to the
 ### Shielded Chain Value Pools
 
 Consensus rules:
-> If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or "Orchard chain value pool balance" would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
->
-> Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
+
+If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or "Orchard chain value pool balance" would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+
+Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
 
 https://zips.z.cash/zip-0209#specification
 
@@ -76,12 +77,13 @@ https://zips.z.cash/zip-0209#specification
 The sum of unspent *inputs* to the transaction: the *negation* of the sum of the transaction value balances.
 
 Consensus rules:
-> Transparent inputs to a transaction insert value into a transparent transaction value pool associated with the transaction, and transparent outputs remove value from this pool.
->
-> As in Bitcoin, the remaining value in the transparent transaction value pool of a non-coinbase transaction is available to miners as a fee.
-> The remaining value in the transparent transaction value pool of a coinbase transaction is destroyed.
->
-> The remaining value in the transparent transaction value pool MUST be nonnegative.
+
+Transparent inputs to a transaction insert value into a transparent transaction value pool associated with the transaction, and transparent outputs remove value from this pool.
+
+As in Bitcoin, the remaining value in the transparent transaction value pool of a non-coinbase transaction is available to miners as a fee.
+The remaining value in the transparent transaction value pool of a coinbase transaction is destroyed.
+
+The remaining value in the transparent transaction value pool MUST be nonnegative.
 
 https://zips.z.cash/protocol/protocol.pdf#transactions
 
@@ -90,46 +92,50 @@ In Zebra, the remaining value in non-coinbase transactions is not assigned to an
 ### Sprout Chain Value Pool
 
 Consensus rules:
-> Each JoinSplit transfer can be seen, from the perspective of the transparent transaction value pool, as an input and an output simultaneously.
->
-> `vold` takes value from the transparent transaction value pool and `vnew` adds value to the transparent transaction value pool . As a result, `vold` is treated like an output value, whereas `vnew` is treated like an input value.
->
-> As defined in [ZIP-209], the Sprout chain value pool balance for a given block chain is the sum of all `vold` field values for transactions in the block chain, minus the sum of all `vnew` fields values for transactions in the block chain.
->
-> If the Sprout chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+
+Each JoinSplit transfer can be seen, from the perspective of the transparent transaction value pool, as an input and an output simultaneously.
+
+`vold` takes value from the transparent transaction value pool and `vnew` adds value to the transparent transaction value pool . As a result, `vold` is treated like an output value, whereas `vnew` is treated like an input value.
+
+As defined in [ZIP-209], the Sprout chain value pool balance for a given block chain is the sum of all `vold` field values for transactions in the block chain, minus the sum of all `vnew` fields values for transactions in the block chain.
+
+If the Sprout chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance
 
 ### Sapling Chain Value Pool
 
 Consensus rules:
-> A positive Sapling balancing value takes value from the Sapling transaction value pool and adds it to the transparent transaction value pool. A negative Sapling balancing value does the reverse. As a result, positive `vbalanceSapling` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceSapling` is treated like an output from that pool.
->
-> As defined in [ZIP-209], the Sapling chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceSapling` field values for transactions in the block chain.
->
-> If the Sapling chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+
+A positive Sapling balancing value takes value from the Sapling transaction value pool and adds it to the transparent transaction value pool. A negative Sapling balancing value does the reverse. As a result, positive `vbalanceSapling` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceSapling` is treated like an output from that pool.
+
+As defined in [ZIP-209], the Sapling chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceSapling` field values for transactions in the block chain.
+
+If the Sapling chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#saplingbalance
 
 ### Orchard Chain Value Pool
 
 Consensus rules:
-> Orchard introduces Action transfers, each of which can optionally perform a spend, and optionally perform an output. Similarly to Sapling, the net value of Orchard spends minus outputs in a transaction is called the Orchard balancing value, measured in zatoshi as a signed integer `vbalanceOrchard`.
->
-> `vbalanceOrchard` is encoded in a transaction as the field `valueBalanceOrchard`. If a transaction has no Action descriptions, `vbalanceOrchard` is implicitly zero. Transaction fields are described in § 7.1 ‘Transaction Encoding and Consensus’ on p. 116.
->
-> A positive Orchard balancing value takes value from the Orchard transaction value pool and adds it to the transparent transaction value pool. A negative Orchard balancing value does the reverse. As a result, positive `vbalanceOrchard` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceOrchard` is treated like an output from that pool.
->
-> Similarly to the Sapling chain value pool balance defined in [ZIP-209], the Orchard chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceOrchard` field values for transactions in the block chain.
->
-> If the Orchard chain value pool balance would become negative in the block chain created as a result of accepting a block , then all nodes MUST reject the block as invalid.
+
+Orchard introduces Action transfers, each of which can optionally perform a spend, and optionally perform an output. Similarly to Sapling, the net value of Orchard spends minus outputs in a transaction is called the Orchard balancing value, measured in zatoshi as a signed integer `vbalanceOrchard`.
+
+`vbalanceOrchard` is encoded in a transaction as the field `valueBalanceOrchard`. If a transaction has no Action descriptions, `vbalanceOrchard` is implicitly zero. Transaction fields are described in § 7.1 ‘Transaction Encoding and Consensus’ on p. 116.
+
+A positive Orchard balancing value takes value from the Orchard transaction value pool and adds it to the transparent transaction value pool. A negative Orchard balancing value does the reverse. As a result, positive `vbalanceOrchard` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceOrchard` is treated like an output from that pool.
+
+Similarly to the Sapling chain value pool balance defined in [ZIP-209], the Orchard chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceOrchard` field values for transactions in the block chain.
+
+If the Orchard chain value pool balance would become negative in the block chain created as a result of accepting a block , then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#orchardbalance
 
 ### Transparent Chain Value Pool
 
 Consensus rule:
-> Transfers of transparent value work essentially as in Bitcoin
+
+Transfers of transparent value work essentially as in Bitcoin
 
 https://zips.z.cash/protocol/protocol.pdf#overview
 
