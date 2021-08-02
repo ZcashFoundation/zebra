@@ -121,6 +121,22 @@ impl StateService {
         (state, best_tip_height_receiver)
     }
 
+    /// Queue a finalized block for verification and storage in the finalized state.
+    fn queue_and_commit_finalized(
+        &mut self,
+        finalized: FinalizedBlock,
+    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+
+        self.disk.queue_and_commit_finalized((finalized, rsp_tx));
+
+        if let Some(finalized_height) = self.disk.finalized_tip_height() {
+            self.best_tip_height.set_finalized_height(finalized_height);
+        }
+
+        rsp_rx
+    }
+
     /// Queue a non finalized block for verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
@@ -673,14 +689,8 @@ impl Service<Request> for StateService {
             Request::CommitFinalizedBlock(finalized) => {
                 metrics::counter!("state.requests", 1, "type" => "commit_finalized_block");
 
-                let (rsp_tx, rsp_rx) = oneshot::channel();
-
                 self.pending_utxos.check_against(&finalized.new_outputs);
-                self.disk.queue_and_commit_finalized((finalized, rsp_tx));
-
-                if let Some(finalized_height) = self.disk.finalized_tip_height() {
-                    self.best_tip_height.set_finalized_height(finalized_height);
-                }
+                let rsp_rx = self.queue_and_commit_finalized(finalized);
 
                 async move {
                     rsp_rx
