@@ -12,8 +12,8 @@ This document describes how to verify the Zcash chain and transaction value pool
 [motivation]: #motivation
 
 In the Zcash protocol there are consensus rules that:
-    - prohibit negative chain value pools [ZIP-209], and
-    - restrict the creation of new money to a specific number of coins in each coinbase transaction. [Spec Section 3.4](https://zips.z.cash/protocol/protocol.pdf#transactions)
+- prohibit negative chain value pools [ZIP-209], and
+- restrict the creation of new money to a specific number of coins in each coinbase transaction. [Spec Section 3.4](https://zips.z.cash/protocol/protocol.pdf#transactions)
 
 These rules make sure that a fixed amount of Zcash is created by each block, even if there are vulnerabilities in some shielded pools.
 
@@ -24,25 +24,25 @@ Checking the coins created by coinbase transactions and funding streams is out o
 # Definitions
 [definitions]: #definitions
 
-- `value balance` - The total change in value caused by a subset of the blockchain.
-- `transparent value balance` - The change in the value of the transparent pool. The sum of the outputs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields.
-- `coinbase transparent value balance` - The change in the value of the transparent pool due to a coinbase transaction. The coins newly created by the block, minus the sum of newly created outputs in `tx_out` fields. In this design, we temporarily assume that all coinbase outputs are valid, to avoid checking the created coins.
-- `sprout value balance` - The change in the sprout value pool. The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
+- `value balance` - The change in the chain value pools, caused by a subset of the blockchain.
+- `transparent value balance` - The change the transparent value pool. The sum of newly created outputs in `tx_out` fields, minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
+- `coinbase transparent value balance` - The change the transparent value pool, due to a coinbase transaction. The sum of newly created outputs in `tx_out` fields.
+- `sprout value balance` - The change in the sprout value pool. The sum of all sprout `v_sprout_old` fields, minus the sum of all `v_sprout_new` fields.
 - `sapling value balance` - The change in the sapling value pool. The negation of the sum of all `valueBalanceSapling` fields.
 - `orchard value balance` - The change in the orchard value pool. The negation of the sum of all `valueBalanceOrchard` fields.
-- `remaining transaction value` - The leftover value in each transaction, collected by miners as a fee. This value must be non-negative. In Zebra, calculated by subtracting the sprout, sapling, and orchard value balances from the transparent value balance. In the spec, defined as the sum of transparent inputs, minus transparent outputs, plus `v_sprout_new`, minus `v_sprout_old`, plus `vbalanceSapling`, plus `vbalanceOrchard`.
+- `remaining transaction value` - The sum of unspent *inputs* to a transaction. This value must be non-negative. It is collected by miners as a fee. In Zebra, calculated by *negating* the sum of the transparent, sprout, sapling, and orchard value balances. In the spec, defined as the sum of transparent inputs, minus transparent outputs, plus `v_sprout_new`, minus `v_sprout_old`, plus `vbalanceSapling`, plus `vbalanceOrchard`.
 - `transaction value pool balance` - The sum of all the value balances in each transaction. There is a separate value for each transparent and shielded pool.
 - `block value pool balance` - The sum of all the value balances in each block. There is a separate value for each transparent and shielded pool.
-- `chain value pool balance` - The sum of all the value balances in a valid blockchain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
+- `chain value pool balance` - The transparent chain value pool balance is the sum of all unspent transparent outputs (UTXOs) in the chain. Each shielded chain value pool balance is the sum of all unspent outputs in the chain for that pool. In Zebra, they are calculated as the sum of all the value balances in a valid blockchain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-There is a value pool for transparent funds, and for each kind of shielded transfer. These value pools exist in each transaction, each block, and each chain.
+There is a chain value pool for transparent funds, and for each kind of shielded transfer. These value pools are updated using value balances, which are calculated for each block and transaction.
 
 We need to check each chain value pool as blocks are added to the chain, to make sure that chain balances never go negative.
 
-We also need to check that non-coinbase transactions only spend the coins provided by their inputs.
+We also need to check that non-coinbase transactions don't create any new value. Each transaction's total output value must be less than or equal to the total input value. In the spec, this is called the remaining value in the transaction value pool.
 
 Each of the chain value pools can change its value with every block added to the chain. This is a state feature and Zebra handle this in the `zebra-state` crate. We propose to store the pool values for the finalized tip height on disk.
 
@@ -62,59 +62,110 @@ Each of the chain value pools can change its value with every block added to the
 ## Consensus rules
 [consensus-rules]: #consensus-rules
 
-### Shielded Chain Value Pools
+### Coinbase Transactions
 
-If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or "Orchard chain value pool balance" would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+In this design, we assume that all coinbase outputs are valid, to avoid checking the newly created coinbase value, and the miner fees.
 
-Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
+The coinbase value and miner feel rules will be checked as part of a future design.
 
-https://zips.z.cash/zip-0209#specification
+### Remaining Value in the Transparent Transaction Value Pool
 
-### Transparent Transaction Value Pool & Remaining Value
+The sum of unspent *inputs* to the transaction: the *negation* of the sum of the transaction value balances.
 
-Transparent inputs to a transaction insert value into a transparent transaction value pool associated with the transaction, and transparent outputs remove value from this pool. As in Bitcoin, the remaining value in the pool is available to miners as a fee.
-
-Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
+Consensus rules:
+> Transparent inputs to a transaction insert value into a transparent transaction value pool associated with the transaction, and transparent outputs remove value from this pool.
+>
+> As in Bitcoin, the remaining value in the transparent transaction value pool of a non-coinbase transaction is available to miners as a fee.
+> The remaining value in the transparent transaction value pool of a coinbase transaction is destroyed.
+>
+> The remaining value in the transparent transaction value pool MUST be nonnegative.
 
 https://zips.z.cash/protocol/protocol.pdf#transactions
 
-Note: there is no explicit rule that the remaining balance in the transparent chain value pool must be non-negative. But it follows from the transparent transaction value pool consensus rule, and the definition of value addition.
+In Zebra, the remaining value in non-coinbase transactions is not assigned to any particular pool, until a miner spends it as part of a coinbase output.
+
+### Transparent Chain Value Pool
+
+Consensus rule:
+> Transfers of transparent value work essentially as in Bitcoin
+
+https://zips.z.cash/protocol/protocol.pdf#overview
+
+There is no explicit Zcash consensus rule that the transparent chain value pool balance must be non-negative.
+But an equivalent rule must be enforced by Zcash implementations, so that each block only creates a fixed amount of coins.
+
+Specifically, this rule can be derived from other consensus rules:
+- a transparent output must have a non-negative value,
+- a transparent input can only spend an unspent transparent output,
+- there must be a non-negative remaining value in the transparent transaction value pool.
+
+Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
+
+### Shielded Chain Value Pools
+
+Consensus rules:
+> If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or "Orchard chain value pool balance" would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+>
+> Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
+
+https://zips.z.cash/zip-0209#specification
 
 ### Sprout Chain Value Pool
 
-Each JoinSplit transfer can be seen, from the perspective of the transparent transaction value pool , as an input and an output simultaneously.
-
-`vold` takes value from the transparent transaction value pool and `vnew` adds value to the transparent transaction value pool . As a result, `vold` is treated like an output value, whereas `vnew` is treated like an input value.
-
-As defined in [ZIP-209], the Sprout chain value pool balance for a given block chain is the sum of all `vold` field values for transactions in the block chain, minus the sum of all `vnew` fields values for transactions in the block chain.
-
-Consensus rule: If the Sprout chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+Consensus rules:
+> Each JoinSplit transfer can be seen, from the perspective of the transparent transaction value pool, as an input and an output simultaneously.
+>
+> `vold` takes value from the transparent transaction value pool and `vnew` adds value to the transparent transaction value pool . As a result, `vold` is treated like an output value, whereas `vnew` is treated like an input value.
+>
+> As defined in [ZIP-209], the Sprout chain value pool balance for a given block chain is the sum of all `vold` field values for transactions in the block chain, minus the sum of all `vnew` fields values for transactions in the block chain.
+>
+> If the Sprout chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance
 
 ### Sapling Chain Value Pool
 
-A positive Sapling balancing value takes value from the Sapling transaction value pool and adds it to the transparent transaction value pool. A negative Sapling balancing value does the reverse. As a result, positive `vbalanceSapling` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceSapling` is treated like an output from that pool.
-
-As defined in [ZIP-209], the Sapling chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceSapling` field values for transactions in the block chain.
-
-Consensus rule: If the Sapling chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+Consensus rules:
+> A positive Sapling balancing value takes value from the Sapling transaction value pool and adds it to the transparent transaction value pool. A negative Sapling balancing value does the reverse. As a result, positive `vbalanceSapling` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceSapling` is treated like an output from that pool.
+>
+> As defined in [ZIP-209], the Sapling chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceSapling` field values for transactions in the block chain.
+>
+> If the Sapling chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#saplingbalance
 
 ### Orchard Chain Value Pool
 
-Orchard introduces Action transfers, each of which can optionally perform a spend, and optionally perform an output. Similarly to Sapling, the net value of Orchard spends minus outputs in a transaction is called the Orchard balancing value, measured in zatoshi as a signed integer `vbalanceOrchard`.
-
-`vbalanceOrchard` is encoded in a transaction as the field `valueBalanceOrchard`. If a transaction has no Action descriptions, `vbalanceOrchard` is implicitly zero. Transaction fields are described in § 7.1 ‘Transaction Encoding and Consensus’ on p. 116.
-
-A positive Orchard balancing value takes value from the Orchard transaction value pool and adds it to the transparent transaction value pool. A negative Orchard balancing value does the reverse. As a result, positive `vbalanceOrchard` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceOrchard` is treated like an output from that pool.
-
-Similarly to the Sapling chain value pool balance defined in [ZIP-209], the Orchard chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceOrchard` field values for transactions in the block chain.
-
-Consensus rule: If the Orchard chain value pool balance would become negative in the block chain created as a result of accepting a block , then all nodes MUST reject the block as invalid.
+Consensus rules:
+> Orchard introduces Action transfers, each of which can optionally perform a spend, and optionally perform an output. Similarly to Sapling, the net value of Orchard spends minus outputs in a transaction is called the Orchard balancing value, measured in zatoshi as a signed integer `vbalanceOrchard`.
+>
+> `vbalanceOrchard` is encoded in a transaction as the field `valueBalanceOrchard`. If a transaction has no Action descriptions, `vbalanceOrchard` is implicitly zero. Transaction fields are described in § 7.1 ‘Transaction Encoding and Consensus’ on p. 116.
+>
+> A positive Orchard balancing value takes value from the Orchard transaction value pool and adds it to the transparent transaction value pool. A negative Orchard balancing value does the reverse. As a result, positive `vbalanceOrchard` is treated like an input to the transparent transaction value pool, whereas negative `vbalanceOrchard` is treated like an output from that pool.
+>
+> Similarly to the Sapling chain value pool balance defined in [ZIP-209], the Orchard chain value pool balance for a given block chain is the negation of the sum of all `valueBalanceOrchard` field values for transactions in the block chain.
+>
+> If the Orchard chain value pool balance would become negative in the block chain created as a result of accepting a block , then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+
+### Exceptions and Edge Cases
+
+Value pools and value balances include the value of all unspent outputs, regardless of whether they can actually be spent.
+
+For example:
+* transparent outputs which have unsatisfiable lock scripts
+* shielded outputs which have invalid private keys
+
+However, some value is not part of any output:
+* if created value or miner fees are not spent in a coinbase transaction, they are destroyed
+* since coinbase transaction output values are rounded to the nearest zatoshi, any fractional part of miner-controlled or funding stream outputs is destroyed by rounding
+
+Therefore:
+* the total of all chain value pools will always be strictly less than `MAX_MONEY`, and
+* the current total of all chain value pools will always be less than or equal to the number of coins created in coinbase transactions.
+
+These properties are implied by other consensus rules, and do not need to be checked separately.
 
 ## Proposed Implementation
 
