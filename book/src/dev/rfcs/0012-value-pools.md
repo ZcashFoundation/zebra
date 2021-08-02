@@ -153,7 +153,7 @@ Some of these consensus rules are derived from Bitcoin, so they may not be docum
 
 In this design, we assume that all coinbase outputs are valid, to avoid checking the newly created coinbase value, and the miner fees.
 
-The coinbase value and miner feel rules will be checked as part of a future design.
+The coinbase value and miner fee rules will be checked as part of a future design.
 
 ### Exceptions and Edge Cases
 
