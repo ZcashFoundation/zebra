@@ -25,7 +25,7 @@ bs58 = { version = "0.4", features = ["check"] }
 byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.2"
-fpe = "0.4"
+fpe = "0.5"
 futures = "0.3"
 group = "0.10"
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083

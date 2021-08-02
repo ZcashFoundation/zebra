@@ -67,7 +67,7 @@ checksum = "884391ef1066acaa41e766ba8f596341b96e93ce34f9a43e7d24bf0a0eaf0561"
 dependencies = [
  "aes-soft",
  "aesni",
- "cipher",
+ "cipher 0.2.5",
 ]
 
 [[package]]
@@ -76,7 +76,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be14c7498ea50828a38d0e24a765ed2effe92a705885b57d029cd67d45744072"
 dependencies = [
- "cipher",
+ "cipher 0.2.5",
  "opaque-debug",
 ]
 
@@ -86,7 +86,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea2e11f5e94c2f7d386164cc2aa1f97823fed6f259e486940a71c174dd01b0ce"
 dependencies = [
- "cipher",
+ "cipher 0.2.5",
  "opaque-debug",
 ]
 
@@ -431,7 +431,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57a0e8073e8baa88212fb5823574c02ebccb395136ba9a164ab89379ec6072f0"
 dependencies = [
  "block-padding",
- "cipher",
+ "cipher 0.2.5",
+]
+
+[[package]]
+name = "block-modes"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cb03d1bed155d89dce0f845b7899b18a9a163e148fd004e1c28421a783e2d8e"
+dependencies = [
+ "block-padding",
+ "cipher 0.3.0",
 ]
 
 [[package]]
@@ -574,6 +584,15 @@ name = "cipher"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12f8e7987cbd042a63249497f41aed09f8e65add917ea6566effbc56578d6801"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
+name = "cipher"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
 dependencies = [
  "generic-array",
 ]
@@ -1198,8 +1217,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a25080721bbcd2cd4d765b7d607ea350425fa087ce53cd3e31afcacdab850352"
 dependencies = [
  "aes",
- "block-modes",
- "num-bigint",
+ "block-modes 0.7.0",
+ "num-bigint 0.3.2",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "fpe"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcf3e40fc9accc7218e082db8a75aeea244b8f5db73e591774ef93b4276365e6"
+dependencies = [
+ "block-modes 0.8.1",
+ "cipher 0.3.0",
+ "libm",
+ "num-bigint 0.4.0",
  "num-integer",
  "num-traits",
 ]
@@ -1912,6 +1945,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7d73b3f436185384286bd8098d17ec07c9a7d2388a6599f824d8502b529702a"
+
+[[package]]
 name = "librocksdb-sys"
 version = "6.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2211,6 +2250,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e0d047c1062aa51e256408c560894e5251f08925980e53cf1aa5bd00eec6512"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-format"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2283,7 +2333,7 @@ dependencies = [
  "bitvec",
  "blake2b_simd",
  "ff",
- "fpe",
+ "fpe 0.4.0",
  "group",
  "halo2",
  "lazy_static",
@@ -4467,7 +4517,7 @@ dependencies = [
  "crypto_api_chachapoly",
  "equihash 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=0c3ed159985affa774e44d10172d4471d798a85a)",
  "ff",
- "fpe",
+ "fpe 0.4.0",
  "group",
  "hex",
  "jubjub",
@@ -4515,7 +4565,7 @@ dependencies = [
  "displaydoc",
  "ed25519-zebra",
  "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "fpe",
+ "fpe 0.5.0",
  "futures 0.3.15",
  "group",
  "halo2",
