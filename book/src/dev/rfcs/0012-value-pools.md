@@ -95,9 +95,9 @@ Consensus rules:
 
 Each JoinSplit transfer can be seen, from the perspective of the transparent transaction value pool, as an input and an output simultaneously.
 
-`vold` takes value from the transparent transaction value pool and `vnew` adds value to the transparent transaction value pool . As a result, `vold` is treated like an output value, whereas `vnew` is treated like an input value.
+`v_sprout_old` takes value from the transparent transaction value pool and `v_sprout_new` adds value to the transparent transaction value pool . As a result, `v_sprout_old` is treated like an output value, whereas `v_sprout_new` is treated like an input value.
 
-As defined in [ZIP-209], the Sprout chain value pool balance for a given block chain is the sum of all `vold` field values for transactions in the block chain, minus the sum of all `vnew` fields values for transactions in the block chain.
+As defined in [ZIP-209], the Sprout chain value pool balance for a given block chain is the sum of all `v_sprout_old` field values for transactions in the block chain, minus the sum of all `v_sprout_new` fields values for transactions in the block chain.
 
 If the Sprout chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
