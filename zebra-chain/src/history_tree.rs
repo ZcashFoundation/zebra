@@ -15,7 +15,7 @@ use crate::{
     block::{Block, ChainHistoryMmrRootHash, Height},
     orchard,
     parameters::{Network, NetworkUpgrade},
-    primitives::zcash_history::{Entry, Tree, V1, V2},
+    primitives::zcash_history::{Entry, Tree, V1 as PreOrchard, V2 as OrchardOnward},
     sapling,
 };
 
@@ -35,9 +35,9 @@ pub enum HistoryTreeError {
 /// The inner [Tree] in one of its supported versions.
 enum InnerHistoryTree {
     /// A pre-Orchard tree.
-    V1(Tree<V1>),
+    PreOrchard(Tree<PreOrchard>),
     /// An Orchard-onward tree.
-    V2(Tree<V2>),
+    OrchardOnward(Tree<OrchardOnward>),
 }
 
 /// History tree (Merkle mountain range) structure that contains information about
@@ -79,24 +79,24 @@ impl HistoryTree {
                 panic!("HistoryTree does not exist for pre-Heartwood upgrades")
             }
             NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
-                let tree = Tree::<V1>::new_from_cache(
+                let tree = Tree::<PreOrchard>::new_from_cache(
                     network,
                     network_upgrade,
                     size,
                     &peaks,
                     &Default::default(),
                 )?;
-                InnerHistoryTree::V1(tree)
+                InnerHistoryTree::PreOrchard(tree)
             }
             NetworkUpgrade::Nu5 => {
-                let tree = Tree::<V2>::new_from_cache(
+                let tree = Tree::<OrchardOnward>::new_from_cache(
                     network,
                     network_upgrade,
                     size,
                     &peaks,
                     &Default::default(),
                 )?;
-                InnerHistoryTree::V2(tree)
+                InnerHistoryTree::OrchardOnward(tree)
             }
         };
         Ok(Self {
@@ -133,14 +133,22 @@ impl HistoryTree {
                 panic!("HistoryTree does not exist for pre-Heartwood upgrades")
             }
             NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
-                let (tree, entry) =
-                    Tree::<V1>::new_from_block(network, block, sapling_root, &Default::default())?;
-                (InnerHistoryTree::V1(tree), entry)
+                let (tree, entry) = Tree::<PreOrchard>::new_from_block(
+                    network,
+                    block,
+                    sapling_root,
+                    &Default::default(),
+                )?;
+                (InnerHistoryTree::PreOrchard(tree), entry)
             }
             NetworkUpgrade::Nu5 => {
-                let (tree, entry) =
-                    Tree::<V2>::new_from_block(network, block, sapling_root, orchard_root)?;
-                (InnerHistoryTree::V2(tree), entry)
+                let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
+                    network,
+                    block,
+                    sapling_root,
+                    orchard_root,
+                )?;
+                (InnerHistoryTree::OrchardOnward(tree), entry)
             }
         };
         let mut peaks = BTreeMap::new();
@@ -194,10 +202,10 @@ impl HistoryTree {
         }
 
         let new_entries = match &mut self.inner {
-            InnerHistoryTree::V1(tree) => tree
+            InnerHistoryTree::PreOrchard(tree) => tree
                 .append_leaf(block, sapling_root, orchard_root)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
-            InnerHistoryTree::V2(tree) => tree
+            InnerHistoryTree::OrchardOnward(tree) => tree
                 .append_leaf(block, sapling_root, orchard_root)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
         };
@@ -300,20 +308,24 @@ impl HistoryTree {
         self.peaks.retain(|k, _| peak_pos_set.contains(k));
         // Rebuild tree
         self.inner = match self.inner {
-            InnerHistoryTree::V1(_) => InnerHistoryTree::V1(Tree::<V1>::new_from_cache(
-                self.network,
-                self.network_upgrade,
-                self.size,
-                &self.peaks,
-                &Default::default(),
-            )?),
-            InnerHistoryTree::V2(_) => InnerHistoryTree::V2(Tree::<V2>::new_from_cache(
-                self.network,
-                self.network_upgrade,
-                self.size,
-                &self.peaks,
-                &Default::default(),
-            )?),
+            InnerHistoryTree::PreOrchard(_) => {
+                InnerHistoryTree::PreOrchard(Tree::<PreOrchard>::new_from_cache(
+                    self.network,
+                    self.network_upgrade,
+                    self.size,
+                    &self.peaks,
+                    &Default::default(),
+                )?)
+            }
+            InnerHistoryTree::OrchardOnward(_) => {
+                InnerHistoryTree::OrchardOnward(Tree::<OrchardOnward>::new_from_cache(
+                    self.network,
+                    self.network_upgrade,
+                    self.size,
+                    &self.peaks,
+                    &Default::default(),
+                )?)
+            }
         };
         Ok(())
     }
@@ -321,8 +333,8 @@ impl HistoryTree {
     /// Return the hash of the tree root.
     pub fn hash(&self) -> ChainHistoryMmrRootHash {
         match &self.inner {
-            InnerHistoryTree::V1(tree) => tree.hash(),
-            InnerHistoryTree::V2(tree) => tree.hash(),
+            InnerHistoryTree::PreOrchard(tree) => tree.hash(),
+            InnerHistoryTree::OrchardOnward(tree) => tree.hash(),
         }
     }
 
@@ -345,8 +357,8 @@ impl HistoryTree {
 impl Clone for HistoryTree {
     fn clone(&self) -> Self {
         let tree = match self.inner {
-            InnerHistoryTree::V1(_) => InnerHistoryTree::V1(
-                Tree::<V1>::new_from_cache(
+            InnerHistoryTree::PreOrchard(_) => InnerHistoryTree::PreOrchard(
+                Tree::<PreOrchard>::new_from_cache(
                     self.network,
                     self.network_upgrade,
                     self.size,
@@ -355,8 +367,8 @@ impl Clone for HistoryTree {
                 )
                 .expect("rebuilding an existing tree should always work"),
             ),
-            InnerHistoryTree::V2(_) => InnerHistoryTree::V2(
-                Tree::<V2>::new_from_cache(
+            InnerHistoryTree::OrchardOnward(_) => InnerHistoryTree::OrchardOnward(
+                Tree::<OrchardOnward>::new_from_cache(
                     self.network,
                     self.network_upgrade,
                     self.size,
