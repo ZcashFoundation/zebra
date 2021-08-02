@@ -138,16 +138,34 @@ where
         let orchard = self.orchard.to_bytes();
         match [transparent, sprout, sapling, orchard].concat().try_into() {
             Ok(bytes) => bytes,
-            _ => unreachable!("should be impossible to get here"),
+            _ => unreachable!(
+                "Four [u8; 8] should always concat with no error into a single [u8; 32]"
+            ),
         }
     }
 
     /// From byte array
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        let transparent = Amount::from_bytes(bytes[0..8].try_into().unwrap());
-        let sprout = Amount::from_bytes(bytes[8..16].try_into().unwrap());
-        let sapling = Amount::from_bytes(bytes[16..24].try_into().unwrap());
-        let orchard = Amount::from_bytes(bytes[24..32].try_into().unwrap());
+        let transparent = Amount::from_bytes(
+            bytes[0..8]
+                .try_into()
+                .expect("Extracting the first quarter of a [u8; 32] should always succeed"),
+        );
+        let sprout = Amount::from_bytes(
+            bytes[8..16]
+                .try_into()
+                .expect("Extracting the second quarter of a [u8; 32] should always succeed"),
+        );
+        let sapling = Amount::from_bytes(
+            bytes[16..24]
+                .try_into()
+                .expect("Extracting the third quarter of a [u8; 32] should always succeed"),
+        );
+        let orchard = Amount::from_bytes(
+            bytes[24..32]
+                .try_into()
+                .expect("Extracting the last quarter of a [u8; 32] should always succeed"),
+        );
 
         ValueBalance {
             transparent,
