@@ -25,8 +25,8 @@ Checking the coins created by coinbase transactions and funding streams is out o
 [definitions]: #definitions
 
 - `value balance` - The change in the chain value pools, caused by a subset of the blockchain.
-- `transparent value balance` - The change the transparent value pool. The sum of newly created outputs in `tx_out` fields, minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
-- `coinbase transparent value balance` - The change the transparent value pool, due to a coinbase transaction. The sum of newly created outputs in `tx_out` fields.
+- `transparent value balance` - The change in the transparent value pool. The sum of newly created outputs in `tx_out` fields, minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
+- `coinbase transparent value balance` - The change in the transparent value pool, due to a coinbase transaction. The sum of newly created outputs in `tx_out` fields.
 - `sprout value balance` - The change in the sprout value pool. The sum of all sprout `v_sprout_old` fields, minus the sum of all `v_sprout_new` fields.
 - `sapling value balance` - The change in the sapling value pool. The negation of the sum of all `valueBalanceSapling` fields.
 - `orchard value balance` - The change in the orchard value pool. The negation of the sum of all `valueBalanceOrchard` fields.
