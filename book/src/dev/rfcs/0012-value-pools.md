@@ -71,29 +71,6 @@ Consensus rules:
 
 https://zips.z.cash/zip-0209#specification
 
-### Transparent Chain Value Pool
-
-Consensus rule:
-> Transfers of transparent value work essentially as in Bitcoin
-
-https://zips.z.cash/protocol/protocol.pdf#overview
-
-There is no explicit Zcash consensus rule that the transparent chain value pool balance must be non-negative.
-But an equivalent rule must be enforced by Zcash implementations, so that each block only creates a fixed amount of coins.
-
-Specifically, this rule can be derived from other consensus rules:
-- a transparent output must have a non-negative value,
-- a transparent input can only spend an unspent transparent output,
-- there must be a non-negative remaining value in the transparent transaction value pool.
-
-Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
-
-### Coinbase Transactions
-
-In this design, we assume that all coinbase outputs are valid, to avoid checking the newly created coinbase value, and the miner fees.
-
-The coinbase value and miner feel rules will be checked as part of a future design.
-
 ### Transparent Transaction Value Pool & Remaining Value
 
 The sum of unspent *inputs* to the transaction: the *negation* of the sum of the transaction value balances.
@@ -148,6 +125,29 @@ Consensus rules:
 > If the Orchard chain value pool balance would become negative in the block chain created as a result of accepting a block , then all nodes MUST reject the block as invalid.
 
 https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+
+### Transparent Chain Value Pool
+
+Consensus rule:
+> Transfers of transparent value work essentially as in Bitcoin
+
+https://zips.z.cash/protocol/protocol.pdf#overview
+
+There is no explicit Zcash consensus rule that the transparent chain value pool balance must be non-negative.
+But an equivalent rule must be enforced by Zcash implementations, so that each block only creates a fixed amount of coins.
+
+Specifically, this rule can be derived from other consensus rules:
+- a transparent output must have a non-negative value,
+- a transparent input can only spend an unspent transparent output,
+- there must be a non-negative remaining value in the transparent transaction value pool.
+
+Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
+
+### Coinbase Transactions
+
+In this design, we assume that all coinbase outputs are valid, to avoid checking the newly created coinbase value, and the miner fees.
+
+The coinbase value and miner feel rules will be checked as part of a future design.
 
 ### Exceptions and Edge Cases
 
