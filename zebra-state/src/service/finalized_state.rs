@@ -196,6 +196,16 @@ impl FinalizedState {
     /// Immediately commit `finalized` to the finalized state.
     ///
     /// Use `source` as the source of the block in log messages.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    ///
+    /// # Panics
+    ///
+    /// - Panics on errors from updating history and note commitment trees.
+    ///   (Which should not happend since they were previously added to the
+    ///   non-finalized state.)
     pub fn commit_finalized_direct(
         &mut self,
         finalized: FinalizedBlock,
@@ -269,7 +279,7 @@ impl FinalizedState {
 
         // We use a closure so we can use an early return for control flow in
         // the genesis case
-        let prepare_commit = || -> Result<rocksdb::WriteBatch, BoxError> {
+        let prepare_commit = || -> rocksdb::WriteBatch {
             let mut batch = rocksdb::WriteBatch::default();
 
             // Index the block
@@ -295,7 +305,7 @@ impl FinalizedState {
                     height,
                     orchard_note_commitment_tree,
                 );
-                return Ok(batch);
+                return batch;
             }
 
             // Index all new transparent outputs
@@ -368,14 +378,20 @@ impl FinalizedState {
                         block.clone(),
                         &sapling_root,
                         &orchard_root,
-                    )?);
+                    ).expect(
+                        "must work since it was already appended before in the non-finalized state",
+                    ));
                 }
                 std::cmp::Ordering::Greater => assert!(history_tree.is_some()),
             }
 
             // Add block to history tree if applicable
             if let Some(history_tree) = &mut history_tree {
-                history_tree.push(block.clone(), &sapling_root, &orchard_root)?;
+                history_tree
+                    .push(block.clone(), &sapling_root, &orchard_root)
+                    .expect(
+                        "must work since it was already appended before in the non-finalized state",
+                    );
             }
 
             // Compute the new anchors and index them
@@ -402,10 +418,10 @@ impl FinalizedState {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
 
-            Ok(batch)
+            batch
         };
 
-        let batch = prepare_commit()?;
+        let batch = prepare_commit();
 
         let result = self.db.write(batch).map(|()| hash);
 
@@ -539,8 +555,8 @@ impl FinalizedState {
             .expect("note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Orchard note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
+    /// Returns the ZIP-221 history tree of the finalized tip or `None`
+    /// if it does not exist yet in the state (pre-Heartwood).
     pub fn history_tree(&self) -> Option<HistoryTree> {
         let height = self.finalized_tip_height()?;
         let history_tree = self.db.cf_handle("history_tree").unwrap();
