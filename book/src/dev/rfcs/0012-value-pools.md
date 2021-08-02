@@ -77,7 +77,7 @@ In this design, we assume that all coinbase outputs are valid, to avoid checking
 
 The coinbase value and miner feel rules will be checked as part of a future design.
 
-### Remaining Value in the Transaction Value Pool
+### Transparent Transaction Value Pool & Remaining Value
 
 The sum of unspent *inputs* to the transaction: the *negation* of the sum of the transaction value balances.
 
