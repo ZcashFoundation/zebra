@@ -59,7 +59,7 @@ pub struct HistoryTree {
 }
 
 impl HistoryTree {
-    /// Recreate a HistoryTree from previously saved data.
+    /// Recreate a [`HistoryTree`] from previously saved data.
     ///
     /// The parameters must come from the values of [HistoryTree::size],
     /// [HistoryTree::peaks] and [HistoryTree::current_height] of a HistoryTree.
