@@ -62,6 +62,23 @@ Each of the chain value pools can change its value with every block added to the
 ## Consensus rules
 [consensus-rules]: #consensus-rules
 
+### Transparent Chain Value Pool
+
+Consensus rule:
+> Transfers of transparent value work essentially as in Bitcoin
+
+https://zips.z.cash/protocol/protocol.pdf#overview
+
+There is no explicit Zcash consensus rule that the transparent chain value pool balance must be non-negative.
+But an equivalent rule must be enforced by Zcash implementations, so that each block only creates a fixed amount of coins.
+
+Specifically, this rule can be derived from other consensus rules:
+- a transparent output must have a non-negative value,
+- a transparent input can only spend an unspent transparent output,
+- there must be a non-negative remaining value in the transparent transaction value pool.
+
+Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
+
 ### Shielded Chain Value Pools
 
 Consensus rules:
@@ -92,23 +109,6 @@ Consensus rules:
 https://zips.z.cash/protocol/protocol.pdf#transactions
 
 In Zebra, the remaining value in non-coinbase transactions is not assigned to any particular pool, until a miner spends it as part of a coinbase output.
-
-### Transparent Chain Value Pool
-
-Consensus rule:
-> Transfers of transparent value work essentially as in Bitcoin
-
-https://zips.z.cash/protocol/protocol.pdf#overview
-
-There is no explicit Zcash consensus rule that the transparent chain value pool balance must be non-negative.
-But an equivalent rule must be enforced by Zcash implementations, so that each block only creates a fixed amount of coins.
-
-Specifically, this rule can be derived from other consensus rules:
-- a transparent output must have a non-negative value,
-- a transparent input can only spend an unspent transparent output,
-- there must be a non-negative remaining value in the transparent transaction value pool.
-
-Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
 
 ### Sprout Chain Value Pool
 
