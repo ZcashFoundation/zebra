@@ -62,6 +62,15 @@ Each of the chain value pools can change its value with every block added to the
 ## Consensus rules
 [consensus-rules]: #consensus-rules
 
+### Shielded Chain Value Pools
+
+Consensus rules:
+> If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or "Orchard chain value pool balance" would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+>
+> Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
+
+https://zips.z.cash/zip-0209#specification
+
 ### Transparent Chain Value Pool
 
 Consensus rule:
@@ -78,15 +87,6 @@ Specifically, this rule can be derived from other consensus rules:
 - there must be a non-negative remaining value in the transparent transaction value pool.
 
 Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
-
-### Shielded Chain Value Pools
-
-Consensus rules:
-> If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or "Orchard chain value pool balance" would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
->
-> Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
-
-https://zips.z.cash/zip-0209#specification
 
 ### Coinbase Transactions
 
