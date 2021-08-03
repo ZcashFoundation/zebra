@@ -195,17 +195,15 @@ impl FinalizedState {
 
     /// Immediately commit `finalized` to the finalized state.
     ///
+    /// This can be called either by the non-finalized state (when finalizing
+    /// a block) or by the checkpoint verifier.
+    ///
     /// Use `source` as the source of the block in log messages.
     ///
     /// # Errors
     ///
     /// - Propagates any errors from writing to the DB
-    ///
-    /// # Panics
-    ///
-    /// - Panics on errors from updating history and note commitment trees.
-    ///   (Which should not happend since they were previously added to the
-    ///   non-finalized state.)
+    /// - Propagates any errors from updating history and note commitment trees
     pub fn commit_finalized_direct(
         &mut self,
         finalized: FinalizedBlock,
@@ -277,9 +275,12 @@ impl FinalizedState {
         let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
         let mut history_tree = self.history_tree();
 
+        // Prepare a batch of DB modifications and return it (without actually writing anything).
         // We use a closure so we can use an early return for control flow in
-        // the genesis case
-        let prepare_commit = || -> rocksdb::WriteBatch {
+        // the genesis case.
+        // If the closure returns an error it will be propagated and the batch will not be written
+        // to the BD afterwards.
+        let prepare_commit = || -> Result<rocksdb::WriteBatch, BoxError> {
             let mut batch = rocksdb::WriteBatch::default();
 
             // Index the block
@@ -305,7 +306,7 @@ impl FinalizedState {
                     height,
                     orchard_note_commitment_tree,
                 );
-                return batch;
+                return Ok(batch);
             }
 
             // Index all new transparent outputs
@@ -352,14 +353,10 @@ impl FinalizedState {
                 }
 
                 for sapling_note_commitment in transaction.sapling_note_commitments() {
-                    sapling_note_commitment_tree
-                        .append(*sapling_note_commitment)
-                        .expect("must work since it was already appended before in the non-finalized state");
+                    sapling_note_commitment_tree.append(*sapling_note_commitment)?;
                 }
                 for orchard_note_commitment in transaction.orchard_note_commitments() {
-                    orchard_note_commitment_tree
-                        .append(*orchard_note_commitment)
-                        .expect("must work since it was already appended before in the non-finalized state");
+                    orchard_note_commitment_tree.append(*orchard_note_commitment)?;
                 }
             }
 
@@ -378,20 +375,14 @@ impl FinalizedState {
                         block.clone(),
                         &sapling_root,
                         &orchard_root,
-                    ).expect(
-                        "must work since it was already appended before in the non-finalized state",
-                    ));
+                    )?);
                 }
                 std::cmp::Ordering::Greater => assert!(history_tree.is_some()),
             }
 
             // Add block to history tree if applicable
             if let Some(history_tree) = &mut history_tree {
-                history_tree
-                    .push(block.clone(), &sapling_root, &orchard_root)
-                    .expect(
-                        "must work since it was already appended before in the non-finalized state",
-                    );
+                history_tree.push(block.clone(), &sapling_root, &orchard_root)?;
             }
 
             // Compute the new anchors and index them
@@ -418,10 +409,11 @@ impl FinalizedState {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
 
-            batch
+            Ok(batch)
         };
 
-        let batch = prepare_commit();
+        // In case of errors, propagate and do not write the batch.
+        let batch = prepare_commit()?;
 
         let result = self.db.write(batch).map(|()| hash);
 
