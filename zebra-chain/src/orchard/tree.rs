@@ -15,6 +15,7 @@
 #![allow(dead_code)]
 
 use std::{
+    cell::Cell,
     convert::TryFrom,
     fmt,
     hash::{Hash, Hasher},
@@ -221,6 +222,7 @@ pub struct NoteCommitmentTree {
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
     inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+    cached_root: Cell<Option<Root>>,
 }
 
 impl NoteCommitmentTree {
@@ -233,6 +235,7 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
+            self.cached_root.replace(None);
             Ok(())
         } else {
             Err(NoteCommitmentTreeError::FullTree)
@@ -242,7 +245,14 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        Root(self.inner.root().0)
+        match self.cached_root.get() {
+            Some(root) => root,
+            None => {
+                let root = Root(self.inner.root().0);
+                self.cached_root.replace(Some(root));
+                root
+            }
+        }
     }
 
     /// Get the Pallas-based Sinsemilla hash / root node of this merkle tree of
@@ -274,6 +284,7 @@ impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
             inner: bridgetree::Frontier::new(),
+            cached_root: Default::default(),
         }
     }
 }

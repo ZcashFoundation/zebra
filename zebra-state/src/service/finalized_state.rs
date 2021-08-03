@@ -387,8 +387,9 @@ impl FinalizedState {
             }
 
             // Compute the new anchors and index them
-            batch.zs_insert(sapling_anchors, sapling_note_commitment_tree.root(), ());
-            batch.zs_insert(orchard_anchors, orchard_note_commitment_tree.root(), ());
+            // Note: if the root hasn't changed, we write the same value again.
+            batch.zs_insert(sapling_anchors, sapling_root, ());
+            batch.zs_insert(orchard_anchors, orchard_root, ());
 
             // Update the trees in state
             if let Some(h) = finalized_tip_height {
