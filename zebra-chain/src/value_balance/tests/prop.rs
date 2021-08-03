@@ -98,4 +98,14 @@ proptest! {
 
         prop_assert_eq!(value_balance, serialized_value_balance);
     }
+
+    #[test]
+    fn value_balance_deserialization(bytes in any::<[u8; 32]>()) {
+        zebra_test::init();
+
+        let deserialized = ValueBalance::<NegativeAllowed>::from_bytes(bytes);
+        let bytes2 = deserialized.to_bytes();
+
+        prop_assert_eq!(bytes, bytes2)
+    }
 }
