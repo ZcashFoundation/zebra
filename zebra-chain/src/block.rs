@@ -14,7 +14,7 @@ pub mod arbitrary;
 #[cfg(any(test, feature = "bench"))]
 pub mod tests;
 
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, convert::TryInto, fmt};
 
 pub use commitment::{ChainHistoryMmrRootHash, Commitment, CommitmentError};
 pub use hash::Hash;
@@ -144,6 +144,30 @@ impl Block {
             .iter()
             .map(|transaction| transaction.orchard_nullifiers())
             .flatten()
+    }
+
+    /// Count how many Sapling transactions exist in a block,
+    /// i.e. transactions "where either of vSpendsSapling or vOutputsSapling is non-empty"
+    /// (https://zips.z.cash/zip-0221#tree-node-specification).
+    pub fn sapling_transactions_count(&self) -> u64 {
+        self.transactions
+            .iter()
+            .filter(|tx| tx.has_sapling_shielded_data())
+            .count()
+            .try_into()
+            .expect("number of transactions must fit u64")
+    }
+
+    /// Count how many Orchard transactions exist in a block,
+    /// i.e. transactions "where vActionsOrchard is non-empty."
+    /// (https://zips.z.cash/zip-0221#tree-node-specification).
+    pub fn orchard_transactions_count(&self) -> u64 {
+        self.transactions
+            .iter()
+            .filter(|tx| tx.has_orchard_shielded_data())
+            .count()
+            .try_into()
+            .expect("number of transactions must fit u64")
     }
 
     /// Get all the value balances from this block by summing all the value balances
