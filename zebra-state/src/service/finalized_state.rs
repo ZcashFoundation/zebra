@@ -368,7 +368,10 @@ impl FinalizedState {
                 .activation_height(self.network)
                 .expect("Heartwood height is known");
             match height.cmp(&heartwood_height) {
-                std::cmp::Ordering::Less => assert!(history_tree.is_none()),
+                std::cmp::Ordering::Less => assert!(
+                    history_tree.is_none(),
+                    "history tree must not exist pre-Heartwood"
+                ),
                 std::cmp::Ordering::Equal => {
                     history_tree = Some(HistoryTree::from_block(
                         self.network,
@@ -377,12 +380,10 @@ impl FinalizedState {
                         &orchard_root,
                     )?);
                 }
-                std::cmp::Ordering::Greater => assert!(history_tree.is_some()),
-            }
-
-            // Add block to history tree if applicable
-            if let Some(history_tree) = &mut history_tree {
-                history_tree.push(block.clone(), &sapling_root, &orchard_root)?;
+                std::cmp::Ordering::Greater => history_tree
+                    .as_mut()
+                    .expect("history tree must exist Heartwood-onward")
+                    .push(block.clone(), &sapling_root, &orchard_root)?,
             }
 
             // Compute the new anchors and index them
