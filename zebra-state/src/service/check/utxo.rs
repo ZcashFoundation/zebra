@@ -208,7 +208,14 @@ pub fn transparent_coinbase_spend(
 
 /// Reject negative remaining transaction value.
 ///
-/// Consensus rule: The remaining value in the transparent transaction value pool MUST be nonnegative.
+/// "As in Bitcoin, the remaining value in the transparent transaction value pool
+/// of a non-coinbase transaction is available to miners as a fee.
+///
+/// The remaining value in the transparent transaction value pool of a
+/// coinbase transaction is destroyed.
+///
+/// Consensus rule: The remaining value in the transparent transaction value pool
+/// MUST be nonnegative."
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transactions
 #[allow(dead_code)]
@@ -217,7 +224,7 @@ pub fn remaining_transaction_value(
     utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
 ) -> Result<(), ValidateContextError> {
     for transaction in prepared.block.transactions.iter() {
-        // This rule does not apply to coinbase transactions.
+        // TODO: check coinbase transaction remaining value (#338, #1162)
         if transaction.is_coinbase() {
             continue;
         }
