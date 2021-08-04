@@ -335,7 +335,7 @@ impl std::ops::Neg for Amount<NegativeAllowed> {
     }
 }
 
-#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
