@@ -48,6 +48,15 @@ impl ZcashDeserialize for OutPoint {
 // unrepresentable, we need just enough parsing of Bitcoin scripts to parse the
 // coinbase height and split off the rest of the (inert) coinbase data.
 
+// Starting at Network Upgrade 5, coinbase transactions also encode the block
+// height in the expiry height field. But Zebra does not use this field to
+// determine the coinbase height, because it is not present in older network
+// upgrades.
+
+/// Split `data` into a block height and remaining miner-controlled coinbase data.
+///
+/// The height may consume `0..=5` bytes at the stat of the coinbase data.
+/// The genesis block does not include an encoded coinbase height.
 fn parse_coinbase_height(
     mut data: Vec<u8>,
 ) -> Result<(block::Height, CoinbaseData), SerializationError> {
@@ -77,10 +86,14 @@ fn parse_coinbase_height(
         )),
         // The genesis block does not encode the block height by mistake; special case it.
         // The first five bytes are [4, 255, 255, 7, 31], the little-endian encoding of
-        // 520_617_983.  This is lucky because it means we can special-case the genesis block
-        // while remaining below the maximum `block::Height` of 500_000_000 forced by `LockTime`.
-        // While it's unlikely this code will ever process a block height that high, this means
-        // we don't need to maintain a cascade of different invariants for allowable heights.
+        // 520_617_983.
+        //
+        // In the far future, Zcash might reach this height, and the miner might use the
+        // same coinbase data as the genesis block. So we need an updated consensus rule
+        // to handle this edge case.
+        //
+        // TODO: update this check based on the consensus rule changes in
+        //       https://github.com/zcash/zips/issues/540
         (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => {
             Ok((Height(0), CoinbaseData(data)))
         }
@@ -103,6 +116,7 @@ fn parse_coinbase_height(
     }
 }
 
+/// Return the encoded length of `height`, as a prefix to the coinbase data.
 fn coinbase_height_len(height: block::Height) -> usize {
     // We can't write this as a match statement on stable until exclusive range
     // guards are stabilized.
@@ -123,13 +137,41 @@ fn coinbase_height_len(height: block::Height) -> usize {
     }
 }
 
-fn write_coinbase_height<W: io::Write>(height: block::Height, mut w: W) -> Result<(), io::Error> {
+/// Encode `height` into a block height, as a prefix of the coinbase data.
+/// Does not write `coinbase_data`.
+///
+/// The height may produce `0..=5` initial bytes of coinbase data.
+///
+/// # Errors
+///
+/// Returns an error if the coinbase height is zero,
+/// and the `coinbase_data` does not match the Zcash mainnet and testnet genesis coinbase data.
+/// (They are identical.)
+///
+/// This check is required, because the genesis block does not include an encoded
+/// coinbase height,
+fn write_coinbase_height<W: io::Write>(
+    height: block::Height,
+    coinbase_data: &CoinbaseData,
+    mut w: W,
+) -> Result<(), io::Error> {
     // We can't write this as a match statement on stable until exclusive range
     // guards are stabilized.
     // The Bitcoin encoding requires that the most significant byte is below 0x80,
     // so the ranges run up to 2^{n-1} rather than 2^n.
     if let 0 = height.0 {
-        // Genesis block does not include height.
+        // The genesis block's coinbase data does not have a height prefix.
+        // So we return an error if the entire coinbase data doesn't match genesis.
+        // (If we don't do this check, then deserialization will fail.)
+        //
+        // TODO: update this check based on the consensus rule changes in
+        //       https://github.com/zcash/zips/issues/540
+        if coinbase_data.0 != GENESIS_COINBASE_DATA {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "invalid genesis coinbase data",
+            ));
+        }
     } else if let h @ 1..=16 = height.0 {
         w.write_u8(0x50 + (h as u8))?;
     } else if let h @ 17..=127 = height.0 {
@@ -153,6 +195,16 @@ fn write_coinbase_height<W: io::Write>(height: block::Height, mut w: W) -> Resul
 }
 
 impl ZcashSerialize for Input {
+    /// Serialize this transparent input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the coinbase height is zero,
+    /// and the coinbase data does not match the Zcash mainnet and testnet genesis coinbase data.
+    /// (They are identical.)
+    ///
+    /// This check is required, because the genesis block does not include an encoded
+    /// coinbase height,
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             Input::PrevOut {
@@ -174,7 +226,7 @@ impl ZcashSerialize for Input {
                 let height_len = coinbase_height_len(*height);
                 let total_len = height_len + data.as_ref().len();
                 writer.write_compactsize(total_len as u64)?;
-                write_coinbase_height(*height, &mut writer)?;
+                write_coinbase_height(*height, data, &mut writer)?;
                 writer.write_all(data.as_ref())?;
                 writer.write_u32::<LittleEndian>(*sequence)?;
             }
