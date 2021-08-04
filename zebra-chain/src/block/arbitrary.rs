@@ -410,10 +410,10 @@ impl Block {
                 block.transactions = new_transactions;
 
                 // TODO: if needed, fixup:
-                // - transparent values and shielded value balances
-                // - transaction outputs (currently 0..=16 outputs, consensus rules require 1..)
+                // - coinbase miner subsidy
                 // - history and authorizing data commitments
                 // - the transaction merkle root
+                // after modifying the block
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it
@@ -478,8 +478,9 @@ where
     // delete invalid inputs
     *transaction.inputs_mut() = new_inputs;
 
-    // keep transactions with valid input counts
-    // coinbase transactions will never fail this check
+    transaction.fix_remaining_value();
+
+    // TODO: if needed, check output count here as well
     if transaction.has_transparent_or_shielded_inputs() {
         // skip genesis created UTXOs
         if height > Height(0) {
