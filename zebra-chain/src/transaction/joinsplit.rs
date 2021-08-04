@@ -53,6 +53,13 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
 
+    /// Modify the [`JoinSplit`]s in `self`, in the order they appear
+    /// in the transaction.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn joinsplits_mut(&mut self) -> impl Iterator<Item = &mut JoinSplit<P>> {
+        std::iter::once(&mut self.first).chain(self.rest.iter_mut())
+    }
+
     /// Iterate over the [`Nullifier`]s in `self`.
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.joinsplits()
