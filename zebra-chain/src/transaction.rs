@@ -676,13 +676,13 @@ impl Transaction {
     /// Return the transparent value balance.
     ///
     /// The change in the value of the transparent pool.
-    /// The sum of the outputs spent by transparent inputs in `tx_in` fields,
-    /// minus the sum of newly created outputs in `tx_out` fields.
+    /// The sum of newly created outputs in `tx_out` fields,
+    /// minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
     ///
     /// Positive values are added to the transparent value pool,
     /// and removed from the value pool of this transaction.
     /// Negative values are removed from transparent,
-    /// and removed from this transaction.
+    /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn transparent_value_balance(
@@ -764,8 +764,7 @@ impl Transaction {
     /// Modify the `vpub_old` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
-    /// This value is removed from the value pool of this transaction,
-    /// and added to the sprout value pool.
+    /// See `sprout_pool_added_values` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn sprout_pool_added_values_mut(
         &mut self,
@@ -814,7 +813,7 @@ impl Transaction {
     /// Modify the `vpub_new` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
-    /// This value is added to the transparent value pool of this transaction,
+    /// This value is added to the value pool of this transaction,
     /// and removed from the sprout value pool.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn sprout_pool_removed_values_mut(
@@ -869,7 +868,7 @@ impl Transaction {
     /// Positive values are added to the sprout value pool,
     /// and removed from the value pool of this transaction.
     /// Negative values are removed from sprout,
-    /// and removed from this transaction.
+    /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
@@ -899,7 +898,7 @@ impl Transaction {
     /// Positive values are added to the sapling value pool,
     /// and removed from the value pool of this transaction.
     /// Negative values are removed from sapling,
-    /// and removed from this transaction.
+    /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn sapling_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
@@ -964,7 +963,7 @@ impl Transaction {
     /// Positive values are added to the orchard value pool,
     /// and removed from the value pool of this transaction.
     /// Negative values are removed from orchard,
-    /// and removed from this transaction.
+    /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn orchard_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
