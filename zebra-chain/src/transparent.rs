@@ -9,6 +9,7 @@ mod utxo;
 
 pub use address::Address;
 pub use script::Script;
+pub use serialize::GENESIS_COINBASE_DATA;
 pub use utxo::{
     new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, CoinbaseSpendRestriction,
     OrderedUtxo, Utxo,
