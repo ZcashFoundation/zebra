@@ -876,14 +876,17 @@ fn transaction_v4_with_transparent_data(
     let inputs: Vec<_> = inputs.into_iter().collect();
     let outputs: Vec<_> = outputs.into_iter().collect();
 
-    // do any fixups here, if required
-
-    Transaction::V4 {
+    let mut transaction = Transaction::V4 {
         inputs,
         outputs,
         lock_time: LockTime::min_lock_time(),
         expiry_height: Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
-    }
+    };
+
+    // do required fixups
+    transaction.fix_remaining_value();
+
+    transaction
 }
