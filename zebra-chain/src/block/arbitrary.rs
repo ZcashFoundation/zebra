@@ -16,6 +16,7 @@ use crate::{
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization,
+    transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     transparent::{new_transaction_ordered_outputs, CoinbaseSpendRestriction},
     work::{difficulty::CompactDifficulty, equihash},
 };
@@ -321,7 +322,14 @@ impl Arbitrary for Block {
     type Parameters = LedgerState;
 
     fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
-        let transactions_strategy = Transaction::vec_strategy(ledger_state, 2);
+        let transactions_strategy =
+            (1..MAX_ARBITRARY_ITEMS).prop_flat_map(move |transaction_count| {
+                Transaction::vec_strategy(ledger_state, transaction_count)
+            });
+
+        // TODO: if needed, fixup:
+        // - history and authorizing data commitments
+        // - the transaction merkle root
 
         (Header::arbitrary_with(ledger_state), transactions_strategy)
             .prop_map(move |(header, transactions)| Self {
