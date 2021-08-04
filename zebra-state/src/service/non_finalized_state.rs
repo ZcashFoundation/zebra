@@ -181,12 +181,14 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<Chain, ValidateContextError> {
-        check::utxo::transparent_spend(
+        let utxos = check::utxo::transparent_spend(
             &prepared,
             &parent_chain.unspent_utxos(),
             &parent_chain.spent_utxos,
             finalized_state,
         )?;
+
+        check::utxo::remaining_transaction_value(&prepared, &utxos)?;
 
         parent_chain.push(prepared)
     }
