@@ -86,6 +86,8 @@ pub fn transparent_spend(
         }
     }
 
+    remaining_transaction_value(prepared, &block_spends)?;
+
     Ok(block_spends)
 }
 

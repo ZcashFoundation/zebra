@@ -31,6 +31,8 @@ use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
 /// for debugging.
 pub const MAX_ARBITRARY_ITEMS: usize = 4;
 
+// TODO: if needed, fixup transaction outputs
+//       (currently 0..=9 outputs, consensus rules require 1..)
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
@@ -162,6 +164,7 @@ impl Transaction {
         mut ledger_state: LedgerState,
         len: usize,
     ) -> BoxedStrategy<Vec<Arc<Self>>> {
+        // TODO: fixup coinbase miner subsidy
         let coinbase = Transaction::arbitrary_with(ledger_state).prop_map(Arc::new);
         ledger_state.has_coinbase = false;
         let remainder = vec(
@@ -175,6 +178,37 @@ impl Transaction {
                 remainder
             })
             .boxed()
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances,
+    /// so that this transaction passes the "remaining transaction value pool" check.
+    pub fn fix_remaining_value(&mut self) {
+        if self.is_coinbase() {
+            // TODO: fixup coinbase block subsidy and remaining transaction value
+            return;
+        }
+
+        // TODO: make outputs less than inputs, rather than zeroing them all
+
+        for mut output in self.outputs_mut() {
+            // since all outputs are zero, all inputs must also be zero
+            output.value = Amount::zero();
+        }
+
+        for sprout_added_value in self.sprout_pool_added_values_mut() {
+            *sprout_added_value = Amount::zero();
+        }
+        for sprout_removed_value in self.sprout_pool_removed_values_mut() {
+            *sprout_removed_value = Amount::zero();
+        }
+
+        if let Some(value_balance) = self.sapling_value_balance_mut() {
+            *value_balance = Amount::zero();
+        }
+
+        if let Some(value_balance) = self.orchard_value_balance_mut() {
+            *value_balance = Amount::zero();
+        }
     }
 }
 
