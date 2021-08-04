@@ -12,7 +12,7 @@ impl Input {
                 .prop_map(|input| vec![input])
                 .boxed()
         } else {
-            vec(Self::arbitrary_with(None), max_size).boxed()
+            vec(Self::arbitrary_with(None), 1..=max_size).boxed()
         }
     }
 }
