@@ -2,7 +2,7 @@ use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use crate::{block, LedgerState};
 
-use super::{CoinbaseData, Input, OutPoint, Script};
+use super::{CoinbaseData, Input, OutPoint, Script, GENESIS_COINBASE_DATA};
 
 impl Input {
     /// Construct a strategy for creating valid-ish vecs of Inputs.
@@ -25,7 +25,11 @@ impl Arbitrary for Input {
             (vec(any::<u8>(), 0..95), any::<u32>())
                 .prop_map(move |(data, sequence)| Input::Coinbase {
                     height,
-                    data: CoinbaseData(data),
+                    data: if height == block::Height(0) {
+                        CoinbaseData(GENESIS_COINBASE_DATA.to_vec())
+                    } else {
+                        CoinbaseData(data)
+                    },
                     sequence,
                 })
                 .boxed()
