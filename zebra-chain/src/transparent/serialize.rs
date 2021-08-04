@@ -17,7 +17,7 @@ use super::{CoinbaseData, Input, OutPoint, Output, Script};
 ///
 /// Zcash uses the same coinbase data for the Mainnet, Testnet, and Regtest
 /// genesis blocks.
-const GENESIS_COINBASE_DATA: [u8; 77] = [
+pub const GENESIS_COINBASE_DATA: [u8; 77] = [
     4, 255, 255, 7, 31, 1, 4, 69, 90, 99, 97, 115, 104, 48, 98, 57, 99, 52, 101, 101, 102, 56, 98,
     55, 99, 99, 52, 49, 55, 101, 101, 53, 48, 48, 49, 101, 51, 53, 48, 48, 57, 56, 52, 98, 54, 102,
     101, 97, 51, 53, 54, 56, 51, 97, 55, 99, 97, 99, 49, 52, 49, 97, 48, 52, 51, 99, 52, 50, 48,
