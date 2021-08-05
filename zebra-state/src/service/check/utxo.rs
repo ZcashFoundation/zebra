@@ -236,19 +236,23 @@ pub fn remaining_transaction_value(
         match value_balance {
             Ok(vb) => match vb.remaining_transaction_value() {
                 Ok(_) => Ok(()),
-                Err(amount_error) => Err(ValidateContextError::NegativeRemainingTransactionValue {
-                    amount_error,
+                Err(value_balance_error) => {
+                    Err(ValidateContextError::NegativeRemainingTransactionValue {
+                        value_balance_error,
+                        height: prepared.height,
+                        tx_index_in_block,
+                        transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                    })
+                }
+            },
+            Err(value_balance_error) => {
+                Err(ValidateContextError::CalculateRemainingTransactionValue {
+                    value_balance_error,
                     height: prepared.height,
                     tx_index_in_block,
                     transaction_hash: prepared.transaction_hashes[tx_index_in_block],
-                }),
-            },
-            Err(amount_error) => Err(ValidateContextError::CalculateRemainingTransactionValue {
-                amount_error,
-                height: prepared.height,
-                tx_index_in_block,
-                transaction_hash: prepared.transaction_hashes[tx_index_in_block],
-            }),
+                })
+            }
         }?
     }
 

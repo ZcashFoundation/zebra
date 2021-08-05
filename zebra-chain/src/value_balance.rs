@@ -1,6 +1,6 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
+use crate::amount::{self, Amount, Constraint, NegativeAllowed, NonNegative};
 
 use std::convert::TryInto;
 
@@ -32,7 +32,7 @@ where
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
     /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
-    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Error> {
+    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
         // Calculated in Zebra by negating the sum of the transparent, sprout,
         // sapling, and orchard value balances as specified in
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
@@ -205,16 +205,16 @@ where
 /// Errors that can be returned when validating a [`ValueBalance`]
 pub enum ValueBalanceError {
     /// transparent amount error {0}
-    Transparent(Error),
+    Transparent(amount::Error),
 
     /// sprout amount error {0}
-    Sprout(Error),
+    Sprout(amount::Error),
 
     /// sapling amount error {0}
-    Sapling(Error),
+    Sapling(amount::Error),
 
     /// orchard amount error {0}
-    Orchard(Error),
+    Orchard(amount::Error),
 }
 
 impl<C> std::ops::Add for ValueBalance<C>
