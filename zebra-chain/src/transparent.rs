@@ -16,7 +16,7 @@ pub use utxo::{
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub(crate) use utxo::new_transaction_ordered_outputs;
+pub(crate) use utxo::{new_transaction_ordered_outputs, outputs_from_utxos};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -27,11 +27,11 @@ mod arbitrary;
 mod prop;
 
 use crate::{
-    amount::{Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NonNegative},
     block, transaction,
 };
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter};
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -142,22 +142,77 @@ impl Input {
         }
     }
 
-    /// Get the value spent by this input.
+    /// Get the value spent by this input, by looking up its [`Outpoint`] in `outputs`.
+    /// See `value` for details.
+    ///
+    /// # Panics
+    ///
+    /// If the provided `Output`s don't have this input's `Outpoint`.
+    pub(crate) fn value_from_outputs(
+        &self,
+        outputs: &HashMap<OutPoint, Output>,
+    ) -> Amount<NonNegative> {
+        match self {
+            Input::PrevOut { outpoint, .. } => {
+                outputs
+                    .get(outpoint)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "provided Outputs (length {:?}) don't have spent {:?}",
+                            outputs.len(),
+                            outpoint
+                        )
+                    })
+                    .value
+            }
+            Input::Coinbase { .. } => Amount::zero(),
+        }
+    }
+
+    /// Get the value spent by this input, by looking up its [`Outpoint`] in `utxos`.
+    ///
     /// This amount is added to the transaction value pool by this input.
     ///
     /// # Panics
     ///
-    /// If the provided Utxos don't have the transaction outpoint.
-    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NegativeAllowed> {
-        match self {
-            Input::PrevOut { outpoint, .. } => utxos
-                .get(outpoint)
-                .expect("Provided Utxos don't have transaction Outpoint")
+    /// If the provided `Utxo`s don't have this input's `Outpoint`.
+    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NonNegative> {
+        if let Some(outpoint) = self.outpoint() {
+            // look up the specific Output and convert it to the expected format
+            let output = utxos
+                .get(&outpoint)
+                .expect("provided Utxos don't have spent OutPoint")
                 .output
-                .value
-                .constrain()
-                .expect("conversion from NonNegative to NegativeAllowed is always valid"),
-            Input::Coinbase { .. } => Amount::zero(),
+                .clone();
+            self.value_from_outputs(&iter::once((outpoint, output)).collect())
+        } else {
+            // coinbase inputs don't need any UTXOs
+            self.value_from_outputs(&HashMap::new())
+        }
+    }
+
+    /// Get the value spent by this input, by looking up its [`Outpoint`] in `ordered_utxos`.
+    /// See `value` for details.
+    ///
+    /// # Panics
+    ///
+    /// If the provided `OrderedUtxo`s don't have this input's `Outpoint`.
+    pub fn value_from_ordered_utxos(
+        &self,
+        ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
+    ) -> Amount<NonNegative> {
+        if let Some(outpoint) = self.outpoint() {
+            // look up the specific Output and convert it to the expected format
+            let output = ordered_utxos
+                .get(&outpoint)
+                .expect("provided Utxos don't have spent OutPoint")
+                .utxo
+                .output
+                .clone();
+            self.value_from_outputs(&iter::once((outpoint, output)).collect())
+        } else {
+            // coinbase inputs don't need any UTXOs
+            self.value_from_outputs(&HashMap::new())
         }
     }
 }
@@ -188,9 +243,7 @@ pub struct Output {
 impl Output {
     /// Get the value contained in this output.
     /// This amount is subtracted from the transaction value pool by this output.
-    pub fn value(&self) -> Amount<NegativeAllowed> {
+    pub fn value(&self) -> Amount<NonNegative> {
         self.value
-            .constrain()
-            .expect("conversion from NonNegative to NegativeAllowed is always valid")
     }
 }

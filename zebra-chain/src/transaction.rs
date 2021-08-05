@@ -691,17 +691,21 @@ impl Transaction {
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
         let inputs = self.inputs();
         let outputs = self.outputs();
-        let input_value_balance: Amount = inputs
+        let input_value = inputs
             .iter()
             .map(|i| i.value(utxos))
-            .sum::<Result<Amount, AmountError>>()?;
+            .sum::<Result<Amount<NonNegative>, AmountError>>()?
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
-        let output_value_balance: Amount<NegativeAllowed> = outputs
+        let output_value = outputs
             .iter()
             .map(|o| o.value())
-            .sum::<Result<Amount, AmountError>>()?;
+            .sum::<Result<Amount<NonNegative>, AmountError>>()?
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
-        (output_value_balance - input_value_balance).map(ValueBalance::from_transparent_amount)
+        (output_value - input_value).map(ValueBalance::from_transparent_amount)
     }
 
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
