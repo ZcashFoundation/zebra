@@ -1,5 +1,7 @@
 //! A type that can hold the four types of Zcash value pools.
 
+use std::ops::Neg;
+
 use crate::amount::{self, Amount, Constraint, NonNegative};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -32,6 +34,7 @@ where
         [self.transparent, self.sprout, self.sapling, self.orchard]
             .iter()
             .sum::<Result<Amount<C>, amount::Error>>()?
+            .neg()
             .constrain::<NonNegative>()
             .map_err(Into::into)
     }
