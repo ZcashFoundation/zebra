@@ -1,11 +1,15 @@
 //! Module defining exactly how to move types in and out of rocksdb
-use std::{convert::TryInto, fmt::Debug, sync::Arc};
+use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
 
 use bincode::Options;
 use zebra_chain::{
     block,
-    block::Block,
-    orchard, sapling,
+    block::{Block, Height},
+    history_tree::HistoryTree,
+    orchard,
+    parameters::Network,
+    primitives::zcash_history,
+    sapling,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transaction, transparent,
 };
@@ -288,6 +292,42 @@ impl FromDisk for orchard::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         bincode::DefaultOptions::new()
             .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HistoryTreeParts {
+    network: Network,
+    size: u32,
+    peaks: BTreeMap<u32, zcash_history::Entry>,
+    current_height: Height,
+}
+
+impl IntoDisk for HistoryTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let data = HistoryTreeParts {
+            network: self.network(),
+            size: self.size(),
+            peaks: self.peaks().clone(),
+            current_height: self.current_height(),
+        };
+        bincode::DefaultOptions::new()
+            .serialize(&data)
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for HistoryTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let parts: HistoryTreeParts = bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect(
+                "deserialization format should match the serialization format used by IntoDisk",
+            );
+        HistoryTree::from_cache(parts.network, parts.size, parts.peaks, parts.current_height)
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }

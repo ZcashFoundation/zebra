@@ -16,6 +16,8 @@
 
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate serde_big_array;
 
 #[macro_use]
 extern crate bitflags;

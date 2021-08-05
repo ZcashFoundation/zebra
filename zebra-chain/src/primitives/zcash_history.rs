@@ -3,6 +3,7 @@
 
 // TODO: remove after this module gets to be used
 #![allow(dead_code)]
+#![allow(missing_docs)]
 
 mod tests;
 
@@ -16,6 +17,8 @@ use crate::{
     parameters::{Network, NetworkUpgrade},
     sapling,
 };
+
+big_array! { BigArray; zcash_history::MAX_ENTRY_SIZE }
 
 /// A trait to represent a version of `Tree`.
 pub trait Version: zcash_history::Version {
@@ -59,8 +62,9 @@ impl From<&zcash_history::NodeData> for NodeData {
 /// An encoded entry in the tree.
 ///
 /// Contains the node data and information about its position in the tree.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Entry {
+    #[serde(with = "BigArray")]
     inner: [u8; zcash_history::MAX_ENTRY_SIZE],
 }
 
