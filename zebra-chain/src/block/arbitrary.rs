@@ -452,6 +452,7 @@ where
 {
     let mut spend_restriction = transaction.coinbase_spend_restriction(height);
     let mut new_inputs = Vec::new();
+    let mut spent_outputs = HashMap::new();
 
     // fixup the transparent spends
     for mut input in transaction.inputs().to_vec().into_iter() {
@@ -466,7 +467,10 @@ where
                 input.set_outpoint(selected_outpoint);
                 new_inputs.push(input);
 
-                utxos.remove(&selected_outpoint);
+                let spent_utxo = utxos
+                    .remove(&selected_outpoint)
+                    .expect("selected outpoint must have a UTXO");
+                spent_outputs.insert(selected_outpoint, spent_utxo.utxo.output);
             }
             // otherwise, drop the invalid input, because it has no valid UTXOs to spend
         } else {
@@ -478,7 +482,7 @@ where
     // delete invalid inputs
     *transaction.inputs_mut() = new_inputs;
 
-    transaction.fix_remaining_value();
+    transaction.fix_remaining_value(&spent_outputs);
 
     // TODO: if needed, check output count here as well
     if transaction.has_transparent_or_shielded_inputs() {

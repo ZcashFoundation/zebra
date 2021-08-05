@@ -1,6 +1,7 @@
 //! Arbitrary data generation for transaction proptests
 
 use std::{
+    collections::HashMap,
     convert::{TryFrom, TryInto},
     sync::Arc,
 };
@@ -9,7 +10,7 @@ use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
-    amount::Amount,
+    amount::{self, Amount, NonNegative},
     at_least_one, block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
@@ -18,7 +19,9 @@ use crate::{
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    sprout, transparent, LedgerState,
+    sprout,
+    transparent::{self, outputs_from_utxos, utxos_from_ordered_utxos},
+    LedgerState,
 };
 
 use itertools::Itertools;
@@ -182,16 +185,30 @@ impl Transaction {
 
     /// Fixup non-coinbase transparent values and shielded value balances,
     /// so that this transaction passes the "remaining transaction value pool" check.
-    pub fn fix_remaining_value(&mut self) {
+    ///
+    /// `outputs` must contain all the [`Output`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Output`] is missing from `outpoints`.
+    pub fn fix_remaining_value(
+        &mut self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) {
         if self.is_coinbase() {
             // TODO: fixup coinbase block subsidy and remaining transaction value
             return;
         }
 
-        // TODO: make outputs less than inputs, rather than zeroing them all
+        // calculate the total input value
+        let _transparent = self
+            .inputs()
+            .iter()
+            .map(|input| input.value_from_outputs(outputs))
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .expect("transparent pool should be limited to MAX_MONEY");
 
         for mut output in self.outputs_mut() {
-            // since all outputs are zero, all inputs must also be zero
             output.value = Amount::zero();
         }
 
@@ -209,6 +226,40 @@ impl Transaction {
         if let Some(value_balance) = self.orchard_value_balance_mut() {
             *value_balance = Amount::zero();
         }
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances.
+    /// See `fix_remaining_value` for details.
+    ///
+    /// `utxos` must contain all the [`Utxo`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Utxo`] is missing from `utxos`.
+    #[allow(dead_code)]
+    pub fn fix_remaining_value_from_utxos(
+        &mut self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) {
+        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()));
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances.
+    /// See `fix_remaining_value` for details.
+    ///
+    /// `ordered_utxos` must contain all the [`OrderedUtxo`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`OrderedUtxo`] is missing from `ordered_utxos`.
+    #[allow(dead_code)]
+    pub fn fix_remaining_value_from_ordered_utxos(
+        &mut self,
+        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) {
+        self.fix_remaining_value(&outputs_from_utxos(utxos_from_ordered_utxos(
+            ordered_utxos.clone(),
+        )));
     }
 }
 
