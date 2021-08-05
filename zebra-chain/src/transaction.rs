@@ -778,7 +778,11 @@ impl Transaction {
             .fold(Ok(Amount::zero()), |accumulator, value| {
                 accumulator.and_then(|sum| sum + value)
             })
-            .map(|amount| ValueBalance::from_sapling_amount(-amount))
+            .map(|amount| {
+                ValueBalance::from_sapling_amount((-amount).expect(
+                    "a change in sign to any value inside Amount<NegativeAllowed> is always valid",
+                ))
+            })
     }
 
     /// Return the orchard value balance.
@@ -794,7 +798,9 @@ impl Transaction {
             .map(|o| o.value_balance())
             .sum::<Result<Amount, AmountError>>()?;
 
-        Ok(ValueBalance::from_orchard_amount(-orchard))
+        Ok(ValueBalance::from_orchard_amount((-orchard).expect(
+            "a change in sign to any value inside Amount<NegativeAllowed> is always valid",
+        )))
     }
 
     /// Get all the value balances for this transaction.
