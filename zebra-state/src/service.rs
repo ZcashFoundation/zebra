@@ -160,7 +160,9 @@ impl StateService {
             let finalized = self.mem.finalize();
             self.disk
                 .commit_finalized_direct(finalized, "best non-finalized chain root")
-                .expect("expected that disk errors would not occur");
+                .expect(
+                    "expected that errors would not occur when writing to disk or updating note commitment and history trees",
+                );
         }
 
         self.queued_blocks

@@ -9,8 +9,9 @@ use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    history_tree::HistoryTree,
     orchard,
-    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling, sprout,
     transaction::{self, Transaction},
     transparent,
@@ -36,6 +37,8 @@ pub struct FinalizedState {
     ephemeral: bool,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
+
+    network: Network,
 }
 
 impl FinalizedState {
@@ -60,6 +63,7 @@ impl FinalizedState {
                 "orchard_note_commitment_tree",
                 db_options.clone(),
             ),
+            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
         ];
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
@@ -83,6 +87,7 @@ impl FinalizedState {
             db,
             ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            network,
         };
 
         if let Some(tip_height) = new_state.finalized_tip_height() {
@@ -190,7 +195,15 @@ impl FinalizedState {
 
     /// Immediately commit `finalized` to the finalized state.
     ///
+    /// This can be called either by the non-finalized state (when finalizing
+    /// a block) or by the checkpoint verifier.
+    ///
     /// Use `source` as the source of the block in log messages.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    /// - Propagates any errors from updating history and note commitment trees
     pub fn commit_finalized_direct(
         &mut self,
         finalized: FinalizedBlock,
@@ -225,6 +238,7 @@ impl FinalizedState {
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
@@ -259,10 +273,14 @@ impl FinalizedState {
         // state, these will contain the empty trees.
         let mut sapling_note_commitment_tree = self.sapling_note_commitment_tree();
         let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
+        let mut history_tree = self.history_tree();
 
+        // Prepare a batch of DB modifications and return it (without actually writing anything).
         // We use a closure so we can use an early return for control flow in
-        // the genesis case
-        let prepare_commit = || -> rocksdb::WriteBatch {
+        // the genesis case.
+        // If the closure returns an error it will be propagated and the batch will not be written
+        // to the BD afterwards.
+        let prepare_commit = || -> Result<rocksdb::WriteBatch, BoxError> {
             let mut batch = rocksdb::WriteBatch::default();
 
             // Index the block
@@ -288,7 +306,7 @@ impl FinalizedState {
                     height,
                     orchard_note_commitment_tree,
                 );
-                return batch;
+                return Ok(batch);
             }
 
             // Index all new transparent outputs
@@ -335,25 +353,48 @@ impl FinalizedState {
                 }
 
                 for sapling_note_commitment in transaction.sapling_note_commitments() {
-                    sapling_note_commitment_tree
-                        .append(*sapling_note_commitment)
-                        .expect("must work since it was already appended before in the non-finalized state");
+                    sapling_note_commitment_tree.append(*sapling_note_commitment)?;
                 }
                 for orchard_note_commitment in transaction.orchard_note_commitments() {
-                    orchard_note_commitment_tree
-                        .append(*orchard_note_commitment)
-                        .expect("must work since it was already appended before in the non-finalized state");
+                    orchard_note_commitment_tree.append(*orchard_note_commitment)?;
                 }
+            }
+
+            let sapling_root = sapling_note_commitment_tree.root();
+            let orchard_root = orchard_note_commitment_tree.root();
+
+            // Create the history tree if it's the Heartwood activation block.
+            let heartwood_height = NetworkUpgrade::Heartwood
+                .activation_height(self.network)
+                .expect("Heartwood height is known");
+            match height.cmp(&heartwood_height) {
+                std::cmp::Ordering::Less => assert!(
+                    history_tree.is_none(),
+                    "history tree must not exist pre-Heartwood"
+                ),
+                std::cmp::Ordering::Equal => {
+                    history_tree = Some(HistoryTree::from_block(
+                        self.network,
+                        block.clone(),
+                        &sapling_root,
+                        &orchard_root,
+                    )?);
+                }
+                std::cmp::Ordering::Greater => history_tree
+                    .as_mut()
+                    .expect("history tree must exist Heartwood-onward")
+                    .push(block.clone(), &sapling_root, &orchard_root)?,
             }
 
             // Compute the new anchors and index them
             batch.zs_insert(sapling_anchors, sapling_note_commitment_tree.root(), ());
             batch.zs_insert(orchard_anchors, orchard_note_commitment_tree.root(), ());
 
-            // Update the note commitment trees
+            // Update the trees in state
             if let Some(h) = finalized_tip_height {
                 batch.zs_delete(sapling_note_commitment_tree_cf, h);
                 batch.zs_delete(orchard_note_commitment_tree_cf, h);
+                batch.zs_delete(history_tree_cf, h);
             }
             batch.zs_insert(
                 sapling_note_commitment_tree_cf,
@@ -365,11 +406,15 @@ impl FinalizedState {
                 height,
                 orchard_note_commitment_tree,
             );
+            if let Some(history_tree) = history_tree {
+                batch.zs_insert(history_tree_cf, height, history_tree);
+            }
 
-            batch
+            Ok(batch)
         };
 
-        let batch = prepare_commit();
+        // In case of errors, propagate and do not write the batch.
+        let batch = prepare_commit()?;
 
         let result = self.db.write(batch).map(|()| hash);
 
@@ -501,6 +546,14 @@ impl FinalizedState {
         self.db
             .zs_get(orchard_note_commitment_tree, &height)
             .expect("note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the ZIP-221 history tree of the finalized tip or `None`
+    /// if it does not exist yet in the state (pre-Heartwood).
+    pub fn history_tree(&self) -> Option<HistoryTree> {
+        let height = self.finalized_tip_height()?;
+        let history_tree = self.db.cf_handle("history_tree").unwrap();
+        self.db.zs_get(history_tree, &height)
     }
 
     /// If the database is `ephemeral`, delete it.
