@@ -1,6 +1,6 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{Amount, Constraint, Error, NonNegative};
+use crate::amount::{self, Amount, Constraint, NonNegative};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -28,11 +28,12 @@ where
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
     /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
-    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Error> {
+    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, ValueBalanceError> {
         [self.transparent, self.sprout, self.sapling, self.orchard]
             .iter()
-            .sum::<Result<Amount<C>, Error>>()?
+            .sum::<Result<Amount<C>, amount::Error>>()?
             .constrain::<NonNegative>()
+            .map_err(Into::into)
     }
 
     /// Creates a [`ValueBalance`] from the given transparent amount.
@@ -130,12 +131,12 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug, Clone, PartialEq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 /// Errors that can be returned when validating a [`ValueBalance`].
 pub enum ValueBalanceError {
     #[error("value balance contains invalid amounts")]
     /// Any error related to [`Amount`]s inside the [`ValueBalance`]
-    AmountError(#[from] Error),
+    AmountError(#[from] amount::Error),
 }
 
 impl<C> std::ops::Add for ValueBalance<C>
