@@ -31,7 +31,7 @@ use crate::{
     primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout,
     transparent::{
-        self,
+        self, outputs_from_utxos,
         CoinbaseSpendRestriction::{self, *},
     },
     value_balance::ValueBalance,
@@ -673,9 +673,36 @@ impl Transaction {
 
     // value balances
 
-    /// Return the transparent value balance.
+    /// Return the transparent value balance,
+    /// using the outputs spent by this transaction.
     ///
-    /// The change in the value of the transparent pool.
+    /// See `transparent_value_balance` for details.
+    fn transparent_value_balance_from_outputs(
+        &self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let input_value = self
+            .inputs()
+            .iter()
+            .map(|i| i.value_from_outputs(outputs))
+            .sum::<Result<Amount<NonNegative>, AmountError>>()?
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+
+        let output_value = self
+            .outputs()
+            .iter()
+            .map(|o| o.value())
+            .sum::<Result<Amount<NonNegative>, AmountError>>()?
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+
+        (output_value - input_value).map(ValueBalance::from_transparent_amount)
+    }
+
+    /// Return the transparent value balance,
+    /// the change in the value of the transparent pool.
+    ///
     /// The sum of newly created outputs in `tx_out` fields,
     /// minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
     ///
@@ -685,27 +712,15 @@ impl Transaction {
     /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    ///
+    /// `utxos` must contain the utxos of every input in the transaction,
+    /// including UTXOs created by earlier transactions in this block.
+    #[allow(dead_code)]
     fn transparent_value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let inputs = self.inputs();
-        let outputs = self.outputs();
-        let input_value = inputs
-            .iter()
-            .map(|i| i.value(utxos))
-            .sum::<Result<Amount<NonNegative>, AmountError>>()?
-            .constrain()
-            .expect("conversion from NonNegative to NegativeAllowed is always valid");
-
-        let output_value = outputs
-            .iter()
-            .map(|o| o.value())
-            .sum::<Result<Amount<NonNegative>, AmountError>>()?
-            .constrain()
-            .expect("conversion from NonNegative to NegativeAllowed is always valid");
-
-        (output_value - input_value).map(ValueBalance::from_transparent_amount)
+        self.transparent_value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
     }
 
     /// Modify the transparent output values of this transaction, regardless of version.
@@ -988,6 +1003,25 @@ impl Transaction {
             .map(|shielded_data| &mut shielded_data.value_balance)
     }
 
+    /// Get all the value balances for this transaction,
+    /// using the transparent outputs spent in this transaction.
+    ///
+    /// See `value_balance` for details.
+    pub(crate) fn value_balance_from_outputs(
+        &self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
+        let mut value_balance = ValueBalance::zero();
+
+        value_balance
+            .set_transparent_value_balance(self.transparent_value_balance_from_outputs(outputs)?);
+        value_balance.set_sprout_value_balance(self.sprout_value_balance()?);
+        value_balance.set_sapling_value_balance(self.sapling_value_balance()?);
+        value_balance.set_orchard_value_balance(self.orchard_value_balance()?);
+
+        Ok(value_balance)
+    }
+
     /// Get all the value balances for this transaction.
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
@@ -996,13 +1030,6 @@ impl Transaction {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let mut value_balance = ValueBalance::zero();
-
-        value_balance.set_transparent_value_balance(self.transparent_value_balance(utxos)?);
-        value_balance.set_sprout_value_balance(self.sprout_value_balance()?);
-        value_balance.set_sapling_value_balance(self.sapling_value_balance()?);
-        value_balance.set_orchard_value_balance(self.orchard_value_balance()?);
-
-        Ok(value_balance)
+        self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
     }
 }

@@ -482,7 +482,9 @@ where
     // delete invalid inputs
     *transaction.inputs_mut() = new_inputs;
 
-    transaction.fix_remaining_value(&spent_outputs);
+    transaction
+        .fix_remaining_value(&spent_outputs)
+        .expect("remaining value was fixed");
 
     // TODO: if needed, check output count here as well
     if transaction.has_transparent_or_shielded_inputs() {

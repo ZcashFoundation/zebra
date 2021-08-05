@@ -10,7 +10,7 @@ use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NonNegative},
     at_least_one, block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
@@ -183,6 +183,39 @@ impl Transaction {
             .boxed()
     }
 
+    /// Apply `f` to the transparent output, `v_sprout_new`, and `v_sprout_old` values
+    /// in this transaction, regardless of version.
+    pub fn for_each_value_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Amount<NonNegative>),
+    {
+        for output_value in self.output_values_mut() {
+            f(output_value);
+        }
+
+        for sprout_added_value in self.sprout_pool_added_values_mut() {
+            f(sprout_added_value);
+        }
+        for sprout_removed_value in self.sprout_pool_removed_values_mut() {
+            f(sprout_removed_value);
+        }
+    }
+
+    /// Apply `f` to the sapling value balance and orchard value balance
+    /// in this transaction, regardless of version.
+    pub fn for_each_value_balance_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Amount<NegativeAllowed>),
+    {
+        if let Some(sapling_value_balance) = self.sapling_value_balance_mut() {
+            f(sapling_value_balance);
+        }
+
+        if let Some(orchard_value_balance) = self.orchard_value_balance_mut() {
+            f(orchard_value_balance);
+        }
+    }
+
     /// Fixup non-coinbase transparent values and shielded value balances,
     /// so that this transaction passes the "remaining transaction value pool" check.
     ///
@@ -194,19 +227,32 @@ impl Transaction {
     pub fn fix_remaining_value(
         &mut self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
-    ) {
+    ) -> Result<Amount<NonNegative>, amount::Error> {
+        // Temporarily make amounts smaller, so the total never overflows MAX_MONEY
+        // in Zebra's ~100-block chain tests. (With up to 7 values per transaction,
+        // and 3 transactions per block.)
+        // TODO: replace this scaling with chain value balance adjustments
+        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
+        where
+            Amount<C>: Copy,
+        {
+            *amount = (*amount / 10_000).expect("divisor is not zero");
+        }
+
+        self.for_each_value_mut(scale_to_avoid_overflow);
+        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+
         if self.is_coinbase() {
             // TODO: fixup coinbase block subsidy and remaining transaction value
-            return;
+            return Ok(Amount::zero());
         }
 
         // calculate the total input value
-        let _transparent = self
+        let _transparent_inputs = self
             .inputs()
             .iter()
             .map(|input| input.value_from_outputs(outputs))
-            .sum::<Result<Amount<NonNegative>, amount::Error>>()
-            .expect("transparent pool should be limited to MAX_MONEY");
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()?;
 
         for mut output in self.outputs_mut() {
             output.value = Amount::zero();
@@ -226,6 +272,9 @@ impl Transaction {
         if let Some(value_balance) = self.orchard_value_balance_mut() {
             *value_balance = Amount::zero();
         }
+
+        self.value_balance_from_outputs(outputs)?
+            .remaining_transaction_value()
     }
 
     /// Fixup non-coinbase transparent values and shielded value balances.
@@ -240,8 +289,8 @@ impl Transaction {
     pub fn fix_remaining_value_from_utxos(
         &mut self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) {
-        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()));
+    ) -> Result<Amount<NonNegative>, amount::Error> {
+        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()))
     }
 
     /// Fixup non-coinbase transparent values and shielded value balances.
@@ -256,10 +305,10 @@ impl Transaction {
     pub fn fix_remaining_value_from_ordered_utxos(
         &mut self,
         ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    ) {
+    ) -> Result<Amount<NonNegative>, amount::Error> {
         self.fix_remaining_value(&outputs_from_utxos(utxos_from_ordered_utxos(
             ordered_utxos.clone(),
-        )));
+        )))
     }
 }
 

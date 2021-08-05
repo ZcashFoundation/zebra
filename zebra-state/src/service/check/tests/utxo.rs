@@ -936,8 +936,9 @@ fn transaction_v4_with_transparent_data(
         sapling_shielded_data: None,
     };
 
-    // do required fixups
-    transaction.fix_remaining_value(&spent_outputs.into_iter().collect());
+    // do required fixups, but ignore any errors,
+    // because we're not checking all the consensus rules here
+    let _ = transaction.fix_remaining_value(&spent_outputs.into_iter().collect());
 
     transaction
 }
