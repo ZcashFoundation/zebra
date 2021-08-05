@@ -261,7 +261,8 @@ impl IntoDisk for ValueBalance<NonNegative> {
 
 impl FromDisk for ValueBalance<NonNegative> {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        ValueBalance::from_bytes(bytes.as_ref().try_into().unwrap())
+        let array = bytes.as_ref().try_into().unwrap();
+        ValueBalance::from_bytes(array).unwrap()
     }
 }
 

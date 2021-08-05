@@ -49,9 +49,12 @@ impl<C> Amount<C> {
     }
 
     /// From little endian byte array
-    pub fn from_bytes(bytes: [u8; 8]) -> Amount<C> {
+    pub fn from_bytes(bytes: [u8; 8]) -> Result<Amount<C>>
+    where
+        C: Constraint,
+    {
         let amount = i64::from_le_bytes(bytes);
-        Amount::<C>(amount, PhantomData)
+        amount.try_into()
     }
 
     /// Create a zero `Amount`
