@@ -27,10 +27,11 @@ where
     /// This rule applies to Block and Mempool transactions.
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
+    /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Error> {
-        // This rule checks the transparent value balance minus the sum of the sprout,
-        // sapling, and orchard value balances in a transaction is nonnegative.
-        (self.transparent - (self.sprout + self.sapling + self.orchard)?)?
+        [self.transparent, self.sprout, self.sapling, self.orchard]
+            .iter()
+            .sum::<Result<Amount<C>, Error>>()?
             .constrain::<NonNegative>()
     }
 

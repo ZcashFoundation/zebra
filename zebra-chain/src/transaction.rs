@@ -701,9 +701,7 @@ impl Transaction {
             .map(|o| o.value())
             .sum::<Result<Amount, AmountError>>()?;
 
-        Ok(ValueBalance::from_transparent_amount(
-            (input_value_balance - output_value_balance)?,
-        ))
+        (output_value_balance - input_value_balance).map(ValueBalance::from_transparent_amount)
     }
 
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
