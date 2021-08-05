@@ -1006,7 +1006,7 @@ fn add_to_sprout_pool_after_nu() {
     // should fail the check.
     assert!(block.transactions[4].joinsplit_count() > 0);
     let vpub_old: Amount<NonNegative> = block.transactions[4]
-        .sprout_pool_added_values()
+        .output_values_to_sprout()
         .fold(zero, |acc, &x| (acc + x).unwrap());
     assert!(vpub_old > zero);
 
@@ -1019,7 +1019,7 @@ fn add_to_sprout_pool_after_nu() {
     // should pass the check.
     assert!(block.transactions[7].joinsplit_count() > 0);
     let vpub_old: Amount<NonNegative> = block.transactions[7]
-        .sprout_pool_added_values()
+        .output_values_to_sprout()
         .fold(zero, |acc, &x| (acc + x).unwrap());
     assert_eq!(vpub_old, zero);
 

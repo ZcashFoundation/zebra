@@ -698,19 +698,19 @@ impl Transaction {
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
         Ok(ValueBalance::from_transparent_amount(
-            (output_value - input_value)?,
+            (input_value - output_value)?,
         ))
     }
 
     /// Return the transparent value balance,
-    /// the change in the value of the transparent pool.
+    /// the change in the value of the transaction value pool.
     ///
-    /// The sum of newly created outputs in `tx_out` fields,
-    /// minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
+    /// The sum of the UTXOs spent by transparent inputs in `tx_in` fields,
+    /// minus the sum of the newly created outputs in `tx_out` fields.
     ///
-    /// Positive values are added to the transparent value pool,
-    /// and removed from the value pool of this transaction.
-    /// Negative values are removed from transparent,
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the transparent chain value pool.
+    /// Negative values are removed from the transparent chain value pool,
     /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
@@ -736,9 +736,9 @@ impl Transaction {
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
-    /// This value is removed from the value pool of this transaction,
-    /// and added to the sprout value pool.
-    pub fn sprout_pool_added_values(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
+    /// These values are added to the sprout chain value pool,
+    /// and removed from the value pool of this transaction.
+    pub fn output_values_to_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
         match self {
             // JoinSplits with Bctv14 Proofs
             Transaction::V2 {
@@ -783,9 +783,9 @@ impl Transaction {
     /// Modify the `vpub_old` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
-    /// See `sprout_pool_added_values` for details.
+    /// See `output_values_to_sprout` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn sprout_pool_added_values_mut(
+    pub fn output_values_to_sprout_mut(
         &mut self,
     ) -> Box<dyn Iterator<Item = &mut Amount<NonNegative>> + '_> {
         match self {
@@ -832,11 +832,9 @@ impl Transaction {
     /// Returns the `vpub_new` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
-    /// This value is added to the value pool of this transaction,
-    /// and removed from the sprout value pool.
-    pub fn sprout_pool_removed_values(
-        &self,
-    ) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
+    /// These values are removed from the value pool of this transaction.
+    /// and added to the sprout chain value pool.
+    pub fn input_values_from_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
         match self {
             // JoinSplits with Bctv14 Proofs
             Transaction::V2 {
@@ -881,10 +879,9 @@ impl Transaction {
     /// Modify the `vpub_new` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
-    /// This value is added to the value pool of this transaction,
-    /// and removed from the sprout value pool.
+    /// See `input_values_from_sprout` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn sprout_pool_removed_values_mut(
+    pub fn input_values_from_sprout_mut(
         &mut self,
     ) -> Box<dyn Iterator<Item = &mut Amount<NonNegative>> + '_> {
         match self {
@@ -928,15 +925,15 @@ impl Transaction {
         }
     }
 
-    /// Return the sprout value balance
+    /// Return the sprout value balance,
+    /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
     ///
-    /// The change in the sprout value pool.
-    /// The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
+    /// The sum of all sprout `vpub_new` fields, minus the sum of all `vpub_old` fields.
     ///
-    /// Positive values are added to the sprout value pool,
-    /// and removed from the value pool of this transaction.
-    /// Negative values are removed from sprout,
-    /// and added to this transaction.
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the sprout chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to the sprout pool.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
@@ -974,14 +971,14 @@ impl Transaction {
     }
 
     /// Return the sapling value balance,
-    /// the change in the sapling value pool.
+    /// the change in the transaction value pool due to sapling `Spend`s and `Output`s.
     ///
-    /// The negation of the `valueBalanceSapling` field.
+    /// Returns the `valueBalanceSapling` field in this transaction.
     ///
-    /// Positive values are added to the sapling value pool,
-    /// and removed from the value pool of this transaction.
-    /// Negative values are removed from sapling,
-    /// and added to this transaction.
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the sapling chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to sapling pool.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
@@ -1008,7 +1005,7 @@ impl Transaction {
             } => Amount::zero(),
         };
 
-        ValueBalance::from_sapling_amount(-sapling_value_balance)
+        ValueBalance::from_sapling_amount(sapling_value_balance)
     }
 
     /// Modify the `value_balance` field from the `sapling::ShieldedData` in this transaction,
@@ -1041,14 +1038,14 @@ impl Transaction {
     }
 
     /// Return the orchard value balance,
-    /// the change in the orchard value pool.
+    /// the change in the transaction value pool due to orchard [`Action`]s.
     ///
-    /// The negation of the `valueBalanceOrchard` field.
+    /// Returns the `valueBalanceOrchard` field in this transaction.
     ///
-    /// Positive values are added to the orchard value pool,
-    /// and removed from the value pool of this transaction.
-    /// Negative values are removed from orchard,
-    /// and added to this transaction.
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the orchard chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to orchard pool.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
@@ -1057,7 +1054,7 @@ impl Transaction {
             .map(|shielded_data| shielded_data.value_balance)
             .unwrap_or_else(Amount::zero);
 
-        ValueBalance::from_orchard_amount(-orchard_value_balance)
+        ValueBalance::from_orchard_amount(orchard_value_balance)
     }
 
     /// Modify the `value_balance` field from the `orchard::ShieldedData` in this transaction,
@@ -1070,7 +1067,7 @@ impl Transaction {
             .map(|shielded_data| &mut shielded_data.value_balance)
     }
 
-    /// Get all the value balances for this transaction,
+    /// Get the value balances for this transaction,
     /// using the transparent outputs spent in this transaction.
     ///
     /// See `value_balance` for details.
@@ -1084,10 +1081,25 @@ impl Transaction {
             + self.orchard_value_balance()
     }
 
-    /// Get all the value balances for this transaction.
+    /// Get the value balances for this transaction.
+    /// These are the changes in the transaction value pool,
+    /// split up into transparent, sprout, sapling, and orchard values.
+    ///
+    /// Calculated as the sum of the inputs and outputs from each pool,
+    /// or the sum of the value balances from each pool.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the corresponding chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to the corresponding pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
     /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
     pub fn value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
