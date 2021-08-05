@@ -708,6 +708,14 @@ impl Transaction {
         (output_value - input_value).map(ValueBalance::from_transparent_amount)
     }
 
+    /// Modify the transparent output values of this transaction, regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn output_values_mut(&mut self) -> impl Iterator<Item = &mut Amount<NonNegative>> {
+        self.outputs_mut()
+            .iter_mut()
+            .map(|output| &mut output.value)
+    }
+
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
     /// regardless of version.
     ///
