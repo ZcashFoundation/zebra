@@ -255,8 +255,9 @@ impl Transaction {
             .inputs()
             .iter()
             .map(|input| input.value_from_outputs(outputs))
-            .sum::<Result<Amount<NonNegative>, amount::Error>>()
-            .expect("chain is limited to MAX_MONEY");
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()?;
+        // TODO: work out how to fix block output values which are cached in `outputs`
+        //.expect("chain is limited to MAX_MONEY");
 
         // negative value balances add to the transaction value pool
         let sprout_inputs = self
@@ -294,7 +295,6 @@ impl Transaction {
             }
         }
 
-        // positive value balances remove from the transaction value pool
         for output_value in self.sprout_pool_added_values_mut() {
             if remaining_input_value >= *output_value {
                 remaining_input_value = (remaining_input_value - *output_value)
@@ -305,7 +305,9 @@ impl Transaction {
         }
 
         if let Some(value_balance) = self.sapling_value_balance_mut() {
-            if let Ok(output_value) = value_balance.constrain::<NonNegative>() {
+            // unfortunately, the signs of sapling_value_balance and sapling_value_balance_mut
+            // are inverted
+            if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
                 if remaining_input_value >= output_value {
                     remaining_input_value = (remaining_input_value - output_value)
                         .expect("input >= output so result is always non-negative");
@@ -316,7 +318,7 @@ impl Transaction {
         }
 
         if let Some(value_balance) = self.orchard_value_balance_mut() {
-            if let Ok(output_value) = value_balance.constrain::<NonNegative>() {
+            if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
                 if remaining_input_value >= output_value {
                     remaining_input_value = (remaining_input_value - output_value)
                         .expect("input >= output so result is always non-negative");
