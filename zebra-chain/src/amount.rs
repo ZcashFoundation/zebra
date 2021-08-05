@@ -183,17 +183,6 @@ impl<C> From<Amount<C>> for halo2::pasta::pallas::Scalar {
     }
 }
 
-impl<C> TryFrom<i64> for Amount<C>
-where
-    C: Constraint,
-{
-    type Error = Error;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        C::validate(value).map(|v| Self(v, PhantomData))
-    }
-}
-
 impl<C> TryFrom<i32> for Amount<C>
 where
     C: Constraint,
@@ -205,6 +194,17 @@ where
     }
 }
 
+impl<C> TryFrom<i64> for Amount<C>
+where
+    C: Constraint,
+{
+    type Error = Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        C::validate(value).map(|v| Self(v, PhantomData))
+    }
+}
+
 impl<C> TryFrom<u64> for Amount<C>
 where
     C: Constraint,
@@ -212,6 +212,22 @@ where
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value = value.try_into().map_err(|source| Error::Convert {
+            value: value.into(),
+            source,
+        })?;
+
+        C::validate(value).map(|v| Self(v, PhantomData))
+    }
+}
+
+impl<C> TryFrom<i128> for Amount<C>
+where
+    C: Constraint,
+{
+    type Error = Error;
+
+    fn try_from(value: i128) -> Result<Self, Self::Error> {
         let value = value
             .try_into()
             .map_err(|source| Error::Convert { value, source })?;
@@ -245,8 +261,7 @@ impl<C> PartialEq<Amount<C>> for i64 {
     }
 }
 
-impl Eq for Amount<NegativeAllowed> {}
-impl Eq for Amount<NonNegative> {}
+impl<C> Eq for Amount<C> {}
 
 impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1> {
     fn partial_cmp(&self, other: &Amount<C2>) -> Option<Ordering> {
@@ -254,47 +269,51 @@ impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1> {
     }
 }
 
-impl Ord for Amount<NegativeAllowed> {
-    fn cmp(&self, other: &Amount<NegativeAllowed>) -> Ordering {
+impl<C> Ord for Amount<C> {
+    fn cmp(&self, other: &Amount<C>) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl Ord for Amount<NonNegative> {
-    fn cmp(&self, other: &Amount<NonNegative>) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl std::ops::Mul<u64> for Amount<NonNegative> {
-    type Output = Result<Amount<NonNegative>>;
+impl<C> std::ops::Mul<u64> for Amount<C>
+where
+    C: Constraint,
+{
+    type Output = Result<Amount<C>>;
 
     fn mul(self, rhs: u64) -> Self::Output {
-        let value = (self.0 as u64)
-            .checked_mul(rhs)
-            .ok_or(Error::MultiplicationOverflow {
+        let value = i128::from(self.0).checked_mul(i128::from(rhs)).ok_or(
+            Error::MultiplicationOverflow {
                 amount: self.0,
                 multiplier: rhs,
-            })?;
+            },
+        )?;
         value.try_into()
     }
 }
 
-impl std::ops::Mul<Amount<NonNegative>> for u64 {
-    type Output = Result<Amount<NonNegative>>;
+impl<C> std::ops::Mul<Amount<C>> for u64
+where
+    C: Constraint,
+{
+    type Output = Result<Amount<C>>;
 
-    fn mul(self, rhs: Amount<NonNegative>) -> Self::Output {
+    fn mul(self, rhs: Amount<C>) -> Self::Output {
         rhs.mul(self)
     }
 }
 
-impl std::ops::Div<u64> for Amount<NonNegative> {
-    type Output = Result<Amount<NonNegative>>;
+impl<C> std::ops::Div<u64> for Amount<C>
+where
+    C: Constraint,
+{
+    type Output = Result<Amount<C>>;
 
     fn div(self, rhs: u64) -> Self::Output {
-        let quotient = (self.0 as u64)
-            .checked_div(rhs)
+        let quotient = i128::from(self.0)
+            .checked_div(i128::from(rhs))
             .ok_or(Error::DivideByZero { amount: self.0 })?;
+
         Ok(quotient
             .try_into()
             .expect("division by a positive integer always stays within the constraint"))
@@ -326,12 +345,12 @@ where
     }
 }
 
-impl std::ops::Neg for Amount<NegativeAllowed> {
-    type Output = Self;
+impl<C> std::ops::Neg for Amount<C> {
+    type Output = Amount<NegativeAllowed>;
 
     fn neg(self) -> Self::Output {
-        Amount::try_from(-self.0)
-            .expect("a change in sign to any value inside Amount<NegativeAllowed> is always valid")
+        Amount::<NegativeAllowed>::try_from(-self.0)
+            .expect("a change in sign to any value inside an Amount is always valid")
     }
 }
 
@@ -344,13 +363,16 @@ pub enum Error {
         range: RangeInclusive<i64>,
         value: i64,
     },
-    /// u64 {value} could not be converted to an i64 Amount
+
+    /// {value} could not be converted to an i64 Amount
     Convert {
-        value: u64,
+        value: i128,
         source: std::num::TryFromIntError,
     },
-    /// i64 overflow when multiplying i64 non-negative amount {amount} by u64 {multiplier}
+
+    /// i64 overflow when multiplying i64 amount {amount} by u64 {multiplier}
     MultiplicationOverflow { amount: i64, multiplier: u64 },
+
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
 
