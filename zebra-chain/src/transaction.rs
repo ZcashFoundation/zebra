@@ -721,7 +721,7 @@ impl Transaction {
             .sum::<Result<Amount, AmountError>>()?;
 
         Ok(ValueBalance::from_transparent_amount(
-            (input_value_balance - output_value_balance)?,
+            (output_value_balance - input_value_balance)?,
         ))
     }
 
