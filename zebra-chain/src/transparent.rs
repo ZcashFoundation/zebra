@@ -15,8 +15,10 @@ pub use utxo::{
     OrderedUtxo, Utxo,
 };
 
+pub(crate) use utxo::outputs_from_utxos;
+
 #[cfg(any(test, feature = "proptest-impl"))]
-pub(crate) use utxo::{new_transaction_ordered_outputs, outputs_from_utxos};
+pub(crate) use utxo::new_transaction_ordered_outputs;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;

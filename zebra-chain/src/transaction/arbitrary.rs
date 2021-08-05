@@ -1,7 +1,9 @@
 //! Arbitrary data generation for transaction proptests
 
 use std::{
+    collections::HashMap,
     convert::{TryFrom, TryInto},
+    ops::Neg,
     sync::Arc,
 };
 
@@ -9,7 +11,7 @@ use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
-    amount::Amount,
+    amount::{self, Amount, NegativeAllowed, NonNegative},
     at_least_one, block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
@@ -18,7 +20,10 @@ use crate::{
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    sprout, transparent, LedgerState,
+    sprout,
+    transparent::{self, outputs_from_utxos, utxos_from_ordered_utxos},
+    value_balance::ValueBalanceError,
+    LedgerState,
 };
 
 use itertools::Itertools;
@@ -180,35 +185,208 @@ impl Transaction {
             .boxed()
     }
 
-    /// Fixup non-coinbase transparent values and shielded value balances,
-    /// so that this transaction passes the "remaining transaction value pool" check.
-    pub fn fix_remaining_value(&mut self) {
-        if self.is_coinbase() {
-            // TODO: fixup coinbase block subsidy and remaining transaction value
-            return;
-        }
-
-        // TODO: make outputs less than inputs, rather than zeroing them all
-
-        for mut output in self.outputs_mut() {
-            // since all outputs are zero, all inputs must also be zero
-            output.value = Amount::zero();
+    /// Apply `f` to the transparent output, `v_sprout_new`, and `v_sprout_old` values
+    /// in this transaction, regardless of version.
+    pub fn for_each_value_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Amount<NonNegative>),
+    {
+        for output_value in self.output_values_mut() {
+            f(output_value);
         }
 
         for sprout_added_value in self.sprout_pool_added_values_mut() {
-            *sprout_added_value = Amount::zero();
+            f(sprout_added_value);
         }
         for sprout_removed_value in self.sprout_pool_removed_values_mut() {
-            *sprout_removed_value = Amount::zero();
+            f(sprout_removed_value);
+        }
+    }
+
+    /// Apply `f` to the sapling value balance and orchard value balance
+    /// in this transaction, regardless of version.
+    pub fn for_each_value_balance_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Amount<NegativeAllowed>),
+    {
+        if let Some(sapling_value_balance) = self.sapling_value_balance_mut() {
+            f(sapling_value_balance);
+        }
+
+        if let Some(orchard_value_balance) = self.orchard_value_balance_mut() {
+            f(orchard_value_balance);
+        }
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances,
+    /// so that this transaction passes the "remaining transaction value pool" check.
+    ///
+    /// `outputs` must contain all the [`Output`]s spent in this block.
+    ///
+    /// Currently, this code almost always leaves some remaining value in the
+    /// transaction value pool.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Output`] is missing from `outpoints`.
+    //
+    // TODO: take an extra arbitrary bool, which selects between zero and non-zero
+    //       remaining value in the transaction value pool
+    pub fn fix_remaining_value(
+        &mut self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        // Temporarily make amounts smaller, so the total never overflows MAX_MONEY
+        // in Zebra's ~100-block chain tests. (With up to 7 values per transaction,
+        // and 3 transactions per block.)
+        // TODO: replace this scaling with chain value balance adjustments
+        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
+        where
+            Amount<C>: Copy,
+        {
+            *amount = (*amount / 10_000).expect("divisor is not zero");
+        }
+
+        self.for_each_value_mut(scale_to_avoid_overflow);
+        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+
+        if self.is_coinbase() {
+            // TODO: fixup coinbase block subsidy and remaining transaction value
+            return Ok(Amount::zero());
+        }
+
+        // calculate the total input value
+
+        let transparent_inputs = self
+            .inputs()
+            .iter()
+            .map(|input| input.value_from_outputs(outputs))
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()?;
+        // TODO: fix callers with invalid values, maybe due to cached outputs?
+        //.expect("chain is limited to MAX_MONEY");
+
+        // negative value balances add to the transaction value pool
+        let sprout_inputs = self
+            .sprout_pool_removed_values()
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .expect("chain is limited to MAX_MONEY");
+
+        let sapling_input = self
+            .sapling_value_balance()
+            .sapling_amount()
+            .neg()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
+        let orchard_input = self
+            .orchard_value_balance()
+            .orchard_amount()
+            .neg()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
+        let mut remaining_input_value =
+            (transparent_inputs + sprout_inputs + sapling_input + orchard_input)
+                .expect("chain is limited to MAX_MONEY");
+
+        // assign remaining input value to outputs,
+        // zeroing any outputs that would exceed the input value
+
+        for output_value in self.output_values_mut() {
+            if remaining_input_value >= *output_value {
+                remaining_input_value = (remaining_input_value - *output_value)
+                    .expect("input >= output so result is always non-negative");
+            } else {
+                *output_value = Amount::zero();
+            }
+        }
+
+        for output_value in self.sprout_pool_added_values_mut() {
+            if remaining_input_value >= *output_value {
+                remaining_input_value = (remaining_input_value - *output_value)
+                    .expect("input >= output so result is always non-negative");
+            } else {
+                *output_value = Amount::zero();
+            }
         }
 
         if let Some(value_balance) = self.sapling_value_balance_mut() {
-            *value_balance = Amount::zero();
+            // TODO: unfortunately, the signs of sapling_value_balance and sapling_value_balance_mut
+            // are inverted
+            if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
+                if remaining_input_value >= output_value {
+                    remaining_input_value = (remaining_input_value - output_value)
+                        .expect("input >= output so result is always non-negative");
+                } else {
+                    *value_balance = Amount::zero();
+                }
+            }
         }
 
         if let Some(value_balance) = self.orchard_value_balance_mut() {
-            *value_balance = Amount::zero();
+            if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
+                if remaining_input_value >= output_value {
+                    remaining_input_value = (remaining_input_value - output_value)
+                        .expect("input >= output so result is always non-negative");
+                } else {
+                    *value_balance = Amount::zero();
+                }
+            }
         }
+
+        // check our calculations are correct
+        let remaining_transaction_value = self
+            .value_balance_from_outputs(outputs)
+            .expect("chain is limited to MAX_MONEY")
+            .remaining_transaction_value()
+            .unwrap_or_else(|err| {
+                panic!(
+                    "unexpected remaining transaction value: {:?}, \
+                     calculated remaining input value: {:?}",
+                    err, remaining_input_value
+                )
+            });
+        assert_eq!(
+            remaining_input_value,
+            remaining_transaction_value,
+            "fix_remaining_value and remaining_transaction_value calculated different remaining values"
+        );
+
+        Ok(remaining_transaction_value)
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances.
+    /// See `fix_remaining_value` for details.
+    ///
+    /// `utxos` must contain all the [`Utxo`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Utxo`] is missing from `utxos`.
+    #[allow(dead_code)]
+    pub fn fix_remaining_value_from_utxos(
+        &mut self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances.
+    /// See `fix_remaining_value` for details.
+    ///
+    /// `ordered_utxos` must contain all the [`OrderedUtxo`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`OrderedUtxo`] is missing from `ordered_utxos`.
+    #[allow(dead_code)]
+    pub fn fix_remaining_value_from_ordered_utxos(
+        &mut self,
+        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        self.fix_remaining_value(&outputs_from_utxos(utxos_from_ordered_utxos(
+            ordered_utxos.clone(),
+        )))
     }
 }
 

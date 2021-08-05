@@ -160,7 +160,7 @@ proptest! {
             .expect("block should deserialize");
 
         // create an output
-        let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
+        let output_transaction = transaction_v4_with_transparent_data([], [], [output.0.clone()]);
 
         // create a spend
         let expected_outpoint = transparent::OutPoint {
@@ -168,7 +168,11 @@ proptest! {
             index: 0,
         };
         prevout_input.set_outpoint(expected_outpoint);
-        let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
+        let spend_transaction = transaction_v4_with_transparent_data(
+            [prevout_input.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -247,7 +251,7 @@ proptest! {
 
         let TestState {
             mut state, block1, ..
-        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
         let previous_mem = state.mem.clone();
 
         let expected_outpoint = transparent::OutPoint {
@@ -256,7 +260,11 @@ proptest! {
         };
         prevout_input.set_outpoint(expected_outpoint);
 
-        let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
+        let spend_transaction = transaction_v4_with_transparent_data(
+            [prevout_input.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -329,7 +337,7 @@ proptest! {
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
 
-        let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
+        let output_transaction = transaction_v4_with_transparent_data([], [], [output.0.clone()]);
 
         let expected_outpoint = transparent::OutPoint {
             hash: output_transaction.hash(),
@@ -338,8 +346,11 @@ proptest! {
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
-        let spend_transaction =
-            transaction_v4_with_transparent_data([prevout_input1.0, prevout_input2.0], []);
+        let spend_transaction = transaction_v4_with_transparent_data(
+            [prevout_input1.0, prevout_input2.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -390,7 +401,7 @@ proptest! {
 
         let TestState {
             mut state, block1, ..
-        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
         let previous_mem = state.mem.clone();
 
         let expected_outpoint = transparent::OutPoint {
@@ -400,8 +411,11 @@ proptest! {
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
-        let spend_transaction =
-            transaction_v4_with_transparent_data([prevout_input1.0, prevout_input2.0], []);
+        let spend_transaction = transaction_v4_with_transparent_data(
+            [prevout_input1.0, prevout_input2.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -463,7 +477,7 @@ proptest! {
 
         let TestState {
             mut state, block1, ..
-        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
         let previous_mem = state.mem.clone();
 
         let expected_outpoint = transparent::OutPoint {
@@ -473,8 +487,16 @@ proptest! {
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
-        let spend_transaction1 = transaction_v4_with_transparent_data([prevout_input1.0], []);
-        let spend_transaction2 = transaction_v4_with_transparent_data([prevout_input2.0], []);
+        let spend_transaction1 = transaction_v4_with_transparent_data(
+            [prevout_input1.0],
+            [(expected_outpoint, output.0.clone())],
+            []
+        );
+        let spend_transaction2 = transaction_v4_with_transparent_data(
+            [prevout_input2.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -548,7 +570,7 @@ proptest! {
 
         let TestState {
             mut state, block1, ..
-        } = new_state_with_mainnet_transparent_data([], [output.0], use_finalized_state_output);
+        } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
         let mut previous_mem = state.mem.clone();
 
         let expected_outpoint = transparent::OutPoint {
@@ -558,8 +580,16 @@ proptest! {
         prevout_input1.set_outpoint(expected_outpoint);
         prevout_input2.set_outpoint(expected_outpoint);
 
-        let spend_transaction1 = transaction_v4_with_transparent_data([prevout_input1.0], []);
-        let spend_transaction2 = transaction_v4_with_transparent_data([prevout_input2.0], []);
+        let spend_transaction1 = transaction_v4_with_transparent_data(
+            [prevout_input1.0],
+            [(expected_outpoint, output.0.clone())],
+            []
+        );
+        let spend_transaction2 = transaction_v4_with_transparent_data(
+            [prevout_input2.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transactions to a version that the non-finalized state will accept
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
@@ -668,6 +698,7 @@ proptest! {
     /// is rejected by state contextual validation.
     #[test]
     fn reject_missing_transparent_spend(
+        unused_output in TypeNameToDebug::<transparent::Output>::arbitrary(),
         prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
     ) {
         zebra_test::init();
@@ -677,7 +708,12 @@ proptest! {
             .expect("block should deserialize");
 
         let expected_outpoint = prevout_input.outpoint().unwrap();
-        let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
+        let spend_transaction = transaction_v4_with_transparent_data(
+            [prevout_input.0],
+            // provide an fake spent output for value fixups
+            [(expected_outpoint, unused_output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -725,7 +761,7 @@ proptest! {
             .expect("block should deserialize");
 
         // create an output
-        let output_transaction = transaction_v4_with_transparent_data([], [output.0]);
+        let output_transaction = transaction_v4_with_transparent_data([], [], [output.0.clone()]);
 
         // create a spend
         let expected_outpoint = transparent::OutPoint {
@@ -733,7 +769,11 @@ proptest! {
             index: 0,
         };
         prevout_input.set_outpoint(expected_outpoint);
-        let spend_transaction = transaction_v4_with_transparent_data([prevout_input.0], []);
+        let spend_transaction = transaction_v4_with_transparent_data(
+            [prevout_input.0],
+            [(expected_outpoint, output.0)],
+            []
+        );
 
         // convert the coinbase transaction to a version that the non-finalized state will accept
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
@@ -785,6 +825,7 @@ struct TestState {
 /// Also returns the finalized genesis block itself.
 fn new_state_with_mainnet_transparent_data(
     inputs: impl IntoIterator<Item = transparent::Input>,
+    spent_outputs: impl IntoIterator<Item = (transparent::OutPoint, transparent::Output)>,
     outputs: impl IntoIterator<Item = transparent::Output>,
     use_finalized_state: bool,
 ) -> TestState {
@@ -801,7 +842,7 @@ fn new_state_with_mainnet_transparent_data(
         .try_into()
         .expect("unexpectedly large output iterator");
 
-    let transaction = transaction_v4_with_transparent_data(inputs, outputs);
+    let transaction = transaction_v4_with_transparent_data(inputs, spent_outputs, outputs);
     let transaction_hash = transaction.hash();
 
     let expected_outpoints = (0..outputs_len).map(|index| transparent::OutPoint {
@@ -874,11 +915,13 @@ fn new_state_with_mainnet_transparent_data(
     }
 }
 
-/// Return a `Transaction::V4`, using transparent `inputs` and `outputs`,
+/// Return a `Transaction::V4`, using transparent `inputs` and their `spent_outputs`,
+/// and newly created `outputs`.
 ///
 /// Other fields have empty or default values.
 fn transaction_v4_with_transparent_data(
     inputs: impl IntoIterator<Item = transparent::Input>,
+    spent_outputs: impl IntoIterator<Item = (transparent::OutPoint, transparent::Output)>,
     outputs: impl IntoIterator<Item = transparent::Output>,
 ) -> Transaction {
     let inputs: Vec<_> = inputs.into_iter().collect();
@@ -893,8 +936,9 @@ fn transaction_v4_with_transparent_data(
         sapling_shielded_data: None,
     };
 
-    // do required fixups
-    transaction.fix_remaining_value();
+    // do required fixups, but ignore any errors,
+    // because we're not checking all the consensus rules here
+    let _ = transaction.fix_remaining_value(&spent_outputs.into_iter().collect());
 
     transaction
 }
