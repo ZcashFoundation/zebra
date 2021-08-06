@@ -1,8 +1,6 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use std::ops::Neg;
-
-use crate::amount::{self, Amount, Constraint, NonNegative};
+use crate::amount::{self, Amount, Constraint, NegativeAllowed, NonNegative};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -30,11 +28,14 @@ where
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
     /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
+    //
+    // TODO: move this method to Transaction, and assert that the transaction is not coinbase
+    //       for coinbase transactions, create a method with two extra arguments:
+    //       block subsidy, and miner fees
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, ValueBalanceError> {
         [self.transparent, self.sprout, self.sapling, self.orchard]
             .iter()
             .sum::<Result<Amount<C>, amount::Error>>()?
-            .neg()
             .constrain::<NonNegative>()
             .map_err(Into::into)
     }
@@ -132,6 +133,20 @@ where
             orchard: zero,
         }
     }
+
+    /// Convert this value balance to a different ValueBalance type,
+    /// if it satisfies the new constraint
+    pub fn constrain<C2>(self) -> Result<ValueBalance<C2>, ValueBalanceError>
+    where
+        C2: Constraint,
+    {
+        Ok(ValueBalance::<C2> {
+            transparent: self.transparent.constrain()?,
+            sprout: self.sprout.constrain()?,
+            sapling: self.sapling.constrain()?,
+            orchard: self.orchard.constrain()?,
+        })
+    }
 }
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
@@ -212,5 +227,18 @@ where
 {
     fn sum<I: Iterator<Item = &'amt ValueBalance<C>>>(iter: I) -> Self {
         iter.copied().sum()
+    }
+}
+
+impl<C> std::ops::Neg for ValueBalance<C> {
+    type Output = ValueBalance<NegativeAllowed>;
+
+    fn neg(self) -> Self::Output {
+        ValueBalance::<NegativeAllowed> {
+            transparent: self.transparent.neg(),
+            sprout: self.sprout.neg(),
+            sapling: self.sapling.neg(),
+            orchard: self.orchard.neg(),
+        }
     }
 }

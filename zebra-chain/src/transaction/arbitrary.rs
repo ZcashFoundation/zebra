@@ -195,10 +195,10 @@ impl Transaction {
             f(output_value);
         }
 
-        for sprout_added_value in self.sprout_pool_added_values_mut() {
+        for sprout_added_value in self.output_values_to_sprout_mut() {
             f(sprout_added_value);
         }
-        for sprout_removed_value in self.sprout_pool_removed_values_mut() {
+        for sprout_removed_value in self.input_values_from_sprout_mut() {
             f(sprout_removed_value);
         }
     }
@@ -229,6 +229,8 @@ impl Transaction {
     /// # Panics
     ///
     /// If any spent [`Output`] is missing from `outpoints`.
+    //
+    // TODO: split this method up, after we've implemented chain value balance adjustments
     //
     // TODO: take an extra arbitrary bool, which selects between zero and non-zero
     //       remaining value in the transaction value pool
@@ -265,23 +267,21 @@ impl Transaction {
         // TODO: fix callers with invalid values, maybe due to cached outputs?
         //.expect("chain is limited to MAX_MONEY");
 
-        // negative value balances add to the transaction value pool
         let sprout_inputs = self
-            .sprout_pool_removed_values()
+            .input_values_from_sprout()
             .sum::<Result<Amount<NonNegative>, amount::Error>>()
             .expect("chain is limited to MAX_MONEY");
 
+        // positive value balances add to the transaction value pool
         let sapling_input = self
             .sapling_value_balance()
             .sapling_amount()
-            .neg()
             .constrain::<NonNegative>()
             .unwrap_or_else(|_| Amount::zero());
 
         let orchard_input = self
             .orchard_value_balance()
             .orchard_amount()
-            .neg()
             .constrain::<NonNegative>()
             .unwrap_or_else(|_| Amount::zero());
 
@@ -301,7 +301,7 @@ impl Transaction {
             }
         }
 
-        for output_value in self.sprout_pool_added_values_mut() {
+        for output_value in self.output_values_to_sprout_mut() {
             if remaining_input_value >= *output_value {
                 remaining_input_value = (remaining_input_value - *output_value)
                     .expect("input >= output so result is always non-negative");
@@ -311,9 +311,7 @@ impl Transaction {
         }
 
         if let Some(value_balance) = self.sapling_value_balance_mut() {
-            // TODO: unfortunately, the signs of sapling_value_balance and sapling_value_balance_mut
-            // are inverted
-            if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
+            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
                 if remaining_input_value >= output_value {
                     remaining_input_value = (remaining_input_value - output_value)
                         .expect("input >= output so result is always non-negative");
@@ -324,7 +322,7 @@ impl Transaction {
         }
 
         if let Some(value_balance) = self.orchard_value_balance_mut() {
-            if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
+            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
                 if remaining_input_value >= output_value {
                     remaining_input_value = (remaining_input_value - output_value)
                         .expect("input >= output so result is always non-negative");
