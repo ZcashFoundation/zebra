@@ -33,6 +33,7 @@ pub enum HistoryTreeError {
 }
 
 /// The inner [Tree] in one of its supported versions.
+#[derive(Debug)]
 enum InnerHistoryTree {
     /// A pre-Orchard tree.
     PreOrchard(Tree<PreOrchard>),
@@ -41,8 +42,9 @@ enum InnerHistoryTree {
 }
 
 /// History tree (Merkle mountain range) structure that contains information about
-// the block history, as specified in [ZIP-221][https://zips.z.cash/zip-0221].
-pub struct HistoryTree {
+/// the block history, as specified in [ZIP-221][https://zips.z.cash/zip-0221].
+#[derive(Debug)]
+pub struct NonEmptyHistoryTree {
     network: Network,
     network_upgrade: NetworkUpgrade,
     /// Merkle mountain range tree from `zcash_history`.
@@ -58,7 +60,7 @@ pub struct HistoryTree {
     current_height: Height,
 }
 
-impl HistoryTree {
+impl NonEmptyHistoryTree {
     /// Recreate a [`HistoryTree`] from previously saved data.
     ///
     /// The parameters must come from the values of [HistoryTree::size],
@@ -68,7 +70,7 @@ impl HistoryTree {
         size: u32,
         peaks: BTreeMap<u32, Entry>,
         current_height: Height,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Self, HistoryTreeError> {
         let network_upgrade = NetworkUpgrade::current(network, current_height);
         let inner = match network_upgrade {
             NetworkUpgrade::Genesis
@@ -119,7 +121,7 @@ impl HistoryTree {
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Self, HistoryTreeError> {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
@@ -153,7 +155,7 @@ impl HistoryTree {
         };
         let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry);
-        Ok(HistoryTree {
+        Ok(NonEmptyHistoryTree {
             network,
             network_upgrade,
             inner: tree,
@@ -359,7 +361,7 @@ impl HistoryTree {
     }
 }
 
-impl Clone for HistoryTree {
+impl Clone for NonEmptyHistoryTree {
     fn clone(&self) -> Self {
         let tree = match self.inner {
             InnerHistoryTree::PreOrchard(_) => InnerHistoryTree::PreOrchard(
@@ -383,7 +385,7 @@ impl Clone for HistoryTree {
                 .expect("rebuilding an existing tree should always work"),
             ),
         };
-        HistoryTree {
+        NonEmptyHistoryTree {
             network: self.network,
             network_upgrade: self.network_upgrade,
             inner: tree,
@@ -391,5 +393,77 @@ impl Clone for HistoryTree {
             peaks: self.peaks.clone(),
             current_height: self.current_height,
         }
+    }
+}
+
+impl PartialEq for NonEmptyHistoryTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash() == other.hash()
+    }
+}
+
+impl Eq for NonEmptyHistoryTree {}
+
+/// A History Tree that keeps track of its own creation in the Heartwood
+/// activation block, being empty beforehand.
+#[derive(Debug, Default, Clone)]
+pub struct HistoryTree(Option<NonEmptyHistoryTree>);
+
+impl HistoryTree {
+    /// Push a block to a maybe-existing HistoryTree, handling network upgrades.
+    ///
+    /// The tree is updated in-place. It is created when pushing the Heartwood
+    /// activation block.
+    pub fn push(
+        &mut self,
+        network: Network,
+        block: Arc<Block>,
+        sapling_root: sapling::tree::Root,
+        orchard_root: orchard::tree::Root,
+    ) -> Result<(), HistoryTreeError> {
+        let heartwood_height = NetworkUpgrade::Heartwood
+            .activation_height(network)
+            .expect("Heartwood height is known");
+        match block
+            .coinbase_height()
+            .expect("must have height")
+            .cmp(&heartwood_height)
+        {
+            std::cmp::Ordering::Less => {
+                assert!(
+                    self.0.is_none(),
+                    "history tree must not exist pre-Heartwood"
+                );
+            }
+            std::cmp::Ordering::Equal => {
+                let tree = Some(NonEmptyHistoryTree::from_block(
+                    network,
+                    block.clone(),
+                    &sapling_root,
+                    &orchard_root,
+                )?);
+                // Replace the current object with the new tree
+                *self = HistoryTree(tree);
+            }
+            std::cmp::Ordering::Greater => {
+                self.0
+                    .as_mut()
+                    .expect("history tree must exist Heartwood-onward")
+                    .push(block.clone(), &sapling_root, &orchard_root)?;
+            }
+        };
+        Ok(())
+    }
+}
+
+impl From<NonEmptyHistoryTree> for HistoryTree {
+    fn from(tree: NonEmptyHistoryTree) -> Self {
+        HistoryTree(Some(tree))
+    }
+}
+
+impl AsRef<Option<NonEmptyHistoryTree>> for HistoryTree {
+    fn as_ref(&self) -> &Option<NonEmptyHistoryTree> {
+        &self.0
     }
 }

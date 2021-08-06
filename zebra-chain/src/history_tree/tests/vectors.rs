@@ -5,7 +5,7 @@ use crate::{
         Block,
         Commitment::{self, ChainHistoryActivationReserved},
     },
-    history_tree::HistoryTree,
+    history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
     sapling,
     serialization::ZcashDeserializeInto,
@@ -63,7 +63,7 @@ fn push_and_prune_for_network_upgrade(
     // Build initial history tree tree with only the first block
     let first_sapling_root =
         sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
-    let mut tree = HistoryTree::from_block(
+    let mut tree = NonEmptyHistoryTree::from_block(
         network,
         first_block,
         &first_sapling_root,
@@ -140,8 +140,12 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     // network upgrade), so we won't be able to check if its root is correct.
     let sapling_root_prev =
         sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
-    let mut tree =
-        HistoryTree::from_block(network, block_prev, &sapling_root_prev, &Default::default())?;
+    let mut tree = NonEmptyHistoryTree::from_block(
+        network,
+        block_prev,
+        &sapling_root_prev,
+        &Default::default(),
+    )?;
 
     assert_eq!(tree.size(), 1);
     assert_eq!(tree.peaks().len(), 1);

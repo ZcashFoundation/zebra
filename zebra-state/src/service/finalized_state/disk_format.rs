@@ -5,7 +5,7 @@ use bincode::Options;
 use zebra_chain::{
     block,
     block::{Block, Height},
-    history_tree::HistoryTree,
+    history_tree::NonEmptyHistoryTree,
     orchard,
     parameters::Network,
     primitives::zcash_history,
@@ -304,7 +304,7 @@ struct HistoryTreeParts {
     current_height: Height,
 }
 
-impl IntoDisk for HistoryTree {
+impl IntoDisk for NonEmptyHistoryTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -320,15 +320,20 @@ impl IntoDisk for HistoryTree {
     }
 }
 
-impl FromDisk for HistoryTree {
+impl FromDisk for NonEmptyHistoryTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let parts: HistoryTreeParts = bincode::DefaultOptions::new()
             .deserialize(bytes.as_ref())
             .expect(
                 "deserialization format should match the serialization format used by IntoDisk",
             );
-        HistoryTree::from_cache(parts.network, parts.size, parts.peaks, parts.current_height)
-            .expect("deserialization format should match the serialization format used by IntoDisk")
+        NonEmptyHistoryTree::from_cache(
+            parts.network,
+            parts.size,
+            parts.peaks,
+            parts.current_height,
+        )
+        .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 
