@@ -131,6 +131,20 @@ where
         }
     }
 
+    /// Convert this value balance to a different ValueBalance type,
+    /// if it satisfies the new constraint
+    pub fn constrain<C2>(self) -> Result<ValueBalance<C2>, ValueBalanceError>
+    where
+        C2: Constraint,
+    {
+        Ok(ValueBalance::<C2> {
+            transparent: self.transparent.constrain()?,
+            sprout: self.sprout.constrain()?,
+            sapling: self.sapling.constrain()?,
+            orchard: self.orchard.constrain()?,
+        })
+    }
+
     /// To byte array
     pub fn to_bytes(self) -> [u8; 32] {
         let transparent = self.transparent.to_bytes();
@@ -177,7 +191,7 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug, Clone, PartialEq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 /// Errors that can be returned when validating a [`ValueBalance`].
 pub enum ValueBalanceError {
     #[error("value balance contains invalid amounts")]
