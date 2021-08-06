@@ -879,8 +879,8 @@ where
     P: FnOnce(&mut TestChild<PathBuf>) -> Result<()>,
 {
     println!("Creating cached database");
-    // 8 hours
-    let timeout = Duration::from_secs(60 * 60 * 8);
+    // 16 hours
+    let timeout = Duration::from_secs(60 * 60 * 16);
 
     // Use a persistent state, so we can handle large syncs
     let mut config = cached_mandatory_checkpoint_test_config()?;
