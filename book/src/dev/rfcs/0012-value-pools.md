@@ -50,7 +50,7 @@ These rules make sure that a fixed amount of Zcash is created by each block, eve
 ## Transaction Value Balances
 [guide-transaction]: #guide-transaction
 
-Each transaction has an indidual value pool, containing its unspent *input* value.
+Each transaction has an individual value pool, containing its unspent *input* value.
 
 Spent transparent inputs add value to this pool, and newly created transparent outputs remove value.
 Similarly, Sprout JoinSplits have a field that adds value to the transaction pool, and a field that removes value.
