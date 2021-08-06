@@ -834,9 +834,7 @@ impl Transaction {
     ///
     /// These values are removed from the value pool of this transaction.
     /// and added to the sprout chain value pool.
-    pub fn input_values_from_sprout(
-        &self,
-    ) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
+    pub fn input_values_from_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
         match self {
             // JoinSplits with Bctv14 Proofs
             Transaction::V2 {
