@@ -91,6 +91,23 @@ impl<T> TryFrom<Vec<T>> for AtLeastOne<T> {
     }
 }
 
+impl<T> TryFrom<&Vec<T>> for AtLeastOne<T>
+where
+    T: Clone,
+{
+    type Error = SerializationError;
+
+    fn try_from(vec: &Vec<T>) -> Result<Self, Self::Error> {
+        if vec.is_empty() {
+            Err(SerializationError::Parse("expected at least one item"))
+        } else {
+            Ok(AtLeastOne {
+                inner: vec.to_vec(),
+            })
+        }
+    }
+}
+
 impl<T> TryFrom<&[T]> for AtLeastOne<T>
 where
     T: Clone,
