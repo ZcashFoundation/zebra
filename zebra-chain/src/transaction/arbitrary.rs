@@ -223,9 +223,15 @@ impl Transaction {
     ///
     /// `outputs` must contain all the [`Output`]s spent in this block.
     ///
+    /// Currently, this code almost always leaves some remaining value in the
+    /// transaction value pool.
+    ///
     /// # Panics
     ///
     /// If any spent [`Output`] is missing from `outpoints`.
+    //
+    // TODO: take an extra arbitrary bool, which selects between zero and non-zero
+    //       remaining value in the transaction value pool
     pub fn fix_remaining_value(
         &mut self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
@@ -256,7 +262,7 @@ impl Transaction {
             .iter()
             .map(|input| input.value_from_outputs(outputs))
             .sum::<Result<Amount<NonNegative>, amount::Error>>()?;
-        // TODO: work out how to fix block output values which are cached in `outputs`
+        // TODO: fix callers with invalid values, maybe due to cached outputs?
         //.expect("chain is limited to MAX_MONEY");
 
         // negative value balances add to the transaction value pool
@@ -305,7 +311,7 @@ impl Transaction {
         }
 
         if let Some(value_balance) = self.sapling_value_balance_mut() {
-            // unfortunately, the signs of sapling_value_balance and sapling_value_balance_mut
+            // TODO: unfortunately, the signs of sapling_value_balance and sapling_value_balance_mut
             // are inverted
             if let Ok(output_value) = (-*value_balance).constrain::<NonNegative>() {
                 if remaining_input_value >= output_value {
@@ -329,29 +335,24 @@ impl Transaction {
         }
 
         // check our calculations are correct
-        // TODO: work out how to fix block output values which are cached in `outputs`
-        /*
         let remaining_transaction_value = self
             .value_balance_from_outputs(outputs)
             .expect("chain is limited to MAX_MONEY")
             .remaining_transaction_value()
-            .unwrap_or_else(|err|
-                            panic!(
-                                "unexpected remaining transaction value: {:?}, \
-                                 calculated remaining input value: {:?}",
-                                err,
-                                remaining_input_value
-                            )
-        );
+            .unwrap_or_else(|err| {
+                panic!(
+                    "unexpected remaining transaction value: {:?}, \
+                     calculated remaining input value: {:?}",
+                    err, remaining_input_value
+                )
+            });
         assert_eq!(
             remaining_input_value,
             remaining_transaction_value,
             "fix_remaining_value and remaining_transaction_value calculated different remaining values"
         );
-        Ok(remaining_transaction_value)
-         */
 
-        Ok(remaining_input_value)
+        Ok(remaining_transaction_value)
     }
 
     /// Fixup non-coinbase transparent values and shielded value balances.
