@@ -11,7 +11,7 @@ mod arbitrary;
 mod tests;
 
 /// An amount spread between different Zcash pools.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
