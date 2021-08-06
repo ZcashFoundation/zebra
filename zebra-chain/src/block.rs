@@ -190,13 +190,13 @@ impl Block {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        let transaction_value_pool_change = self
+        let transaction_value_balance_total = self
             .transactions
             .iter()
             .flat_map(|t| t.value_balance(utxos))
             .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?;
 
-        Ok(transaction_value_pool_change.neg())
+        Ok(transaction_value_balance_total.neg())
     }
 }
 
