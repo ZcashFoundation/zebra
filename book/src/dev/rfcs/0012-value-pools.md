@@ -17,34 +17,66 @@ In the Zcash protocol there are consensus rules that:
 
 These rules make sure that a fixed amount of Zcash is created by each block, even if there are vulnerabilities in some shielded pools.
 
-Checking the coins created by coinbase transactions and funding streams is out of scope for this design.
+(Checking the coins created by coinbase transactions and funding streams is out of scope for this design.)
 
 [ZIP-209]: https://zips.z.cash/zip-0209
 
 # Definitions
 [definitions]: #definitions
 
-- `value balance` - The change in the chain value pools, caused by a subset of the blockchain.
-- `transparent value balance` - The change in the transparent value pool. The sum of newly created outputs in `tx_out` fields, minus the sum of the outputs spent by transparent inputs in `tx_in` fields.
-- `coinbase transparent value balance` - The change in the transparent value pool, due to a coinbase transaction. The sum of newly created outputs in `tx_out` fields.
-- `sprout value balance` - The change in the sprout value pool. The sum of all sprout `v_sprout_old` fields, minus the sum of all `v_sprout_new` fields.
-- `sapling value balance` - The change in the sapling value pool. The negation of the sum of all `valueBalanceSapling` fields.
-- `orchard value balance` - The change in the orchard value pool. The negation of the sum of all `valueBalanceOrchard` fields.
-- `remaining transaction value` - The sum of unspent *inputs* to a transaction. This value must be non-negative. It is collected by miners as a fee. In Zebra, calculated by *negating* the sum of the transparent, sprout, sapling, and orchard value balances. In the spec, defined as the sum of transparent inputs, minus transparent outputs, plus `v_sprout_new`, minus `v_sprout_old`, plus `vbalanceSapling`, plus `vbalanceOrchard`.
-- `transaction value pool balance` - The sum of all the value balances in each transaction. There is a separate value for each transparent and shielded pool.
-- `block value pool balance` - The sum of all the value balances in each block. There is a separate value for each transparent and shielded pool.
-- `chain value pool balance` - The transparent chain value pool balance is the sum of all unspent transparent outputs (UTXOs) in the chain. Each shielded chain value pool balance is the sum of all unspent outputs in the chain for that pool. In Zebra, they are calculated as the sum of all the value balances in a valid blockchain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
+## Transaction Value Balances
+[definitions-transaction]: #definitions-transaction
+
+- `transaction value pool` - The unspent *input* value in a transaction. Inputs add value, outputs remove value, and value balances modify value.
+- `value balance` - The change in a transaction's value pool. There is a separate value balance for each transparent and shielded pool.
+- `transparent value balance` - The change in the transaction value pool, due to transparent inputs and outputs. The sum of the UTXOs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields.
+- `sprout value balance` - The change in the transaction value pool, due to sprout JoinSplits. The sum of all `v_sprout_new` fields, minus the sum of all `v_sprout_old` fields.
+- `sapling value balance` - The change in the transaction value pool, due to sapling Spends and Outputs. Equal to the `valueBalanceSapling` field.
+- `orchard value balance` - The change in the transaction value pool, due to orchard Actions. Equal to the `valueBalanceOrchard` field.
+- `remaining transaction value` - The unspent value in the transaction value pool. The sum of the transparent and shielded value balances in each transaction.
+- `coinbase transaction` - A transaction which spends newly created value (coinbase), and the remaining value of other transactions in its block (miner fees). Coinbase transactions do not have any other inputs, so they can't spend the outputs of other transactions.
+
+## Chain Value Pools
+[definitions-chain]: #definitions-chain
+
+**Note: chain value pools and transaction value balances have opposite signs.**
+
+- `chain value pool balance` - The total value of unspent *outputs* in the chain, for each transparent and shielded pool. The sum of all block chain value pool changes in the chain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
+- `block chain value pool change` - The change in the chain value pools caused by a block. The *negative* sum of all the value balances in each block.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-There is a chain value pool for transparent funds, and for each kind of shielded transfer. These value pools are updated using value balances, which are calculated for each block and transaction.
+## Transaction Value Balances
+[guide-transaction]: #guide-transaction
 
-We need to check each chain value pool as blocks are added to the chain, to make sure that chain balances never go negative.
+Each transaction has an individual value pool, containing its unspent *input* value.
 
-We also need to check that non-coinbase transactions don't create any new value. Each transaction's total output value must be less than or equal to the total input value. In the spec, this is called the remaining value in the transaction value pool.
+Spent transparent inputs add value to this pool, and newly created transparent outputs remove value.
+Similarly, Sprout JoinSplits have a field that adds value to the transaction pool, and a field that removes value.
+These transparent and sprout values are unsigned.
+
+Sapling and Orchard have a single signed value balance per transaction, which modifies the transaction value pool.
+
+We need to check that each transaction's total output value is less than or equal to the total input value.
+The remaining value in the transaction must not be negative.
+This makes sure that transactions can only spend up to their total input value.
+(Only coinbase transactions can create new value.)
+
+In the spec, this is called the remaining value in the transparent transaction value pool.
+But in Zebra, we don't assign this value to a specific pool. We just call it the transaction value pool.
+
+## Chain Value Pools
+[guide-chain]: #guide-chain
+
+There is one chain value pool for transparent funds, and one for each kind of shielded transfer, containing their unspent *outputs*.
+
+These value pools are updated using chain value pool changes, which are the *negation* of transaction value balances.
+(Transaction value balances use unspent *input* value, but chain value balances use unspent *outputs*.)
 
 Each of the chain value pools can change its value with every block added to the chain. This is a state feature and Zebra handle this in the `zebra-state` crate. We propose to store the pool values for the finalized tip height on disk.
+
+We need to check each chain value pool as blocks are added to the chain, to make sure that chain balances never go negative.
 
 ## Summary of the implementation:
 
@@ -74,7 +106,7 @@ https://zips.z.cash/zip-0209#specification
 
 ### Transparent Transaction Value Pool & Remaining Value
 
-The sum of unspent *inputs* to the transaction: the *negation* of the sum of the transaction value balances.
+The unspent *input value* in a transaction: the sum of the transaction value balances.
 
 Consensus rules:
 
@@ -145,7 +177,7 @@ But an equivalent rule must be enforced by Zcash implementations, so that each b
 Specifically, this rule can be derived from other consensus rules:
 - a transparent output must have a non-negative value,
 - a transparent input can only spend an unspent transparent output,
-- there must be a non-negative remaining value in the transparent transaction value pool.
+- so, there must be a non-negative remaining value in the transparent transaction value pool.
 
 Some of these consensus rules are derived from Bitcoin, so they may not be documented in the Zcash Specification.
 
