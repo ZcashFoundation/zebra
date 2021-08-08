@@ -348,14 +348,16 @@ impl<C> std::iter::Sum<Amount<C>> for Result<Amount<C>>
 where
     C: Constraint,
 {
-    fn sum<I: Iterator<Item = Amount<C>>>(iter: I) -> Self {
-        let sum = iter
-            .map(|a| a.0)
-            .try_fold(0i64, |acc, amount| acc.checked_add(amount));
+    fn sum<I: Iterator<Item = Amount<C>>>(mut iter: I) -> Self {
+        let sum = iter.try_fold(Amount::zero(), |acc, amount| acc + amount);
 
         match sum {
-            Some(sum) => Amount::try_from(sum),
-            None => Err(Error::SumOverflow),
+            Ok(sum) => Ok(sum),
+            Err(Error::Contains { value, .. }) => Err(Error::SumOverflow {
+                partial_sum: value,
+                remaining_items: iter.count(),
+            }),
+            Err(unexpected_error) => unreachable!("unexpected Add error: {:?}", unexpected_error),
         }
     }
 }
@@ -406,8 +408,11 @@ pub enum Error {
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
 
-    /// i64 overflow when summing i64 amounts
-    SumOverflow,
+    /// i64 overflow when summing i64 amounts, partial_sum: {partial_sum}, remaining items: {remaining_items}
+    SumOverflow {
+        partial_sum: i64,
+        remaining_items: usize,
+    },
 }
 
 /// Marker type for `Amount` that allows negative values.
@@ -828,9 +833,9 @@ mod test {
         assert_eq!(sum_ref, sum_value);
         assert_eq!(
             sum_ref,
-            Err(Error::Contains {
-                range: -MAX_MONEY..=MAX_MONEY,
-                value: integer_sum,
+            Err(Error::SumOverflow {
+                partial_sum: integer_sum,
+                remaining_items: 0
             })
         );
 
@@ -845,9 +850,9 @@ mod test {
         assert_eq!(sum_ref, sum_value);
         assert_eq!(
             sum_ref,
-            Err(Error::Contains {
-                range: -MAX_MONEY..=MAX_MONEY,
-                value: integer_sum,
+            Err(Error::SumOverflow {
+                partial_sum: integer_sum,
+                remaining_items: 0
             })
         );
 
@@ -863,7 +868,13 @@ mod test {
         let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
 
         assert_eq!(sum_ref, sum_value);
-        assert_eq!(sum_ref, Err(Error::SumOverflow));
+        assert_eq!(
+            sum_ref,
+            Err(Error::SumOverflow {
+                partial_sum: 4200000000000000,
+                remaining_items: 4391
+            })
+        );
 
         // below min of i64 overflow
         let times: usize = (i64::MAX / MAX_MONEY)
@@ -877,7 +888,13 @@ mod test {
         let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
 
         assert_eq!(sum_ref, sum_value);
-        assert_eq!(sum_ref, Err(Error::SumOverflow));
+        assert_eq!(
+            sum_ref,
+            Err(Error::SumOverflow {
+                partial_sum: -4200000000000000,
+                remaining_items: 4391
+            })
+        );
 
         Ok(())
     }
