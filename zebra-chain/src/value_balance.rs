@@ -31,8 +31,8 @@ where
         // Calculated in Zebra by negating the sum of the transparent, sprout,
         // sapling, and orchard value balances as specified in
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-        (-(self.transparent + self.sprout + self.sapling + self.orchard)?)?
-            .constrain::<NonNegative>()
+        let value = (self.transparent + self.sprout + self.sapling + self.orchard)?;
+        (-(value)).constrain::<NonNegative>()
     }
 
     /// Creates a [`ValueBalance`] from the given transparent amount.

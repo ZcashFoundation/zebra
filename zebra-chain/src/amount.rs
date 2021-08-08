@@ -330,10 +330,10 @@ impl<C> std::ops::Neg for Amount<C>
 where
     C: Constraint,
 {
-    type Output = Result<Amount<C>>;
-
+    type Output = Amount<NegativeAllowed>;
     fn neg(self) -> Self::Output {
-        Amount::<C>::try_from(-self.0)
+        Amount::<NegativeAllowed>::try_from(-self.0)
+            .expect("a negation of any Amount into NegativeAllowed is always valid")
     }
 }
 
