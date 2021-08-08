@@ -1,6 +1,6 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{Amount, Constraint, Error, NonNegative};
+use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -222,5 +222,21 @@ where
 {
     fn sum<I: Iterator<Item = &'amt ValueBalance<C>>>(iter: I) -> Self {
         iter.copied().sum()
+    }
+}
+
+impl<C> std::ops::Neg for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = ValueBalance<NegativeAllowed>;
+
+    fn neg(self) -> Self::Output {
+        ValueBalance::<NegativeAllowed> {
+            transparent: self.transparent.neg(),
+            sprout: self.sprout.neg(),
+            sapling: self.sapling.neg(),
+            orchard: self.orchard.neg(),
+        }
     }
 }
