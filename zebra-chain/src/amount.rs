@@ -254,6 +254,9 @@ where
     }
 }
 
+/// Conversion from `i128` to `Amount`.
+///
+/// Used to handle the result of multiplying negative `Amount`s by `u64`.
 impl<C> TryFrom<i128> for Amount<C>
 where
     C: Constraint,
@@ -315,13 +318,16 @@ where
     type Output = Result<Amount<C>>;
 
     fn mul(self, rhs: u64) -> Self::Output {
-        let value = i128::from(self.0).checked_mul(i128::from(rhs)).ok_or(
-            Error::MultiplicationOverflow {
-                amount: self.0,
-                multiplier: rhs,
-            },
-        )?;
-        value.try_into()
+        // use i128 for multiplication, so we can handle negative Amounts
+        let value = i128::from(self.0)
+            .checked_mul(i128::from(rhs))
+            .expect("multiplying i64 by u64 can't overflow i128");
+
+        value.try_into().map_err(|_| Error::MultiplicationOverflow {
+            amount: self.0,
+            multiplier: rhs,
+            overflowing_result: value,
+        })
     }
 }
 
@@ -405,8 +411,12 @@ pub enum Error {
         source: std::num::TryFromIntError,
     },
 
-    /// i64 overflow when multiplying i64 amount {amount} by u64 {multiplier}
-    MultiplicationOverflow { amount: i64, multiplier: u64 },
+    /// i64 overflow when multiplying i64 amount {amount} by u64 {multiplier}, overflowing result {overflowing_result}
+    MultiplicationOverflow {
+        amount: i64,
+        multiplier: u64,
+        overflowing_result: i128,
+    },
 
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
