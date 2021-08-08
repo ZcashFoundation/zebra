@@ -403,8 +403,8 @@ where
 pub enum Error {
     /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
     Contains {
-        range: RangeInclusive<i64>,
         value: i64,
+        range: RangeInclusive<i64>,
     },
 
     /// {value} could not be converted to an i64 Amount
@@ -482,7 +482,7 @@ pub trait Constraint {
         let range = Self::valid_range();
 
         if !range.contains(&value) {
-            Err(Error::Contains { range, value })
+            Err(Error::Contains { value, range })
         } else {
             Ok(value)
         }
