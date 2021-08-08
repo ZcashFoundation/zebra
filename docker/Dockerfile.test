@@ -12,6 +12,9 @@ ENV SHORT_SHA $SHORT_SHA
 
 ENV RUST_BACKTRACE full
 ENV CARGO_HOME /zebra/.cargo/
+# Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
+# GitHub Actions time limit (6 hours), so we needed to make it faster.
+ENV RUSTFLAGS -O
 
 RUN rustc -V; cargo -V; rustup -V
 

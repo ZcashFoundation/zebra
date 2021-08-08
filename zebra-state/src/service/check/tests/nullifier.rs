@@ -34,7 +34,7 @@ use crate::{
 // because we're only interested in spend validation,
 // (and passing various other state checks).
 
-const DEFAULT_NULLIFIER_PROPTEST_CASES: u32 = 16;
+const DEFAULT_NULLIFIER_PROPTEST_CASES: u32 = 2;
 
 proptest! {
     #![proptest_config(

@@ -17,7 +17,11 @@ use crate::{
     },
 };
 
-/// Reject invalid spends of transparent outputs.
+/// Lookup all the [`transparent::Utxo`]s spent by a [`PreparedBlock`].
+/// If any of the spends are invalid, return an error.
+/// Otherwise, return the looked up UTXOs.
+///
+/// Checks for the following kinds of invalid spends:
 ///
 /// Double-spends:
 /// - duplicate spends that are both in this block,
@@ -36,8 +40,8 @@ pub fn transparent_spend(
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
     finalized_state: &FinalizedState,
-) -> Result<(), ValidateContextError> {
-    let mut block_spends = HashSet::new();
+) -> Result<HashMap<transparent::OutPoint, transparent::Utxo>, ValidateContextError> {
+    let mut block_spends = HashMap::new();
 
     for (spend_tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
         let spends = transaction.inputs().iter().filter_map(|input| match input {
@@ -48,15 +52,6 @@ pub fn transparent_spend(
         });
 
         for spend in spends {
-            // see `transparent_spend_chain_order` for the consensus rule
-            if !block_spends.insert(*spend) {
-                // reject in-block duplicate spends
-                return Err(DuplicateTransparentSpend {
-                    outpoint: *spend,
-                    location: "the same block",
-                });
-            }
-
             let utxo = transparent_spend_chain_order(
                 *spend,
                 spend_tx_index_in_block,
@@ -75,13 +70,23 @@ pub fn transparent_spend(
             // We don't want to use UTXOs from invalid pending blocks,
             // so we check transparent coinbase maturity and shielding
             // using known valid UTXOs during non-finalized chain validation.
-
             let spend_restriction = transaction.coinbase_spend_restriction(prepared.height);
-            transparent_coinbase_spend(*spend, spend_restriction, utxo)?;
+            let utxo = transparent_coinbase_spend(*spend, spend_restriction, utxo)?;
+
+            // We don't delete the UTXOs until the block is committed,
+            // so we  need to check for duplicate spends within the same block.
+            //
+            // See `transparent_spend_chain_order` for the relevant consensus rule.
+            if block_spends.insert(*spend, utxo).is_some() {
+                return Err(DuplicateTransparentSpend {
+                    outpoint: *spend,
+                    location: "the same block",
+                });
+            }
         }
     }
 
-    Ok(())
+    Ok(block_spends)
 }
 
 /// Check that transparent spends occur in chain order.

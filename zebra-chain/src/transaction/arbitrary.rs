@@ -268,32 +268,39 @@ impl Arbitrary for sapling::TransferData<PerSpendAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // TODO: add an extra spend or output using Either, and stop using filter_map
-        (
-            vec(
-                any::<sapling::Spend<PerSpendAnchor>>(),
-                0..MAX_ARBITRARY_ITEMS,
-            ),
-            vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS),
-        )
-            .prop_filter_map(
-                "arbitrary v4 transfers with no spends and no outputs",
-                |(spends, outputs)| {
-                    if !spends.is_empty() {
-                        Some(sapling::TransferData::SpendsAndMaybeOutputs {
-                            shared_anchor: FieldNotPresent,
-                            spends: spends.try_into().unwrap(),
-                            maybe_outputs: outputs,
-                        })
-                    } else if !outputs.is_empty() {
-                        Some(sapling::TransferData::JustOutputs {
-                            outputs: outputs.try_into().unwrap(),
-                        })
+        vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS)
+            .prop_flat_map(|outputs| {
+                (
+                    if outputs.is_empty() {
+                        // must have at least one spend or output
+                        vec(
+                            any::<sapling::Spend<PerSpendAnchor>>(),
+                            1..MAX_ARBITRARY_ITEMS,
+                        )
                     } else {
-                        None
+                        vec(
+                            any::<sapling::Spend<PerSpendAnchor>>(),
+                            0..MAX_ARBITRARY_ITEMS,
+                        )
+                    },
+                    Just(outputs),
+                )
+            })
+            .prop_map(|(spends, outputs)| {
+                if !spends.is_empty() {
+                    sapling::TransferData::SpendsAndMaybeOutputs {
+                        shared_anchor: FieldNotPresent,
+                        spends: spends.try_into().unwrap(),
+                        maybe_outputs: outputs,
                     }
-                },
-            )
+                } else if !outputs.is_empty() {
+                    sapling::TransferData::JustOutputs {
+                        outputs: outputs.try_into().unwrap(),
+                    }
+                } else {
+                    unreachable!("there must be at least one generated spend or output")
+                }
+            })
             .boxed()
     }
 
@@ -304,33 +311,40 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // TODO: add an extra spend or output using Either, and stop using filter_map
-        (
-            any::<sapling::tree::Root>(),
-            vec(
-                any::<sapling::Spend<SharedAnchor>>(),
-                0..MAX_ARBITRARY_ITEMS,
-            ),
-            vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS),
-        )
-            .prop_filter_map(
-                "arbitrary v5 transfers with no spends and no outputs",
-                |(shared_anchor, spends, outputs)| {
-                    if !spends.is_empty() {
-                        Some(sapling::TransferData::SpendsAndMaybeOutputs {
-                            shared_anchor,
-                            spends: spends.try_into().unwrap(),
-                            maybe_outputs: outputs,
-                        })
-                    } else if !outputs.is_empty() {
-                        Some(sapling::TransferData::JustOutputs {
-                            outputs: outputs.try_into().unwrap(),
-                        })
+        vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS)
+            .prop_flat_map(|outputs| {
+                (
+                    any::<sapling::tree::Root>(),
+                    if outputs.is_empty() {
+                        // must have at least one spend or output
+                        vec(
+                            any::<sapling::Spend<SharedAnchor>>(),
+                            1..MAX_ARBITRARY_ITEMS,
+                        )
                     } else {
-                        None
+                        vec(
+                            any::<sapling::Spend<SharedAnchor>>(),
+                            0..MAX_ARBITRARY_ITEMS,
+                        )
+                    },
+                    Just(outputs),
+                )
+            })
+            .prop_map(|(shared_anchor, spends, outputs)| {
+                if !spends.is_empty() {
+                    sapling::TransferData::SpendsAndMaybeOutputs {
+                        shared_anchor,
+                        spends: spends.try_into().unwrap(),
+                        maybe_outputs: outputs,
                     }
-                },
-            )
+                } else if !outputs.is_empty() {
+                    sapling::TransferData::JustOutputs {
+                        outputs: outputs.try_into().unwrap(),
+                    }
+                } else {
+                    unreachable!("there must be at least one generated spend or output")
+                }
+            })
             .boxed()
     }
 
