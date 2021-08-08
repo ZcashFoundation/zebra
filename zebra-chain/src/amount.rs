@@ -79,7 +79,10 @@ where
     type Output = Result<Amount<C>>;
 
     fn add(self, rhs: Amount<C>) -> Self::Output {
-        let value = self.0 + rhs.0;
+        let value = self
+            .0
+            .checked_add(rhs.0)
+            .expect("adding two constrained Amounts is always within an i64");
         value.try_into()
     }
 }
@@ -125,7 +128,10 @@ where
     type Output = Result<Amount<C>>;
 
     fn sub(self, rhs: Amount<C>) -> Self::Output {
-        let value = self.0 - rhs.0;
+        let value = self
+            .0
+            .checked_sub(rhs.0)
+            .expect("subtracting two constrained Amounts is always within an i64");
         value.try_into()
     }
 }
@@ -172,7 +178,7 @@ impl<C> From<Amount<C>> for i64 {
 
 impl From<Amount<NonNegative>> for u64 {
     fn from(amount: Amount<NonNegative>) -> Self {
-        amount.0 as _
+        amount.0.try_into().expect("non-negative i64 fits in u64")
     }
 }
 
@@ -180,9 +186,14 @@ impl<C> From<Amount<C>> for jubjub::Fr {
     fn from(a: Amount<C>) -> jubjub::Fr {
         // TODO: this isn't constant time -- does that matter?
         if a.0 < 0 {
-            jubjub::Fr::from(a.0.abs() as u64).neg()
+            let abs_amount = i128::from(a.0)
+                .checked_abs()
+                .expect("absolute i64 fits in i128");
+            let abs_amount = u64::try_from(abs_amount).expect("absolute i64 fits in u64");
+
+            jubjub::Fr::from(abs_amount).neg()
         } else {
-            jubjub::Fr::from(a.0 as u64)
+            jubjub::Fr::from(u64::try_from(a.0).expect("non-negative i64 fits in u64"))
         }
     }
 }
@@ -191,9 +202,16 @@ impl<C> From<Amount<C>> for halo2::pasta::pallas::Scalar {
     fn from(a: Amount<C>) -> halo2::pasta::pallas::Scalar {
         // TODO: this isn't constant time -- does that matter?
         if a.0 < 0 {
-            halo2::pasta::pallas::Scalar::from(a.0.abs() as u64).neg()
+            let abs_amount = i128::from(a.0)
+                .checked_abs()
+                .expect("absolute i64 fits in i128");
+            let abs_amount = u64::try_from(abs_amount).expect("absolute i64 fits in u64");
+
+            halo2::pasta::pallas::Scalar::from(abs_amount).neg()
         } else {
-            halo2::pasta::pallas::Scalar::from(a.0 as u64)
+            halo2::pasta::pallas::Scalar::from(
+                u64::try_from(a.0).expect("non-negative i64 fits in u64"),
+            )
         }
     }
 }
@@ -205,7 +223,7 @@ where
     type Error = Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        C::validate(value as _).map(|v| Self(v, PhantomData))
+        C::validate(value.into()).map(|v| Self(v, PhantomData))
     }
 }
 
