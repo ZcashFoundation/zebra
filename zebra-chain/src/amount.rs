@@ -353,7 +353,7 @@ where
 
         match sum {
             Ok(sum) => Ok(sum),
-            Err(Error::Contains { value, .. }) => Err(Error::SumOverflow {
+            Err(Error::Constraint { value, .. }) => Err(Error::SumOverflow {
                 partial_sum: value,
                 remaining_items: iter.count(),
             }),
@@ -387,7 +387,7 @@ where
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
     /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
-    Contains {
+    Constraint {
         value: i64,
         range: RangeInclusive<i64>,
     },
@@ -467,7 +467,7 @@ pub trait Constraint {
         let range = Self::valid_range();
 
         if !range.contains(&value) {
-            Err(Error::Contains { value, range })
+            Err(Error::Constraint { value, range })
         } else {
             Ok(value)
         }
