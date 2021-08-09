@@ -6,6 +6,7 @@ mod tests;
 use std::{
     collections::{BTreeMap, HashSet},
     io,
+    ops::Deref,
     sync::Arc,
 };
 
@@ -396,14 +397,6 @@ impl Clone for NonEmptyHistoryTree {
     }
 }
 
-impl PartialEq for NonEmptyHistoryTree {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash() == other.hash()
-    }
-}
-
-impl Eq for NonEmptyHistoryTree {}
-
 /// A History Tree that keeps track of its own creation in the Heartwood
 /// activation block, being empty beforehand.
 #[derive(Debug, Default, Clone)]
@@ -462,8 +455,9 @@ impl From<NonEmptyHistoryTree> for HistoryTree {
     }
 }
 
-impl AsRef<Option<NonEmptyHistoryTree>> for HistoryTree {
-    fn as_ref(&self) -> &Option<NonEmptyHistoryTree> {
+impl Deref for HistoryTree {
+    type Target = Option<NonEmptyHistoryTree>;
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
