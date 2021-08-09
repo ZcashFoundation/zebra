@@ -95,7 +95,17 @@ pub fn utxos_from_ordered_utxos(
 ) -> HashMap<transparent::OutPoint, Utxo> {
     ordered_utxos
         .into_iter()
-        .map(|(out_point, ordered_utxo)| (out_point, ordered_utxo.utxo))
+        .map(|(outpoint, ordered_utxo)| (outpoint, ordered_utxo.utxo))
+        .collect()
+}
+
+/// Compute an index of [`Output`]s, given an index of [`Utxo`]s.
+pub(crate) fn outputs_from_utxos(
+    utxos: HashMap<transparent::OutPoint, Utxo>,
+) -> HashMap<transparent::OutPoint, transparent::Output> {
+    utxos
+        .into_iter()
+        .map(|(outpoint, utxo)| (outpoint, utxo.output))
         .collect()
 }
 
