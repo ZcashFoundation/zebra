@@ -29,7 +29,11 @@ proptest! {
             ),
             _ => prop_assert!(
                 matches!(
-                    value_balance1 + value_balance2, Err(ValueBalanceError::AmountError(_))
+                    value_balance1 + value_balance2,
+                    Err(ValueBalanceError::Transparent(_)
+                        | ValueBalanceError::Sprout(_)
+                        | ValueBalanceError::Sapling(_)
+                        | ValueBalanceError::Orchard(_))
                 )
             ),
         }
@@ -58,7 +62,11 @@ proptest! {
             ),
             _ => prop_assert!(
                 matches!(
-                    value_balance1 - value_balance2, Err(ValueBalanceError::AmountError(_))
+                    value_balance1 - value_balance2,
+                    Err(ValueBalanceError::Transparent(_)
+                        | ValueBalanceError::Sprout(_)
+                        | ValueBalanceError::Sapling(_)
+                        | ValueBalanceError::Orchard(_))
                 )
             ),
         }
@@ -88,7 +96,12 @@ proptest! {
                     orchard,
                 })
             ),
-            _ => prop_assert!(matches!(collection.iter().sum(), Err(ValueBalanceError::AmountError(_))))
+            _ => prop_assert!(matches!(collection.iter().sum(),
+                                       Err(ValueBalanceError::Transparent(_)
+                                           | ValueBalanceError::Sprout(_)
+                                           | ValueBalanceError::Sapling(_)
+                                           | ValueBalanceError::Orchard(_))
+            ))
         }
     }
 

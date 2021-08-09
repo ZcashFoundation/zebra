@@ -1,6 +1,6 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{Amount, Constraint, Error, NonNegative};
+use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
 
 use std::convert::TryInto;
 
@@ -10,8 +10,10 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+use ValueBalanceError::*;
+
 /// An amount spread between different Zcash pools.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
@@ -131,6 +133,20 @@ where
         }
     }
 
+    /// Convert this value balance to a different ValueBalance type,
+    /// if it satisfies the new constraint
+    pub fn constrain<C2>(self) -> Result<ValueBalance<C2>, ValueBalanceError>
+    where
+        C2: Constraint,
+    {
+        Ok(ValueBalance::<C2> {
+            transparent: self.transparent.constrain().map_err(Transparent)?,
+            sprout: self.sprout.constrain().map_err(Sprout)?,
+            sapling: self.sapling.constrain().map_err(Sapling)?,
+            orchard: self.orchard.constrain().map_err(Orchard)?,
+        })
+    }
+
     /// To byte array
     pub fn to_bytes(self) -> [u8; 32] {
         let transparent = self.transparent.to_bytes();
@@ -151,22 +167,29 @@ where
             bytes[0..8]
                 .try_into()
                 .expect("Extracting the first quarter of a [u8; 32] should always succeed"),
-        )?;
+        )
+        .map_err(Transparent)?;
+
         let sprout = Amount::from_bytes(
             bytes[8..16]
                 .try_into()
                 .expect("Extracting the second quarter of a [u8; 32] should always succeed"),
-        )?;
+        )
+        .map_err(Sprout)?;
+
         let sapling = Amount::from_bytes(
             bytes[16..24]
                 .try_into()
                 .expect("Extracting the third quarter of a [u8; 32] should always succeed"),
-        )?;
+        )
+        .map_err(Sapling)?;
+
         let orchard = Amount::from_bytes(
             bytes[24..32]
                 .try_into()
                 .expect("Extracting the last quarter of a [u8; 32] should always succeed"),
-        )?;
+        )
+        .map_err(Orchard)?;
 
         Ok(ValueBalance {
             transparent,
@@ -177,12 +200,20 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug, Clone, PartialEq)]
-/// Errors that can be returned when validating a [`ValueBalance`].
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
+/// Errors that can be returned when validating a [`ValueBalance`]
 pub enum ValueBalanceError {
-    #[error("value balance contains invalid amounts")]
-    /// Any error related to [`Amount`]s inside the [`ValueBalance`]
-    AmountError(#[from] Error),
+    /// transparent amount error {0}
+    Transparent(Error),
+
+    /// sprout amount error {0}
+    Sprout(Error),
+
+    /// sapling amount error {0}
+    Sapling(Error),
+
+    /// orchard amount error {0}
+    Orchard(Error),
 }
 
 impl<C> std::ops::Add for ValueBalance<C>
@@ -192,10 +223,10 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn add(self, rhs: ValueBalance<C>) -> Self::Output {
         Ok(ValueBalance::<C> {
-            transparent: (self.transparent + rhs.transparent)?,
-            sprout: (self.sprout + rhs.sprout)?,
-            sapling: (self.sapling + rhs.sapling)?,
-            orchard: (self.orchard + rhs.orchard)?,
+            transparent: (self.transparent + rhs.transparent).map_err(Transparent)?,
+            sprout: (self.sprout + rhs.sprout).map_err(Sprout)?,
+            sapling: (self.sapling + rhs.sapling).map_err(Sapling)?,
+            orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
         })
     }
 }
@@ -216,10 +247,10 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn sub(self, rhs: ValueBalance<C>) -> Self::Output {
         Ok(ValueBalance::<C> {
-            transparent: (self.transparent - rhs.transparent)?,
-            sprout: (self.sprout - rhs.sprout)?,
-            sapling: (self.sapling - rhs.sapling)?,
-            orchard: (self.orchard - rhs.orchard)?,
+            transparent: (self.transparent - rhs.transparent).map_err(Transparent)?,
+            sprout: (self.sprout - rhs.sprout).map_err(Sprout)?,
+            sapling: (self.sapling - rhs.sapling).map_err(Sapling)?,
+            orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
         })
     }
 }
@@ -239,12 +270,7 @@ where
 {
     fn sum<I: Iterator<Item = ValueBalance<C>>>(mut iter: I) -> Self {
         iter.try_fold(ValueBalance::zero(), |acc, value_balance| {
-            Ok(ValueBalance {
-                transparent: (acc.transparent + value_balance.transparent)?,
-                sprout: (acc.sprout + value_balance.sprout)?,
-                sapling: (acc.sapling + value_balance.sapling)?,
-                orchard: (acc.orchard + value_balance.orchard)?,
-            })
+            acc + value_balance
         })
     }
 }
@@ -255,5 +281,21 @@ where
 {
     fn sum<I: Iterator<Item = &'amt ValueBalance<C>>>(iter: I) -> Self {
         iter.copied().sum()
+    }
+}
+
+impl<C> std::ops::Neg for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = ValueBalance<NegativeAllowed>;
+
+    fn neg(self) -> Self::Output {
+        ValueBalance::<NegativeAllowed> {
+            transparent: self.transparent.neg(),
+            sprout: self.sprout.neg(),
+            sapling: self.sapling.neg(),
+            orchard: self.orchard.neg(),
+        }
     }
 }
