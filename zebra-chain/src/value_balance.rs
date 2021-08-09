@@ -1,8 +1,15 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{self, Amount, Constraint, NegativeAllowed, NonNegative};
+use crate::{
+    amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
+    block::Block,
+    transparent,
+};
 
-use std::convert::TryInto;
+use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use crate::transaction::Transaction;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -39,6 +46,72 @@ where
         // as specified in:
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
         (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
+    }
+
+    /// Update this value balance with the chain value pool change from `block`.
+    ///
+    /// `utxos` must contain the [`Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] for details.
+    pub fn update_with_block(
+        &mut self,
+        block: impl Borrow<Block>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<(), ValueBalanceError> {
+        let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
+
+        self.update_with_chain_value_pool_change(chain_value_pool_change)
+    }
+
+    /// Update this value balance with the chain value pool change from `transaction`.
+    ///
+    /// `outputs` must contain the [`Output`]s of every input in this transaction,
+    /// including UTXOs created by earlier transactions in its block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
+    /// for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn update_with_transaction(
+        &mut self,
+        transaction: impl Borrow<Transaction>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<(), ValueBalanceError> {
+        use std::ops::Neg;
+
+        // the chain pool (unspent outputs) has the opposite sign to
+        // transaction value balances (inputs - outputs)
+        let chain_value_pool_change = transaction
+            .borrow()
+            .value_balance_from_outputs(utxos)?
+            .neg();
+
+        self.update_with_chain_value_pool_change(chain_value_pool_change)
+    }
+
+    /// Update this value balance with a chain value pool change.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See `update_with_block` for details.
+    fn update_with_chain_value_pool_change(
+        &mut self,
+        chain_value_pool_change: ValueBalance<NegativeAllowed>,
+    ) -> Result<(), ValueBalanceError> {
+        let mut current_value_pool = self
+            .constrain::<NegativeAllowed>()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+        current_value_pool = (current_value_pool + chain_value_pool_change)?;
+        *self = current_value_pool.constrain()?;
+
+        Ok(())
     }
 
     /// Creates a [`ValueBalance`] from the given transparent amount.
