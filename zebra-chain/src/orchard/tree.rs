@@ -237,7 +237,8 @@ pub struct NoteCommitmentTree {
     /// [`Cell`] offers interior mutability (it works even with a non-mutable
     /// reference to the tree) but it prevents the tree (and anything that uses it)
     /// from being shared between threads. If this ever becomes an issue we can
-    /// leave caching to the callers (which requires much more code).
+    /// leave caching to the callers (which requires much more code), or replace
+    /// `Cell` with `Arc<Mutex<_>>` (and be careful of deadlocks and async code.)
     cached_root: Cell<Option<Root>>,
 }
 
