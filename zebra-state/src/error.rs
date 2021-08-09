@@ -4,8 +4,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    block, orchard, sapling, sprout, transparent, value_balance::ValueBalanceError,
-    work::difficulty::CompactDifficulty,
+    block, orchard, sapling, sprout, transparent, work::difficulty::CompactDifficulty,
 };
 
 use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
@@ -141,30 +140,11 @@ pub enum ValidateContextError {
         in_finalized_state: bool,
     },
 
-    #[error(
-        "the remaining value in the transparent transaction value pool MUST be nonnegative: \
-         {value_balance_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
-         {transaction_hash:?}"
-    )]
+    #[error("remaining value in the transparent transaction value pool MUST be nonnegative: {transaction_hash:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
-    NegativeRemainingTransactionValue {
-        value_balance_error: ValueBalanceError,
-        height: block::Height,
-        tx_index_in_block: usize,
+    InvalidRemainingTransparentValue {
         transaction_hash: zebra_chain::transaction::Hash,
-    },
-
-    #[error(
-        "error while calculating the remaining value in the transaction value pool: \
-         {value_balance_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
-         {transaction_hash:?}"
-    )]
-    #[non_exhaustive]
-    CalculateRemainingTransactionValue {
-        value_balance_error: ValueBalanceError,
-        height: block::Height,
-        tx_index_in_block: usize,
-        transaction_hash: zebra_chain::transaction::Hash,
+        in_finalized_state: bool,
     },
 
     #[error("error in Sapling note commitment tree")]

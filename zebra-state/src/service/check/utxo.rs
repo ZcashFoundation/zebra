@@ -225,8 +225,8 @@ pub fn remaining_transaction_value(
     prepared: &PreparedBlock,
     utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
 ) -> Result<(), ValidateContextError> {
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
-        // TODO: check coinbase transaction remaining value (#338, #1162)
+    for transaction in prepared.block.transactions.iter() {
+        // This rule does not apply to coinbase transactions.
         if transaction.is_coinbase() {
             continue;
         }
@@ -236,23 +236,15 @@ pub fn remaining_transaction_value(
         match value_balance {
             Ok(vb) => match vb.remaining_transaction_value() {
                 Ok(_) => Ok(()),
-                Err(value_balance_error) => {
-                    Err(ValidateContextError::NegativeRemainingTransactionValue {
-                        value_balance_error,
-                        height: prepared.height,
-                        tx_index_in_block,
-                        transaction_hash: prepared.transaction_hashes[tx_index_in_block],
-                    })
-                }
+                Err(_) => Err(ValidateContextError::InvalidRemainingTransparentValue {
+                    transaction_hash: transaction.hash(),
+                    in_finalized_state: false,
+                }),
             },
-            Err(value_balance_error) => {
-                Err(ValidateContextError::CalculateRemainingTransactionValue {
-                    value_balance_error,
-                    height: prepared.height,
-                    tx_index_in_block,
-                    transaction_hash: prepared.transaction_hashes[tx_index_in_block],
-                })
-            }
+            Err(_) => Err(ValidateContextError::InvalidRemainingTransparentValue {
+                transaction_hash: transaction.hash(),
+                in_finalized_state: false,
+            }),
         }?
     }
 
