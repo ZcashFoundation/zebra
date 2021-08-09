@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    amount::{Amount, Error},
+    amount::{self, Amount, NegativeAllowed},
     primitives::{ed25519, ZkSnarkProof},
     sprout::{self, JoinSplit, Nullifier},
 };
@@ -72,10 +72,18 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     ///
     /// See [`Transaction::sprout_value_balance`] for details.
-    pub fn value_balance(&self) -> Result<Amount, Error> {
-        self.joinsplits()
-            .flat_map(|j| j.vpub_new.constrain() - j.vpub_old.constrain()?)
-            .sum()
+    pub fn value_balance(&self) -> Result<Amount<NegativeAllowed>, amount::Error> {
+        self.joinsplit_value_balances().sum()
+    }
+
+    /// Return a list of sprout value balances,
+    /// the changes in the transaction value pool due to each sprout [`JoinSplit`].
+    ///
+    /// See [`Transaction::sprout_value_balance`] for details.
+    pub fn joinsplit_value_balances(
+        &self,
+    ) -> Box<dyn Iterator<Item = Amount<NegativeAllowed>> + '_> {
+        Box::new(self.joinsplits().map(JoinSplit::value_balance))
     }
 
     /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s,
