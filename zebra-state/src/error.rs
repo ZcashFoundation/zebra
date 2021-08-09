@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    block, orchard, sapling, sprout, transparent, work::difficulty::CompactDifficulty,
+    amount, block, orchard, sapling, sprout, transparent, value_balance::ValueBalanceError,
+    work::difficulty::CompactDifficulty,
 };
 
 use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
@@ -35,12 +36,12 @@ impl From<BoxError> for CloneError {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a block could not be committed to the state.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("block is not contextually valid")]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
@@ -140,11 +141,43 @@ pub enum ValidateContextError {
         in_finalized_state: bool,
     },
 
-    #[error("remaining value in the transparent transaction value pool MUST be nonnegative: {transaction_hash:?}, in finalized state: {in_finalized_state:?}")]
+    #[error(
+        "the remaining value in the transparent transaction value pool MUST be nonnegative: \
+         {amount_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
+         {transaction_hash:?}"
+    )]
     #[non_exhaustive]
-    InvalidRemainingTransparentValue {
+    NegativeRemainingTransactionValue {
+        amount_error: amount::Error,
+        height: block::Height,
+        tx_index_in_block: usize,
         transaction_hash: zebra_chain::transaction::Hash,
-        in_finalized_state: bool,
+    },
+
+    #[error(
+        "error calculating the remaining value in the transaction value pool: \
+         {amount_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
+         {transaction_hash:?}"
+    )]
+    #[non_exhaustive]
+    CalculateRemainingTransactionValue {
+        amount_error: amount::Error,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
+
+    #[error(
+        "error calculating value balances for the remaining value in the transaction value pool: \
+         {value_balance_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
+         {transaction_hash:?}"
+    )]
+    #[non_exhaustive]
+    CalculateTransactionValueBalances {
+        value_balance_error: ValueBalanceError,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: zebra_chain::transaction::Hash,
     },
 
     #[error("error in Sapling note commitment tree")]

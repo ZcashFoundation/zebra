@@ -430,6 +430,26 @@ pub enum Error {
     },
 }
 
+impl Error {
+    /// Returns the invalid value for this error.
+    ///
+    /// This value may be an initial input value, partially calculated value,
+    /// or an overflowing or underflowing value.
+    pub fn invalid_value(&self) -> i128 {
+        use Error::*;
+
+        match self.clone() {
+            Constraint { value, .. } => value.into(),
+            Convert { value, .. } => value,
+            MultiplicationOverflow {
+                overflowing_result, ..
+            } => overflowing_result,
+            DivideByZero { amount } => amount.into(),
+            SumOverflow { partial_sum, .. } => partial_sum.into(),
+        }
+    }
+}
+
 /// Marker type for `Amount` that allows negative values.
 ///
 /// ```
