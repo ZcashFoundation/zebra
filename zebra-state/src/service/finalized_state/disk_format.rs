@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
 
 use bincode::Options;
 use zebra_chain::{
+    amount::NonNegative,
     block,
     block::{Block, Height},
     history_tree::HistoryTree,
@@ -12,6 +13,7 @@ use zebra_chain::{
     sapling,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transaction, transparent,
+    value_balance::ValueBalance,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -250,6 +252,21 @@ impl IntoDisk for orchard::tree::Root {
 
     fn as_bytes(&self) -> Self::Bytes {
         self.into()
+    }
+}
+
+impl IntoDisk for ValueBalance<NonNegative> {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for ValueBalance<NonNegative> {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array = bytes.as_ref().try_into().unwrap();
+        ValueBalance::from_bytes(array).unwrap()
     }
 }
 
@@ -525,5 +542,12 @@ mod tests {
         zebra_test::init();
 
         proptest!(|(val in any::<transparent::Utxo>())| assert_value_properties(val));
+    }
+
+    #[test]
+    fn roundtrip_value_balance() {
+        zebra_test::init();
+
+        proptest!(|(val in any::<ValueBalance::<NonNegative>>())| assert_value_properties(val));
     }
 }
