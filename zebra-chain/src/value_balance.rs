@@ -32,6 +32,8 @@ where
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
     /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
+    //
+    // TODO: move this method to Transaction, so it can handle coinbase transactions as well?
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
         // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
         // as specified in:

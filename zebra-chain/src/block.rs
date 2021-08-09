@@ -181,7 +181,7 @@ impl Block {
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
     ///
-    /// `utxos` must contain the utxos of every input in this block,
+    /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
