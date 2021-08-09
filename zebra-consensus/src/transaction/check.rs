@@ -125,7 +125,7 @@ pub fn disabled_add_to_sprout_pool(
     if height >= canopy_activation_height {
         let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
 
-        let tx_sprout_pool = tx.sprout_pool_added_values();
+        let tx_sprout_pool = tx.output_values_to_sprout();
         for vpub_old in tx_sprout_pool {
             if *vpub_old != zero {
                 return Err(TransactionError::DisabledAddToSproutPool);

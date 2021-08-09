@@ -66,12 +66,15 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
             .flat_map(|joinsplit| joinsplit.nullifiers.iter())
     }
 
-    /// Calculate and return the value balance for the joinsplits.
+    /// Return the sprout value balance,
+    /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
     ///
-    /// Needed to calculate the sprout value balance.
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    ///
+    /// See [`Transaction::sprout_value_balance`] for details.
     pub fn value_balance(&self) -> Result<Amount, Error> {
         self.joinsplits()
-            .flat_map(|j| j.vpub_old.constrain() - j.vpub_new.constrain()?)
+            .flat_map(|j| j.vpub_new.constrain() - j.vpub_old.constrain()?)
             .sum()
     }
 
