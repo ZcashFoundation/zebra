@@ -638,7 +638,7 @@ impl Transaction {
 
     // orchard
 
-    /// Access the [`orchard::ShieldedData`] in this transaction, if there are any,
+    /// Access the [`orchard::ShieldedData`] in this transaction,
     /// regardless of version.
     pub fn orchard_shielded_data(&self) -> Option<&orchard::ShieldedData> {
         match self {
@@ -653,6 +653,27 @@ impl Transaction {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => None,
+        }
+    }
+
+    /// Modify the [`orchard::ShieldedData`] in this transaction,
+    /// regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn orchard_shielded_data_mut(&mut self) -> Option<&mut orchard::ShieldedData> {
+        match self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(orchard_shielded_data),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            } => None,
         }
     }
 
@@ -690,7 +711,8 @@ impl Transaction {
             .map(|orchard_shielded_data| orchard_shielded_data.flags)
     }
 
-    /// Return if the transaction has any Orchard shielded data.
+    /// Return if the transaction has any Orchard shielded data,
+    /// regardless of version.
     pub fn has_orchard_shielded_data(&self) -> bool {
         self.orchard_shielded_data().is_some()
     }
@@ -721,7 +743,7 @@ impl Transaction {
             .sum::<Result<Amount, AmountError>>()?;
 
         Ok(ValueBalance::from_transparent_amount(
-            (input_value_balance - output_value_balance)?,
+            (output_value_balance - input_value_balance)?,
         ))
     }
 

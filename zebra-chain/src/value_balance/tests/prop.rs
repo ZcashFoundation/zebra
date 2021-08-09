@@ -1,9 +1,12 @@
-use crate::{amount::*, value_balance::*};
+//! Randomised property tests for value balances.
+
 use proptest::prelude::*;
+
+use crate::{amount::*, value_balance::*};
 
 proptest! {
     #[test]
-    fn test_add(
+    fn value_blance_add(
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>())
     {
@@ -26,13 +29,17 @@ proptest! {
             ),
             _ => prop_assert!(
                 matches!(
-                    value_balance1 + value_balance2, Err(ValueBalanceError::AmountError(_))
+                    value_balance1 + value_balance2,
+                    Err(ValueBalanceError::Transparent(_)
+                        | ValueBalanceError::Sprout(_)
+                        | ValueBalanceError::Sapling(_)
+                        | ValueBalanceError::Orchard(_))
                 )
             ),
         }
     }
     #[test]
-    fn test_sub(
+    fn value_balance_sub(
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>())
     {
@@ -55,14 +62,18 @@ proptest! {
             ),
             _ => prop_assert!(
                 matches!(
-                    value_balance1 - value_balance2, Err(ValueBalanceError::AmountError(_))
+                    value_balance1 - value_balance2,
+                    Err(ValueBalanceError::Transparent(_)
+                        | ValueBalanceError::Sprout(_)
+                        | ValueBalanceError::Sapling(_)
+                        | ValueBalanceError::Orchard(_))
                 )
             ),
         }
     }
 
     #[test]
-    fn test_sum(
+    fn value_balance_sum(
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>(),
     ) {
@@ -85,7 +96,32 @@ proptest! {
                     orchard,
                 })
             ),
-            _ => prop_assert!(matches!(collection.iter().sum(), Err(ValueBalanceError::AmountError(_))))
+            _ => prop_assert!(matches!(collection.iter().sum(),
+                                       Err(ValueBalanceError::Transparent(_)
+                                           | ValueBalanceError::Sprout(_)
+                                           | ValueBalanceError::Sapling(_)
+                                           | ValueBalanceError::Orchard(_))
+            ))
+        }
+    }
+
+    #[test]
+    fn value_balance_serialization(value_balance in any::<ValueBalance<NegativeAllowed>>()) {
+        zebra_test::init();
+
+        let bytes = value_balance.to_bytes();
+        let serialized_value_balance = ValueBalance::from_bytes(bytes)?;
+
+        prop_assert_eq!(value_balance, serialized_value_balance);
+    }
+
+    #[test]
+    fn value_balance_deserialization(bytes in any::<[u8; 32]>()) {
+        zebra_test::init();
+
+        if let Ok(deserialized) = ValueBalance::<NegativeAllowed>::from_bytes(bytes) {
+            let bytes2 = deserialized.to_bytes();
+            prop_assert_eq!(bytes, bytes2);
         }
     }
 }
