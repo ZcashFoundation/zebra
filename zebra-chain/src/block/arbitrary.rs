@@ -409,11 +409,9 @@ impl Block {
                 // delete invalid transactions
                 block.transactions = new_transactions;
 
-                // TODO: if needed, fixup:
-                // - coinbase miner subsidy
+                // TODO: if needed, fixup after modifying the block:
                 // - history and authorizing data commitments
                 // - the transaction merkle root
-                // after modifying the block
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it
@@ -484,7 +482,7 @@ where
 
     transaction
         .fix_remaining_value(&spent_outputs)
-        .expect("remaining value was fixed");
+        .expect("generated chain value fixes always succeed");
 
     // TODO: if needed, check output count here as well
     if transaction.has_transparent_or_shielded_inputs() {

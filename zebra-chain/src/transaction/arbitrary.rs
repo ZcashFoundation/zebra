@@ -221,6 +221,8 @@ impl Transaction {
     /// Fixup non-coinbase transparent values and shielded value balances,
     /// so that this transaction passes the "remaining transaction value pool" check.
     ///
+    /// Returns the remaining transaction value.
+    ///
     /// `outputs` must contain all the [`Output`]s spent in this block.
     ///
     /// Currently, this code almost always leaves some remaining value in the
@@ -253,7 +255,10 @@ impl Transaction {
         self.for_each_value_balance_mut(scale_to_avoid_overflow);
 
         if self.is_coinbase() {
-            // TODO: fixup coinbase block subsidy and remaining transaction value
+            // TODO: if needed, fixup coinbase:
+            // - miner subsidy
+            // - founders reward or funding streams (hopefully not?)
+            // - remaining transaction value
             return Ok(Amount::zero());
         }
 
