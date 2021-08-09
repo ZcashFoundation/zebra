@@ -8,6 +8,7 @@ use proptest::{
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    amount::NonNegative,
     block,
     fmt::SummaryDebug,
     parameters::{
@@ -386,6 +387,7 @@ impl Block {
         vec.prop_map(move |mut vec| {
             let mut previous_block_hash = None;
             let mut utxos = HashMap::new();
+            let mut chain_value_pools = ValueBalance::zero();
 
             for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
@@ -399,6 +401,7 @@ impl Block {
                         (*transaction).clone(),
                         tx_index_in_block,
                         *height,
+                        &mut chain_value_pools,
                         &mut utxos,
                         check_transparent_coinbase_spend,
                     ) {
@@ -436,6 +439,7 @@ pub fn fix_generated_transaction<F, T, E>(
     mut transaction: Transaction,
     tx_index_in_block: usize,
     height: Height,
+    chain_value_pools: &mut ValueBalance<NonNegative>,
     utxos: &mut HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     check_transparent_coinbase_spend: F,
 ) -> Option<Transaction>
@@ -455,6 +459,8 @@ where
     // fixup the transparent spends
     for mut input in transaction.inputs().to_vec().into_iter() {
         if input.outpoint().is_some() {
+            // the transparent chain value pool is the sum of unspent UTXOs,
+            // so we don't need to check it separately, because we only spend unspent UTXOs
             if let Some(selected_outpoint) = find_valid_utxo_for_spend(
                 &mut transaction,
                 &mut spend_restriction,
@@ -480,16 +486,17 @@ where
     // delete invalid inputs
     *transaction.inputs_mut() = new_inputs;
 
-    transaction
-        .fix_remaining_value(&spent_outputs)
-        .expect("generated chain value fixes always succeed");
+    let (_remaining_transaction_value, new_chain_value_pools) = transaction
+        .fix_chain_value_pools(*chain_value_pools, &spent_outputs)
+        .expect("value fixes produce valid chain value pools and remaining transaction values");
 
     // TODO: if needed, check output count here as well
     if transaction.has_transparent_or_shielded_inputs() {
-        // skip genesis created UTXOs
+        // consensus rule: skip genesis created UTXOs
+        // Zebra implementation: also skip shielded chain value pool changes
         if height > Height(0) {
-            // non-coinbase outputs can be spent from the next transaction in this block onwards
-            // coinbase outputs have to wait 100 blocks, and be shielded
+            *chain_value_pools = new_chain_value_pools;
+
             utxos.extend(new_transaction_ordered_outputs(
                 &transaction,
                 transaction.hash(),
