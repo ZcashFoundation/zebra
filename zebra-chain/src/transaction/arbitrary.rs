@@ -263,7 +263,8 @@ impl Transaction {
             .inputs()
             .iter()
             .map(|input| input.value_from_outputs(outputs))
-            .sum::<Result<Amount<NonNegative>, amount::Error>>()?;
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .map_err(ValueBalanceError::Transparent)?;
         // TODO: fix callers with invalid values, maybe due to cached outputs?
         //.expect("chain is limited to MAX_MONEY");
 

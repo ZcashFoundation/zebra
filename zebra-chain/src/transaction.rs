@@ -685,7 +685,8 @@ impl Transaction {
             .inputs()
             .iter()
             .map(|i| i.value_from_outputs(outputs))
-            .sum::<Result<Amount<NonNegative>, AmountError>>()?
+            .sum::<Result<Amount<NonNegative>, AmountError>>()
+            .map_err(ValueBalanceError::Transparent)?
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
@@ -693,13 +694,14 @@ impl Transaction {
             .outputs()
             .iter()
             .map(|o| o.value())
-            .sum::<Result<Amount<NonNegative>, AmountError>>()?
+            .sum::<Result<Amount<NonNegative>, AmountError>>()
+            .map_err(ValueBalanceError::Transparent)?
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
-        Ok(ValueBalance::from_transparent_amount(
-            (input_value - output_value)?,
-        ))
+        (input_value - output_value)
+            .map(ValueBalance::from_transparent_amount)
+            .map_err(ValueBalanceError::Transparent)
     }
 
     /// Return the transparent value balance,
@@ -945,11 +947,15 @@ impl Transaction {
             | Transaction::V3 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data.value_balance()?,
+            } => joinsplit_data
+                .value_balance()
+                .map_err(ValueBalanceError::Sprout)?,
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data.value_balance()?,
+            } => joinsplit_data
+                .value_balance()
+                .map_err(ValueBalanceError::Sprout)?,
 
             Transaction::V1 { .. }
             | Transaction::V2 {
