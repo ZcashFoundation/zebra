@@ -341,12 +341,14 @@ where
     }
 }
 
-impl std::ops::Neg for Amount<NegativeAllowed> {
-    type Output = Self;
-
+impl<C> std::ops::Neg for Amount<C>
+where
+    C: Constraint,
+{
+    type Output = Amount<NegativeAllowed>;
     fn neg(self) -> Self::Output {
-        Amount::try_from(-self.0)
-            .expect("a change in sign to any value inside Amount<NegativeAllowed> is always valid")
+        Amount::<NegativeAllowed>::try_from(-self.0)
+            .expect("a negation of any Amount into NegativeAllowed is always valid")
     }
 }
 

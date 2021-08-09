@@ -30,10 +30,11 @@ where
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Error> {
-        // This rule checks the transparent value balance minus the sum of the sprout,
-        // sapling, and orchard value balances in a transaction is nonnegative.
-        (self.transparent - (self.sprout + self.sapling + self.orchard)?)?
-            .constrain::<NonNegative>()
+        // Calculated in Zebra by negating the sum of the transparent, sprout,
+        // sapling, and orchard value balances as specified in
+        // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+        let value = (self.transparent + self.sprout + self.sapling + self.orchard)?;
+        (-(value)).constrain::<NonNegative>()
     }
 
     /// Creates a [`ValueBalance`] from the given transparent amount.
