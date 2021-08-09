@@ -16,6 +16,12 @@ use std::{
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
+
+#[cfg(test)]
+mod tests;
+
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
@@ -459,22 +465,7 @@ impl ZcashDeserialize for Amount<NonNegative> {
     }
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest::prelude::*;
-#[cfg(any(test, feature = "proptest-impl"))]
-impl<C> Arbitrary for Amount<C>
-where
-    C: Constraint + std::fmt::Debug,
-{
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
+// TODO: move to tests::vectors after PR #2577 merges
 #[cfg(test)]
 mod test {
     use crate::serialization::ZcashDeserializeInto;
