@@ -1,8 +1,15 @@
 //! A type that can hold the four types of Zcash value pools.
 
-use crate::amount::{Amount, Constraint, Error, NegativeAllowed, NonNegative};
+use crate::{
+    amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
+    block::Block,
+    transparent,
+};
 
-use std::convert::TryInto;
+use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use crate::transaction::Transaction;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -13,7 +20,7 @@ mod tests;
 use ValueBalanceError::*;
 
 /// An amount spread between different Zcash pools.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
@@ -31,12 +38,80 @@ where
     /// This rule applies to Block and Mempool transactions.
     ///
     /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
-    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, Error> {
-        // Calculated in Zebra by negating the sum of the transparent, sprout,
-        // sapling, and orchard value balances as specified in
+    /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
+    //
+    // TODO: move this method to Transaction, so it can handle coinbase transactions as well?
+    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
+        // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
+        // as specified in:
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-        let value = (self.transparent + self.sprout + self.sapling + self.orchard)?;
-        (-(value)).constrain::<NonNegative>()
+        (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
+    }
+
+    /// Update this value balance with the chain value pool change from `block`.
+    ///
+    /// `utxos` must contain the [`Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] for details.
+    pub fn update_with_block(
+        &mut self,
+        block: impl Borrow<Block>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<(), ValueBalanceError> {
+        let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
+
+        self.update_with_chain_value_pool_change(chain_value_pool_change)
+    }
+
+    /// Update this value balance with the chain value pool change from `transaction`.
+    ///
+    /// `outputs` must contain the [`Output`]s of every input in this transaction,
+    /// including UTXOs created by earlier transactions in its block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
+    /// for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn update_with_transaction(
+        &mut self,
+        transaction: impl Borrow<Transaction>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<(), ValueBalanceError> {
+        use std::ops::Neg;
+
+        // the chain pool (unspent outputs) has the opposite sign to
+        // transaction value balances (inputs - outputs)
+        let chain_value_pool_change = transaction
+            .borrow()
+            .value_balance_from_outputs(utxos)?
+            .neg();
+
+        self.update_with_chain_value_pool_change(chain_value_pool_change)
+    }
+
+    /// Update this value balance with a chain value pool change.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See `update_with_block` for details.
+    fn update_with_chain_value_pool_change(
+        &mut self,
+        chain_value_pool_change: ValueBalance<NegativeAllowed>,
+    ) -> Result<(), ValueBalanceError> {
+        let mut current_value_pool = self
+            .constrain::<NegativeAllowed>()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+        current_value_pool = (current_value_pool + chain_value_pool_change)?;
+        *self = current_value_pool.constrain()?;
+
+        Ok(())
     }
 
     /// Creates a [`ValueBalance`] from the given transparent amount.
@@ -204,16 +279,16 @@ where
 /// Errors that can be returned when validating a [`ValueBalance`]
 pub enum ValueBalanceError {
     /// transparent amount error {0}
-    Transparent(Error),
+    Transparent(amount::Error),
 
     /// sprout amount error {0}
-    Sprout(Error),
+    Sprout(amount::Error),
 
     /// sapling amount error {0}
-    Sapling(Error),
+    Sapling(amount::Error),
 
     /// orchard amount error {0}
-    Orchard(Error),
+    Orchard(amount::Error),
 }
 
 impl<C> std::ops::Add for ValueBalance<C>
@@ -230,6 +305,7 @@ where
         })
     }
 }
+
 impl<C> std::ops::Add<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
 where
     C: Constraint,
@@ -237,6 +313,29 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn add(self, rhs: ValueBalance<C>) -> Self::Output {
         self? + rhs
+    }
+}
+
+impl<C> std::ops::Add<Result<ValueBalance<C>, ValueBalanceError>> for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = Result<ValueBalance<C>, ValueBalanceError>;
+
+    fn add(self, rhs: Result<ValueBalance<C>, ValueBalanceError>) -> Self::Output {
+        self + rhs?
+    }
+}
+
+impl<C> std::ops::AddAssign<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
+where
+    ValueBalance<C>: Copy,
+    C: Constraint,
+{
+    fn add_assign(&mut self, rhs: ValueBalance<C>) {
+        if let Ok(lhs) = *self {
+            *self = lhs + rhs;
+        }
     }
 }
 
@@ -261,6 +360,29 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn sub(self, rhs: ValueBalance<C>) -> Self::Output {
         self? - rhs
+    }
+}
+
+impl<C> std::ops::Sub<Result<ValueBalance<C>, ValueBalanceError>> for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = Result<ValueBalance<C>, ValueBalanceError>;
+
+    fn sub(self, rhs: Result<ValueBalance<C>, ValueBalanceError>) -> Self::Output {
+        self - rhs?
+    }
+}
+
+impl<C> std::ops::SubAssign<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
+where
+    ValueBalance<C>: Copy,
+    C: Constraint,
+{
+    fn sub_assign(&mut self, rhs: ValueBalance<C>) {
+        if let Ok(lhs) = *self {
+            *self = lhs - rhs;
+        }
     }
 }
 

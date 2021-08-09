@@ -31,10 +31,10 @@ use crate::{
     primitives::{Bctv14Proof, Groth16Proof},
     sapling, sprout,
     transparent::{
-        self,
+        self, outputs_from_utxos,
         CoinbaseSpendRestriction::{self, *},
     },
-    value_balance::ValueBalance,
+    value_balance::{ValueBalance, ValueBalanceError},
 };
 
 use std::collections::HashMap;
@@ -408,52 +408,6 @@ impl Transaction {
         }
     }
 
-    /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction, regardless of version.
-    ///
-    /// This value is removed from the transparent value pool of this transaction, and added to the
-    /// sprout value pool.
-    pub fn sprout_pool_added_values(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .map(|joinsplit| &joinsplit.vpub_old),
-            ),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .map(|joinsplit| &joinsplit.vpub_old),
-            ),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
     /// Access the sprout::Nullifiers in this transaction, regardless of version.
     pub fn sprout_nullifiers(&self) -> Box<dyn Iterator<Item = &sprout::Nullifier> + '_> {
         // This function returns a boxed iterator because the different
@@ -719,121 +673,443 @@ impl Transaction {
 
     // value balances
 
-    /// Return the transparent value balance.
+    /// Return the transparent value balance,
+    /// using the outputs spent by this transaction.
     ///
-    /// The change in the value of the transparent pool.
-    /// The sum of the outputs spent by transparent inputs in `tx_in` fields,
-    /// minus the sum of newly created outputs in `tx_out` fields.
-    ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn transparent_value_balance(
+    /// See `transparent_value_balance` for details.
+    fn transparent_value_balance_from_outputs(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let inputs = self.inputs();
-        let outputs = self.outputs();
-        let input_value_balance: Amount = inputs
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        let input_value = self
+            .inputs()
             .iter()
-            .map(|i| i.value(utxos))
-            .sum::<Result<Amount, AmountError>>()?;
+            .map(|i| i.value_from_outputs(outputs))
+            .sum::<Result<Amount<NonNegative>, AmountError>>()
+            .map_err(ValueBalanceError::Transparent)?
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
-        let output_value_balance: Amount<NegativeAllowed> = outputs
+        let output_value = self
+            .outputs()
             .iter()
             .map(|o| o.value())
-            .sum::<Result<Amount, AmountError>>()?;
+            .sum::<Result<Amount<NonNegative>, AmountError>>()
+            .map_err(ValueBalanceError::Transparent)?
+            .constrain()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
-        Ok(ValueBalance::from_transparent_amount(
-            (output_value_balance - input_value_balance)?,
-        ))
+        (input_value - output_value)
+            .map(ValueBalance::from_transparent_amount)
+            .map_err(ValueBalanceError::Transparent)
     }
 
-    /// Return the sprout value balance
+    /// Return the transparent value balance,
+    /// the change in the value of the transaction value pool.
     ///
-    /// The change in the sprout value pool.
-    /// The sum of all sprout `vpub_old` fields, minus the sum of all `vpub_new` fields.
+    /// The sum of the UTXOs spent by transparent inputs in `tx_in` fields,
+    /// minus the sum of the newly created outputs in `tx_out` fields.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the transparent chain value pool.
+    /// Negative values are removed from the transparent chain value pool,
+    /// and added to this transaction.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let joinsplit_amounts = match self {
-            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
-                joinsplit_data.as_ref().map(JoinSplitData::value_balance)
-            }
-            Transaction::V4 { joinsplit_data, .. } => {
-                joinsplit_data.as_ref().map(JoinSplitData::value_balance)
-            }
-            Transaction::V1 { .. } | Transaction::V5 { .. } => None,
-        };
-
-        joinsplit_amounts
-            .into_iter()
-            .fold(Ok(Amount::zero()), |accumulator, value| {
-                accumulator.and_then(|sum| sum + value)
-            })
-            .map(ValueBalance::from_sprout_amount)
-    }
-
-    /// Return the sapling value balance.
-    ///
-    /// The change in the sapling value pool.
-    /// The negation of the sum of all `valueBalanceSapling` fields.
-    ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn sapling_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let sapling_amounts = match self {
-            Transaction::V4 {
-                sapling_shielded_data,
-                ..
-            } => sapling_shielded_data
-                .as_ref()
-                .map(sapling::ShieldedData::value_balance),
-            Transaction::V5 {
-                sapling_shielded_data,
-                ..
-            } => sapling_shielded_data
-                .as_ref()
-                .map(sapling::ShieldedData::value_balance),
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => None,
-        };
-
-        sapling_amounts
-            .into_iter()
-            .fold(Ok(Amount::zero()), |accumulator, value| {
-                accumulator.and_then(|sum| sum + value)
-            })
-            .map(|amount| ValueBalance::from_sapling_amount(-amount))
-    }
-
-    /// Return the orchard value balance.
-    ///
-    /// The change in the orchard value pool.
-    /// The negation of the sum of all `valueBalanceOrchard` fields.
-    ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn orchard_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let orchard = self
-            .orchard_shielded_data()
-            .iter()
-            .map(|o| o.value_balance())
-            .sum::<Result<Amount, AmountError>>()?;
-
-        Ok(ValueBalance::from_orchard_amount(-orchard))
-    }
-
-    /// Get all the value balances for this transaction.
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
     /// including UTXOs created by earlier transactions in this block.
+    #[allow(dead_code)]
+    fn transparent_value_balance(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.transparent_value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Modify the transparent output values of this transaction, regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn output_values_mut(&mut self) -> impl Iterator<Item = &mut Amount<NonNegative>> {
+        self.outputs_mut()
+            .iter_mut()
+            .map(|output| &mut output.value)
+    }
+
+    /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
+    /// regardless of version.
+    ///
+    /// These values are added to the sprout chain value pool,
+    /// and removed from the value pool of this transaction.
+    pub fn output_values_to_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_old),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_old),
+            ),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Modify the `vpub_old` fields from `JoinSplit`s in this transaction,
+    /// regardless of version.
+    ///
+    /// See `output_values_to_sprout` for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn output_values_to_sprout_mut(
+        &mut self,
+    ) -> Box<dyn Iterator<Item = &mut Amount<NonNegative>> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits_mut()
+                    .map(|joinsplit| &mut joinsplit.vpub_old),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits_mut()
+                    .map(|joinsplit| &mut joinsplit.vpub_old),
+            ),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Returns the `vpub_new` fields from `JoinSplit`s in this transaction,
+    /// regardless of version.
+    ///
+    /// These values are removed from the value pool of this transaction.
+    /// and added to the sprout chain value pool.
+    pub fn input_values_from_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_new),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits()
+                    .map(|joinsplit| &joinsplit.vpub_new),
+            ),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Modify the `vpub_new` fields from `JoinSplit`s in this transaction,
+    /// regardless of version.
+    ///
+    /// See `input_values_from_sprout` for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn input_values_from_sprout_mut(
+        &mut self,
+    ) -> Box<dyn Iterator<Item = &mut Amount<NonNegative>> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits_mut()
+                    .map(|joinsplit| &mut joinsplit.vpub_new),
+            ),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(
+                joinsplit_data
+                    .joinsplits_mut()
+                    .map(|joinsplit| &mut joinsplit.vpub_new),
+            ),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Return the sprout value balance,
+    /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
+    ///
+    /// The sum of all sprout `vpub_new` fields, minus the sum of all `vpub_old` fields.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the sprout chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to the sprout pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        let joinsplit_value_balance = match self {
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data
+                .value_balance()
+                .map_err(ValueBalanceError::Sprout)?,
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data
+                .value_balance()
+                .map_err(ValueBalanceError::Sprout)?,
+
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Amount::zero(),
+        };
+
+        Ok(ValueBalance::from_sprout_amount(joinsplit_value_balance))
+    }
+
+    /// Return the sapling value balance,
+    /// the change in the transaction value pool due to sapling `Spend`s and `Output`s.
+    ///
+    /// Returns the `valueBalanceSapling` field in this transaction.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the sapling chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to sapling pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+        let sapling_value_balance = match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => sapling_shielded_data.value_balance,
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => sapling_shielded_data.value_balance,
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Amount::zero(),
+        };
+
+        ValueBalance::from_sapling_amount(sapling_value_balance)
+    }
+
+    /// Modify the `value_balance` field from the `sapling::ShieldedData` in this transaction,
+    /// regardless of version.
+    ///
+    /// See `sapling_value_balance` for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn sapling_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(&mut sapling_shielded_data.value_balance),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(&mut sapling_shielded_data.value_balance),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => None,
+        }
+    }
+
+    /// Return the orchard value balance,
+    /// the change in the transaction value pool due to orchard [`Action`]s.
+    ///
+    /// Returns the `valueBalanceOrchard` field in this transaction.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the orchard chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to orchard pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+        let orchard_value_balance = self
+            .orchard_shielded_data()
+            .map(|shielded_data| shielded_data.value_balance)
+            .unwrap_or_else(Amount::zero);
+
+        ValueBalance::from_orchard_amount(orchard_value_balance)
+    }
+
+    /// Modify the `value_balance` field from the `orchard::ShieldedData` in this transaction,
+    /// regardless of version.
+    ///
+    /// See `orchard_value_balance` for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
+        self.orchard_shielded_data_mut()
+            .map(|shielded_data| &mut shielded_data.value_balance)
+    }
+
+    /// Get the value balances for this transaction,
+    /// using the transparent outputs spent in this transaction.
+    ///
+    /// See `value_balance` for details.
+    pub(crate) fn value_balance_from_outputs(
+        &self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.transparent_value_balance_from_outputs(outputs)?
+            + self.sprout_value_balance()?
+            + self.sapling_value_balance()
+            + self.orchard_value_balance()
+    }
+
+    /// Get the value balances for this transaction.
+    /// These are the changes in the transaction value pool,
+    /// split up into transparent, sprout, sapling, and orchard values.
+    ///
+    /// Calculated as the sum of the inputs and outputs from each pool,
+    /// or the sum of the value balances from each pool.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the corresponding chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to the corresponding pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    ///
+    /// `utxos` must contain the utxos of every input in the transaction,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
     pub fn value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<NegativeAllowed>, AmountError> {
-        let mut value_balance = ValueBalance::zero();
-
-        value_balance.set_transparent_value_balance(self.transparent_value_balance(utxos)?);
-        value_balance.set_sprout_value_balance(self.sprout_value_balance()?);
-        value_balance.set_sapling_value_balance(self.sapling_value_balance()?);
-        value_balance.set_orchard_value_balance(self.orchard_value_balance()?);
-
-        Ok(value_balance)
+    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
     }
 }

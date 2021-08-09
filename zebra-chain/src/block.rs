@@ -14,7 +14,7 @@ pub mod arbitrary;
 #[cfg(any(test, feature = "bench"))]
 pub mod tests;
 
-use std::{collections::HashMap, convert::TryInto, fmt};
+use std::{collections::HashMap, convert::TryInto, fmt, ops::Neg};
 
 pub use commitment::{ChainHistoryMmrRootHash, Commitment, CommitmentError};
 pub use hash::Hash;
@@ -170,20 +170,33 @@ impl Block {
             .expect("number of transactions must fit u64")
     }
 
-    /// Get all the value balances from this block by summing all the value balances
-    /// in each transaction the block has.
+    /// Get the overall chain value pool change in this block,
+    /// the negative sum of the transaction value balances in this block.
     ///
-    /// `utxos` must contain the utxos of every input in the block,
-    /// including UTXOs created by a transaction in this block,
-    /// then spent by a later transaction that's also in this block.
-    pub fn value_balance(
+    /// These are the changes in the transparent, sprout, sapling, and orchard
+    /// chain value pools, as a result of this block.
+    ///
+    /// Positive values are added to the corresponding chain value pool.
+    /// Negative values are removed from the corresponding pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    ///
+    /// `utxos` must contain the [`Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.transactions
+        let transaction_value_balance_total = self
+            .transactions
             .iter()
             .flat_map(|t| t.value_balance(utxos))
-            .sum()
+            .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?;
+
+        Ok(transaction_value_balance_total.neg())
     }
 }
 
