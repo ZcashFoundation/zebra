@@ -2,6 +2,8 @@
 
 use crate::amount::{Amount, Constraint, Error, NonNegative};
 
+use std::convert::TryInto;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
@@ -127,6 +129,51 @@ where
             sapling: zero,
             orchard: zero,
         }
+    }
+
+    /// To byte array
+    pub fn to_bytes(self) -> [u8; 32] {
+        let transparent = self.transparent.to_bytes();
+        let sprout = self.sprout.to_bytes();
+        let sapling = self.sapling.to_bytes();
+        let orchard = self.orchard.to_bytes();
+        match [transparent, sprout, sapling, orchard].concat().try_into() {
+            Ok(bytes) => bytes,
+            _ => unreachable!(
+                "Four [u8; 8] should always concat with no error into a single [u8; 32]"
+            ),
+        }
+    }
+
+    /// From byte array
+    pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<C>, ValueBalanceError> {
+        let transparent = Amount::from_bytes(
+            bytes[0..8]
+                .try_into()
+                .expect("Extracting the first quarter of a [u8; 32] should always succeed"),
+        )?;
+        let sprout = Amount::from_bytes(
+            bytes[8..16]
+                .try_into()
+                .expect("Extracting the second quarter of a [u8; 32] should always succeed"),
+        )?;
+        let sapling = Amount::from_bytes(
+            bytes[16..24]
+                .try_into()
+                .expect("Extracting the third quarter of a [u8; 32] should always succeed"),
+        )?;
+        let orchard = Amount::from_bytes(
+            bytes[24..32]
+                .try_into()
+                .expect("Extracting the last quarter of a [u8; 32] should always succeed"),
+        )?;
+
+        Ok(ValueBalance {
+            transparent,
+            sprout,
+            sapling,
+            orchard,
+        })
     }
 }
 
