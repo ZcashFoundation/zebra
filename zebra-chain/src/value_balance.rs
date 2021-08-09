@@ -13,7 +13,7 @@ mod tests;
 use ValueBalanceError::*;
 
 /// An amount spread between different Zcash pools.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
@@ -230,6 +230,7 @@ where
         })
     }
 }
+
 impl<C> std::ops::Add<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
 where
     C: Constraint,
@@ -237,6 +238,29 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn add(self, rhs: ValueBalance<C>) -> Self::Output {
         self? + rhs
+    }
+}
+
+impl<C> std::ops::Add<Result<ValueBalance<C>, ValueBalanceError>> for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = Result<ValueBalance<C>, ValueBalanceError>;
+
+    fn add(self, rhs: Result<ValueBalance<C>, ValueBalanceError>) -> Self::Output {
+        self + rhs?
+    }
+}
+
+impl<C> std::ops::AddAssign<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
+where
+    ValueBalance<C>: Copy,
+    C: Constraint,
+{
+    fn add_assign(&mut self, rhs: ValueBalance<C>) {
+        if let Ok(lhs) = *self {
+            *self = lhs + rhs;
+        }
     }
 }
 
@@ -261,6 +285,29 @@ where
     type Output = Result<ValueBalance<C>, ValueBalanceError>;
     fn sub(self, rhs: ValueBalance<C>) -> Self::Output {
         self? - rhs
+    }
+}
+
+impl<C> std::ops::Sub<Result<ValueBalance<C>, ValueBalanceError>> for ValueBalance<C>
+where
+    C: Constraint,
+{
+    type Output = Result<ValueBalance<C>, ValueBalanceError>;
+
+    fn sub(self, rhs: Result<ValueBalance<C>, ValueBalanceError>) -> Self::Output {
+        self - rhs?
+    }
+}
+
+impl<C> std::ops::SubAssign<ValueBalance<C>> for Result<ValueBalance<C>, ValueBalanceError>
+where
+    ValueBalance<C>: Copy,
+    C: Constraint,
+{
+    fn sub_assign(&mut self, rhs: ValueBalance<C>) {
+        if let Ok(lhs) = *self {
+            *self = lhs - rhs;
+        }
     }
 }
 
