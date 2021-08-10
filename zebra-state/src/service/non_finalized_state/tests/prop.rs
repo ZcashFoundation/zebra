@@ -35,11 +35,7 @@ fn forked_equals_pushed() -> Result<()> {
                                           .ok()
                                           .and_then(|v| v.parse().ok())
                                           .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, fork_at_count, network) in PreparedChain::new_heartwood())| {
-            // Build a history tree with the first block to simulate the tree of
-            // the finalized state.
-            let finalized_tree: HistoryTree = NonEmptyHistoryTree::from_block(network, chain[0].block.clone(), &Default::default(), &Default::default()).unwrap().into();
-            let chain = &chain[1..];
+        |((chain, fork_at_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
 
@@ -108,12 +104,7 @@ fn finalized_equals_pushed() -> Result<()> {
                                       .ok()
                                       .and_then(|v| v.parse().ok())
                                       .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-    |((chain, end_count, network) in PreparedChain::new_heartwood())| {
-        // Build a history tree with the first block to simulate the tree of
-        // the finalized state.
-        let finalized_tree: HistoryTree = NonEmptyHistoryTree::from_block(network, chain[0].block.clone(), &Default::default(), &Default::default()).unwrap().into();
-        let chain = &chain[1..];
-
+    |((chain, end_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
         let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree);
@@ -156,7 +147,7 @@ fn rejection_restores_internal_state() -> Result<()> {
                                          .and_then(|v| v.parse().ok())
                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
               |((chain, valid_count, network, mut bad_block) in (PreparedChain::default(), any::<bool>(), any::<bool>())
-                .prop_flat_map(|((chain, valid_count, network), is_nu5, is_v5)| {
+                .prop_flat_map(|((chain, valid_count, network, _history_tree), is_nu5, is_v5)| {
                     let next_height = chain[valid_count - 1].height;
                     (
                         Just(chain),
