@@ -206,12 +206,18 @@ where
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
+            let block_value_balance = block
+                .chain_value_pool_change(&transparent::utxos_from_ordered_utxos(
+                    new_outputs.clone(),
+                ))
+                .expect("all utxos needed to compute value balance should be known at this stage");
             let prepared_block = zs::PreparedBlock {
                 block,
                 hash,
                 height,
                 new_outputs,
                 transaction_hashes,
+                block_value_balance,
             };
             match state_service
                 .ready_and()

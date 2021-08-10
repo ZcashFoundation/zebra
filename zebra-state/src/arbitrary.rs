@@ -16,6 +16,10 @@ impl Prepare for Arc<Block> {
         let height = block.coinbase_height().unwrap();
         let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, transaction_hashes.as_slice());
+        let new_unordered_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
+        let block_value_balance = block
+            .chain_value_pool_change(&new_unordered_outputs)
+            .unwrap();
 
         PreparedBlock {
             block,
@@ -23,6 +27,7 @@ impl Prepare for Arc<Block> {
             height,
             new_outputs,
             transaction_hashes,
+            block_value_balance,
         }
     }
 }

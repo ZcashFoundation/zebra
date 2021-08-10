@@ -1,8 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
+    amount::NegativeAllowed,
     block::{self, Block},
     transaction, transparent,
+    value_balance::ValueBalance,
 };
 
 // Allow *only* this unused import, so that rustdoc link resolution
@@ -81,6 +83,8 @@ pub struct PreparedBlock {
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
+    /// The value balances for each pool for this block.
+    pub block_value_balance: ValueBalance<NegativeAllowed>,
 }
 
 /// A contextually validated block, ready to be committed directly to the finalized state with
@@ -94,6 +98,7 @@ pub(crate) struct ContextuallyValidBlock {
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) block_value_balance: ValueBalance<NegativeAllowed>,
 }
 
 /// A finalized block, ready to be committed directly to the finalized state with
@@ -109,6 +114,7 @@ pub struct FinalizedBlock {
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) block_value_balance: ValueBalance<NegativeAllowed>,
 }
 
 // Doing precomputation in this From impl means that it will be done in
@@ -127,12 +133,17 @@ impl From<Arc<Block>> for FinalizedBlock {
             .collect::<Vec<_>>();
         let new_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
 
+        let block_value_balance = block
+            .chain_value_pool_change(&new_outputs)
+            .expect("finalized blocks must have a chain value pool");
+
         Self {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
+            block_value_balance,
         }
     }
 }
@@ -145,6 +156,7 @@ impl From<PreparedBlock> for ContextuallyValidBlock {
             height,
             new_outputs,
             transaction_hashes,
+            block_value_balance,
         } = prepared;
         Self {
             block,
@@ -152,6 +164,7 @@ impl From<PreparedBlock> for ContextuallyValidBlock {
             height,
             new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
             transaction_hashes,
+            block_value_balance,
         }
     }
 }
@@ -164,6 +177,7 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            block_value_balance,
         } = contextually_valid;
         Self {
             block,
@@ -171,6 +185,7 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            block_value_balance,
         }
     }
 }

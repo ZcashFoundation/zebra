@@ -8,6 +8,7 @@ mod tests;
 use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
+    amount::{NegativeAllowed, NonNegative},
     block::{self, Block},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
@@ -15,6 +16,7 @@ use zebra_chain::{
     sapling, sprout,
     transaction::{self, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
@@ -64,6 +66,7 @@ impl FinalizedState {
                 db_options.clone(),
             ),
             rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
         ];
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
@@ -217,6 +220,7 @@ impl FinalizedState {
             height,
             new_outputs,
             transaction_hashes,
+            block_value_balance,
         } = finalized;
 
         let finalized_tip_height = self.finalized_tip_height();
@@ -239,6 +243,8 @@ impl FinalizedState {
         let orchard_note_commitment_tree_cf =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
         let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+
+        let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
@@ -388,6 +394,19 @@ impl FinalizedState {
             );
             if let Some(history_tree) = history_tree.as_ref() {
                 batch.zs_insert(history_tree_cf, height, history_tree);
+            }
+
+            // Consensus rule: The block height of the genesis block is 0
+            // https://zips.z.cash/protocol/protocol.pdf#blockchain
+            if height == block::Height(0) {
+                batch.zs_insert(tip_chain_value_pool, height, ValueBalance::zero());
+            } else {
+                let current_pool = self.current_value_pool().constrain::<NegativeAllowed>()?;
+                batch.zs_insert(
+                    tip_chain_value_pool,
+                    height,
+                    (current_pool + block_value_balance)?.constrain::<NonNegative>()?,
+                );
             }
 
             Ok(batch)
@@ -571,6 +590,15 @@ impl FinalizedState {
     #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         self.db.path()
+    }
+
+    /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
+    pub fn current_value_pool(&self) -> ValueBalance<NonNegative> {
+        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
+        let tip_height = &self.finalized_tip_height().unwrap();
+        self.db
+            .zs_get(value_pool_cf, tip_height)
+            .unwrap_or(ValueBalance::zero())
     }
 }
 
