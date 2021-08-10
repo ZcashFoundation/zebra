@@ -4,11 +4,12 @@ use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeseria
 use zebra_test::prelude::*;
 
 use crate::{
+    arbitrary::Prepare,
     service::{
         finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState},
     },
-    tests::{FakeChainHelper, Prepare},
+    tests::FakeChainHelper,
     Config,
 };
 
@@ -17,7 +18,7 @@ use self::assert_eq;
 #[test]
 fn construct_empty() {
     zebra_test::init();
-    let _chain = Chain::default();
+    let _chain = Chain::new(Default::default(), Default::default());
 }
 
 #[test]
@@ -26,7 +27,7 @@ fn construct_single() -> Result<()> {
     let block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
-    let mut chain = Chain::default();
+    let mut chain = Chain::new(Default::default(), Default::default());
     chain = chain.push(block.prepare())?;
 
     assert_eq!(1, chain.blocks.len());
@@ -48,7 +49,7 @@ fn construct_many() -> Result<()> {
         block = next_block;
     }
 
-    let mut chain = Chain::default();
+    let mut chain = Chain::new(Default::default(), Default::default());
 
     for block in blocks {
         chain = chain.push(block.prepare())?;
@@ -67,10 +68,10 @@ fn ord_matches_work() -> Result<()> {
         .set_work(1);
     let more_block = less_block.clone().set_work(10);
 
-    let mut lesser_chain = Chain::default();
+    let mut lesser_chain = Chain::new(Default::default(), Default::default());
     lesser_chain = lesser_chain.push(less_block.prepare())?;
 
-    let mut bigger_chain = Chain::default();
+    let mut bigger_chain = Chain::new(Default::default(), Default::default());
     bigger_chain = bigger_chain.push(more_block.prepare())?;
 
     assert!(bigger_chain > lesser_chain);

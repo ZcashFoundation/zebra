@@ -9,7 +9,16 @@ mod utxo;
 
 pub use address::Address;
 pub use script::Script;
-pub use utxo::{new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, OrderedUtxo, Utxo};
+pub use serialize::GENESIS_COINBASE_DATA;
+pub use utxo::{
+    new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, CoinbaseSpendRestriction,
+    OrderedUtxo, Utxo,
+};
+
+pub(crate) use utxo::outputs_from_utxos;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub(crate) use utxo::new_transaction_ordered_outputs;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -23,6 +32,8 @@ use crate::{
     amount::{Amount, NonNegative},
     block, transaction,
 };
+
+use std::{collections::HashMap, iter};
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -103,6 +114,111 @@ pub enum Input {
     },
 }
 
+impl Input {
+    /// If this is a `PrevOut` input, returns this input's outpoint.
+    /// Otherwise, returns `None`.
+    pub fn outpoint(&self) -> Option<OutPoint> {
+        if let Input::PrevOut { outpoint, .. } = self {
+            Some(*outpoint)
+        } else {
+            None
+        }
+    }
+
+    /// Set this input's outpoint.
+    ///
+    /// Should only be called on `PrevOut` inputs.
+    ///
+    /// # Panics
+    ///
+    /// If `self` is a coinbase input.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_outpoint(&mut self, new_outpoint: OutPoint) {
+        if let Input::PrevOut {
+            ref mut outpoint, ..
+        } = self
+        {
+            *outpoint = new_outpoint;
+        } else {
+            unreachable!("unexpected variant: Coinbase Inputs do not have OutPoints");
+        }
+    }
+
+    /// Get the value spent by this input, by looking up its [`Outpoint`] in `outputs`.
+    /// See `value` for details.
+    ///
+    /// # Panics
+    ///
+    /// If the provided `Output`s don't have this input's `Outpoint`.
+    pub(crate) fn value_from_outputs(
+        &self,
+        outputs: &HashMap<OutPoint, Output>,
+    ) -> Amount<NonNegative> {
+        match self {
+            Input::PrevOut { outpoint, .. } => {
+                outputs
+                    .get(outpoint)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "provided Outputs (length {:?}) don't have spent {:?}",
+                            outputs.len(),
+                            outpoint
+                        )
+                    })
+                    .value
+            }
+            Input::Coinbase { .. } => Amount::zero(),
+        }
+    }
+
+    /// Get the value spent by this input, by looking up its [`Outpoint`] in `utxos`.
+    ///
+    /// This amount is added to the transaction value pool by this input.
+    ///
+    /// # Panics
+    ///
+    /// If the provided `Utxo`s don't have this input's `Outpoint`.
+    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NonNegative> {
+        if let Some(outpoint) = self.outpoint() {
+            // look up the specific Output and convert it to the expected format
+            let output = utxos
+                .get(&outpoint)
+                .expect("provided Utxos don't have spent OutPoint")
+                .output
+                .clone();
+            self.value_from_outputs(&iter::once((outpoint, output)).collect())
+        } else {
+            // coinbase inputs don't need any UTXOs
+            self.value_from_outputs(&HashMap::new())
+        }
+    }
+
+    /// Get the value spent by this input, by looking up its [`Outpoint`] in `ordered_utxos`.
+    /// See `value` for details.
+    ///
+    /// # Panics
+    ///
+    /// If the provided `OrderedUtxo`s don't have this input's `Outpoint`.
+    pub fn value_from_ordered_utxos(
+        &self,
+        ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
+    ) -> Amount<NonNegative> {
+        if let Some(outpoint) = self.outpoint() {
+            // look up the specific Output and convert it to the expected format
+            let output = ordered_utxos
+                .get(&outpoint)
+                .expect("provided Utxos don't have spent OutPoint")
+                .utxo
+                .output
+                .clone();
+            self.value_from_outputs(&iter::once((outpoint, output)).collect())
+        } else {
+            // coinbase inputs don't need any UTXOs
+            self.value_from_outputs(&HashMap::new())
+        }
+    }
+}
+
 /// A transparent output from a transaction.
 ///
 /// The most fundamental building block of a transaction is a
@@ -124,4 +240,12 @@ pub struct Output {
 
     /// The lock script defines the conditions under which this output can be spent.
     pub lock_script: Script,
+}
+
+impl Output {
+    /// Get the value contained in this output.
+    /// This amount is subtracted from the transaction value pool by this output.
+    pub fn value(&self) -> Amount<NonNegative> {
+        self.value
+    }
 }

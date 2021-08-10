@@ -16,6 +16,12 @@ use std::{
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
+
+#[cfg(test)]
+mod tests;
+
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
@@ -48,6 +54,15 @@ impl<C> Amount<C> {
         buf
     }
 
+    /// From little endian byte array
+    pub fn from_bytes(bytes: [u8; 8]) -> Result<Amount<C>>
+    where
+        C: Constraint,
+    {
+        let amount = i64::from_le_bytes(bytes);
+        amount.try_into()
+    }
+
     /// Create a zero `Amount`
     pub fn zero() -> Amount<C>
     where
@@ -64,7 +79,10 @@ where
     type Output = Result<Amount<C>>;
 
     fn add(self, rhs: Amount<C>) -> Self::Output {
-        let value = self.0 + rhs.0;
+        let value = self
+            .0
+            .checked_add(rhs.0)
+            .expect("adding two constrained Amounts is always within an i64");
         value.try_into()
     }
 }
@@ -110,7 +128,10 @@ where
     type Output = Result<Amount<C>>;
 
     fn sub(self, rhs: Amount<C>) -> Self::Output {
-        let value = self.0 - rhs.0;
+        let value = self
+            .0
+            .checked_sub(rhs.0)
+            .expect("subtracting two constrained Amounts is always within an i64");
         value.try_into()
     }
 }
@@ -157,7 +178,7 @@ impl<C> From<Amount<C>> for i64 {
 
 impl From<Amount<NonNegative>> for u64 {
     fn from(amount: Amount<NonNegative>) -> Self {
-        amount.0 as _
+        amount.0.try_into().expect("non-negative i64 fits in u64")
     }
 }
 
@@ -165,9 +186,14 @@ impl<C> From<Amount<C>> for jubjub::Fr {
     fn from(a: Amount<C>) -> jubjub::Fr {
         // TODO: this isn't constant time -- does that matter?
         if a.0 < 0 {
-            jubjub::Fr::from(a.0.abs() as u64).neg()
+            let abs_amount = i128::from(a.0)
+                .checked_abs()
+                .expect("absolute i64 fits in i128");
+            let abs_amount = u64::try_from(abs_amount).expect("absolute i64 fits in u64");
+
+            jubjub::Fr::from(abs_amount).neg()
         } else {
-            jubjub::Fr::from(a.0 as u64)
+            jubjub::Fr::from(u64::try_from(a.0).expect("non-negative i64 fits in u64"))
         }
     }
 }
@@ -176,10 +202,28 @@ impl<C> From<Amount<C>> for halo2::pasta::pallas::Scalar {
     fn from(a: Amount<C>) -> halo2::pasta::pallas::Scalar {
         // TODO: this isn't constant time -- does that matter?
         if a.0 < 0 {
-            halo2::pasta::pallas::Scalar::from(a.0.abs() as u64).neg()
+            let abs_amount = i128::from(a.0)
+                .checked_abs()
+                .expect("absolute i64 fits in i128");
+            let abs_amount = u64::try_from(abs_amount).expect("absolute i64 fits in u64");
+
+            halo2::pasta::pallas::Scalar::from(abs_amount).neg()
         } else {
-            halo2::pasta::pallas::Scalar::from(a.0 as u64)
+            halo2::pasta::pallas::Scalar::from(
+                u64::try_from(a.0).expect("non-negative i64 fits in u64"),
+            )
         }
+    }
+}
+
+impl<C> TryFrom<i32> for Amount<C>
+where
+    C: Constraint,
+{
+    type Error = Error;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        C::validate(value.into()).map(|v| Self(v, PhantomData))
     }
 }
 
@@ -194,17 +238,6 @@ where
     }
 }
 
-impl<C> TryFrom<i32> for Amount<C>
-where
-    C: Constraint,
-{
-    type Error = Error;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        C::validate(value as _).map(|v| Self(v, PhantomData))
-    }
-}
-
 impl<C> TryFrom<u64> for Amount<C>
 where
     C: Constraint,
@@ -212,6 +245,25 @@ where
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value = value.try_into().map_err(|source| Error::Convert {
+            value: value.into(),
+            source,
+        })?;
+
+        C::validate(value).map(|v| Self(v, PhantomData))
+    }
+}
+
+/// Conversion from `i128` to `Amount`.
+///
+/// Used to handle the result of multiplying negative `Amount`s by `u64`.
+impl<C> TryFrom<i128> for Amount<C>
+where
+    C: Constraint,
+{
+    type Error = Error;
+
+    fn try_from(value: i128) -> Result<Self, Self::Error> {
         let value = value
             .try_into()
             .map_err(|source| Error::Convert { value, source })?;
@@ -245,8 +297,7 @@ impl<C> PartialEq<Amount<C>> for i64 {
     }
 }
 
-impl Eq for Amount<NegativeAllowed> {}
-impl Eq for Amount<NonNegative> {}
+impl<C> Eq for Amount<C> {}
 
 impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1> {
     fn partial_cmp(&self, other: &Amount<C2>) -> Option<Ordering> {
@@ -254,47 +305,54 @@ impl<C1, C2> PartialOrd<Amount<C2>> for Amount<C1> {
     }
 }
 
-impl Ord for Amount<NegativeAllowed> {
-    fn cmp(&self, other: &Amount<NegativeAllowed>) -> Ordering {
+impl<C> Ord for Amount<C> {
+    fn cmp(&self, other: &Amount<C>) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl Ord for Amount<NonNegative> {
-    fn cmp(&self, other: &Amount<NonNegative>) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl std::ops::Mul<u64> for Amount<NonNegative> {
-    type Output = Result<Amount<NonNegative>>;
+impl<C> std::ops::Mul<u64> for Amount<C>
+where
+    C: Constraint,
+{
+    type Output = Result<Amount<C>>;
 
     fn mul(self, rhs: u64) -> Self::Output {
-        let value = (self.0 as u64)
-            .checked_mul(rhs)
-            .ok_or(Error::MultiplicationOverflow {
-                amount: self.0,
-                multiplier: rhs,
-            })?;
-        value.try_into()
+        // use i128 for multiplication, so we can handle negative Amounts
+        let value = i128::from(self.0)
+            .checked_mul(i128::from(rhs))
+            .expect("multiplying i64 by u64 can't overflow i128");
+
+        value.try_into().map_err(|_| Error::MultiplicationOverflow {
+            amount: self.0,
+            multiplier: rhs,
+            overflowing_result: value,
+        })
     }
 }
 
-impl std::ops::Mul<Amount<NonNegative>> for u64 {
-    type Output = Result<Amount<NonNegative>>;
+impl<C> std::ops::Mul<Amount<C>> for u64
+where
+    C: Constraint,
+{
+    type Output = Result<Amount<C>>;
 
-    fn mul(self, rhs: Amount<NonNegative>) -> Self::Output {
+    fn mul(self, rhs: Amount<C>) -> Self::Output {
         rhs.mul(self)
     }
 }
 
-impl std::ops::Div<u64> for Amount<NonNegative> {
-    type Output = Result<Amount<NonNegative>>;
+impl<C> std::ops::Div<u64> for Amount<C>
+where
+    C: Constraint,
+{
+    type Output = Result<Amount<C>>;
 
     fn div(self, rhs: u64) -> Self::Output {
-        let quotient = (self.0 as u64)
-            .checked_div(rhs)
+        let quotient = i128::from(self.0)
+            .checked_div(i128::from(rhs))
             .ok_or(Error::DivideByZero { amount: self.0 })?;
+
         Ok(quotient
             .try_into()
             .expect("division by a positive integer always stays within the constraint"))
@@ -305,14 +363,16 @@ impl<C> std::iter::Sum<Amount<C>> for Result<Amount<C>>
 where
     C: Constraint,
 {
-    fn sum<I: Iterator<Item = Amount<C>>>(iter: I) -> Self {
-        let sum = iter
-            .map(|a| a.0)
-            .try_fold(0i64, |acc, amount| acc.checked_add(amount));
+    fn sum<I: Iterator<Item = Amount<C>>>(mut iter: I) -> Self {
+        let sum = iter.try_fold(Amount::zero(), |acc, amount| acc + amount);
 
         match sum {
-            Some(sum) => Amount::try_from(sum),
-            None => Err(Error::SumOverflow),
+            Ok(sum) => Ok(sum),
+            Err(Error::Constraint { value, .. }) => Err(Error::SumOverflow {
+                partial_sum: value,
+                remaining_items: iter.count(),
+            }),
+            Err(unexpected_error) => unreachable!("unexpected Add error: {:?}", unexpected_error),
         }
     }
 }
@@ -326,27 +386,68 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq)]
+impl<C> std::ops::Neg for Amount<C>
+where
+    C: Constraint,
+{
+    type Output = Amount<NegativeAllowed>;
+    fn neg(self) -> Self::Output {
+        Amount::<NegativeAllowed>::try_from(-self.0)
+            .expect("a negation of any Amount into NegativeAllowed is always valid")
+    }
+}
+
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
     /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
-    Contains {
-        range: RangeInclusive<i64>,
+    Constraint {
         value: i64,
+        range: RangeInclusive<i64>,
     },
-    /// u64 {value} could not be converted to an i64 Amount
+
+    /// {value} could not be converted to an i64 Amount
     Convert {
-        value: u64,
+        value: i128,
         source: std::num::TryFromIntError,
     },
-    /// i64 overflow when multiplying i64 non-negative amount {amount} by u64 {multiplier}
-    MultiplicationOverflow { amount: i64, multiplier: u64 },
+
+    /// i64 overflow when multiplying i64 amount {amount} by u64 {multiplier}, overflowing result {overflowing_result}
+    MultiplicationOverflow {
+        amount: i64,
+        multiplier: u64,
+        overflowing_result: i128,
+    },
+
     /// cannot divide amount {amount} by zero
     DivideByZero { amount: i64 },
 
-    /// i64 overflow when summing i64 amounts
-    SumOverflow,
+    /// i64 overflow when summing i64 amounts, partial_sum: {partial_sum}, remaining items: {remaining_items}
+    SumOverflow {
+        partial_sum: i64,
+        remaining_items: usize,
+    },
+}
+
+impl Error {
+    /// Returns the invalid value for this error.
+    ///
+    /// This value may be an initial input value, partially calculated value,
+    /// or an overflowing or underflowing value.
+    pub fn invalid_value(&self) -> i128 {
+        use Error::*;
+
+        match self.clone() {
+            Constraint { value, .. } => value.into(),
+            Convert { value, .. } => value,
+            MultiplicationOverflow {
+                overflowing_result, ..
+            } => overflowing_result,
+            DivideByZero { amount } => amount.into(),
+            SumOverflow { partial_sum, .. } => partial_sum.into(),
+        }
+    }
 }
 
 /// Marker type for `Amount` that allows negative values.
@@ -401,7 +502,7 @@ pub trait Constraint {
         let range = Self::valid_range();
 
         if !range.contains(&value) {
-            Err(Error::Contains { range, value })
+            Err(Error::Constraint { value, range })
         } else {
             Ok(value)
         }
@@ -438,386 +539,5 @@ impl ZcashDeserialize for Amount<NonNegative> {
         mut reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
         Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
-    }
-}
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest::prelude::*;
-#[cfg(any(test, feature = "proptest-impl"))]
-impl<C> Arbitrary for Amount<C>
-where
-    C: Constraint + std::fmt::Debug,
-{
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        C::valid_range().prop_map(|v| Self(v, PhantomData)).boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-mod test {
-    use crate::serialization::ZcashDeserializeInto;
-
-    use super::*;
-
-    use std::{collections::hash_map::RandomState, collections::HashSet, fmt::Debug};
-
-    use color_eyre::eyre::Result;
-
-    #[test]
-    fn test_add_bare() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let neg_one: Amount = (-1).try_into()?;
-
-        let zero: Amount = Amount::zero();
-        let new_zero = one + neg_one;
-
-        assert_eq!(zero, new_zero?);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_add_opt_lhs() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let one = Ok(one);
-        let neg_one: Amount = (-1).try_into()?;
-
-        let zero: Amount = Amount::zero();
-        let new_zero = one + neg_one;
-
-        assert_eq!(zero, new_zero?);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_add_opt_rhs() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let neg_one: Amount = (-1).try_into()?;
-        let neg_one = Ok(neg_one);
-
-        let zero: Amount = Amount::zero();
-        let new_zero = one + neg_one;
-
-        assert_eq!(zero, new_zero?);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_add_opt_both() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let one = Ok(one);
-        let neg_one: Amount = (-1).try_into()?;
-        let neg_one = Ok(neg_one);
-
-        let zero: Amount = Amount::zero();
-        let new_zero = one.and_then(|one| one + neg_one);
-
-        assert_eq!(zero, new_zero?);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_add_assign() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let neg_one: Amount = (-1).try_into()?;
-        let mut neg_one = Ok(neg_one);
-
-        let zero: Amount = Amount::zero();
-        neg_one += one;
-        let new_zero = neg_one;
-
-        assert_eq!(Ok(zero), new_zero);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sub_bare() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let zero: Amount = Amount::zero();
-
-        let neg_one: Amount = (-1).try_into()?;
-        let new_neg_one = zero - one;
-
-        assert_eq!(Ok(neg_one), new_neg_one);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sub_opt_lhs() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let one = Ok(one);
-        let zero: Amount = Amount::zero();
-
-        let neg_one: Amount = (-1).try_into()?;
-        let new_neg_one = zero - one;
-
-        assert_eq!(Ok(neg_one), new_neg_one);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sub_opt_rhs() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let zero: Amount = Amount::zero();
-        let zero = Ok(zero);
-
-        let neg_one: Amount = (-1).try_into()?;
-        let new_neg_one = zero - one;
-
-        assert_eq!(Ok(neg_one), new_neg_one);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sub_assign() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let zero: Amount = Amount::zero();
-        let mut zero = Ok(zero);
-
-        let neg_one: Amount = (-1).try_into()?;
-        zero -= one;
-        let new_neg_one = zero;
-
-        assert_eq!(Ok(neg_one), new_neg_one);
-
-        Ok(())
-    }
-
-    #[test]
-    fn add_with_diff_constraints() -> Result<()> {
-        zebra_test::init();
-
-        let one = Amount::<NonNegative>::try_from(1)?;
-        let zero: Amount<NegativeAllowed> = Amount::zero();
-
-        (zero - one.constrain()).expect("should allow negative");
-        (zero.constrain() - one).expect_err("shouldn't allow negative");
-
-        Ok(())
-    }
-
-    #[test]
-    fn deserialize_checks_bounds() -> Result<()> {
-        zebra_test::init();
-
-        let big = (MAX_MONEY * 2)
-            .try_into()
-            .expect("unexpectedly large constant: multiplied constant should be within range");
-        let neg = -10;
-
-        let mut big_bytes = Vec::new();
-        (&mut big_bytes)
-            .write_u64::<LittleEndian>(big)
-            .expect("unexpected serialization failure: vec should be infalliable");
-
-        let mut neg_bytes = Vec::new();
-        (&mut neg_bytes)
-            .write_i64::<LittleEndian>(neg)
-            .expect("unexpected serialization failure: vec should be infalliable");
-
-        Amount::<NonNegative>::zcash_deserialize(big_bytes.as_slice())
-            .expect_err("deserialization should reject too large values");
-        Amount::<NegativeAllowed>::zcash_deserialize(big_bytes.as_slice())
-            .expect_err("deserialization should reject too large values");
-
-        Amount::<NonNegative>::zcash_deserialize(neg_bytes.as_slice())
-            .expect_err("NonNegative deserialization should reject negative values");
-        let amount: Amount<NegativeAllowed> = neg_bytes
-            .zcash_deserialize_into()
-            .expect("NegativeAllowed deserialization should allow negative values");
-
-        assert_eq!(amount.0, neg);
-
-        Ok(())
-    }
-
-    #[test]
-    fn hash() -> Result<()> {
-        zebra_test::init();
-
-        let one = Amount::<NonNegative>::try_from(1)?;
-        let another_one = Amount::<NonNegative>::try_from(1)?;
-        let zero: Amount<NonNegative> = Amount::zero();
-
-        let hash_set: HashSet<Amount<NonNegative>, RandomState> = [one].iter().cloned().collect();
-        assert_eq!(hash_set.len(), 1);
-
-        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            [one, one].iter().cloned().collect();
-        assert_eq!(hash_set.len(), 1, "Amount hashes are consistent");
-
-        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            [one, another_one].iter().cloned().collect();
-        assert_eq!(hash_set.len(), 1, "Amount hashes are by value");
-
-        let hash_set: HashSet<Amount<NonNegative>, RandomState> =
-            [one, zero].iter().cloned().collect();
-        assert_eq!(
-            hash_set.len(),
-            2,
-            "Amount hashes are different for different values"
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn ordering_constraints() -> Result<()> {
-        zebra_test::init();
-
-        ordering::<NonNegative, NonNegative>()?;
-        ordering::<NonNegative, NegativeAllowed>()?;
-        ordering::<NegativeAllowed, NonNegative>()?;
-        ordering::<NegativeAllowed, NegativeAllowed>()?;
-
-        Ok(())
-    }
-
-    #[allow(clippy::eq_op)]
-    fn ordering<C1, C2>() -> Result<()>
-    where
-        C1: Constraint + Debug,
-        C2: Constraint + Debug,
-    {
-        let zero: Amount<C1> = Amount::zero();
-        let one = Amount::<C2>::try_from(1)?;
-        let another_one = Amount::<C1>::try_from(1)?;
-
-        assert_eq!(one, one);
-        assert_eq!(one, another_one, "Amount equality is by value");
-
-        assert_ne!(one, zero);
-        assert_ne!(zero, one);
-
-        assert!(one > zero);
-        assert!(zero < one);
-        assert!(zero <= one);
-
-        let negative_one = Amount::<NegativeAllowed>::try_from(-1)?;
-        let negative_two = Amount::<NegativeAllowed>::try_from(-2)?;
-
-        assert_ne!(negative_one, zero);
-        assert_ne!(negative_one, one);
-
-        assert!(negative_one < zero);
-        assert!(negative_one <= one);
-        assert!(zero > negative_one);
-        assert!(zero >= negative_one);
-        assert!(negative_two < negative_one);
-        assert!(negative_one > negative_two);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_sum() -> Result<()> {
-        zebra_test::init();
-
-        let one: Amount = 1.try_into()?;
-        let neg_one: Amount = (-1).try_into()?;
-
-        let zero: Amount = Amount::zero();
-
-        // success
-        let amounts = vec![one, neg_one, zero];
-
-        let sum_ref: Amount = amounts.iter().sum::<Result<Amount, Error>>()?;
-        let sum_value: Amount = amounts.into_iter().sum::<Result<Amount, Error>>()?;
-
-        assert_eq!(sum_ref, sum_value);
-        assert_eq!(sum_ref, zero);
-
-        // above max for Amount error
-        let max: Amount = MAX_MONEY.try_into()?;
-        let amounts = vec![one, max];
-        let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
-
-        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
-        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
-
-        assert_eq!(sum_ref, sum_value);
-        assert_eq!(
-            sum_ref,
-            Err(Error::Contains {
-                range: -MAX_MONEY..=MAX_MONEY,
-                value: integer_sum,
-            })
-        );
-
-        // below min for Amount error
-        let min: Amount = (-MAX_MONEY).try_into()?;
-        let amounts = vec![min, neg_one];
-        let integer_sum: i64 = amounts.iter().map(|a| a.0).sum();
-
-        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
-        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
-
-        assert_eq!(sum_ref, sum_value);
-        assert_eq!(
-            sum_ref,
-            Err(Error::Contains {
-                range: -MAX_MONEY..=MAX_MONEY,
-                value: integer_sum,
-            })
-        );
-
-        // above max of i64 error
-        let times: usize = (i64::MAX / MAX_MONEY)
-            .try_into()
-            .expect("4392 can always be converted to usize");
-        let amounts: Vec<Amount> = std::iter::repeat(MAX_MONEY.try_into()?)
-            .take(times + 1)
-            .collect();
-
-        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
-        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
-
-        assert_eq!(sum_ref, sum_value);
-        assert_eq!(sum_ref, Err(Error::SumOverflow));
-
-        // below min of i64 overflow
-        let times: usize = (i64::MAX / MAX_MONEY)
-            .try_into()
-            .expect("4392 can always be converted to usize");
-        let neg_max_money: Amount<NegativeAllowed> = (-MAX_MONEY).try_into()?;
-        let amounts: Vec<Amount<NegativeAllowed>> =
-            std::iter::repeat(neg_max_money).take(times + 1).collect();
-
-        let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
-        let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
-
-        assert_eq!(sum_ref, sum_value);
-        assert_eq!(sum_ref, Err(Error::SumOverflow));
-
-        Ok(())
     }
 }

@@ -16,6 +16,8 @@
 
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate serde_big_array;
 
 #[macro_use]
 extern crate bitflags;
@@ -33,6 +35,7 @@ pub mod shutdown;
 pub mod sprout;
 pub mod transaction;
 pub mod transparent;
+pub mod value_balance;
 pub mod work;
 
 #[cfg(any(test, feature = "proptest-impl"))]

@@ -110,7 +110,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book) = init(config, inbound_service).await;
+    let (_peer_service, address_book) = init(config, inbound_service, None).await;
     let local_listener = address_book.lock().unwrap().local_listener_meta_addr();
 
     if listen_addr.port() == 0 {

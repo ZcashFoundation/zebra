@@ -4,6 +4,7 @@ use std::{
     ops::Deref,
 };
 
+use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
@@ -13,7 +14,7 @@ use zebra_chain::{
 
 use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Chain {
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
@@ -27,25 +28,30 @@ pub struct Chain {
     ///
     /// Note that these UTXOs may not be unspent.
     /// Outputs can be spent by later transactions or blocks in the chain.
-    pub(super) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
     /// The [`OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
-    pub(super) spent_utxos: HashSet<transparent::OutPoint>,
+    pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
-    /// The sprout anchors created by `blocks`.
-    ///
-    /// TODO: does this include intersitial anchors?
-    pub(super) sprout_anchors: HashSet<sprout::tree::Root>,
-    /// The sapling anchors created by `blocks`.
-    pub(super) sapling_anchors: HashSet<sapling::tree::Root>,
-    /// The orchard anchors created by `blocks`.
-    pub(super) orchard_anchors: HashSet<orchard::tree::Root>,
+    /// The Sapling note commitment tree of the tip of this Chain.
+    pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    /// The Orchard note commitment tree of the tip of this Chain.
+    pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
 
-    /// The sprout nullifiers revealed by `blocks`.
+    /// The Sapling anchors created by `blocks`.
+    pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
+    /// The Sapling anchors created by each block in the chain.
+    pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
+    /// The Orchard anchors created by `blocks`.
+    pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
+    /// The Orchard anchors created by each block in the chain.
+    pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
+
+    /// The Sprout nullifiers revealed by `blocks`.
     pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
-    /// The sapling nullifiers revealed by `blocks`.
+    /// The Sapling nullifiers revealed by `blocks`.
     pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
-    /// The orchard nullifiers revealed by `blocks`.
+    /// The Orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
     /// The cumulative work represented by this partial non-finalized chain.
@@ -53,6 +59,30 @@ pub struct Chain {
 }
 
 impl Chain {
+    // Create a new Chain with the given note commitment trees.
+    pub(crate) fn new(
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    ) -> Self {
+        Self {
+            blocks: Default::default(),
+            height_by_hash: Default::default(),
+            tx_by_hash: Default::default(),
+            created_utxos: Default::default(),
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            spent_utxos: Default::default(),
+            sapling_anchors: HashMultiSet::new(),
+            sapling_anchors_by_height: Default::default(),
+            orchard_anchors: HashMultiSet::new(),
+            orchard_anchors_by_height: Default::default(),
+            sprout_nullifiers: Default::default(),
+            sapling_nullifiers: Default::default(),
+            orchard_nullifiers: Default::default(),
+            partial_cumulative_work: Default::default(),
+        }
+    }
+
     /// Is the internal state of `self` the same as `other`?
     ///
     /// [`Chain`] has custom [`Eq`] and [`Ord`] implementations based on proof of work,
@@ -76,10 +106,15 @@ impl Chain {
             self.created_utxos == other.created_utxos &&
             self.spent_utxos == other.spent_utxos &&
 
+            // note commitment trees
+            self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
+            self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
+
             // anchors
-            self.sprout_anchors == other.sprout_anchors &&
             self.sapling_anchors == other.sapling_anchors &&
+            self.sapling_anchors_by_height == other.sapling_anchors_by_height &&
             self.orchard_anchors == other.orchard_anchors &&
+            self.orchard_anchors_by_height == other.orchard_anchors_by_height &&
 
             // nullifiers
             self.sprout_nullifiers == other.sprout_nullifiers &&
@@ -133,15 +168,44 @@ impl Chain {
 
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
-    pub fn fork(&self, fork_tip: block::Hash) -> Result<Option<Self>, ValidateContextError> {
+    ///
+    /// The note commitment trees must be the trees of the finalized tip.
+    pub fn fork(
+        &self,
+        fork_tip: block::Hash,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
         }
 
-        let mut forked = self.clone();
+        let mut forked =
+            self.with_trees(sapling_note_commitment_tree, orchard_note_commitment_tree);
 
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
+        }
+
+        // Rebuild the note commitment trees, starting from the finalized tip tree.
+        // TODO: change to a more efficient approach by removing nodes
+        // from the tree of the original chain (in `pop_tip()`).
+        // See https://github.com/ZcashFoundation/zebra/issues/2378
+        for block in forked.blocks.values() {
+            for transaction in block.block.transactions.iter() {
+                for sapling_note_commitment in transaction.sapling_note_commitments() {
+                    forked
+                        .sapling_note_commitment_tree
+                        .append(*sapling_note_commitment)
+                        .expect("must work since it was already appended before the fork");
+                }
+                for orchard_note_commitment in transaction.orchard_note_commitments() {
+                    forked
+                        .orchard_note_commitment_tree
+                        .append(*orchard_note_commitment)
+                        .expect("must work since it was already appended before the fork");
+                }
+            }
         }
 
         Ok(Some(forked))
@@ -182,6 +246,45 @@ impl Chain {
 
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
+    }
+
+    /// Returns the unspent transaction outputs (UTXOs) in this non-finalized chain.
+    ///
+    /// Callers should also check the finalized state for available UTXOs.
+    /// If UTXOs remain unspent when a block is finalized, they are stored in the finalized state,
+    /// and removed from the relevant chain(s).
+    pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::Utxo> {
+        let mut unspent_utxos = self.created_utxos.clone();
+        unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
+        unspent_utxos
+    }
+
+    /// Clone the Chain but not the history and note commitment trees, using
+    /// the specified trees instead.
+    ///
+    /// Useful when forking, where the trees are rebuilt anyway.
+    fn with_trees(
+        &self,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    ) -> Self {
+        Chain {
+            blocks: self.blocks.clone(),
+            height_by_hash: self.height_by_hash.clone(),
+            tx_by_hash: self.tx_by_hash.clone(),
+            created_utxos: self.created_utxos.clone(),
+            spent_utxos: self.spent_utxos.clone(),
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            sapling_anchors: self.sapling_anchors.clone(),
+            orchard_anchors: self.orchard_anchors.clone(),
+            sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
+            orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
+            sprout_nullifiers: self.sprout_nullifiers.clone(),
+            sapling_nullifiers: self.sapling_nullifiers.clone(),
+            orchard_nullifiers: self.orchard_nullifiers.clone(),
+            partial_cumulative_work: self.partial_cumulative_work,
+        }
     }
 }
 
@@ -289,14 +392,25 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_state_with(orchard_shielded_data)?;
         }
 
+        // Having updated all the note commitment trees and nullifier sets in
+        // this block, the roots of the note commitment trees as of the last
+        // transaction are the treestates of this block.
+        let root = self.sapling_note_commitment_tree.root();
+        self.sapling_anchors.insert(root);
+        self.sapling_anchors_by_height.insert(height, root);
+        let root = self.orchard_note_commitment_tree.root();
+        self.orchard_anchors.insert(root);
+        self.orchard_anchors_by_height.insert(height, root);
+
         Ok(())
     }
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     fn revert_chain_state_with(&mut self, contextually_valid: &ContextuallyValidBlock) {
-        let (block, hash, new_outputs, transaction_hashes) = (
+        let (block, hash, height, new_outputs, transaction_hashes) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
+            contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
         );
@@ -366,6 +480,22 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             self.revert_chain_state_with(orchard_shielded_data);
         }
+        let anchor = self
+            .sapling_anchors_by_height
+            .remove(&height)
+            .expect("Sapling anchor must be present if block was added to chain");
+        assert!(
+            self.sapling_anchors.remove(&anchor),
+            "Sapling anchor must be present if block was added to chain"
+        );
+        let anchor = self
+            .orchard_anchors_by_height
+            .remove(&height)
+            .expect("Orchard anchor must be present if block was added to chain");
+        assert!(
+            self.orchard_anchors.remove(&anchor),
+            "Orchard anchor must be present if block was added to chain"
+        );
     }
 }
 
@@ -463,6 +593,10 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            for cm_u in sapling_shielded_data.note_commitments() {
+                self.sapling_note_commitment_tree.append(*cm_u)?;
+            }
+
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
@@ -482,6 +616,10 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            // Note commitments are not removed from the tree here because we
+            // don't support that operation yet. Instead, we recreate the tree
+            // from the finalized tip in NonFinalizedState.
+
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
@@ -497,6 +635,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            for cm_x in orchard_shielded_data.note_commitments() {
+                self.orchard_note_commitment_tree.append(*cm_x)?;
+            }
+
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),
@@ -513,6 +655,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            // Note commitments are not removed from the tree here because we
+            // don't support that operation yet. Instead, we recreate the tree
+            // from the finalized tip in NonFinalizedState.
+
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),

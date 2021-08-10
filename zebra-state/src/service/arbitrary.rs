@@ -1,23 +1,33 @@
+use std::sync::Arc;
+
 use proptest::{
     num::usize::BinarySearch,
+    prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
-use std::sync::Arc;
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::{self, Block},
     fmt::SummaryDebug,
     parameters::NetworkUpgrade,
     LedgerState,
 };
-use zebra_test::prelude::*;
 
-use crate::tests::Prepare;
+use crate::{arbitrary::Prepare, constants};
 
 use super::*;
 
-const MAX_PARTIAL_CHAIN_BLOCKS: usize = 102;
+/// The chain length for state proptests.
+///
+/// Most generated chains will contain transparent spends at or before this height.
+///
+/// This height was chosen as a tradeoff between chains with no transparent spends,
+/// and chains which spend outputs created by previous spends.
+///
+/// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
+pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
+    constants::MIN_TRANSPARENT_COINBASE_MATURITY as usize + block::arbitrary::PREVOUTS_CHAIN_HEIGHT;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
@@ -66,7 +76,11 @@ impl Strategy for PreparedChain {
                 .prop_flat_map(|ledger| {
                     (
                         Just(ledger.network),
-                        Block::partial_chain_strategy(ledger, MAX_PARTIAL_CHAIN_BLOCKS),
+                        Block::partial_chain_strategy(
+                            ledger,
+                            MAX_PARTIAL_CHAIN_BLOCKS,
+                            check::utxo::transparent_coinbase_spend,
+                        ),
                     )
                 })
                 .prop_map(|(network, vec)| {
@@ -90,59 +104,4 @@ impl Strategy for PreparedChain {
             network: chain.0,
         })
     }
-}
-
-/// Generate a chain that allows us to make tests for the legacy chain rules.
-///
-/// Arguments:
-/// - `transaction_version_override`: See `LedgerState::height_strategy` for details.
-/// - `transaction_has_valid_network_upgrade`: See `LedgerState::height_strategy` for details.
-///    Note: `false` allows zero or more invalid network upgrades.
-/// - `blocks_after_nu_activation`: The number of blocks the strategy will generate
-/// after the provided `network_upgrade`.
-/// - `network_upgrade` - The network upgrade that we are using to simulate from where the
-/// legacy chain checks should start to apply.
-///
-/// Returns:
-/// A generated arbitrary strategy for the provided arguments.
-pub(crate) fn partial_nu5_chain_strategy(
-    transaction_version_override: u32,
-    transaction_has_valid_network_upgrade: bool,
-    blocks_after_nu_activation: u32,
-    // TODO: This argument can be removed and just use Nu5 after we have an activation height #1841
-    network_upgrade: NetworkUpgrade,
-) -> impl Strategy<
-    Value = (
-        Network,
-        Height,
-        zebra_chain::fmt::SummaryDebug<Vec<Arc<Block>>>,
-    ),
-> {
-    (
-        any::<Network>(),
-        NetworkUpgrade::reduced_branch_id_strategy(),
-    )
-        .prop_flat_map(move |(network, random_nu)| {
-            // TODO: update this to Nu5 after we have a height #1841
-            let mut nu = network_upgrade;
-            let nu_activation = nu.activation_height(network).unwrap();
-            let height = Height(nu_activation.0 + blocks_after_nu_activation);
-
-            // The `network_upgrade_override` will not be enough as when it is `None`,
-            // current network upgrade will be used (`NetworkUpgrade::Canopy`) which will be valid.
-            if !transaction_has_valid_network_upgrade {
-                nu = random_nu;
-            }
-
-            zebra_chain::block::LedgerState::height_strategy(
-                height,
-                Some(nu),
-                Some(transaction_version_override),
-                transaction_has_valid_network_upgrade,
-            )
-            .prop_flat_map(move |init| {
-                Block::partial_chain_strategy(init, blocks_after_nu_activation as usize)
-            })
-            .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
-        })
 }

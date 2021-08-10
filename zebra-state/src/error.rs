@@ -3,7 +3,12 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, orchard, sapling, sprout, work::difficulty::CompactDifficulty};
+use zebra_chain::{
+    amount, block, orchard, sapling, sprout, transparent, value_balance::ValueBalanceError,
+    work::difficulty::CompactDifficulty,
+};
+
+use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -31,12 +36,12 @@ impl From<BoxError> for CloneError {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a block could not be committed to the state.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("block is not contextually valid")]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
@@ -75,6 +80,46 @@ pub enum ValidateContextError {
         expected_difficulty: CompactDifficulty,
     },
 
+    #[error("transparent double-spend: {outpoint:?} is spent twice in {location:?}")]
+    #[non_exhaustive]
+    DuplicateTransparentSpend {
+        outpoint: transparent::OutPoint,
+        location: &'static str,
+    },
+
+    #[error("missing transparent output: possible double-spend of {outpoint:?} in {location:?}")]
+    #[non_exhaustive]
+    MissingTransparentOutput {
+        outpoint: transparent::OutPoint,
+        location: &'static str,
+    },
+
+    #[error("out-of-order transparent spend: {outpoint:?} is created by a later transaction in the same block")]
+    #[non_exhaustive]
+    EarlyTransparentSpend { outpoint: transparent::OutPoint },
+
+    #[error(
+        "unshielded transparent coinbase spend: {outpoint:?} \
+         must be spent in a transaction which only has shielded outputs"
+    )]
+    #[non_exhaustive]
+    UnshieldedTransparentCoinbaseSpend { outpoint: transparent::OutPoint },
+
+    #[error(
+        "immature transparent coinbase spend: \
+        attempt to spend {outpoint:?} at {spend_height:?}, \
+        but spends are invalid before {min_spend_height:?}, \
+        which is {MIN_TRANSPARENT_COINBASE_MATURITY:?} blocks \
+        after it was created at {created_height:?}"
+    )]
+    #[non_exhaustive]
+    ImmatureTransparentCoinbaseSpend {
+        outpoint: transparent::OutPoint,
+        spend_height: block::Height,
+        min_spend_height: block::Height,
+        created_height: block::Height,
+    },
+
     #[error("sprout double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
     DuplicateSproutNullifier {
@@ -95,6 +140,51 @@ pub enum ValidateContextError {
         nullifier: orchard::Nullifier,
         in_finalized_state: bool,
     },
+
+    #[error(
+        "the remaining value in the transparent transaction value pool MUST be nonnegative: \
+         {amount_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
+         {transaction_hash:?}"
+    )]
+    #[non_exhaustive]
+    NegativeRemainingTransactionValue {
+        amount_error: amount::Error,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
+
+    #[error(
+        "error calculating the remaining value in the transaction value pool: \
+         {amount_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
+         {transaction_hash:?}"
+    )]
+    #[non_exhaustive]
+    CalculateRemainingTransactionValue {
+        amount_error: amount::Error,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
+
+    #[error(
+        "error calculating value balances for the remaining value in the transaction value pool: \
+         {value_balance_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
+         {transaction_hash:?}"
+    )]
+    #[non_exhaustive]
+    CalculateTransactionValueBalances {
+        value_balance_error: ValueBalanceError,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
+
+    #[error("error in Sapling note commitment tree")]
+    SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
+
+    #[error("error in Orchard note commitment tree")]
+    OrchardNoteCommitmentTreeError(#[from] zebra_chain::orchard::tree::NoteCommitmentTreeError),
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

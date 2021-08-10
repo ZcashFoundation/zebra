@@ -1,11 +1,12 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-alpha.13"
+version = "1.0.0-alpha.14"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+proptest-impl = ["proptest", "zebra-test"]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
@@ -15,6 +16,7 @@ hex = "0.4.3"
 lazy_static = "1.4.0"
 regex = "1"
 serde = { version = "1", features = ["serde_derive"] }
+bincode = "1"
 
 futures = "0.3.15"
 metrics = "0.13.0-alpha.8"
@@ -27,6 +29,12 @@ rocksdb = "0.16.0"
 tempdir = "0.3.7"
 chrono = "0.4.19"
 rlimit = "0.5.4"
+# TODO: this crate is not maintained anymore. Replace it?
+# https://github.com/ZcashFoundation/zebra/issues/2523
+multiset = "0.0.5"
+
+proptest = { version = "0.10.1", optional = true }
+zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
@@ -38,6 +46,10 @@ itertools = "0.10.1"
 spandoc = "0.2"
 tempdir = "0.3.7"
 tokio = { version = "0.3.6", features = ["full"] }
+# TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
+# Note: if updating this, also update the workspace Cargo.toml to match.
+halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
+jubjub = "0.7.0"
 
 proptest = "0.10.1"
 proptest-derive = "0.3"

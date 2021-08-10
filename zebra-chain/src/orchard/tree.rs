@@ -15,6 +15,7 @@
 #![allow(dead_code)]
 
 use std::{
+    cell::Cell,
     convert::TryFrom,
     fmt,
     hash::{Hash, Hasher},
@@ -111,6 +112,12 @@ impl From<Root> for [u8; 32] {
     }
 }
 
+impl From<&Root> for [u8; 32] {
+    fn from(root: &Root) -> Self {
+        (*root).into()
+    }
+}
+
 impl Hash for Root {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.to_bytes().hash(state)
@@ -177,15 +184,36 @@ impl From<pallas::Base> for Node {
     }
 }
 
+impl serde::Serialize for Node {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.to_bytes().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Node {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = <[u8; 32]>::deserialize(deserializer)?;
+        Option::<pallas::Base>::from(pallas::Base::from_bytes(&bytes))
+            .map(Node)
+            .ok_or_else(|| serde::de::Error::custom("invalid Pallas field element"))
+    }
+}
+
 #[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,
 }
 
 /// Orchard Incremental Note Commitment Tree
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
@@ -194,6 +222,24 @@ pub struct NoteCommitmentTree {
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
     inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+    /// A cached root of the tree.
+    ///
+    /// Every time the root is computed by [`Self::root`] it is cached here,
+    /// and the cached value will be returned by [`Self::root`] until the tree is
+    /// changed by [`Self::append`]. This greatly increases performance
+    /// because it avoids recomputing the root when the tree does not change
+    /// between blocks. In the finalized state, the tree is read from
+    /// disk for every block processed, which would also require recomputing
+    /// the root even if it has not changed (note that the cached root is
+    /// serialized with the tree). This is particularly important since we decided
+    /// to instantiate the trees from the genesis block, for simplicity.
+    ///
+    /// [`Cell`] offers interior mutability (it works even with a non-mutable
+    /// reference to the tree) but it prevents the tree (and anything that uses it)
+    /// from being shared between threads. If this ever becomes an issue we can
+    /// leave caching to the callers (which requires much more code), or replace
+    /// `Cell` with `Arc<Mutex<_>>` (and be careful of deadlocks and async code.)
+    cached_root: Cell<Option<Root>>,
 }
 
 impl NoteCommitmentTree {
@@ -206,6 +252,8 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
+            // Invalidate cached root
+            self.cached_root.replace(None);
             Ok(())
         } else {
             Err(NoteCommitmentTreeError::FullTree)
@@ -215,7 +263,16 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        Root(self.inner.root().0)
+        match self.cached_root.get() {
+            // Return cached root
+            Some(root) => root,
+            None => {
+                // Compute root and cache it
+                let root = Root(self.inner.root().0);
+                self.cached_root.replace(Some(root));
+                root
+            }
+        }
     }
 
     /// Get the Pallas-based Sinsemilla hash / root node of this merkle tree of
@@ -247,6 +304,7 @@ impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
             inner: bridgetree::Frontier::new(),
+            cached_root: Default::default(),
         }
     }
 }

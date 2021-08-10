@@ -1,7 +1,9 @@
 //! Arbitrary data generation for transaction proptests
 
 use std::{
+    collections::HashMap,
     convert::{TryFrom, TryInto},
+    ops::Neg,
     sync::Arc,
 };
 
@@ -9,7 +11,7 @@ use chrono::{TimeZone, Utc};
 use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
-    amount::Amount,
+    amount::{self, Amount, NegativeAllowed, NonNegative},
     at_least_one, block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
@@ -18,7 +20,10 @@ use crate::{
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    sprout, transparent, LedgerState,
+    sprout,
+    transparent::{self, outputs_from_utxos, utxos_from_ordered_utxos},
+    value_balance::ValueBalanceError,
+    LedgerState,
 };
 
 use itertools::Itertools;
@@ -31,6 +36,8 @@ use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
 /// for debugging.
 pub const MAX_ARBITRARY_ITEMS: usize = 4;
 
+// TODO: if needed, fixup transaction outputs
+//       (currently 0..=9 outputs, consensus rules require 1..)
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
@@ -162,11 +169,12 @@ impl Transaction {
         mut ledger_state: LedgerState,
         len: usize,
     ) -> BoxedStrategy<Vec<Arc<Self>>> {
+        // TODO: fixup coinbase miner subsidy
         let coinbase = Transaction::arbitrary_with(ledger_state).prop_map(Arc::new);
         ledger_state.has_coinbase = false;
         let remainder = vec(
             Transaction::arbitrary_with(ledger_state).prop_map(Arc::new),
-            len,
+            0..=len,
         );
 
         (coinbase, remainder)
@@ -175,6 +183,214 @@ impl Transaction {
                 remainder
             })
             .boxed()
+    }
+
+    /// Apply `f` to the transparent output, `v_sprout_new`, and `v_sprout_old` values
+    /// in this transaction, regardless of version.
+    pub fn for_each_value_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Amount<NonNegative>),
+    {
+        for output_value in self.output_values_mut() {
+            f(output_value);
+        }
+
+        for sprout_added_value in self.output_values_to_sprout_mut() {
+            f(sprout_added_value);
+        }
+        for sprout_removed_value in self.input_values_from_sprout_mut() {
+            f(sprout_removed_value);
+        }
+    }
+
+    /// Apply `f` to the sapling value balance and orchard value balance
+    /// in this transaction, regardless of version.
+    pub fn for_each_value_balance_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Amount<NegativeAllowed>),
+    {
+        if let Some(sapling_value_balance) = self.sapling_value_balance_mut() {
+            f(sapling_value_balance);
+        }
+
+        if let Some(orchard_value_balance) = self.orchard_value_balance_mut() {
+            f(orchard_value_balance);
+        }
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances,
+    /// so that this transaction passes the "remaining transaction value pool" check.
+    ///
+    /// Returns the remaining transaction value.
+    ///
+    /// `outputs` must contain all the [`Output`]s spent in this block.
+    ///
+    /// Currently, this code almost always leaves some remaining value in the
+    /// transaction value pool.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Output`] is missing from `outpoints`.
+    //
+    // TODO: split this method up, after we've implemented chain value balance adjustments
+    //
+    // TODO: take an extra arbitrary bool, which selects between zero and non-zero
+    //       remaining value in the transaction value pool
+    pub fn fix_remaining_value(
+        &mut self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        // Temporarily make amounts smaller, so the total never overflows MAX_MONEY
+        // in Zebra's ~100-block chain tests. (With up to 7 values per transaction,
+        // and 3 transactions per block.)
+        // TODO: replace this scaling with chain value balance adjustments
+        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
+        where
+            Amount<C>: Copy,
+        {
+            *amount = (*amount / 10_000).expect("divisor is not zero");
+        }
+
+        self.for_each_value_mut(scale_to_avoid_overflow);
+        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+
+        if self.is_coinbase() {
+            // TODO: if needed, fixup coinbase:
+            // - miner subsidy
+            // - founders reward or funding streams (hopefully not?)
+            // - remaining transaction value
+            return Ok(Amount::zero());
+        }
+
+        // calculate the total input value
+
+        let transparent_inputs = self
+            .inputs()
+            .iter()
+            .map(|input| input.value_from_outputs(outputs))
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .map_err(ValueBalanceError::Transparent)?;
+        // TODO: fix callers with invalid values, maybe due to cached outputs?
+        //.expect("chain is limited to MAX_MONEY");
+
+        let sprout_inputs = self
+            .input_values_from_sprout()
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .expect("chain is limited to MAX_MONEY");
+
+        // positive value balances add to the transaction value pool
+        let sapling_input = self
+            .sapling_value_balance()
+            .sapling_amount()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
+        let orchard_input = self
+            .orchard_value_balance()
+            .orchard_amount()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
+        let mut remaining_input_value =
+            (transparent_inputs + sprout_inputs + sapling_input + orchard_input)
+                .expect("chain is limited to MAX_MONEY");
+
+        // assign remaining input value to outputs,
+        // zeroing any outputs that would exceed the input value
+
+        for output_value in self.output_values_mut() {
+            if remaining_input_value >= *output_value {
+                remaining_input_value = (remaining_input_value - *output_value)
+                    .expect("input >= output so result is always non-negative");
+            } else {
+                *output_value = Amount::zero();
+            }
+        }
+
+        for output_value in self.output_values_to_sprout_mut() {
+            if remaining_input_value >= *output_value {
+                remaining_input_value = (remaining_input_value - *output_value)
+                    .expect("input >= output so result is always non-negative");
+            } else {
+                *output_value = Amount::zero();
+            }
+        }
+
+        if let Some(value_balance) = self.sapling_value_balance_mut() {
+            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
+                if remaining_input_value >= output_value {
+                    remaining_input_value = (remaining_input_value - output_value)
+                        .expect("input >= output so result is always non-negative");
+                } else {
+                    *value_balance = Amount::zero();
+                }
+            }
+        }
+
+        if let Some(value_balance) = self.orchard_value_balance_mut() {
+            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
+                if remaining_input_value >= output_value {
+                    remaining_input_value = (remaining_input_value - output_value)
+                        .expect("input >= output so result is always non-negative");
+                } else {
+                    *value_balance = Amount::zero();
+                }
+            }
+        }
+
+        // check our calculations are correct
+        let remaining_transaction_value = self
+            .value_balance_from_outputs(outputs)
+            .expect("chain is limited to MAX_MONEY")
+            .remaining_transaction_value()
+            .unwrap_or_else(|err| {
+                panic!(
+                    "unexpected remaining transaction value: {:?}, \
+                     calculated remaining input value: {:?}",
+                    err, remaining_input_value
+                )
+            });
+        assert_eq!(
+            remaining_input_value,
+            remaining_transaction_value,
+            "fix_remaining_value and remaining_transaction_value calculated different remaining values"
+        );
+
+        Ok(remaining_transaction_value)
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances.
+    /// See `fix_remaining_value` for details.
+    ///
+    /// `utxos` must contain all the [`Utxo`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Utxo`] is missing from `utxos`.
+    #[allow(dead_code)]
+    pub fn fix_remaining_value_from_utxos(
+        &mut self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances.
+    /// See `fix_remaining_value` for details.
+    ///
+    /// `ordered_utxos` must contain all the [`OrderedUtxo`]s spent in this block.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`OrderedUtxo`] is missing from `ordered_utxos`.
+    #[allow(dead_code)]
+    pub fn fix_remaining_value_from_ordered_utxos(
+        &mut self,
+        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        self.fix_remaining_value(&outputs_from_utxos(utxos_from_ordered_utxos(
+            ordered_utxos.clone(),
+        )))
     }
 }
 
@@ -268,32 +484,39 @@ impl Arbitrary for sapling::TransferData<PerSpendAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // TODO: add an extra spend or output using Either, and stop using filter_map
-        (
-            vec(
-                any::<sapling::Spend<PerSpendAnchor>>(),
-                0..MAX_ARBITRARY_ITEMS,
-            ),
-            vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS),
-        )
-            .prop_filter_map(
-                "arbitrary v4 transfers with no spends and no outputs",
-                |(spends, outputs)| {
-                    if !spends.is_empty() {
-                        Some(sapling::TransferData::SpendsAndMaybeOutputs {
-                            shared_anchor: FieldNotPresent,
-                            spends: spends.try_into().unwrap(),
-                            maybe_outputs: outputs,
-                        })
-                    } else if !outputs.is_empty() {
-                        Some(sapling::TransferData::JustOutputs {
-                            outputs: outputs.try_into().unwrap(),
-                        })
+        vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS)
+            .prop_flat_map(|outputs| {
+                (
+                    if outputs.is_empty() {
+                        // must have at least one spend or output
+                        vec(
+                            any::<sapling::Spend<PerSpendAnchor>>(),
+                            1..MAX_ARBITRARY_ITEMS,
+                        )
                     } else {
-                        None
+                        vec(
+                            any::<sapling::Spend<PerSpendAnchor>>(),
+                            0..MAX_ARBITRARY_ITEMS,
+                        )
+                    },
+                    Just(outputs),
+                )
+            })
+            .prop_map(|(spends, outputs)| {
+                if !spends.is_empty() {
+                    sapling::TransferData::SpendsAndMaybeOutputs {
+                        shared_anchor: FieldNotPresent,
+                        spends: spends.try_into().unwrap(),
+                        maybe_outputs: outputs,
                     }
-                },
-            )
+                } else if !outputs.is_empty() {
+                    sapling::TransferData::JustOutputs {
+                        outputs: outputs.try_into().unwrap(),
+                    }
+                } else {
+                    unreachable!("there must be at least one generated spend or output")
+                }
+            })
             .boxed()
     }
 
@@ -304,33 +527,40 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // TODO: add an extra spend or output using Either, and stop using filter_map
-        (
-            any::<sapling::tree::Root>(),
-            vec(
-                any::<sapling::Spend<SharedAnchor>>(),
-                0..MAX_ARBITRARY_ITEMS,
-            ),
-            vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS),
-        )
-            .prop_filter_map(
-                "arbitrary v5 transfers with no spends and no outputs",
-                |(shared_anchor, spends, outputs)| {
-                    if !spends.is_empty() {
-                        Some(sapling::TransferData::SpendsAndMaybeOutputs {
-                            shared_anchor,
-                            spends: spends.try_into().unwrap(),
-                            maybe_outputs: outputs,
-                        })
-                    } else if !outputs.is_empty() {
-                        Some(sapling::TransferData::JustOutputs {
-                            outputs: outputs.try_into().unwrap(),
-                        })
+        vec(any::<sapling::Output>(), 0..MAX_ARBITRARY_ITEMS)
+            .prop_flat_map(|outputs| {
+                (
+                    any::<sapling::tree::Root>(),
+                    if outputs.is_empty() {
+                        // must have at least one spend or output
+                        vec(
+                            any::<sapling::Spend<SharedAnchor>>(),
+                            1..MAX_ARBITRARY_ITEMS,
+                        )
                     } else {
-                        None
+                        vec(
+                            any::<sapling::Spend<SharedAnchor>>(),
+                            0..MAX_ARBITRARY_ITEMS,
+                        )
+                    },
+                    Just(outputs),
+                )
+            })
+            .prop_map(|(shared_anchor, spends, outputs)| {
+                if !spends.is_empty() {
+                    sapling::TransferData::SpendsAndMaybeOutputs {
+                        shared_anchor,
+                        spends: spends.try_into().unwrap(),
+                        maybe_outputs: outputs,
                     }
-                },
-            )
+                } else if !outputs.is_empty() {
+                    sapling::TransferData::JustOutputs {
+                        outputs: outputs.try_into().unwrap(),
+                    }
+                } else {
+                    unreachable!("there must be at least one generated spend or output")
+                }
+            })
             .boxed()
     }
 

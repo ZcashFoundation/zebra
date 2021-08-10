@@ -13,7 +13,12 @@ use futures::{
     channel::{mpsc, oneshot},
     future, FutureExt, SinkExt, StreamExt,
 };
-use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use tokio::{
+    net::TcpStream,
+    sync::{broadcast, watch},
+    task::JoinError,
+    time::timeout,
+};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
@@ -53,6 +58,7 @@ pub struct Handshake<S> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
+    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 /// The peer address that we are handshaking with.
@@ -302,6 +308,7 @@ pub struct Builder<S> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 impl<S> Builder<S>
@@ -361,6 +368,18 @@ where
         self
     }
 
+    /// Provide a realtime endpoint to obtain the current best chain tip block height. Optional.
+    ///
+    /// If this is unset, the minimum accepted protocol version for peer connections is kept
+    /// constant over network upgrade activations.
+    pub fn with_best_tip_height(
+        mut self,
+        best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+    ) -> Self {
+        self.best_tip_height = best_tip_height;
+        self
+    }
+
     /// Whether to request that peers relay transactions to our node.  Optional.
     ///
     /// If this is unset, the node will not request transactions.
@@ -402,6 +421,7 @@ where
             our_services,
             relay,
             parent_span: Span::current(),
+            best_tip_height: self.best_tip_height,
         })
     }
 }
@@ -424,6 +444,7 @@ where
             our_services: None,
             relay: None,
             inv_collector: None,
+            best_tip_height: None,
         }
     }
 }
@@ -433,6 +454,7 @@ where
 ///
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
+#[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version(
     peer_conn: &mut Framed<TcpStream, Codec>,
     connected_addr: &ConnectedAddr,
@@ -441,6 +463,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
+    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -552,17 +575,11 @@ pub async fn negotiate_version(
         Err(HandshakeError::NonceReuse)?;
     }
 
-    // TODO: Reject connections with nodes that don't know about the current network upgrade (#1334)
-    //       Use the latest non-finalized block height, rather than the minimum
-    if remote_version
-        < Version::min_remote_for_height(
-            config.network,
-            // This code will be replaced in #1334
-            constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-                .activation_height(config.network)
-                .expect("minimum network protocol network upgrade has an activation height"),
-        )
-    {
+    // SECURITY: Reject connections to peers on old versions, because they might not know about all
+    // network upgrades and could lead to chain forks or slower block propagation.
+    let height = best_tip_height.and_then(|height| *height.borrow());
+    let min_version = Version::min_remote_for_height(config.network, height);
+    if remote_version < min_version {
         // Disconnect if peer is using an obsolete version.
         Err(HandshakeError::ObsoleteVersion(remote_version))?;
     }
@@ -617,6 +634,7 @@ where
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
+        let best_tip_height = self.best_tip_height.clone();
 
         let fut = async move {
             debug!(
@@ -647,6 +665,7 @@ where
                     user_agent,
                     our_services,
                     relay,
+                    best_tip_height,
                 ),
             )
             .await??;

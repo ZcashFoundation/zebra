@@ -1,12 +1,19 @@
 //! Module defining exactly how to move types in and out of rocksdb
-use std::{convert::TryInto, fmt::Debug, sync::Arc};
+use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
 
+use bincode::Options;
 use zebra_chain::{
+    amount::NonNegative,
     block,
-    block::Block,
-    orchard, sapling,
+    block::{Block, Height},
+    history_tree::NonEmptyHistoryTree,
+    orchard,
+    parameters::Network,
+    primitives::zcash_history,
+    sapling,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transaction, transparent,
+    value_balance::ValueBalance,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -232,6 +239,121 @@ impl IntoDisk for transparent::OutPoint {
     }
 }
 
+impl IntoDisk for sapling::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl IntoDisk for orchard::tree::Root {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl IntoDisk for ValueBalance<NonNegative> {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for ValueBalance<NonNegative> {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array = bytes.as_ref().try_into().unwrap();
+        ValueBalance::from_bytes(array).unwrap()
+    }
+}
+
+// The following implementations for the note commitment trees use `serde` and
+// `bincode` because currently the inner Merkle tree frontier (from
+// `incrementalmerkletree`) only supports `serde` for serialization. `bincode`
+// was chosen because it is small and fast. We explicitly use `DefaultOptions`
+// in particular to disallow trailing bytes; see
+// https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
+
+impl IntoDisk for sapling::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for sapling::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+impl IntoDisk for orchard::tree::NoteCommitmentTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for orchard::tree::NoteCommitmentTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HistoryTreeParts {
+    network: Network,
+    size: u32,
+    peaks: BTreeMap<u32, zcash_history::Entry>,
+    current_height: Height,
+}
+
+impl IntoDisk for NonEmptyHistoryTree {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let data = HistoryTreeParts {
+            network: self.network(),
+            size: self.size(),
+            peaks: self.peaks().clone(),
+            current_height: self.current_height(),
+        };
+        bincode::DefaultOptions::new()
+            .serialize(&data)
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for NonEmptyHistoryTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let parts: HistoryTreeParts = bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect(
+                "deserialization format should match the serialization format used by IntoDisk",
+            );
+        NonEmptyHistoryTree::from_cache(
+            parts.network,
+            parts.size,
+            parts.peaks,
+            parts.current_height,
+        )
+        .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
 /// defined format
 pub trait DiskSerialize {
@@ -241,6 +363,11 @@ pub trait DiskSerialize {
     where
         K: IntoDisk + Debug,
         V: IntoDisk;
+
+    /// Remove the given key form rocksdb column family if it exists.
+    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
+    where
+        K: IntoDisk + Debug;
 }
 
 impl DiskSerialize for rocksdb::WriteBatch {
@@ -252,6 +379,14 @@ impl DiskSerialize for rocksdb::WriteBatch {
         let key_bytes = key.as_bytes();
         let value_bytes = value.as_bytes();
         self.put_cf(cf, key_bytes, value_bytes);
+    }
+
+    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
+    where
+        K: IntoDisk + Debug,
+    {
+        let key_bytes = key.as_bytes();
+        self.delete_cf(cf, key_bytes);
     }
 }
 
@@ -412,5 +547,12 @@ mod tests {
         zebra_test::init();
 
         proptest!(|(val in any::<transparent::Utxo>())| assert_value_properties(val));
+    }
+
+    #[test]
+    fn roundtrip_value_balance() {
+        zebra_test::init();
+
+        proptest!(|(val in any::<ValueBalance::<NonNegative>>())| assert_value_properties(val));
     }
 }

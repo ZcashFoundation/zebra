@@ -31,28 +31,9 @@ use std::convert::TryFrom;
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
-    let tx_in_count = tx.inputs().len();
-    let tx_out_count = tx.outputs().len();
-    let n_joinsplit = tx.joinsplit_count();
-    let n_spends_sapling = tx.sapling_spends_per_anchor().count();
-    let n_outputs_sapling = tx.sapling_outputs().count();
-    let n_actions_orchard = tx.orchard_actions().count();
-    let flags_orchard = tx.orchard_flags().unwrap_or_else(Flags::empty);
-
-    // TODO: Improve the code to express the spec rules better #2410.
-    if tx_in_count
-        + n_spends_sapling
-        + n_joinsplit
-        + (n_actions_orchard > 0 && flags_orchard.contains(Flags::ENABLE_SPENDS)) as usize
-        == 0
-    {
+    if !tx.has_transparent_or_shielded_inputs() {
         Err(TransactionError::NoInputs)
-    } else if tx_out_count
-        + n_outputs_sapling
-        + n_joinsplit
-        + (n_actions_orchard > 0 && flags_orchard.contains(Flags::ENABLE_OUTPUTS)) as usize
-        == 0
-    {
+    } else if !tx.has_transparent_or_shielded_outputs() {
         Err(TransactionError::NoOutputs)
     } else {
         Ok(())
@@ -144,7 +125,7 @@ pub fn disabled_add_to_sprout_pool(
     if height >= canopy_activation_height {
         let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
 
-        let tx_sprout_pool = tx.sprout_pool_added_values();
+        let tx_sprout_pool = tx.output_values_to_sprout();
         for vpub_old in tx_sprout_pool {
             if *vpub_old != zero {
                 return Err(TransactionError::DisabledAddToSproutPool);

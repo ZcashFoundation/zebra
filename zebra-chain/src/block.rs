@@ -10,11 +10,11 @@ mod serialize;
 pub mod merkle;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
+pub mod arbitrary;
 #[cfg(any(test, feature = "bench"))]
 pub mod tests;
 
-use std::fmt;
+use std::{collections::HashMap, convert::TryInto, fmt, ops::Neg};
 
 pub use commitment::{ChainHistoryMmrRootHash, Commitment, CommitmentError};
 pub use hash::Hash;
@@ -28,6 +28,7 @@ pub use arbitrary::LedgerState;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    amount::NegativeAllowed,
     fmt::DisplayToDebug,
     orchard,
     parameters::{Network, NetworkUpgrade},
@@ -36,6 +37,7 @@ use crate::{
     sprout,
     transaction::Transaction,
     transparent,
+    value_balance::{ValueBalance, ValueBalanceError},
 };
 
 /// A Zcash block, containing a header and a list of transactions.
@@ -142,6 +144,59 @@ impl Block {
             .iter()
             .map(|transaction| transaction.orchard_nullifiers())
             .flatten()
+    }
+
+    /// Count how many Sapling transactions exist in a block,
+    /// i.e. transactions "where either of vSpendsSapling or vOutputsSapling is non-empty"
+    /// (https://zips.z.cash/zip-0221#tree-node-specification).
+    pub fn sapling_transactions_count(&self) -> u64 {
+        self.transactions
+            .iter()
+            .filter(|tx| tx.has_sapling_shielded_data())
+            .count()
+            .try_into()
+            .expect("number of transactions must fit u64")
+    }
+
+    /// Count how many Orchard transactions exist in a block,
+    /// i.e. transactions "where vActionsOrchard is non-empty."
+    /// (https://zips.z.cash/zip-0221#tree-node-specification).
+    pub fn orchard_transactions_count(&self) -> u64 {
+        self.transactions
+            .iter()
+            .filter(|tx| tx.has_orchard_shielded_data())
+            .count()
+            .try_into()
+            .expect("number of transactions must fit u64")
+    }
+
+    /// Get the overall chain value pool change in this block,
+    /// the negative sum of the transaction value balances in this block.
+    ///
+    /// These are the changes in the transparent, sprout, sapling, and orchard
+    /// chain value pools, as a result of this block.
+    ///
+    /// Positive values are added to the corresponding chain value pool.
+    /// Negative values are removed from the corresponding pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    ///
+    /// `utxos` must contain the [`Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    pub fn chain_value_pool_change(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        let transaction_value_balance_total = self
+            .transactions
+            .iter()
+            .flat_map(|t| t.value_balance(utxos))
+            .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?;
+
+        Ok(transaction_value_balance_total.neg())
     }
 }
 
