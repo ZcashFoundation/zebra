@@ -80,6 +80,7 @@ impl ShieldedData {
 
         let key_bytes: [u8; 32] = (cv - cv_balance).into();
         key_bytes.into()
+    }
 
     /// Provide access to the `value_balance` field of the shielded data.
     ///

@@ -547,26 +547,6 @@ where
 
         Ok(async_checks)
     }
-
-    /// Verifies a transaction's Orchard shielded data.
-    fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
-        shielded_sighash: &blake2b_simd::Hash,
-    ) -> Result<AsyncChecks, TransactionError> {
-        let mut async_checks = AsyncChecks::new();
-
-        if let Some(orchard_shielded_data) = orchard_shielded_data {
-            let bvk = orchard_shielded_data.binding_verification_key();
-
-            async_checks.push(
-                primitives::redpallas::VERIFIER
-                    .clone()
-                    .oneshot((bvk, orchard_shielded_data.binding_sig, &shielded_sighash).into()),
-            );
-        }
-
-        Ok(async_checks)
-    }
 }
 
 /// A set of unordered asynchronous checks that should succeed.
