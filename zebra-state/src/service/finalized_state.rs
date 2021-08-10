@@ -396,18 +396,12 @@ impl FinalizedState {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
 
-            // Consensus rule: The block height of the genesis block is 0
-            // https://zips.z.cash/protocol/protocol.pdf#blockchain
-            if height == block::Height(0) {
-                batch.zs_insert(tip_chain_value_pool, height, ValueBalance::zero());
-            } else {
-                let current_pool = self.current_value_pool().constrain::<NegativeAllowed>()?;
-                batch.zs_insert(
-                    tip_chain_value_pool,
-                    height,
-                    (current_pool + block_value_balance)?.constrain::<NonNegative>()?,
-                );
-            }
+            let current_pool = self.current_value_pool().constrain::<NegativeAllowed>()?;
+            batch.zs_insert(
+                tip_chain_value_pool,
+                height,
+                (current_pool + block_value_balance)?.constrain::<NonNegative>()?,
+            );
 
             Ok(batch)
         };
