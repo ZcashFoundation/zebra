@@ -13,7 +13,7 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::fmt;
+use std::{cell::Cell, fmt};
 
 use bitvec::prelude::*;
 use incrementalmerkletree::{bridgetree, Frontier};
@@ -185,6 +185,24 @@ pub struct NoteCommitmentTree {
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
     inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+    /// A cached root of the tree.
+    ///
+    /// Every time the root is computed by [`Self::root`] it is cached here,
+    /// and the cached value will be returned by [`Self::root`] until the tree is
+    /// changed by [`Self::append`]. This greatly increases performance
+    /// because it avoids recomputing the root when the tree does not change
+    /// between blocks. In the finalized state, the tree is read from
+    /// disk for every block processed, which would also require recomputing
+    /// the root even if it has not changed (note that the cached root is
+    /// serialized with the tree). This is particularly important since we decided
+    /// to instantiate the trees from the genesis block, for simplicity.
+    ///
+    /// [`Cell`] offers interior mutability (it works even with a non-mutable
+    /// reference to the tree) but it prevents the tree (and anything that uses it)
+    /// from being shared between threads. If this ever becomes an issue we can
+    /// leave caching to the callers (which requires much more code), or replace
+    /// `Cell` with `Arc<Mutex<_>>` (and be careful of deadlocks and async code.)
+    cached_root: Cell<Option<Root>>,
 }
 
 impl NoteCommitmentTree {
@@ -197,6 +215,8 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_u.into()) {
+            // Invalidate cached root
+            self.cached_root.replace(None);
             Ok(())
         } else {
             Err(NoteCommitmentTreeError::FullTree)
@@ -206,7 +226,16 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Sapling
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        Root(self.inner.root().0)
+        match self.cached_root.get() {
+            // Return cached root
+            Some(root) => root,
+            None => {
+                // Compute root and cache it
+                let root = Root(self.inner.root().0);
+                self.cached_root.replace(Some(root));
+                root
+            }
+        }
     }
 
     /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
@@ -238,6 +267,7 @@ impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
             inner: bridgetree::Frontier::new(),
+            cached_root: Default::default(),
         }
     }
 }
