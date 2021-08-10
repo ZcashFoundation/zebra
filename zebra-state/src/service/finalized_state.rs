@@ -400,7 +400,9 @@ impl FinalizedState {
             batch.zs_insert(
                 tip_chain_value_pool,
                 height,
-                (current_pool + block_value_balance)?.constrain::<NonNegative>()?,
+                current_pool
+                    .update_with_chain_value_pool_change(block_value_balance)?
+                    .constrain::<NonNegative>()?,
             );
 
             Ok(batch)
