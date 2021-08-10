@@ -62,7 +62,7 @@ impl From<&zcash_history::NodeData> for NodeData {
 /// An encoded entry in the tree.
 ///
 /// Contains the node data and information about its position in the tree.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entry {
     #[serde(with = "BigArray")]
     inner: [u8; zcash_history::MAX_ENTRY_SIZE],
@@ -232,6 +232,15 @@ impl<V: Version> Tree<V> {
         // Both append_leaf() and truncate_leaf() leave a root node, so it should
         // always exist.
         V::hash(self.inner.root_node().expect("must have root node").data()).into()
+    }
+}
+
+impl<V: zcash_history::Version> std::fmt::Debug for Tree<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tree")
+            .field("network", &self.network)
+            .field("network_upgrade", &self.network_upgrade)
+            .finish()
     }
 }
 
