@@ -9,9 +9,9 @@ use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
-    history_tree::HistoryTree,
+    history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
-    parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling, sprout,
     transaction::{self, Transaction},
     transparent,
@@ -363,28 +363,7 @@ impl FinalizedState {
             let sapling_root = sapling_note_commitment_tree.root();
             let orchard_root = orchard_note_commitment_tree.root();
 
-            // Create the history tree if it's the Heartwood activation block.
-            let heartwood_height = NetworkUpgrade::Heartwood
-                .activation_height(self.network)
-                .expect("Heartwood height is known");
-            match height.cmp(&heartwood_height) {
-                std::cmp::Ordering::Less => assert!(
-                    history_tree.is_none(),
-                    "history tree must not exist pre-Heartwood"
-                ),
-                std::cmp::Ordering::Equal => {
-                    history_tree = Some(HistoryTree::from_block(
-                        self.network,
-                        block.clone(),
-                        &sapling_root,
-                        &orchard_root,
-                    )?);
-                }
-                std::cmp::Ordering::Greater => history_tree
-                    .as_mut()
-                    .expect("history tree must exist Heartwood-onward")
-                    .push(block.clone(), &sapling_root, &orchard_root)?,
-            }
+            history_tree.push(self.network, block.clone(), sapling_root, orchard_root)?;
 
             // Compute the new anchors and index them
             // Note: if the root hasn't changed, we write the same value again.
@@ -407,7 +386,7 @@ impl FinalizedState {
                 height,
                 orchard_note_commitment_tree,
             );
-            if let Some(history_tree) = history_tree {
+            if let Some(history_tree) = history_tree.as_ref() {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
 
@@ -551,10 +530,20 @@ impl FinalizedState {
 
     /// Returns the ZIP-221 history tree of the finalized tip or `None`
     /// if it does not exist yet in the state (pre-Heartwood).
-    pub fn history_tree(&self) -> Option<HistoryTree> {
-        let height = self.finalized_tip_height()?;
-        let history_tree = self.db.cf_handle("history_tree").unwrap();
-        self.db.zs_get(history_tree, &height)
+    pub fn history_tree(&self) -> HistoryTree {
+        match self.finalized_tip_height() {
+            Some(height) => {
+                let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+                let history_tree: Option<NonEmptyHistoryTree> =
+                    self.db.zs_get(history_tree_cf, &height);
+                if let Some(non_empty_tree) = history_tree {
+                    HistoryTree::from(non_empty_tree)
+                } else {
+                    Default::default()
+                }
+            }
+            None => Default::default(),
+        }
     }
 
     /// If the database is `ephemeral`, delete it.
