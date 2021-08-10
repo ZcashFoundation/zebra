@@ -37,7 +37,7 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter};
 
 /// A Zcash transaction.
 ///
@@ -927,19 +927,16 @@ impl Transaction {
         }
     }
 
-    /// Return the sprout value balance,
-    /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
+    /// Return a list of sprout value balances,
+    /// the changes in the transaction value pool due to each sprout [`JoinSplit`].
     ///
-    /// The sum of all sprout `vpub_new` fields, minus the sum of all `vpub_old` fields.
+    /// Each value balance is the sprout `vpub_new` field, minus the `vpub_old` field.
     ///
-    /// Positive values are added to this transaction's value pool,
-    /// and removed from the sprout chain value pool.
-    /// Negative values are removed from this transaction,
-    /// and added to the sprout pool.
-    ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        let joinsplit_value_balance = match self {
+    /// See `sprout_value_balance` for details.
+    fn sprout_joinsplit_value_balances(
+        &self,
+    ) -> impl Iterator<Item = ValueBalance<NegativeAllowed>> + '_ {
+        let joinsplit_value_balances = match self {
             Transaction::V2 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
@@ -947,16 +944,11 @@ impl Transaction {
             | Transaction::V3 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data
-                .value_balance()
-                .map_err(ValueBalanceError::Sprout)?,
+            } => joinsplit_data.joinsplit_value_balances(),
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
-            } => joinsplit_data
-                .value_balance()
-                .map_err(ValueBalanceError::Sprout)?,
-
+            } => joinsplit_data.joinsplit_value_balances(),
             Transaction::V1 { .. }
             | Transaction::V2 {
                 joinsplit_data: None,
@@ -970,10 +962,25 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Amount::zero(),
+            | Transaction::V5 { .. } => Box::new(iter::empty()),
         };
 
-        Ok(ValueBalance::from_sprout_amount(joinsplit_value_balance))
+        joinsplit_value_balances.map(ValueBalance::from_sprout_amount)
+    }
+
+    /// Return the sprout value balance,
+    /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
+    ///
+    /// The sum of all sprout `vpub_new` fields, minus the sum of all `vpub_old` fields.
+    ///
+    /// Positive values are added to this transaction's value pool,
+    /// and removed from the sprout chain value pool.
+    /// Negative values are removed from this transaction,
+    /// and added to the sprout pool.
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.sprout_joinsplit_value_balances().sum()
     }
 
     /// Return the sapling value balance,
