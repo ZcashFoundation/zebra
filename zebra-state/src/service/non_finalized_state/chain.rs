@@ -63,7 +63,7 @@ pub struct Chain {
 }
 
 impl Chain {
-    /// Create a new Chain with the given note commitment trees.
+    /// Create a new Chain with the given trees and network.
     pub(crate) fn new(
         network: Network,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
