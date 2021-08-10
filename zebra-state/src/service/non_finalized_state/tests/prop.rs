@@ -36,6 +36,9 @@ fn forked_equals_pushed() -> Result<()> {
                                           .and_then(|v| v.parse().ok())
                                           .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, fork_at_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+            // Skip first block which was used for the history tree; make sure fork_at_count is still valid
+            let fork_at_count = std::cmp::min(fork_at_count, chain.len() - 1);
+            let chain = &chain[1..];
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
 
@@ -105,6 +108,9 @@ fn finalized_equals_pushed() -> Result<()> {
                                       .and_then(|v| v.parse().ok())
                                       .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
     |((chain, end_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+        // Skip first block which was used for the history tree; make sure end_count is still valid
+        let end_count = std::cmp::min(end_count, chain.len() - 1);
+        let chain = &chain[1..];
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
         let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree);

@@ -120,8 +120,7 @@ impl Strategy for PreparedChain {
                         Just(ledger.network),
                         Block::partial_chain_strategy(
                             ledger,
-                            // One additional block is used to generate the history tree
-                            MAX_PARTIAL_CHAIN_BLOCKS + 1,
+                            MAX_PARTIAL_CHAIN_BLOCKS,
                             check::utxo::transparent_coinbase_spend,
                         ),
                     )
@@ -136,7 +135,7 @@ impl Strategy for PreparedChain {
                 })
                 .new_tree(runner)?
                 .current();
-            // Generate a history tree from the first block; use the rest
+            // Generate a history tree from the first block
             let history_tree = HistoryTree::from_block(
                 network,
                 blocks[0].block.clone(),
@@ -145,11 +144,7 @@ impl Strategy for PreparedChain {
                 &Default::default(),
             )
             .expect("history tree should be created");
-            *chain = Some((
-                network,
-                Arc::new(SummaryDebug(blocks[1..].to_vec())),
-                history_tree,
-            ));
+            *chain = Some((network, Arc::new(SummaryDebug(blocks)), history_tree));
         }
 
         let chain = chain.clone().expect("should be generated");
