@@ -14,6 +14,7 @@ use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
+    history_tree::HistoryTree,
     orchard,
     parameters::Network,
     sapling,
@@ -129,6 +130,7 @@ impl NonFinalizedState {
             parent_hash,
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
+            finalized_state.history_tree(),
         )?;
 
         // We might have taken a chain, so all validation must happen within
@@ -161,8 +163,10 @@ impl NonFinalizedState {
         finalized_state: &FinalizedState,
     ) -> Result<(), ValidateContextError> {
         let chain = Chain::new(
+            self.network,
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
+            finalized_state.history_tree(),
         );
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -355,13 +359,14 @@ impl NonFinalizedState {
     /// The chain can be an existing chain in the non-finalized state or a freshly
     /// created fork, if needed.
     ///
-    /// The note commitment trees must be the trees of the finalized tip.
+    /// The trees must be the trees of the finalized tip.
     /// They are used to recreate the trees if a fork is needed.
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        history_tree: HistoryTree,
     ) -> Result<Box<Chain>, ValidateContextError> {
         match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // An existing chain in the non-finalized state
@@ -376,6 +381,7 @@ impl NonFinalizedState {
                                 parent_hash,
                                 sapling_note_commitment_tree.clone(),
                                 orchard_note_commitment_tree.clone(),
+                                history_tree.clone(),
                             )
                             .transpose()
                     })

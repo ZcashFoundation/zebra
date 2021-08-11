@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::Block,
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
+};
 use zebra_test::prelude::*;
 
 use crate::{
@@ -18,7 +22,12 @@ use self::assert_eq;
 #[test]
 fn construct_empty() {
     zebra_test::init();
-    let _chain = Chain::new(Default::default(), Default::default());
+    let _chain = Chain::new(
+        Network::Mainnet,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
 }
 
 #[test]
@@ -27,7 +36,12 @@ fn construct_single() -> Result<()> {
     let block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
-    let mut chain = Chain::new(Default::default(), Default::default());
+    let mut chain = Chain::new(
+        Network::Mainnet,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
     chain = chain.push(block.prepare())?;
 
     assert_eq!(1, chain.blocks.len());
@@ -49,7 +63,12 @@ fn construct_many() -> Result<()> {
         block = next_block;
     }
 
-    let mut chain = Chain::new(Default::default(), Default::default());
+    let mut chain = Chain::new(
+        Network::Mainnet,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
 
     for block in blocks {
         chain = chain.push(block.prepare())?;
@@ -68,10 +87,20 @@ fn ord_matches_work() -> Result<()> {
         .set_work(1);
     let more_block = less_block.clone().set_work(10);
 
-    let mut lesser_chain = Chain::new(Default::default(), Default::default());
+    let mut lesser_chain = Chain::new(
+        Network::Mainnet,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
     lesser_chain = lesser_chain.push(less_block.prepare())?;
 
-    let mut bigger_chain = Chain::new(Default::default(), Default::default());
+    let mut bigger_chain = Chain::new(
+        Network::Mainnet,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
     bigger_chain = bigger_chain.push(more_block.prepare())?;
 
     assert!(bigger_chain > lesser_chain);
@@ -91,11 +120,14 @@ fn best_chain_wins() -> Result<()> {
 
 fn best_chain_wins_for_network(network: Network) -> Result<()> {
     let block1: Arc<Block> = match network {
+        // Since the brand new FinalizedState below will pass a None history tree
+        // to the NonFinalizedState, we must use pre-Heartwood blocks since
+        // they won't trigger the history tree update in the NonFinalizedState.
         Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
         }
         Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
         }
     };
 
@@ -128,11 +160,14 @@ fn finalize_pops_from_best_chain() -> Result<()> {
 
 fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let block1: Arc<Block> = match network {
+        // Since the brand new FinalizedState below will pass a None history tree
+        // to the NonFinalizedState, we must use pre-Heartwood blocks since
+        // they won't trigger the history tree update in the NonFinalizedState.
         Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
         }
         Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
         }
     };
 
@@ -172,11 +207,14 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     network: Network,
 ) -> Result<()> {
     let block1: Arc<Block> = match network {
+        // Since the brand new FinalizedState below will pass a None history tree
+        // to the NonFinalizedState, we must use pre-Heartwood blocks since
+        // they won't trigger the history tree update in the NonFinalizedState.
         Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
         }
         Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
         }
     };
 
@@ -212,11 +250,14 @@ fn shorter_chain_can_be_best_chain() -> Result<()> {
 
 fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     let block1: Arc<Block> = match network {
+        // Since the brand new FinalizedState below will pass a None history tree
+        // to the NonFinalizedState, we must use pre-Heartwood blocks since
+        // they won't trigger the history tree update in the NonFinalizedState.
         Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
         }
         Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
         }
     };
 
@@ -251,11 +292,14 @@ fn longer_chain_with_more_work_wins() -> Result<()> {
 
 fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> {
     let block1: Arc<Block> = match network {
+        // Since the brand new FinalizedState below will pass a None history tree
+        // to the NonFinalizedState, we must use pre-Heartwood blocks since
+        // they won't trigger the history tree update in the NonFinalizedState.
         Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
         }
         Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
         }
     };
 
@@ -293,11 +337,14 @@ fn equal_length_goes_to_more_work() -> Result<()> {
 }
 fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let block1: Arc<Block> = match network {
+        // Since the brand new FinalizedState below will pass a None history tree
+        // to the NonFinalizedState, we must use pre-Heartwood blocks since
+        // they won't trigger the history tree update in the NonFinalizedState.
         Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
         }
         Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES.zcash_deserialize_into()?
+            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
         }
     };
 
@@ -315,6 +362,76 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 
     let tip_hash = state.best_tip().unwrap().1;
     assert_eq!(expected_hash, tip_hash);
+
+    Ok(())
+}
+
+#[test]
+fn history_tree_is_updated() -> Result<()> {
+    history_tree_is_updated_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
+    history_tree_is_updated_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
+    // TODO: we can't test other upgrades until we have a method for creating a FinalizedState
+    // with a HistoryTree.
+    Ok(())
+}
+
+fn history_tree_is_updated_for_network_upgrade(
+    network: Network,
+    network_upgrade: NetworkUpgrade,
+) -> Result<()> {
+    let blocks = match network {
+        Network::Mainnet => &*zebra_test::vectors::MAINNET_BLOCKS,
+        Network::Testnet => &*zebra_test::vectors::TESTNET_BLOCKS,
+    };
+    let height = network_upgrade.activation_height(network).unwrap().0;
+
+    let prev_block = Arc::new(
+        blocks
+            .get(&(height - 1))
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+    let activation_block = prev_block.make_fake_child();
+    let next_block = activation_block.make_fake_child();
+
+    let mut state = NonFinalizedState::new(network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+
+    state.commit_new_chain(prev_block.prepare(), &finalized_state)?;
+
+    let chain = state.best_chain().unwrap();
+    if network_upgrade == NetworkUpgrade::Heartwood {
+        assert!(
+            chain.history_tree.as_ref().is_none(),
+            "history tree must not exist yet"
+        );
+    } else {
+        assert!(
+            chain.history_tree.as_ref().is_some(),
+            "history tree must already exist"
+        );
+    }
+
+    state.commit_block(activation_block.prepare(), &finalized_state)?;
+
+    let chain = state.best_chain().unwrap();
+    assert!(
+        chain.history_tree.as_ref().is_some(),
+        "history tree must have been (re)created"
+    );
+    assert_eq!(
+        chain.history_tree.as_ref().as_ref().unwrap().size(),
+        1,
+        "history tree must have a single node"
+    );
+
+    state.commit_block(next_block.prepare(), &finalized_state)?;
+
+    assert!(
+        state.best_chain().unwrap().history_tree.as_ref().is_some(),
+        "history tree must still exist"
+    );
 
     Ok(())
 }

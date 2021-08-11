@@ -149,6 +149,12 @@ impl From<[u8; 32]> for ChainHistoryMmrRootHash {
     }
 }
 
+impl From<ChainHistoryMmrRootHash> for [u8; 32] {
+    fn from(hash: ChainHistoryMmrRootHash) -> Self {
+        hash.0
+    }
+}
+
 /// A block commitment to chain history and transaction auth.
 /// - the chain history tree for all ancestors in the current network upgrade,
 ///   and
@@ -170,7 +176,7 @@ pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 /// implement, and ensures that we don't reject blocks or transactions
 /// for a non-enumerated reason.
 #[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum CommitmentError {
     #[error("invalid final sapling root: expected {expected:?}, actual: {actual:?}")]
     InvalidFinalSaplingRoot {
