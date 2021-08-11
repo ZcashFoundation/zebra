@@ -59,8 +59,9 @@ jobs:
           --scopes cloud-platform \
           --tags zebrad \
           --zone "$ZONE"
-      # Build and run test container to sync up to activation and no further, for mainnet and then testnet
+      # Build and run test container to sync up to activation and no further
       - name: Regenerate state for tests
+        id: regenerate-state
         run: |
           gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --zone "$ZONE" --command \
           "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git &&
@@ -68,6 +69,12 @@ jobs:
           docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test . &&
           docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-${{ github.event.inputs.network }},target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_to_mandatory_checkpoint_${{ github.event.inputs.network }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ github.event.inputs.network }};
           "
+      # Create image from disk that will be used in test.yml workflow
+      - name: Create image from state disk
+        # Only run if the earlier step succeeds
+        if: steps.regenerate-state.outcome == 'success'
+        run: |
+          gcloud compute images create "zebrad-cache-$SHORT_SHA-${{ github.event.inputs.network }}" --source-disk="zebrad-cache-$SHORT_SHA-${{ github.event.inputs.network }}" --source-disk-zone="$ZONE"
       # Clean up
       - name: Delete test instance
         # Always run even if the earlier step fails
