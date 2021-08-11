@@ -119,7 +119,7 @@ fn request_genesis_is_rate_limited() {
         );
 
     // start the sync
-    let mut chain_sync = ChainSync::new(
+    let (mut chain_sync, _) = ChainSync::new(
         &ZebradConfig::default(),
         peer_service,
         state_service,
