@@ -3,7 +3,7 @@ use std::io;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::MAX_BLOCK_BYTES,
     primitives::{x25519, Bctv14Proof, Groth16Proof, ZkSnarkProof},
     serialization::{
@@ -67,6 +67,27 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
         self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
         Ok(())
+    }
+}
+
+impl<P: ZkSnarkProof> JoinSplit<P> {
+    /// Return the sprout value balance,
+    /// the change in the transaction value pool due to this sprout [`JoinSplit`].
+    ///
+    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    ///
+    /// See [`Transaction::sprout_value_balance`] for details.
+    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
+        let vpub_new = self
+            .vpub_new
+            .constrain()
+            .expect("constrain::NegativeAllowed is always valid");
+        let vpub_old = self
+            .vpub_old
+            .constrain()
+            .expect("constrain::NegativeAllowed is always valid");
+
+        (vpub_new - vpub_old).expect("subtraction of two valid amounts is a valid NegativeAllowed")
     }
 }
 
