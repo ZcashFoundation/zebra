@@ -21,7 +21,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, count, network) in PreparedChain::default())| {
+        |((chain, count, network, _history_tree) in PreparedChain::default())| {
             let mut state = FinalizedState::new(&Config::ephemeral(), network);
             let mut height = Height(0);
             // use `count` to minimize test failures, so they are easier to diagnose
