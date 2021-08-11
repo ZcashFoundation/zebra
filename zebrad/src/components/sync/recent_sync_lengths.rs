@@ -69,6 +69,12 @@ impl RecentSyncLengths {
 
         self.recent_lengths.truncate(Self::MAX_RECENT_LENGTHS);
 
+        // TODO: remove or downgrade this log to debug
+        tracing::info!(
+            recent_lengths = ?self.recent_lengths,
+            "sending recent sync lengths"
+        );
+
         // ignore dropped receivers
         let _ = self.sender.send(self.recent_lengths.clone());
     }
