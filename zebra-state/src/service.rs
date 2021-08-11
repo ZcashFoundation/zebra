@@ -276,7 +276,7 @@ impl StateService {
         let relevant_chain = self.any_ancestor_blocks(prepared.block.header.previous_block_hash);
 
         // Security: check proof of work before any other checks
-        check::block_is_contextually_valid(
+        check::block_is_valid_for_recent_chain(
             prepared,
             self.network,
             self.disk.finalized_tip_height(),
