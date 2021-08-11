@@ -4725,6 +4725,8 @@ dependencies = [
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 1.0.7",
+ "proptest",
+ "proptest-derive",
  "regex",
  "semver 1.0.3",
  "sentry",
