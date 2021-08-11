@@ -25,6 +25,7 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     transparent,
+    value_balance::ValueBalance,
     work::equihash,
 };
 use zebra_state as zs;
@@ -203,14 +204,14 @@ where
             metrics::gauge!("zcash.chain.verified.block.height", height.0 as _);
             metrics::counter!("zcash.chain.verified.block.total", 1);
 
-            // Finally, submit the block for contextual verification.
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
-            let block_value_balance = block
-                .chain_value_pool_change(&transparent::utxos_from_ordered_utxos(
-                    new_outputs.clone(),
-                ))
-                .expect("all utxos needed to compute value balance should be known at this stage");
+
+            // TODO: Call `block.chain_value_pool_change()` with all the needed `Utxo`s.
+            // `Utxo`s in `new_outputs` are currently not enough.
+            let block_value_balance = ValueBalance::zero();
+
+            // Finally, submit the block for contextual verification.
             let prepared_block = zs::PreparedBlock {
                 block,
                 hash,

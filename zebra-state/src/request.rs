@@ -133,9 +133,9 @@ impl From<Arc<Block>> for FinalizedBlock {
             .collect::<Vec<_>>();
         let new_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
 
-        let block_value_balance = block
-            .chain_value_pool_change(&new_outputs)
-            .expect("finalized blocks must have a chain value pool");
+        // TODO: Call `block.chain_value_pool_change()` with all the needed `Utxo`s.
+        // `Utxo`s in `new_outputs` are currently not enough.
+        let block_value_balance = ValueBalance::zero();
 
         Self {
             block,
