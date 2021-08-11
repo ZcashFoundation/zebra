@@ -10,6 +10,7 @@ pub mod metrics;
 mod sync;
 pub mod tokio;
 pub mod tracing;
+pub mod mempool;
 
 pub use inbound::Inbound;
 pub use sync::ChainSync;
