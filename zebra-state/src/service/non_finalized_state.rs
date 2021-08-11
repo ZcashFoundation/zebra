@@ -20,6 +20,7 @@ use zebra_chain::{
     sapling,
     transaction::{self, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 #[cfg(test)]
@@ -167,6 +168,9 @@ impl NonFinalizedState {
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
+            // TODO: We need to call `finalized_state.current_value_pool()`
+            // once we have #2599 merged.
+            ValueBalance::zero(),
         );
         let (height, hash) = (prepared.height, prepared.hash);
 

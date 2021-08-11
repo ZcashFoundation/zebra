@@ -8,9 +8,9 @@ use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    block, history_tree::HistoryTree, orchard, parameters::Network, primitives::Groth16Proof,
-    sapling, sprout, transaction, transaction::Transaction::*, transparent,
-    work::difficulty::PartialCumulativeWork,
+    amount::NonNegative, block, history_tree::HistoryTree, orchard, parameters::Network,
+    primitives::Groth16Proof, sapling, sprout, transaction, transaction::Transaction::*,
+    transparent, value_balance::ValueBalance, work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
@@ -60,6 +60,9 @@ pub struct Chain {
 
     /// The cumulative work represented by this partial non-finalized chain.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
+
+    /// The chain value pool balance at the tip of this chain.
+    pub(super) value_pool: ValueBalance<NonNegative>,
 }
 
 impl Chain {
@@ -69,6 +72,7 @@ impl Chain {
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
+        finalized_tip_value_balance: ValueBalance<NonNegative>,
     ) -> Self {
         Self {
             network,
@@ -88,6 +92,7 @@ impl Chain {
             orchard_nullifiers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_tree,
+            value_pool: finalized_tip_value_balance,
         }
     }
 
@@ -323,6 +328,7 @@ impl Chain {
             orchard_nullifiers: self.orchard_nullifiers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
             history_tree,
+            value_pool: self.value_pool.clone(),
         }
     }
 }

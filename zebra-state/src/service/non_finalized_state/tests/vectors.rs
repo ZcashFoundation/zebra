@@ -4,6 +4,7 @@ use zebra_chain::{
     block::Block,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
+    value_balance::ValueBalance,
 };
 use zebra_test::prelude::*;
 
@@ -27,6 +28,7 @@ fn construct_empty() {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
 }
 
@@ -41,6 +43,7 @@ fn construct_single() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
     chain = chain.push(block.prepare())?;
 
@@ -68,6 +71,7 @@ fn construct_many() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
 
     for block in blocks {
@@ -92,6 +96,7 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
     lesser_chain = lesser_chain.push(less_block.prepare())?;
 
@@ -100,6 +105,7 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
     bigger_chain = bigger_chain.push(more_block.prepare())?;
 
