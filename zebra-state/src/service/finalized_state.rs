@@ -396,13 +396,11 @@ impl FinalizedState {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
 
-            let current_pool = self.current_value_pool().constrain::<NegativeAllowed>()?;
+            let current_pool = self.current_value_pool();
             batch.zs_insert(
                 tip_chain_value_pool,
                 height,
-                current_pool
-                    .update_with_chain_value_pool_change(block_value_balance)?
-                    .constrain::<NonNegative>()?,
+                current_pool.update_with_chain_value_pool_change(block_value_balance)?,
             );
 
             Ok(batch)
