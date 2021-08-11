@@ -591,7 +591,7 @@ impl FinalizedState {
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
         self.db
             .zs_get(value_pool_cf, &())
-            .unwrap_or(ValueBalance::zero())
+            .unwrap_or_else(ValueBalance::zero)
     }
 }
 
