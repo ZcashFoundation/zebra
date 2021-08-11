@@ -488,7 +488,7 @@ where
                     let new_download_len = download_set.len();
                     let new_hashes = new_download_len - prev_download_len;
                     tracing::debug!(new_hashes, "added hashes to download set");
-                    metrics::gauge!("sync.obtain.response.hash.count", new_hashes as f64);
+                    metrics::histogram!("sync.obtain.response.hash.count", new_hashes as u64);
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -624,7 +624,7 @@ where
                         let new_download_len = download_set.len();
                         let new_hashes = new_download_len - prev_download_len;
                         tracing::debug!(new_hashes, "added hashes to download set");
-                        metrics::gauge!("sync.extend.response.hash.count", new_hashes as f64);
+                        metrics::histogram!("sync.extend.response.hash.count", new_hashes as u64);
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
