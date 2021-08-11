@@ -52,9 +52,9 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --container-image rust:buster \
-          --container-mount-disk mount-path='/mainnet',name="zebrad-cache-$SHORT_SHA-mainnet-1046400" \
+          --container-mount-disk mount-path='/mainnet',name="zebrad-cache-$SHORT_SHA-mainnet-canopy" \
           --container-restart-policy never \
-          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-1046400",image=zebrad-cache-85f2cd71-mainnet-1046400 \
+          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-1046400",image=zebrad-cache-9121ae2-mainnet-canopy \
           --machine-type n2-standard-8 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
@@ -69,7 +69,7 @@ jobs:
           cd zebra/ &&
           docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test . &&
           docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" zebrad-test:latest cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored &&
-          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet;
+          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-canopy,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet;
           "
       # Clean up
       - name: Delete test instance
