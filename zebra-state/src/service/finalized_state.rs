@@ -8,7 +8,7 @@ mod tests;
 use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
-    amount::{NegativeAllowed, NonNegative},
+    amount::NonNegative,
     block::{self, Block},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
@@ -399,7 +399,7 @@ impl FinalizedState {
             let current_pool = self.current_value_pool();
             batch.zs_insert(
                 tip_chain_value_pool,
-                height,
+                (),
                 current_pool.update_with_chain_value_pool_change(block_value_balance)?,
             );
 
@@ -589,9 +589,8 @@ impl FinalizedState {
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
     pub fn current_value_pool(&self) -> ValueBalance<NonNegative> {
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
-        let tip_height = &self.finalized_tip_height().unwrap();
         self.db
-            .zs_get(value_pool_cf, tip_height)
+            .zs_get(value_pool_cf, &())
             .unwrap_or(ValueBalance::zero())
     }
 }
