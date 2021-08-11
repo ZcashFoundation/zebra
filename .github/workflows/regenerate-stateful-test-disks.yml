@@ -2,6 +2,9 @@ name: Regenerate test state
 
 on:
   workflow_dispatch:
+    inputs:
+      network:
+        default: 'mainnet'
 
 env:
   PROJECT_ID: zealous-zebra
@@ -48,11 +51,9 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --container-image rust:buster \
-          --container-mount-disk mount-path='/mainnet',name="zebrad-cache-$SHORT_SHA-mainnet-1046400" \
-          --container-mount-disk mount-path='/testnet',name="zebrad-cache-$SHORT_SHA-testnet-1028500" \
+          --container-mount-disk mount-path='/${{ github.event.inputs.network }}',name="zebrad-cache-$SHORT_SHA-${{ github.event.inputs.network }}" \
           --container-restart-policy never \
-          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-1046400",size=100GB,type=pd-balanced,auto-delete=no \
-          --create-disk name="zebrad-cache-$SHORT_SHA-testnet-1028500",size=100GB,type=pd-balanced,auto-delete=no \
+          --create-disk name="zebrad-cache-$SHORT_SHA-${{ github.event.inputs.network }}",size=100GB,type=pd-balanced,auto-delete=no \
           --machine-type n2-standard-4 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \
@@ -65,8 +66,7 @@ jobs:
           "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git &&
           cd zebra/ &&
           docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test . &&
-          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-mainnet-1046400,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_to_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_mainnet &&
-          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-testnet-1028500,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_to_mandatory_checkpoint_testnet --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_testnet;
+          docker run -i -e "ZEBRA_SKIP_IPV6_TESTS=1" --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-$SHORT_SHA-${{ github.event.inputs.network }},target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_to_mandatory_checkpoint_${{ github.event.inputs.network }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ github.event.inputs.network }};
           "
       # Clean up
       - name: Delete test instance
