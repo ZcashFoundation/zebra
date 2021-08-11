@@ -1,6 +1,7 @@
 //! Arbitrary data generation for transaction proptests
 
 use std::{
+    cmp::max,
     collections::HashMap,
     convert::{TryFrom, TryInto},
     ops::Neg,
@@ -12,7 +13,9 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
-    at_least_one, block, orchard,
+    at_least_one,
+    block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
+    orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
         redpallas::{Binding, Signature},
@@ -20,8 +23,7 @@ use crate::{
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    sprout,
-    transparent::{self, outputs_from_utxos, utxos_from_ordered_utxos},
+    sprout, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     LedgerState,
 };
@@ -219,6 +221,37 @@ impl Transaction {
     }
 
     /// Fixup transparent values and shielded value balances,
+    /// so that transaction and chain value pools won't overflow MAX_MONEY.
+    ///
+    /// These fixes are applied to coinbase and non-coinbase transactions.
+    //
+    // TODO: do we want to allow overflow, based on an arbitrary bool?
+    pub fn fix_overflow(&mut self) {
+        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
+        where
+            Amount<C>: Copy,
+        {
+            const POOL_COUNT: u64 = 4;
+
+            let max_arbitrary_items: u64 = MAX_ARBITRARY_ITEMS.try_into().unwrap();
+            let max_partial_chain_blocks: u64 = MAX_PARTIAL_CHAIN_BLOCKS.try_into().unwrap();
+
+            // inputs/joinsplits/spends|outputs/actions * pools * transactions
+            let transaction_pool_scaling_divisor =
+                max_arbitrary_items * POOL_COUNT * max_arbitrary_items;
+            // inputs/joinsplits/spends|outputs/actions * transactions * blocks
+            let chain_pool_scaling_divisor =
+                max_arbitrary_items * max_arbitrary_items * max_partial_chain_blocks;
+            let scaling_divisor = max(transaction_pool_scaling_divisor, chain_pool_scaling_divisor);
+
+            *amount = (*amount / scaling_divisor).expect("divisor is not zero");
+        }
+
+        self.for_each_value_mut(scale_to_avoid_overflow);
+        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+    }
+
+    /// Fixup transparent values and shielded value balances,
     /// so that this transaction passes the "non-negative chain value pool" checks.
     /// (These checks use the sum of unspent outputs for each transparent and shielded pool.)
     ///
@@ -232,6 +265,9 @@ impl Transaction {
     ///
     /// Currently, these fixes almost always leave some remaining value in each transparent
     /// and shielded chain value pool.
+    ///
+    /// Before fixing the chain value balances, this method calls `fix_overflow`
+    /// to make sure that transaction and chain value pools don't overflow MAX_MONEY.
     ///
     /// After fixing the chain value balances, this method calls `fix_remaining_value`
     /// to fix the remaining value in the transaction value pool.
@@ -249,19 +285,7 @@ impl Transaction {
         chain_value_pools: ValueBalance<NonNegative>,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<(Amount<NonNegative>, ValueBalance<NonNegative>), ValueBalanceError> {
-        // Temporarily make amounts smaller, so the total never overflows MAX_MONEY
-        // in Zebra's ~100-block chain tests. (With up to 7 values per transaction,
-        // and 3 transactions per block.)
-        // TODO: replace this scaling with chain value balance adjustments
-        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
-        where
-            Amount<C>: Copy,
-        {
-            *amount = (*amount / 10_000).expect("divisor is not zero");
-        }
-
-        self.for_each_value_mut(scale_to_avoid_overflow);
-        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+        self.fix_overflow();
 
         // a temporary value used to check that inputs don't break the chain value balance
         // consensus rules
