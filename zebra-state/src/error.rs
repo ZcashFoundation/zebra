@@ -188,6 +188,9 @@ pub enum ValidateContextError {
 
     #[error("error building the history tree")]
     HistoryTreeError(#[from] HistoryTreeError),
+
+    #[error("block contains an invalid commitment")]
+    InvalidBlockCommitment(#[from] block::CommitmentError),
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

@@ -169,6 +169,18 @@ impl From<ChainHistoryMmrRootHash> for [u8; 32] {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 
+impl From<[u8; 32]> for ChainHistoryBlockTxAuthCommitmentHash {
+    fn from(hash: [u8; 32]) -> Self {
+        ChainHistoryBlockTxAuthCommitmentHash(hash)
+    }
+}
+
+impl From<ChainHistoryBlockTxAuthCommitmentHash> for [u8; 32] {
+    fn from(hash: ChainHistoryBlockTxAuthCommitmentHash) -> Self {
+        hash.0
+    }
+}
+
 /// Errors that can occur when checking RootHash consensus rules.
 ///
 /// Each error variant corresponds to a consensus rule, so enumerating

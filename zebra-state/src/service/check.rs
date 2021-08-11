@@ -1,11 +1,12 @@
 //! Consensus critical contextual checks
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, convert::TryInto};
 
 use chrono::Duration;
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, CommitmentError},
+    history_tree::HistoryTree,
     parameters::POW_AVERAGING_WINDOW,
     parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
@@ -24,8 +25,11 @@ pub(crate) mod utxo;
 #[cfg(test)]
 mod tests;
 
-/// Check that `block` is contextually valid for `network`, based on the
-/// `finalized_tip_height` and `relevant_chain`.
+/// Check that the `prepared` block is contextually valid for `network`, based
+/// on the `finalized_tip_height` and `relevant_chain`.
+///
+/// This function performs checks that require a small number of recent blocks,
+/// including previous hash, previous height, and block difficulty.
 ///
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
@@ -34,12 +38,8 @@ mod tests;
 ///
 /// If the state contains less than 28
 /// (`POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN`) blocks.
-#[tracing::instrument(
-    name = "contextual_validation",
-    fields(?network),
-    skip(prepared, network, finalized_tip_height, relevant_chain)
-)]
-pub(crate) fn block_is_contextually_valid<C>(
+#[tracing::instrument(skip(prepared, finalized_tip_height, relevant_chain))]
+pub(crate) fn block_is_valid_for_recent_chain<C>(
     prepared: &PreparedBlock,
     network: Network,
     finalized_tip_height: Option<block::Height>,
@@ -98,6 +98,75 @@ where
     )?;
 
     Ok(())
+}
+
+/// Check that the `prepared` block is contextually valid for `network`, using
+/// the `history_tree` up to and including the previous block.
+#[tracing::instrument(skip(prepared))]
+pub(crate) fn block_commitment_is_valid_for_chain_history(
+    prepared: &PreparedBlock,
+    network: Network,
+    history_tree: &HistoryTree,
+) -> Result<(), ValidateContextError> {
+    match prepared.block.commitment(network)? {
+        block::Commitment::PreSaplingReserved(_)
+        | block::Commitment::FinalSaplingRoot(_)
+        | block::Commitment::ChainHistoryActivationReserved => {
+            // No contextual checks needed for those.
+            Ok(())
+        }
+        block::Commitment::ChainHistoryRoot(actual_history_tree_root) => {
+            let history_tree_root = history_tree
+                .hash()
+                .expect("the history tree of the previous block must exist since the current block has a ChainHistoryRoot");
+            if actual_history_tree_root == history_tree_root {
+                Ok(())
+            } else {
+                Err(ValidateContextError::InvalidBlockCommitment(
+                    CommitmentError::InvalidChainHistoryRoot {
+                        actual: actual_history_tree_root.into(),
+                        expected: history_tree_root.into(),
+                    },
+                ))
+            }
+        }
+        block::Commitment::ChainHistoryBlockTxAuthCommitment(actual_hash_block_commitments) => {
+            let actual_block_commitments: [u8; 32] = actual_hash_block_commitments.into();
+            let history_tree_root = history_tree
+                .hash()
+                .expect("the history tree of the previous block must exist since the current block has a ChainHistoryBlockTxAuthCommitment");
+            let auth_data_root = prepared.block.auth_data_root();
+
+            // > The value of this hash [hashBlockCommitments] is the BLAKE2b-256 hash personalized
+            // > by the string "ZcashBlockCommit" of the following elements:
+            // >   hashLightClientRoot (as described in ZIP 221)
+            // >   hashAuthDataRoot    (as described below)
+            // >   terminator          [0u8;32]
+            // https://zips.z.cash/zip-0244#block-header-changes
+            let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(b"ZcashBlockCommit")
+                .to_state()
+                .update(&<[u8; 32]>::from(history_tree_root)[..])
+                .update(&auth_data_root.0[..])
+                .update(&[0u8; 32])
+                .finalize()
+                .as_bytes()
+                .try_into()
+                .expect("32 byte array");
+
+            if actual_block_commitments == hash_block_commitments {
+                Ok(())
+            } else {
+                Err(ValidateContextError::InvalidBlockCommitment(
+                    CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                        actual: actual_block_commitments,
+                        expected: hash_block_commitments,
+                    },
+                ))
+            }
+        }
+    }
 }
 
 /// Returns `ValidateContextError::OrphanedBlock` if the height of the given
