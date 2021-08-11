@@ -33,6 +33,16 @@ pub enum HistoryTreeError {
     IOError(#[from] io::Error),
 }
 
+impl PartialEq for HistoryTreeError {
+    fn eq(&self, other: &Self) -> bool {
+        // Workaround since subtypes do not implement Eq.
+        // This is only used for tests anyway.
+        format!("{:?}", self) == format!("{:?}", other)
+    }
+}
+
+impl Eq for HistoryTreeError {}
+
 /// The inner [Tree] in one of its supported versions.
 #[derive(Debug)]
 enum InnerHistoryTree {
@@ -403,6 +413,30 @@ impl Clone for NonEmptyHistoryTree {
 pub struct HistoryTree(Option<NonEmptyHistoryTree>);
 
 impl HistoryTree {
+    /// Create a HistoryTree from a block.
+    ///
+    /// If the block is pre-Heartwood, it returns an empty history tree.
+    pub fn from_block(
+        network: Network,
+        block: Arc<Block>,
+        sapling_root: &sapling::tree::Root,
+        orchard_root: &orchard::tree::Root,
+    ) -> Result<Self, HistoryTreeError> {
+        let heartwood_height = NetworkUpgrade::Heartwood
+            .activation_height(network)
+            .expect("Heartwood height is known");
+        match block
+            .coinbase_height()
+            .expect("must have height")
+            .cmp(&heartwood_height)
+        {
+            std::cmp::Ordering::Less => Ok(HistoryTree(None)),
+            _ => Ok(
+                NonEmptyHistoryTree::from_block(network, block, sapling_root, orchard_root)?.into(),
+            ),
+        }
+    }
+
     /// Push a block to a maybe-existing HistoryTree, handling network upgrades.
     ///
     /// The tree is updated in-place. It is created when pushing the Heartwood
