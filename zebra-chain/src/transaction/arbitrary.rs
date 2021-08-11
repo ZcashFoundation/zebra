@@ -363,6 +363,52 @@ impl Transaction {
         Ok((remaining_transaction_value, chain_value_pools))
     }
 
+    /// Returns the total input value of this transaction's value pool.
+    ///
+    /// This is the sum of transparent inputs, sprout input values,
+    /// and if positive, the sapling and orchard value balances.
+    ///
+    /// `outputs` must contain all the [`transparent::Output`]s spent in this transaction.
+    fn input_value_pool(
+        &self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        let transparent_inputs = self
+            .inputs()
+            .iter()
+            .map(|input| input.value_from_outputs(outputs))
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .map_err(ValueBalanceError::Transparent)?;
+        // TODO: fix callers which cause overflows, check for:
+        //       cached `outputs` that don't go through `fix_overflow`, and
+        //       values much larger than MAX_MONEY
+        //.expect("chain is limited to MAX_MONEY");
+
+        let sprout_inputs = self
+            .input_values_from_sprout()
+            .sum::<Result<Amount<NonNegative>, amount::Error>>()
+            .expect("chain is limited to MAX_MONEY");
+
+        // positive value balances add to the transaction value pool
+        let sapling_input = self
+            .sapling_value_balance()
+            .sapling_amount()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
+        let orchard_input = self
+            .orchard_value_balance()
+            .orchard_amount()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
+        let transaction_input_value_pool =
+            (transparent_inputs + sprout_inputs + sapling_input + orchard_input)
+                .expect("chain is limited to MAX_MONEY");
+
+        Ok(transaction_input_value_pool)
+    }
+
     /// Fixup non-coinbase transparent values and shielded value balances,
     /// so that this transaction passes the "non-negative remaining transaction value"
     /// check. (This check uses the sum of inputs minus outputs.)
@@ -397,38 +443,7 @@ impl Transaction {
             return Ok(Amount::zero());
         }
 
-        // calculate the total input value
-
-        let transparent_inputs = self
-            .inputs()
-            .iter()
-            .map(|input| input.value_from_outputs(outputs))
-            .sum::<Result<Amount<NonNegative>, amount::Error>>()
-            .map_err(ValueBalanceError::Transparent)?;
-        // TODO: fix callers with invalid values, maybe due to cached outputs?
-        //.expect("chain is limited to MAX_MONEY");
-
-        let sprout_inputs = self
-            .input_values_from_sprout()
-            .sum::<Result<Amount<NonNegative>, amount::Error>>()
-            .expect("chain is limited to MAX_MONEY");
-
-        // positive value balances add to the transaction value pool
-        let sapling_input = self
-            .sapling_value_balance()
-            .sapling_amount()
-            .constrain::<NonNegative>()
-            .unwrap_or_else(|_| Amount::zero());
-
-        let orchard_input = self
-            .orchard_value_balance()
-            .orchard_amount()
-            .constrain::<NonNegative>()
-            .unwrap_or_else(|_| Amount::zero());
-
-        let mut remaining_input_value =
-            (transparent_inputs + sprout_inputs + sapling_input + orchard_input)
-                .expect("chain is limited to MAX_MONEY");
+        let mut remaining_input_value = self.input_value_pool(outputs)?;
 
         // assign remaining input value to outputs,
         // zeroing any outputs that would exceed the input value
