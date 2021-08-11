@@ -508,40 +508,6 @@ impl Transaction {
 
         Ok(remaining_transaction_value)
     }
-
-    /// Fixup non-coinbase transparent values and shielded value balances.
-    /// See `fix_remaining_value` for details.
-    ///
-    /// `utxos` must contain all the [`Utxo`]s spent in this block.
-    ///
-    /// # Panics
-    ///
-    /// If any spent [`Utxo`] is missing from `utxos`.
-    #[allow(dead_code)]
-    pub fn fix_remaining_value_from_utxos(
-        &mut self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
-        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()))
-    }
-
-    /// Fixup non-coinbase transparent values and shielded value balances.
-    /// See `fix_remaining_value` for details.
-    ///
-    /// `ordered_utxos` must contain all the [`OrderedUtxo`]s spent in this block.
-    ///
-    /// # Panics
-    ///
-    /// If any spent [`OrderedUtxo`] is missing from `ordered_utxos`.
-    #[allow(dead_code)]
-    pub fn fix_remaining_value_from_ordered_utxos(
-        &mut self,
-        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
-        self.fix_remaining_value(&outputs_from_utxos(utxos_from_ordered_utxos(
-            ordered_utxos.clone(),
-        )))
-    }
 }
 
 impl Arbitrary for Memo {
