@@ -10,6 +10,8 @@ mod tests;
 ///
 /// New lengths are added to the front of the list.
 /// Old lengths are dropped if the list is longer than `MAX_RECENT_LENGTHS`.
+//
+// TODO: disable the mempool if obtain or extend tips return errors?
 #[derive(Debug)]
 pub struct RecentSyncLengths {
     ///
