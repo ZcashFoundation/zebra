@@ -26,9 +26,11 @@ impl RecentSyncLengths {
     ///
     /// Older lengths are dropped.
     ///
-    /// Note: this maximum should be increased if Zebra starts tracking the
-    /// lengths of each individual peer response.
-    pub const MAX_RECENT_LENGTHS: usize = 3;
+    /// This length was chosen as a tradeoff between:
+    /// * clearing temporary errors and temporary syncs quickly
+    /// * distinguishing between temporary and sustained syncs/errors
+    /// * activating the syncer shortly after reaching the chain tip
+    pub const MAX_RECENT_LENGTHS: usize = 4;
 
     /// Create a new instance of [`RecentSyncLengths`]
     /// and a [`watch::Receiver`] endpoint for receiving recent sync lengths.
