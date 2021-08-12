@@ -8,32 +8,22 @@ use proptest::{
 };
 
 use zebra_chain::{
-    block::{self, Block},
-    fmt::SummaryDebug,
-    parameters::NetworkUpgrade,
+    block::Block, fmt::SummaryDebug, history_tree::HistoryTree, parameters::NetworkUpgrade,
     LedgerState,
 };
 
-use crate::{arbitrary::Prepare, constants};
+use crate::arbitrary::Prepare;
 
 use super::*;
 
-/// The chain length for state proptests.
-///
-/// Most generated chains will contain transparent spends at or before this height.
-///
-/// This height was chosen as a tradeoff between chains with no transparent spends,
-/// and chains which spend outputs created by previous spends.
-///
-/// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
-pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
-    constants::MIN_TRANSPARENT_COINBASE_MATURITY as usize + block::arbitrary::PREVOUTS_CHAIN_HEIGHT;
+pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
     chain: Arc<SummaryDebug<Vec<PreparedBlock>>>,
     count: BinarySearch,
     network: Network,
+    history_tree: HistoryTree,
 }
 
 impl ValueTree for PreparedChainTree {
@@ -41,10 +31,16 @@ impl ValueTree for PreparedChainTree {
         Arc<SummaryDebug<Vec<PreparedBlock>>>,
         <BinarySearch as ValueTree>::Value,
         Network,
+        HistoryTree,
     );
 
     fn current(&self) -> Self::Value {
-        (self.chain.clone(), self.count.current(), self.network)
+        (
+            self.chain.clone(),
+            self.count.current(),
+            self.network,
+            self.history_tree.clone(),
+        )
     }
 
     fn simplify(&mut self) -> bool {
@@ -59,7 +55,36 @@ impl ValueTree for PreparedChainTree {
 #[derive(Debug, Default)]
 pub struct PreparedChain {
     // the proptests are threaded (not async), so we want to use a threaded mutex here
-    chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>)>>,
+    chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>, HistoryTree)>>,
+    // the strategy for generating LedgerStates. If None, it calls [`LedgerState::genesis_strategy`].
+    ledger_strategy: Option<BoxedStrategy<LedgerState>>,
+}
+
+impl PreparedChain {
+    /// Create a PreparedChain strategy with Heartwood-onward blocks.
+    #[cfg(test)]
+    pub(crate) fn new_heartwood() -> Self {
+        // The history tree only works with Heartwood onward.
+        // Since the network will be chosen later, we pick the larger
+        // between the mainnet and testnet Heartwood activation heights.
+        let main_height = NetworkUpgrade::Heartwood
+            .activation_height(Network::Mainnet)
+            .expect("must have height");
+        let test_height = NetworkUpgrade::Heartwood
+            .activation_height(Network::Testnet)
+            .expect("must have height");
+        let height = std::cmp::max(main_height, test_height);
+
+        PreparedChain {
+            ledger_strategy: Some(LedgerState::height_strategy(
+                height,
+                NetworkUpgrade::Nu5,
+                None,
+                false,
+            )),
+            ..Default::default()
+        }
+    }
 }
 
 impl Strategy for PreparedChain {
@@ -70,7 +95,12 @@ impl Strategy for PreparedChain {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
-            let ledger_strategy = LedgerState::genesis_strategy(NetworkUpgrade::Nu5, None, false);
+            let default_ledger_strategy =
+                LedgerState::genesis_strategy(NetworkUpgrade::Nu5, None, false);
+            let ledger_strategy = self
+                .ledger_strategy
+                .as_ref()
+                .unwrap_or(&default_ledger_strategy);
 
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {
@@ -93,7 +123,16 @@ impl Strategy for PreparedChain {
                 })
                 .new_tree(runner)?
                 .current();
-            *chain = Some((network, Arc::new(SummaryDebug(blocks))));
+            // Generate a history tree from the first block
+            let history_tree = HistoryTree::from_block(
+                network,
+                blocks[0].block.clone(),
+                // Dummy roots since this is only used for tests
+                &Default::default(),
+                &Default::default(),
+            )
+            .expect("history tree should be created");
+            *chain = Some((network, Arc::new(SummaryDebug(blocks)), history_tree));
         }
 
         let chain = chain.clone().expect("should be generated");
@@ -102,6 +141,7 @@ impl Strategy for PreparedChain {
             chain: chain.1,
             count,
             network: chain.0,
+            history_tree: chain.2,
         })
     }
 }
