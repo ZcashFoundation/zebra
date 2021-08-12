@@ -6,37 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-alpha.15](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.15) - 2021-08-TBD
 
-- Generate test chains with valid chain value pools (#2597)
-- Make zebra-state compile successfully by itself (#2611)
-- Update cache to v9 (#2598)
-- Sync to, not past, activation for regenerate-stateful-test-disks.yml (#2601)
-- Add ZIP-221 history tree to non-finalized state (#2583)
-- Refactor value balances to support generated data modification (#2596)
-- Cache note commitment tree roots (#2584)
-- Refactor HistoryTree into NonEmptyHistoryTree and HistoryTree (#2582)
-- Check remaining transaction value \& make value balance signs match the spec  (#2566)
-- Add extra arithmetic operations and error details to Amount and ValueBalance (#2577)
-- Add Chain ValueBalance serialization (#2554)
-- Reject connections from outdated peers (#2519)
-- Use the same value balance sign for transparent and shielded outputs (#2569)
-- Add test-only methods for modifying orchard shielded data and joinsplits (#2580)
-- Update the signs in the value pools design to match the spec (#2576)
-- Stop using prop\_filter\_map to produce valid sapling shielded data (#2579)
-- impl TryFrom for vector references for AtLeastOne (#2578)
-- Increase timeout of cached database creation (#2581)
-- Decrease `DEFAULT_NULLIFIER_PROPTEST_CASES` (#2574)
-- Add ZIP-221 (history tree) to finalized state (#2553)
+Zebra's latest alpha contains the last of the changes to zebra chain state ahead of NU5 testnet activation and before concentrating on mempool work. The remaining NU5 validation will be completed prior to NU5 mainnet activation.
+
+### Added
+
+#### Network Upgrade 5
+
+- ZIP-209: Prohibit Negative Shielded Chain Value Pool Balances Implementation (#2546, #2554, #2561, #2566, #2569, #2576, #2577, #2578, #2596)
+- ZIP-221: FlyClient - Consensus-Layer Changes Implementation(#2531, #2553, #2583)
+
+### Changed
+
+- Cache note commitment tree roots to speed up chain synchronisation  (#2584)
+- Update state cache version to v9 (#2598)
+- Refactor HistoryTree type into NonEmptyHistoryTree and HistoryTree types (#2582)
+
+#### Testing and CI
+
+- Reduce number of nullifier property test cases (#2574)
+- Ensure `regenerate-stateful-test-disks.yml` syncs to the latest network upgrade (#2601)
 - Add a random number of transactions to generated blocks, rather than always 2 (#2567)
-- Fix the storage of anchors in the state (#2563)
-- Use fixed genesis coinbase data in generated genesis blocks (#2568)
-- Return valid `Utxo`s from `check::transparent_spend` (#2561)
-- Optimize build used when regenerating the state to hopefully make it faster (#2552)
-- ZIP-221: Add Orchard support to history tree (#2531)
-- Design: Fix Transparent Value Sign and Definition (#2555)
-- Remove unreliable generated chain prevouts tests (#2548)
-- Add value\_balance() method to Block (#2546)
 - Increase coverage for generated chains and proptests (#2540)
-- Update release date in CHANGELOG (#2545)
+- Remove unreliable tests for generated chains (#2548)
+- Add test-only methods for modifying orchard shielded data and joinsplits (#2580)
+- Generate test chains with valid chain value pools (#2597)
+- Increase timeout of cached database creation (#2581)
+- Use fixed genesis coinbase data in generated genesis blocks (#2568)
+- Generate valid sapling shielded data for property tests (#2579)
+- Make `zebra-state` compile successfully by itself (#2611)
+- Optimize build to regenerate the test state faster (#2552)
+
+### Fixed
+
+- Reject connections from outdated peers after network upgrade activation (#2519)
+- Fix the storage of anchors in the state (#2563)
+
+#### Documentation
+
+- Fix Transparent Value sign and definition (#2555)
 
 ## [Zebra 1.0.0-alpha.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.14) - 2021-07-29
 
