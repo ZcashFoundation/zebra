@@ -5,7 +5,13 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    convert::TryInto,
+    path::Path,
+    sync::Arc
+};
 
 use zebra_chain::{
     amount::NonNegative,
@@ -220,7 +226,6 @@ impl FinalizedState {
             height,
             new_outputs,
             transaction_hashes,
-            block_value_balance,
         } = finalized;
 
         let finalized_tip_height = self.finalized_tip_height();
@@ -316,7 +321,7 @@ impl FinalizedState {
             }
 
             // Index all new transparent outputs
-            for (outpoint, utxo) in new_outputs.into_iter() {
+            for (outpoint, utxo) in new_outputs.borrow().into_iter() {
                 batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
             }
 
@@ -397,7 +402,7 @@ impl FinalizedState {
             }
 
             let current_pool = self.current_value_pool();
-            let new_pool = current_pool.update_with_chain_value_pool_change(block_value_balance)?;
+            let new_pool = current_pool.update_with_block(block.borrow(), &new_outputs)?;
             batch.zs_insert(tip_chain_value_pool, (), new_pool);
 
             Ok(batch)

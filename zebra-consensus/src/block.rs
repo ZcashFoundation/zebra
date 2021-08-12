@@ -8,7 +8,6 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    borrow::Borrow,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -26,7 +25,6 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     transparent,
-    value_balance::ValueBalance,
     work::equihash,
 };
 use zebra_state as zs;
@@ -208,13 +206,6 @@ where
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            let block_value_balance = ValueBalance::zero()
-                .update_with_block(
-                    block.borrow(),
-                    &transparent::utxos_from_ordered_utxos(new_outputs.clone()),
-                )
-                .expect("all utxos should be available");
-
             // Finally, submit the block for contextual verification.
             let prepared_block = zs::PreparedBlock {
                 block,
@@ -222,7 +213,6 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                block_value_balance,
             };
             match state_service
                 .ready_and()
