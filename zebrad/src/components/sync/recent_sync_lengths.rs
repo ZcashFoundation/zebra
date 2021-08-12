@@ -51,7 +51,11 @@ impl RecentSyncLengths {
     /// Insert a sync length from [`ChainSync::obtain_tips`] at the front of the list.
     #[instrument(skip(self), fields(self.recent_lengths))]
     pub fn push_obtain_tips_length(&mut self, sync_length: usize) {
-        // currently, we treat lengths from obtain and extend tips exactly the same
+        // currently, we treat lengths from obtain and extend tips exactly the same,
+        // but we might want to ignore some obtain tips lengths
+        //
+        // See "Response Lengths During Sync -> Details" in:
+        // https://github.com/ZcashFoundation/zebra/issues/2592#issuecomment-897304684
         self.update(sync_length)
     }
 
