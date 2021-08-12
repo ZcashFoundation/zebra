@@ -321,7 +321,7 @@ impl FinalizedState {
             }
 
             // Index all new transparent outputs
-            for (outpoint, utxo) in new_outputs.borrow().into_iter() {
+            for (outpoint, utxo) in new_outputs.borrow().iter() {
                 batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
             }
 
