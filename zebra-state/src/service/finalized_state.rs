@@ -397,11 +397,8 @@ impl FinalizedState {
             }
 
             let current_pool = self.current_value_pool();
-            batch.zs_insert(
-                tip_chain_value_pool,
-                (),
-                current_pool.update_with_chain_value_pool_change(block_value_balance)?,
-            );
+            let new_pool = current_pool.update_with_chain_value_pool_change(block_value_balance)?;
+            batch.zs_insert(tip_chain_value_pool, (), new_pool);
 
             Ok(batch)
         };

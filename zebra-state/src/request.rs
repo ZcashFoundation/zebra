@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use zebra_chain::{
     amount::NegativeAllowed,
@@ -133,9 +133,9 @@ impl From<Arc<Block>> for FinalizedBlock {
             .collect::<Vec<_>>();
         let new_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
 
-        // TODO: Call `block.chain_value_pool_change()` with all the needed `Utxo`s.
-        // `Utxo`s in `new_outputs` are currently not enough.
-        let block_value_balance = ValueBalance::zero();
+        let block_value_balance = ValueBalance::zero()
+            .update_with_block(block.borrow(), &new_outputs.clone())
+            .expect("finalized blocks must have a valid value balance");
 
         Self {
             block,

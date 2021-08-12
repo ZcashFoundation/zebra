@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    borrow::Borrow,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -207,9 +208,12 @@ where
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            // TODO: Call `block.chain_value_pool_change()` with all the needed `Utxo`s.
-            // `Utxo`s in `new_outputs` are currently not enough.
-            let block_value_balance = ValueBalance::zero();
+            let block_value_balance = ValueBalance::zero()
+                .update_with_block(
+                    block.borrow(),
+                    &transparent::utxos_from_ordered_utxos(new_outputs.clone()),
+                )
+                .expect("all utxos should be available");
 
             // Finally, submit the block for contextual verification.
             let prepared_block = zs::PreparedBlock {
