@@ -19,6 +19,7 @@ pub enum TransactionInsertError {
 }
 
 #[derive(Error, Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum TransactionQueryError {
     #[error("transaction was not found in mempool")]
     NotInMempool,
