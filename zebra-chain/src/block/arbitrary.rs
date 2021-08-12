@@ -18,13 +18,16 @@ use crate::{
     },
     serialization,
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
-    transparent::{new_transaction_ordered_outputs, CoinbaseSpendRestriction},
+    transparent::{
+        new_transaction_ordered_outputs, CoinbaseSpendRestriction,
+        MIN_TRANSPARENT_COINBASE_MATURITY,
+    },
     work::{difficulty::CompactDifficulty, equihash},
 };
 
 use super::*;
 
-/// The chain length for zebra-chain proptests.
+/// The chain length for most zebra-chain proptests.
 ///
 /// Most generated chains will contain transparent spends at or before this height.
 ///
@@ -43,6 +46,17 @@ use super::*;
 ///
 /// To increase the proportion of test runs with proptest spends, increase `PREVOUTS_CHAIN_HEIGHT`.
 pub const PREVOUTS_CHAIN_HEIGHT: usize = 4;
+
+/// The chain length for most zebra-state proptests.
+///
+/// Most generated chains will contain transparent spends at or before this height.
+///
+/// This height was chosen as a tradeoff between chains with no transparent spends,
+/// and chains which spend outputs created by previous spends.
+///
+/// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
+pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
+    MIN_TRANSPARENT_COINBASE_MATURITY as usize + PREVOUTS_CHAIN_HEIGHT;
 
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]

@@ -8,27 +8,15 @@ use proptest::{
 };
 
 use zebra_chain::{
-    block::{self, Block},
-    fmt::SummaryDebug,
-    history_tree::HistoryTree,
-    parameters::NetworkUpgrade,
+    block::Block, fmt::SummaryDebug, history_tree::HistoryTree, parameters::NetworkUpgrade,
     LedgerState,
 };
 
-use crate::{arbitrary::Prepare, constants};
+use crate::arbitrary::Prepare;
 
 use super::*;
 
-/// The chain length for state proptests.
-///
-/// Most generated chains will contain transparent spends at or before this height.
-///
-/// This height was chosen as a tradeoff between chains with no transparent spends,
-/// and chains which spend outputs created by previous spends.
-///
-/// See [`block::arbitrary::PREVOUTS_CHAIN_HEIGHT`] for details.
-pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
-    constants::MIN_TRANSPARENT_COINBASE_MATURITY as usize + block::arbitrary::PREVOUTS_CHAIN_HEIGHT;
+pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
