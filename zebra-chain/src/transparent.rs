@@ -35,6 +35,15 @@ use crate::{
 
 use std::{collections::HashMap, iter};
 
+/// The maturity threshold for transparent coinbase outputs.
+///
+/// "A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// from a block less than 100 blocks prior to the spend. Note that transparent
+/// outputs of coinbase transactions include Founders' Reward outputs and
+/// transparent Funding Stream outputs."
+/// [7.1](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)
+pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
+
 /// Arbitrary data inserted by miners into a coinbase transaction.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CoinbaseData(

@@ -1,6 +1,7 @@
 //! Arbitrary data generation for transaction proptests
 
 use std::{
+    cmp::max,
     collections::HashMap,
     convert::{TryFrom, TryInto},
     ops::Neg,
@@ -12,7 +13,9 @@ use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
-    at_least_one, block, orchard,
+    at_least_one,
+    block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
+    orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{
         redpallas::{Binding, Signature},
@@ -20,9 +23,8 @@ use crate::{
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    sprout,
-    transparent::{self, outputs_from_utxos, utxos_from_ordered_utxos},
-    value_balance::ValueBalanceError,
+    sprout, transparent,
+    value_balance::{ValueBalance, ValueBalanceError},
     LedgerState,
 };
 
@@ -218,59 +220,168 @@ impl Transaction {
         }
     }
 
-    /// Fixup non-coinbase transparent values and shielded value balances,
-    /// so that this transaction passes the "remaining transaction value pool" check.
+    /// Fixup transparent values and shielded value balances,
+    /// so that transaction and chain value pools won't overflow MAX_MONEY.
     ///
-    /// Returns the remaining transaction value.
+    /// These fixes are applied to coinbase and non-coinbase transactions.
+    //
+    // TODO: do we want to allow overflow, based on an arbitrary bool?
+    pub fn fix_overflow(&mut self) {
+        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
+        where
+            Amount<C>: Copy,
+        {
+            const POOL_COUNT: u64 = 4;
+
+            let max_arbitrary_items: u64 = MAX_ARBITRARY_ITEMS.try_into().unwrap();
+            let max_partial_chain_blocks: u64 = MAX_PARTIAL_CHAIN_BLOCKS.try_into().unwrap();
+
+            // inputs/joinsplits/spends|outputs/actions * pools * transactions
+            let transaction_pool_scaling_divisor =
+                max_arbitrary_items * POOL_COUNT * max_arbitrary_items;
+            // inputs/joinsplits/spends|outputs/actions * transactions * blocks
+            let chain_pool_scaling_divisor =
+                max_arbitrary_items * max_arbitrary_items * max_partial_chain_blocks;
+            let scaling_divisor = max(transaction_pool_scaling_divisor, chain_pool_scaling_divisor);
+
+            *amount = (*amount / scaling_divisor).expect("divisor is not zero");
+        }
+
+        self.for_each_value_mut(scale_to_avoid_overflow);
+        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+    }
+
+    /// Fixup transparent values and shielded value balances,
+    /// so that this transaction passes the "non-negative chain value pool" checks.
+    /// (These checks use the sum of unspent outputs for each transparent and shielded pool.)
     ///
-    /// `outputs` must contain all the [`Output`]s spent in this block.
+    /// These fixes are applied to coinbase and non-coinbase transactions.
     ///
-    /// Currently, this code almost always leaves some remaining value in the
-    /// transaction value pool.
+    /// `chain_value_pools` contains the chain value pool balances,
+    /// as of the previous transaction in this block
+    /// (or the last transaction in the previous block).
+    ///
+    /// `outputs` must contain all the [`transparent::Output`]s spent in this transaction.
+    ///
+    /// Currently, these fixes almost always leave some remaining value in each transparent
+    /// and shielded chain value pool.
+    ///
+    /// Before fixing the chain value balances, this method calls `fix_overflow`
+    /// to make sure that transaction and chain value pools don't overflow MAX_MONEY.
+    ///
+    /// After fixing the chain value balances, this method calls `fix_remaining_value`
+    /// to fix the remaining value in the transaction value pool.
+    ///
+    /// Returns the remaining transaction value, and the updated chain value balances.
     ///
     /// # Panics
     ///
     /// If any spent [`Output`] is missing from `outpoints`.
     //
-    // TODO: split this method up, after we've implemented chain value balance adjustments
-    //
-    // TODO: take an extra arbitrary bool, which selects between zero and non-zero
-    //       remaining value in the transaction value pool
-    pub fn fix_remaining_value(
+    // TODO: take some extra arbitrary flags, which select between zero and non-zero
+    //       remaining value in each chain value pool
+    pub fn fix_chain_value_pools(
         &mut self,
+        chain_value_pools: ValueBalance<NonNegative>,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<(Amount<NonNegative>, ValueBalance<NonNegative>), ValueBalanceError> {
+        self.fix_overflow();
+
+        // a temporary value used to check that inputs don't break the chain value balance
+        // consensus rules
+        let mut input_chain_value_pools = chain_value_pools;
+
+        for input in self.inputs() {
+            input_chain_value_pools = input_chain_value_pools
+                .update_with_transparent_input(input, outputs)
+                .expect("find_valid_utxo_for_spend only spends unspent transparent outputs");
+        }
+
+        // update the input chain value pools,
+        // zeroing any inputs that would exceed the input value
+
+        // TODO: consensus rule: normalise sprout JoinSplit values
+        //       so at least one of the values in each JoinSplit is zero
+        for input in self.input_values_from_sprout_mut() {
+            match input_chain_value_pools
+                .update_with_chain_value_pool_change(ValueBalance::from_sprout_amount(input.neg()))
+            {
+                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                // set the invalid input value to zero
+                Err(_) => *input = Amount::zero(),
+            }
+        }
+
+        // positive value balances subtract from the chain value pool
+
+        let sapling_input = self.sapling_value_balance().constrain::<NonNegative>();
+        if let Ok(sapling_input) = sapling_input {
+            if sapling_input != ValueBalance::zero() {
+                match input_chain_value_pools.update_with_chain_value_pool_change(-sapling_input) {
+                    Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                    Err(_) => *self.sapling_value_balance_mut().unwrap() = Amount::zero(),
+                }
+            }
+        }
+
+        let orchard_input = self.orchard_value_balance().constrain::<NonNegative>();
+        if let Ok(orchard_input) = orchard_input {
+            if orchard_input != ValueBalance::zero() {
+                match input_chain_value_pools.update_with_chain_value_pool_change(-orchard_input) {
+                    Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                    Err(_) => *self.orchard_value_balance_mut().unwrap() = Amount::zero(),
+                }
+            }
+        }
+
+        let remaining_transaction_value = self.fix_remaining_value(outputs)?;
+
+        // check our calculations are correct
+        let transaction_chain_value_pool_change =
+            self
+            .value_balance_from_outputs(outputs)
+            .expect("chain value pool and remaining transaction value fixes produce valid transaction value balances")
+            .neg();
+
+        let chain_value_pools = chain_value_pools
+            .update_with_transaction(self, outputs)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "unexpected chain value pool error: {:?}, \n\
+                     original chain value pools: {:?}, \n\
+                     transaction chain value change: {:?}, \n\
+                     input-only transaction chain value pools: {:?}, \n\
+                     calculated remaining transaction value: {:?}",
+                    err,
+                    chain_value_pools, // old value
+                    transaction_chain_value_pool_change,
+                    input_chain_value_pools,
+                    remaining_transaction_value,
+                )
+            });
+
+        Ok((remaining_transaction_value, chain_value_pools))
+    }
+
+    /// Returns the total input value of this transaction's value pool.
+    ///
+    /// This is the sum of transparent inputs, sprout input values,
+    /// and if positive, the sapling and orchard value balances.
+    ///
+    /// `outputs` must contain all the [`transparent::Output`]s spent in this transaction.
+    fn input_value_pool(
+        &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<Amount<NonNegative>, ValueBalanceError> {
-        // Temporarily make amounts smaller, so the total never overflows MAX_MONEY
-        // in Zebra's ~100-block chain tests. (With up to 7 values per transaction,
-        // and 3 transactions per block.)
-        // TODO: replace this scaling with chain value balance adjustments
-        fn scale_to_avoid_overflow<C: amount::Constraint>(amount: &mut Amount<C>)
-        where
-            Amount<C>: Copy,
-        {
-            *amount = (*amount / 10_000).expect("divisor is not zero");
-        }
-
-        self.for_each_value_mut(scale_to_avoid_overflow);
-        self.for_each_value_balance_mut(scale_to_avoid_overflow);
-
-        if self.is_coinbase() {
-            // TODO: if needed, fixup coinbase:
-            // - miner subsidy
-            // - founders reward or funding streams (hopefully not?)
-            // - remaining transaction value
-            return Ok(Amount::zero());
-        }
-
-        // calculate the total input value
-
         let transparent_inputs = self
             .inputs()
             .iter()
             .map(|input| input.value_from_outputs(outputs))
             .sum::<Result<Amount<NonNegative>, amount::Error>>()
             .map_err(ValueBalanceError::Transparent)?;
-        // TODO: fix callers with invalid values, maybe due to cached outputs?
+        // TODO: fix callers which cause overflows, check for:
+        //       cached `outputs` that don't go through `fix_overflow`, and
+        //       values much larger than MAX_MONEY
         //.expect("chain is limited to MAX_MONEY");
 
         let sprout_inputs = self
@@ -291,9 +402,48 @@ impl Transaction {
             .constrain::<NonNegative>()
             .unwrap_or_else(|_| Amount::zero());
 
-        let mut remaining_input_value =
+        let transaction_input_value_pool =
             (transparent_inputs + sprout_inputs + sapling_input + orchard_input)
                 .expect("chain is limited to MAX_MONEY");
+
+        Ok(transaction_input_value_pool)
+    }
+
+    /// Fixup non-coinbase transparent values and shielded value balances,
+    /// so that this transaction passes the "non-negative remaining transaction value"
+    /// check. (This check uses the sum of inputs minus outputs.)
+    ///
+    /// Returns the remaining transaction value.
+    ///
+    /// `outputs` must contain all the [`transparent::Output`]s spent in this transaction.
+    ///
+    /// Currently, these fixes almost always leave some remaining value in the
+    /// transaction value pool.
+    ///
+    /// # Panics
+    ///
+    /// If any spent [`Output`] is missing from `outpoints`.
+    //
+    // TODO: split this method up, after we've implemented chain value balance adjustments
+    //
+    // TODO: take an extra arbitrary bool, which selects between zero and non-zero
+    //       remaining value in the transaction value pool
+    pub fn fix_remaining_value(
+        &mut self,
+        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        if self.is_coinbase() {
+            // TODO: if needed, fixup coinbase:
+            // - miner subsidy
+            // - founders reward or funding streams (hopefully not?)
+            // - remaining transaction value
+
+            // Act as if the generated test case spends all the miner subsidy, miner fees, and
+            // founders reward / funding stream correctly.
+            return Ok(Amount::zero());
+        }
+
+        let mut remaining_input_value = self.input_value_pool(outputs)?;
 
         // assign remaining input value to outputs,
         // zeroing any outputs that would exceed the input value
@@ -357,40 +507,6 @@ impl Transaction {
         );
 
         Ok(remaining_transaction_value)
-    }
-
-    /// Fixup non-coinbase transparent values and shielded value balances.
-    /// See `fix_remaining_value` for details.
-    ///
-    /// `utxos` must contain all the [`Utxo`]s spent in this block.
-    ///
-    /// # Panics
-    ///
-    /// If any spent [`Utxo`] is missing from `utxos`.
-    #[allow(dead_code)]
-    pub fn fix_remaining_value_from_utxos(
-        &mut self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
-        self.fix_remaining_value(&outputs_from_utxos(utxos.clone()))
-    }
-
-    /// Fixup non-coinbase transparent values and shielded value balances.
-    /// See `fix_remaining_value` for details.
-    ///
-    /// `ordered_utxos` must contain all the [`OrderedUtxo`]s spent in this block.
-    ///
-    /// # Panics
-    ///
-    /// If any spent [`OrderedUtxo`] is missing from `ordered_utxos`.
-    #[allow(dead_code)]
-    pub fn fix_remaining_value_from_ordered_utxos(
-        &mut self,
-        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
-        self.fix_remaining_value(&outputs_from_utxos(utxos_from_ordered_utxos(
-            ordered_utxos.clone(),
-        )))
     }
 }
 
