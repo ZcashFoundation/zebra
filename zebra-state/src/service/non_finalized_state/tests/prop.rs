@@ -3,9 +3,11 @@ use std::{env, sync::Arc};
 use zebra_test::prelude::*;
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block},
     fmt::DisplayToDebug,
+    history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade::*,
+    parameters::{Network, *},
     LedgerState,
 };
 
@@ -33,12 +35,15 @@ fn forked_equals_pushed() -> Result<()> {
                                           .ok()
                                           .and_then(|v| v.parse().ok())
                                           .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, fork_at_count, _network) in PreparedChain::default())| {
+        |((chain, fork_at_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+            // Skip first block which was used for the history tree; make sure fork_at_count is still valid
+            let fork_at_count = std::cmp::min(fork_at_count, chain.len() - 1);
+            let chain = &chain[1..];
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
 
-            let mut full_chain = Chain::new(Default::default(), Default::default());
-            let mut partial_chain = Chain::new(Default::default(), Default::default());
+            let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone());
+            let mut partial_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone());
 
             for block in chain.iter().take(fork_at_count) {
                 partial_chain = partial_chain.push(block.clone())?;
@@ -65,11 +70,12 @@ fn forked_equals_pushed() -> Result<()> {
                 }
             }
 
-            let forked = full_chain
+            let mut forked = full_chain
                 .fork(
                     fork_tip_hash,
                     Default::default(),
                     Default::default(),
+                    finalized_tree,
                 )
                 .expect("fork works")
                 .expect("hash is present");
@@ -77,6 +83,15 @@ fn forked_equals_pushed() -> Result<()> {
             // the first check is redundant, but it's useful for debugging
             prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
             prop_assert!(forked.eq_internal_state(&partial_chain));
+
+            // Re-add blocks to the fork and check if we arrive at the
+            // same original full chain
+            for block in chain.iter().skip(fork_at_count) {
+                forked = forked.push(block.clone())?;
+            }
+
+            prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
+            prop_assert!(forked.eq_internal_state(&full_chain));
         });
 
     Ok(())
@@ -92,17 +107,22 @@ fn finalized_equals_pushed() -> Result<()> {
                                       .ok()
                                       .and_then(|v| v.parse().ok())
                                       .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-    |((chain, end_count, _network) in PreparedChain::default())| {
+    |((chain, end_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+        // Skip first block which was used for the history tree; make sure end_count is still valid
+        let end_count = std::cmp::min(end_count, chain.len() - 1);
+        let chain = &chain[1..];
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
-        let mut full_chain = Chain::new(Default::default(), Default::default());
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree);
 
         for block in chain.iter().take(finalized_count) {
             full_chain = full_chain.push(block.clone())?;
         }
         let mut partial_chain = Chain::new(
+            network,
             full_chain.sapling_note_commitment_tree.clone(),
             full_chain.orchard_note_commitment_tree.clone(),
+            full_chain.history_tree.clone(),
         );
         for block in chain.iter().skip(finalized_count) {
             partial_chain = partial_chain.push(block.clone())?;
@@ -133,7 +153,7 @@ fn rejection_restores_internal_state() -> Result<()> {
                                          .and_then(|v| v.parse().ok())
                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
               |((chain, valid_count, network, mut bad_block) in (PreparedChain::default(), any::<bool>(), any::<bool>())
-                .prop_flat_map(|((chain, valid_count, network), is_nu5, is_v5)| {
+                .prop_flat_map(|((chain, valid_count, network, _history_tree), is_nu5, is_v5)| {
                     let next_height = chain[valid_count - 1].height;
                     (
                         Just(chain),
@@ -205,7 +225,7 @@ fn different_blocks_different_chains() -> Result<()> {
                                .ok()
                                .and_then(|v| v.parse().ok())
                                .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-    |((block1, block2) in (any::<bool>(), any::<bool>())
+    |((vec1, vec2) in (any::<bool>(), any::<bool>())
       .prop_flat_map(|(is_nu5, is_v5)| {
           // generate a Canopy or NU5 block with v4 or v5 transactions
           LedgerState::coinbase_strategy(
@@ -213,15 +233,28 @@ fn different_blocks_different_chains() -> Result<()> {
               if is_nu5 && is_v5 { 5 } else { 4 },
               true,
           )})
-      .prop_map(Block::arbitrary_with)
+      .prop_map(|ledger_state| Block::partial_chain_strategy(ledger_state, 2, allow_all_transparent_coinbase_spends))
       .prop_flat_map(|block_strategy| (block_strategy.clone(), block_strategy))
-      .prop_map(|(block1, block2)| (DisplayToDebug(block1), DisplayToDebug(block2)))
     )| {
-        let chain1 = Chain::new(Default::default(), Default::default());
-        let chain2 = Chain::new(Default::default(), Default::default());
+        let prev_block1 = vec1[0].clone();
+        let prev_block2 = vec2[0].clone();
+        let height1 = prev_block1.coinbase_height().unwrap();
+        let height2 = prev_block1.coinbase_height().unwrap();
+        let finalized_tree1: HistoryTree = if height1 >= Heartwood.activation_height(Network::Mainnet).unwrap() {
+            NonEmptyHistoryTree::from_block(Network::Mainnet, prev_block1, &Default::default(), &Default::default()).unwrap().into()
+        } else {
+            Default::default()
+        };
+        let finalized_tree2 = if height2 >= NetworkUpgrade::Heartwood.activation_height(Network::Mainnet).unwrap() {
+            NonEmptyHistoryTree::from_block(Network::Mainnet, prev_block2, &Default::default(), &Default::default()).unwrap().into()
+        } else {
+            Default::default()
+        };
+        let chain1 = Chain::new(Network::Mainnet, Default::default(), Default::default(), finalized_tree1);
+        let chain2 = Chain::new(Network::Mainnet, Default::default(), Default::default(), finalized_tree2);
 
-        let block1 = Arc::new(block1.0).prepare();
-        let block2 = Arc::new(block2.0).prepare();
+        let block1 = vec1[1].clone().prepare();
+        let block2 = vec2[1].clone().prepare();
 
         let result1 = chain1.push(block1.clone());
         let result2 = chain2.push(block2.clone());
@@ -255,6 +288,9 @@ fn different_blocks_different_chains() -> Result<()> {
                 // note commitment trees
                 chain1.sapling_note_commitment_tree = chain2.sapling_note_commitment_tree.clone();
                 chain1.orchard_note_commitment_tree = chain2.orchard_note_commitment_tree.clone();
+
+                // history tree
+                chain1.history_tree = chain2.history_tree.clone();
 
                 // anchors
                 chain1.sapling_anchors = chain2.sapling_anchors.clone();
