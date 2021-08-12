@@ -53,24 +53,27 @@ impl ShieldedData {
 
     /// Calculate the Action binding verification key.
     ///
-    /// Getting the binding signature validating key from the Spend and Output
-    /// description value commitments and the balancing value implicitly checks
-    /// that the balancing value is consistent with the value transfered in the
-    /// Spend and Output descriptions but also proves that the signer knew the
-    /// randomness used for the Spend and Output value commitments, which
-    /// prevents replays of Output descriptions.
+    /// Getting the binding signature validating key from the Action description 
+    /// value commitments and the balancing value implicitly checks that the 
+    /// balancing value is consistent with the value transferred in the
+    /// Action descriptions, but also proves that the signer knew the
+    /// randomness used for the Action value commitments, which
+    /// prevents replays of Action descriptions that perform an output.
+    /// In Orchard, all Action descriptions have a spend authorization signature,
+    /// therefore the proof of knowledge of the value commitment randomness
+    /// is less important, but stills provides defense in depth, and reduces the 
+    /// differences between Orchard and Sapling.
     ///
-    /// The net value of Spend transfers minus Output transfers in a transaction
+    /// The net value of Orchard spends minus outputs in a transaction
     /// is called the balancing value, measured in zatoshi as a signed integer
-    /// v_balance.
+    /// cv_balance.
     ///
-    /// Consistency of v_balance with the value commitments in Spend
-    /// descriptions and Output descriptions is enforced by the binding
-    /// signature.
+    /// Consistency of cv_balance with the value commitments in Action 
+    /// descriptions is enforced by the binding signature.
     ///
     /// Instead of generating a key pair at random, we generate it as a function
-    /// of the value commitments in the Spend descriptions and Output
-    /// descriptions of the transaction, and the balancing value.
+    /// of the value commitments in the Action descriptions of the transaction, and 
+    /// the balancing value.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#orchardbalance
     pub fn binding_verification_key(&self) -> redpallas::VerificationKeyBytes<Binding> {
