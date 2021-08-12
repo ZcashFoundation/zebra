@@ -6,11 +6,11 @@
 //! don't fit the async context well.
 
 mod inbound;
+pub mod mempool;
 pub mod metrics;
 mod sync;
 pub mod tokio;
 pub mod tracing;
-pub mod mempool;
 
 pub use inbound::Inbound;
 pub use sync::ChainSync;
