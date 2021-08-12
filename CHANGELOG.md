@@ -4,6 +4,40 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.15](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.15) - 2021-08-TBD
+
+- Generate test chains with valid chain value pools (#2597)
+- Make zebra-state compile successfully by itself (#2611)
+- Update cache to v9 (#2598)
+- Sync to, not past, activation for regenerate-stateful-test-disks.yml (#2601)
+- Add ZIP-221 history tree to non-finalized state (#2583)
+- Refactor value balances to support generated data modification (#2596)
+- Cache note commitment tree roots (#2584)
+- Refactor HistoryTree into NonEmptyHistoryTree and HistoryTree (#2582)
+- Check remaining transaction value \& make value balance signs match the spec  (#2566)
+- Add extra arithmetic operations and error details to Amount and ValueBalance (#2577)
+- Add Chain ValueBalance serialization (#2554)
+- Reject connections from outdated peers (#2519)
+- Use the same value balance sign for transparent and shielded outputs (#2569)
+- Add test-only methods for modifying orchard shielded data and joinsplits (#2580)
+- Update the signs in the value pools design to match the spec (#2576)
+- Stop using prop\_filter\_map to produce valid sapling shielded data (#2579)
+- impl TryFrom for vector references for AtLeastOne (#2578)
+- Increase timeout of cached database creation (#2581)
+- Decrease `DEFAULT_NULLIFIER_PROPTEST_CASES` (#2574)
+- Add ZIP-221 (history tree) to finalized state (#2553)
+- Add a random number of transactions to generated blocks, rather than always 2 (#2567)
+- Fix the storage of anchors in the state (#2563)
+- Use fixed genesis coinbase data in generated genesis blocks (#2568)
+- Return valid `Utxo`s from `check::transparent_spend` (#2561)
+- Optimize build used when regenerating the state to hopefully make it faster (#2552)
+- ZIP-221: Add Orchard support to history tree (#2531)
+- Design: Fix Transparent Value Sign and Definition (#2555)
+- Remove unreliable generated chain prevouts tests (#2548)
+- Add value\_balance() method to Block (#2546)
+- Increase coverage for generated chains and proptests (#2540)
+- Update release date in CHANGELOG (#2545)
+
 ## [Zebra 1.0.0-alpha.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.14) - 2021-07-29
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5.
