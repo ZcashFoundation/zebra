@@ -319,6 +319,9 @@ impl FinalizedState {
                 batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
             }
 
+            // Create a map for all the utxos spent by the block
+            let mut all_utxos_spent_by_block = HashMap::new();
+
             // Index each transaction, spent inputs, nullifiers
             for (transaction_index, (transaction, transaction_hash)) in block
                 .transactions
@@ -334,10 +337,15 @@ impl FinalizedState {
                 };
                 batch.zs_insert(tx_by_hash, transaction_hash, transaction_location);
 
-                // Mark all transparent inputs as spent
+                // Mark all transparent inputs as spent, collect them as well.
                 for input in transaction.inputs() {
                     match input {
                         transparent::Input::PrevOut { outpoint, .. } => {
+                            all_utxos_spent_by_block.insert(
+                                *outpoint,
+                                self.utxo(outpoint)
+                                    .expect("Utxo for OutPoint should be present"),
+                            );
                             batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
                         }
                         // Coinbase inputs represent new coins,
@@ -396,7 +404,8 @@ impl FinalizedState {
             }
 
             let current_pool = self.current_value_pool();
-            let new_pool = current_pool.update_with_block(block.borrow(), &new_outputs)?;
+            let new_pool =
+                current_pool.update_with_block(block.borrow(), &all_utxos_spent_by_block)?;
             batch.zs_insert(tip_chain_value_pool, (), new_pool);
 
             Ok(batch)
