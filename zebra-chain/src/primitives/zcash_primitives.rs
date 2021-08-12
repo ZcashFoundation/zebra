@@ -137,10 +137,12 @@ pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
     let alt_tx: zcash_primitives::transaction::Transaction = trans
         .try_into()
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
+
     let digest_bytes: [u8; 32] = alt_tx
         .auth_commitment()
         .as_ref()
         .try_into()
         .expect("digest has the correct size");
+
     AuthDigest(digest_bytes)
 }

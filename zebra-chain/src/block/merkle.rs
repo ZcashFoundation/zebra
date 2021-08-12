@@ -83,8 +83,8 @@ fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     w.finish()
 }
 
-/// Compute the root of a Merkle tree as used in Bitcoin.
-/// `hashes` must contain the hashes of the tree leaves.
+/// Compute the root of a Merkle tree of transactions as used in Bitcoin.
+/// `hashes` must contain the hashes of the tree leaves (transactions) in some form.
 /// The root is written to the the first element of the input vector.
 /// See [`Root`] for an important disclaimer.
 fn root(hashes: &mut Vec<[u8; 32]>) {
@@ -135,7 +135,7 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct AuthDataRoot(pub [u8; 32]);
+pub struct AuthDataRoot(pub(crate) [u8; 32]);
 
 impl fmt::Debug for AuthDataRoot {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -208,8 +208,8 @@ mod tests {
     fn auth_digest() {
         for block_bytes in zebra_test::vectors::BLOCKS.iter() {
             let block = Block::zcash_deserialize(&**block_bytes).unwrap();
-            let _merkle_root = block.transactions.iter().collect::<AuthDataRoot>();
-            // No test vectors for now, so just check it works
+            let _auth_digest = block.transactions.iter().collect::<AuthDataRoot>();
+            // No test vectors for now, so just check it computes without panicking
         }
     }
 }
