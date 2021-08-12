@@ -543,6 +543,14 @@ where
                         .oneshot((action.rk, spend_auth_sig, &shielded_sighash).into()),
                 );
             }
+
+            let bvk = orchard_shielded_data.binding_verification_key();
+
+            async_checks.push(
+                primitives::redpallas::VERIFIER
+                    .clone()
+                    .oneshot((bvk, orchard_shielded_data.binding_sig, &shielded_sighash).into()),
+            );
         }
 
         Ok(async_checks)
