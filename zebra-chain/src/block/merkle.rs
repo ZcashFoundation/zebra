@@ -83,7 +83,7 @@ fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     w.finish()
 }
 
-/// Compute the root of a Merke tree as used in Bitcoin.
+/// Compute the root of a Merkle tree as used in Bitcoin.
 /// `hashes` must contain the hashes of the tree leaves.
 /// The root is written to the the first element of the input vector.
 /// See [`Root`] for an important disclaimer.
