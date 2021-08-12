@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum TransactionInsertError {
     #[error("transaction already exists in mempool")]
     InMempool,
