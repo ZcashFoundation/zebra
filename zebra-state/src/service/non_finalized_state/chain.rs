@@ -8,9 +8,17 @@ use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    amount::NonNegative, block, history_tree::HistoryTree, orchard, parameters::Network,
-    primitives::Groth16Proof, sapling, sprout, transaction, transaction::Transaction::*,
-    transparent, value_balance::ValueBalance, work::difficulty::PartialCumulativeWork,
+    amount::{NegativeAllowed, NonNegative},
+    block,
+    history_tree::HistoryTree,
+    orchard,
+    parameters::Network,
+    primitives::Groth16Proof,
+    sapling, sprout, transaction,
+    transaction::Transaction::*,
+    transparent,
+    value_balance::ValueBalance,
+    work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
@@ -435,6 +443,13 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_state_with(sapling_shielded_data_per_spend_anchor)?;
             self.update_chain_state_with(sapling_shielded_data_shared_anchor)?;
             self.update_chain_state_with(orchard_shielded_data)?;
+
+            // add the value balance data
+            self.update_chain_state_with(
+                &transaction
+                    .value_balance(new_outputs)
+                    .expect("All the needed utxos should be available"),
+            )?;
         }
 
         // Having updated all the note commitment trees and nullifier sets in
@@ -536,6 +551,11 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
             self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             self.revert_chain_state_with(orchard_shielded_data);
+
+            // remove the value balance
+            self.revert_chain_state_with(&transaction.value_balance(new_outputs).expect(
+                "Value balance for the transaction will be valid as we inserted it before",
+            ));
         }
         let anchor = self
             .sapling_anchors_by_height
@@ -721,6 +741,29 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
                 orchard_shielded_data.nullifiers(),
             );
         }
+    }
+}
+
+impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
+    fn update_chain_state_with(
+        &mut self,
+        value_balance: &ValueBalance<NegativeAllowed>,
+    ) -> Result<(), ValidateContextError> {
+        match self
+            .value_pool
+            .update_with_chain_value_pool_change(-(*value_balance))
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ValidateContextError::AddValuePool {
+                value_balance_error: e,
+            }),
+        }
+    }
+    fn revert_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) {
+        self.value_pool = self
+            .value_pool
+            .update_with_chain_value_pool_change(*value_balance)
+            .expect("The reverse operation will leave the pools in a previously valid state");
     }
 }
 

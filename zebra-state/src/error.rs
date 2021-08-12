@@ -180,6 +180,15 @@ pub enum ValidateContextError {
         transaction_hash: zebra_chain::transaction::Hash,
     },
 
+    #[error(
+        "error adding value balances to the chain value pool: \
+         {value_balance_error:?}"
+    )]
+    #[non_exhaustive]
+    AddValuePool {
+        value_balance_error: ValueBalanceError,
+    },
+
     #[error("error in Sapling note commitment tree")]
     SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
 
