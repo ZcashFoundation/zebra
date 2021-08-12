@@ -5,13 +5,7 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    convert::TryInto,
-    path::Path,
-    sync::Arc
-};
+use std::{borrow::Borrow, collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
     amount::NonNegative,
