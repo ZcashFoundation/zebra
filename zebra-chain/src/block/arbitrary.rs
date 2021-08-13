@@ -11,6 +11,7 @@ use crate::{
     amount::NonNegative,
     block,
     fmt::SummaryDebug,
+    history_tree::HistoryTree,
     parameters::{
         Network,
         NetworkUpgrade::{self, *},
@@ -402,6 +403,9 @@ impl Block {
             let mut previous_block_hash = None;
             let mut utxos = HashMap::new();
             let mut chain_value_pools = ValueBalance::zero();
+            let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
+            let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
+            let mut history_tree = HistoryTree::default();
 
             for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
@@ -419,6 +423,12 @@ impl Block {
                         &mut utxos,
                         check_transparent_coinbase_spend,
                     ) {
+                        for sapling_note_commitment in transaction.sapling_note_commitments() {
+                            sapling_tree.append(*sapling_note_commitment).unwrap();
+                        }
+                        for orchard_note_commitment in transaction.orchard_note_commitments() {
+                            orchard_tree.append(*orchard_note_commitment).unwrap();
+                        }
                         new_transactions.push(Arc::new(transaction));
                     }
                 }
@@ -426,13 +436,53 @@ impl Block {
                 // delete invalid transactions
                 block.transactions = new_transactions;
 
-                // TODO: if needed, fixup after modifying the block:
-                // - history and authorizing data commitments
-                // - the transaction merkle root
+                // fix commitment (must be done after finishing changing the block)
+                let current_height = block.coinbase_height().unwrap();
+                let heartwood_height = NetworkUpgrade::Heartwood
+                    .activation_height(current.network)
+                    .unwrap();
+                let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
+                match current_height.cmp(&heartwood_height) {
+                    std::cmp::Ordering::Less => {}
+                    std::cmp::Ordering::Equal => {
+                        block.header.commitment_bytes = [0u8; 32];
+                    }
+                    std::cmp::Ordering::Greater => {
+                        if nu5_height.is_some() && current_height >= nu5_height.unwrap() {
+                            // From zebra-state/src/service/check.rs
+                            let history_tree_root = history_tree.hash().unwrap();
+                            let auth_data_root = block.auth_data_root();
+                            let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
+                                .hash_length(32)
+                                .personal(b"ZcashBlockCommit")
+                                .to_state()
+                                .update(&<[u8; 32]>::from(history_tree_root)[..])
+                                .update(&<[u8; 32]>::from(auth_data_root))
+                                .update(&[0u8; 32])
+                                .finalize()
+                                .as_bytes()
+                                .try_into()
+                                .expect("32 byte array");
+                            block.header.commitment_bytes = hash_block_commitments;
+                        } else {
+                            block.header.commitment_bytes = history_tree.hash().unwrap().into();
+                        }
+                    }
+                }
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it
                 previous_block_hash = Some(block.hash());
+
+                // update history tree for the next block
+                history_tree
+                    .push(
+                        Network::Mainnet,
+                        Arc::new(block.clone()),
+                        sapling_tree.root(),
+                        orchard_tree.root(),
+                    )
+                    .unwrap();
             }
             SummaryDebug(
                 vec.into_iter()

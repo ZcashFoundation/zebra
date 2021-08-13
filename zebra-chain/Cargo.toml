@@ -11,6 +11,7 @@ edition = "2018"
 default = []
 proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test", "rand", "rand_chacha"]
 bench = ["zebra-test"]
+test_fake_activation_heights = []
 
 [dependencies]
 aes = "0.6"

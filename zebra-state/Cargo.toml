@@ -7,6 +7,7 @@ edition = "2018"
 
 [features]
 proptest-impl = ["proptest", "zebra-test"]
+test_fake_activation_heights = ["zebra-chain/test_fake_activation_heights"]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
@@ -38,7 +39,7 @@ proptest = { version = "0.10.1", optional = true }
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl", "test_fake_activation_heights"] }
 zebra-test = { path = "../zebra-test/" }
 
 color-eyre = "0.5.11"
