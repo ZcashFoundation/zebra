@@ -1,6 +1,6 @@
 //! Consensus critical contextual checks
 
-use std::{borrow::Borrow, convert::TryInto};
+use std::{borrow::Borrow, convert::TryInto, sync::Arc};
 
 use chrono::Duration;
 
@@ -12,7 +12,7 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{PreparedBlock, ValidateContextError};
+use crate::{FinalizedBlock, PreparedBlock, ValidateContextError};
 
 use super::check;
 
@@ -103,12 +103,31 @@ where
 /// Check that the `prepared` block is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
 #[tracing::instrument(skip(prepared, history_tree))]
-pub(crate) fn block_commitment_is_valid_for_chain_history(
+pub(crate) fn prepared_block_commitment_is_valid_for_chain_history(
     prepared: &PreparedBlock,
     network: Network,
     history_tree: &HistoryTree,
 ) -> Result<(), ValidateContextError> {
-    match prepared.block.commitment(network)? {
+    block_commitment_is_valid_for_chain_history(prepared.block.clone(), network, history_tree)
+}
+
+/// Check that the `finalized` block is contextually valid for `network`, using
+/// the `history_tree` up to and including the previous block.
+#[tracing::instrument(skip(finalized, history_tree))]
+pub(crate) fn finalized_block_commitment_is_valid_for_chain_history(
+    finalized: &FinalizedBlock,
+    network: Network,
+    history_tree: &HistoryTree,
+) -> Result<(), ValidateContextError> {
+    block_commitment_is_valid_for_chain_history(finalized.block.clone(), network, history_tree)
+}
+
+fn block_commitment_is_valid_for_chain_history(
+    block: Arc<Block>,
+    network: Network,
+    history_tree: &HistoryTree,
+) -> Result<(), ValidateContextError> {
+    match block.commitment(network)? {
         block::Commitment::PreSaplingReserved(_)
         | block::Commitment::FinalSaplingRoot(_)
         | block::Commitment::ChainHistoryActivationReserved => {
@@ -135,7 +154,7 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
             let history_tree_root = history_tree
                 .hash()
                 .expect("the history tree of the previous block must exist since the current block has a ChainHistoryBlockTxAuthCommitment");
-            let auth_data_root = prepared.block.auth_data_root();
+            let auth_data_root = block.auth_data_root();
 
             // > The value of this hash [hashBlockCommitments] is the BLAKE2b-256 hash personalized
             // > by the string "ZcashBlockCommit" of the following elements:

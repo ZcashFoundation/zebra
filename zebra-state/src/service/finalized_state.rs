@@ -17,7 +17,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::{BoxError, Config, FinalizedBlock, HashOrHeight};
+use crate::{service::check, BoxError, Config, FinalizedBlock, HashOrHeight};
 
 use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
 
@@ -204,20 +204,14 @@ impl FinalizedState {
     ///
     /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from updating history and note commitment trees
+    /// - If `hashFinalSaplingRoot` / `hashLightClientRoot` / `hashBlockCommitments`
+    ///   does not match the expected value
     pub fn commit_finalized_direct(
         &mut self,
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
         block_precommit_metrics(&finalized);
-
-        let FinalizedBlock {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-        } = finalized;
 
         let finalized_tip_height = self.finalized_tip_height();
 
@@ -243,27 +237,27 @@ impl FinalizedState {
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
             assert_eq!(
-                GENESIS_PREVIOUS_BLOCK_HASH, block.header.previous_block_hash,
+                GENESIS_PREVIOUS_BLOCK_HASH, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {}",
                 source,
             );
             assert_eq!(
                 block::Height(0),
-                height,
+                finalized.height,
                 "cannot commit genesis: invalid height, source: {}",
                 source,
             );
         } else {
             assert_eq!(
                 finalized_tip_height.expect("state must have a genesis block committed") + 1,
-                Some(height),
+                Some(finalized.height),
                 "committed block height must be 1 more than the finalized tip height, source: {}",
                 source,
             );
 
             assert_eq!(
                 self.finalized_tip_hash(),
-                block.header.previous_block_hash,
+                finalized.block.header.previous_block_hash,
                 "committed block must be a child of the finalized tip, source: {}",
                 source,
             );
@@ -274,6 +268,27 @@ impl FinalizedState {
         let mut sapling_note_commitment_tree = self.sapling_note_commitment_tree();
         let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
         let mut history_tree = self.history_tree();
+
+        // Check the block commitment. For Nu5-onward, the block hash commits only
+        // to non-authorizing data (see ZIP-244). This checks the authorizing data
+        // commitment, making sure the entire block contents were commited to.
+        // The test is done here (and not during semantic validation) because it needs
+        // the history tree root. While it _is_ checked during contextual validation,
+        // that is not called by the checkpoint verifier, and keeping a history tree there
+        // would be harder to implement.
+        check::finalized_block_commitment_is_valid_for_chain_history(
+            &finalized,
+            self.network,
+            &history_tree,
+        )?;
+
+        let FinalizedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        } = finalized;
 
         // Prepare a batch of DB modifications and return it (without actually writing anything).
         // We use a closure so we can use an early return for control flow in

@@ -919,8 +919,7 @@ where
             match state_service
                 .oneshot(zs::Request::CommitFinalizedBlock(block.into()))
                 .map_err(VerifyCheckpointError::CommitFinalized)
-                .await
-                .expect("state service commit block failed: verified checkpoints must be committed transactionally")
+                .await?
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
