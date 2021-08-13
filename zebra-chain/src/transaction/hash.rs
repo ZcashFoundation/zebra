@@ -68,21 +68,3 @@ impl std::str::FromStr for Hash {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn transactionhash_from_str() {
-        zebra_test::init();
-
-        let hash: Hash = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
-            .parse()
-            .unwrap();
-        assert_eq!(
-            format!("{:?}", hash),
-            r#"transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
-        );
-    }
-}
