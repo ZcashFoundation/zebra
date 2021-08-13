@@ -403,6 +403,9 @@ impl FinalizedState {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
 
+            // Some utxos are spent in the same block so they will be in `new_outputs`.
+            all_utxos_spent_by_block.extend(new_outputs);
+
             let current_pool = self.current_value_pool();
             let new_pool =
                 current_pool.update_with_block(block.borrow(), &all_utxos_spent_by_block)?;
