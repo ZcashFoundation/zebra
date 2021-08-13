@@ -13,7 +13,7 @@ Zebra's latest alpha contains the last of the changes to zebra chain state ahead
 #### Network Upgrade 5
 
 - ZIP-209: Prohibit Negative Shielded Chain Value Pool Balances Implementation (#2546, #2554, #2561, #2566, #2569, #2576, #2577, #2578, #2596)
-- ZIP-221: FlyClient - Consensus-Layer Changes Implementation(#2531, #2553, #2583)
+- ZIP-221: FlyClient - Consensus-Layer Changes Implementation (#2531, #2553, #2583)
 
 ### Changed
 
