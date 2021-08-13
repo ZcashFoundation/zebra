@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::NegativeAllowed,
+    block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     orchard,
     parameters::{Network, NetworkUpgrade},
@@ -197,6 +198,14 @@ impl Block {
             .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?;
 
         Ok(transaction_value_balance_total.neg())
+    }
+
+    /// Compute the root of the authorizing data Merkle tree,
+    /// as defined in [ZIP-244].
+    ///
+    /// [ZIP-244]: https://zips.z.cash/zip-0244
+    pub fn auth_data_root(&self) -> AuthDataRoot {
+        self.transactions.iter().collect::<AuthDataRoot>()
     }
 }
 
