@@ -1,4 +1,4 @@
-use std::{io, num::TryFromIntError, str::Utf8Error};
+use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
 
 use thiserror::Error;
 
@@ -20,6 +20,10 @@ pub enum SerializationError {
     /// Note: Rust `String` and `str` are always UTF-8.
     #[error("string was not UTF-8: {0}")]
     Utf8Error(#[from] Utf8Error),
+
+    /// A slice was an unexpected length during deserialization.
+    #[error("slice was the wrong length: {0}")]
+    TryFromSliceError(#[from] TryFromSliceError),
 
     /// The length of a vec is too large to convert to a usize (and thus, too large to allocate on this platform)
     #[error("compactsize too large: {0}")]

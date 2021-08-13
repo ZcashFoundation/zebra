@@ -9,13 +9,19 @@
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
 
-use std::fmt;
+use std::{
+    borrow::Borrow,
+    convert::{TryFrom, TryInto},
+    fmt,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::SerializationError;
+use crate::serialization::{
+    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+};
 
 use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 
@@ -28,12 +34,33 @@ use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
-impl<'a> From<&'a Transaction> for Hash {
-    fn from(transaction: &'a Transaction) -> Self {
-        let hasher = TxIdBuilder::new(transaction);
+impl<Tx> From<Tx> for Hash
+where
+    Tx: Borrow<Transaction>,
+{
+    fn from(transaction: Tx) -> Self {
+        let hasher = TxIdBuilder::new(transaction.borrow());
         hasher
             .txid()
             .expect("zcash_primitives and Zebra transaction formats must be compatible")
+    }
+}
+
+impl From<[u8; 32]> for Hash {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<Hash> for [u8; 32] {
+    fn from(hash: Hash) -> Self {
+        hash.0
+    }
+}
+
+impl From<&Hash> for [u8; 32] {
+    fn from(hash: &Hash) -> Self {
+        (*hash).into()
     }
 }
 
@@ -69,6 +96,18 @@ impl std::str::FromStr for Hash {
     }
 }
 
+impl ZcashSerialize for Hash {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_32_bytes(&self.into())
+    }
+}
+
+impl ZcashDeserialize for Hash {
+    fn zcash_deserialize<R: std::io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_32_bytes()?.into())
+    }
+}
+
 /// A wide transaction ID, which uniquely identifies unmined v5 transactions.
 ///
 /// Wide transaction IDs are not used for transaction versions 1-4.
@@ -82,17 +121,83 @@ pub struct WtxId {
     pub auth_digest: AuthDigest,
 }
 
-impl<'a> From<&'a Transaction> for WtxId {
+impl WtxId {
+    /// Return this wide transaction ID as a serialized byte array.
+    pub fn as_bytes(&self) -> [u8; 64] {
+        <[u8; 64]>::from(self)
+    }
+}
+
+impl<Tx> From<Tx> for WtxId
+where
+    Tx: Borrow<Transaction>,
+{
     /// Computes the wide transaction ID for a transaction.
     ///
     /// # Panics
     ///
     /// If passed a pre-v5 transaction.
-    fn from(transaction: &'a Transaction) -> Self {
+    fn from(transaction: Tx) -> Self {
         Self {
-            id: transaction.into(),
-            auth_digest: transaction.into(),
+            id: transaction.borrow().into(),
+            auth_digest: transaction.borrow().into(),
         }
+    }
+}
+
+impl From<[u8; 64]> for WtxId {
+    fn from(bytes: [u8; 64]) -> Self {
+        let id: [u8; 32] = bytes[0..32].try_into().expect("length is 64");
+        let auth_digest: [u8; 32] = bytes[32..64].try_into().expect("length is 64");
+
+        Self {
+            id: id.into(),
+            auth_digest: auth_digest.into(),
+        }
+    }
+}
+
+impl From<WtxId> for [u8; 64] {
+    fn from(wtx_id: WtxId) -> Self {
+        let mut bytes = [0; 64];
+        let (id, auth_digest) = bytes.split_at_mut(32);
+
+        id.copy_from_slice(&wtx_id.id.0);
+        auth_digest.copy_from_slice(&wtx_id.auth_digest.0);
+
+        bytes
+    }
+}
+
+impl From<&WtxId> for [u8; 64] {
+    fn from(wtx_id: &WtxId) -> Self {
+        (*wtx_id).into()
+    }
+}
+
+impl TryFrom<&[u8]> for WtxId {
+    type Error = SerializationError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let bytes: [u8; 64] = bytes.try_into()?;
+
+        Ok(bytes.into())
+    }
+}
+
+impl TryFrom<Vec<u8>> for WtxId {
+    type Error = SerializationError;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        bytes.as_slice().try_into()
+    }
+}
+
+impl TryFrom<&Vec<u8>> for WtxId {
+    type Error = SerializationError;
+
+    fn try_from(bytes: &Vec<u8>) -> Result<Self, Self::Error> {
+        bytes.clone().try_into()
     }
 }
 
@@ -125,5 +230,17 @@ impl std::str::FromStr for WtxId {
                 "wrong length for WtxId hex string",
             ))
         }
+    }
+}
+
+impl ZcashSerialize for WtxId {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_64_bytes(&self.into())
+    }
+}
+
+impl ZcashDeserialize for WtxId {
+    fn zcash_deserialize<R: std::io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_64_bytes()?.into())
     }
 }
