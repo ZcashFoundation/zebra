@@ -341,11 +341,9 @@ impl FinalizedState {
                 for input in transaction.inputs() {
                     match input {
                         transparent::Input::PrevOut { outpoint, .. } => {
-                            all_utxos_spent_by_block.insert(
-                                *outpoint,
-                                self.utxo(outpoint)
-                                    .expect("Utxo for OutPoint should be present"),
-                            );
+                            if let Some(utxo) = self.utxo(outpoint) {
+                                all_utxos_spent_by_block.insert(*outpoint, utxo);
+                            }
                             batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
                         }
                         // Coinbase inputs represent new coins,
