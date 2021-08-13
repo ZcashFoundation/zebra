@@ -16,6 +16,9 @@ pub enum TransactionInsertError {
 
     #[error("transaction has expired")]
     TransactionExpired,
+
+    #[error("transaction fee is too low for the current mempool state")]
+    LowFee,
 }
 
 #[derive(Error, Debug, PartialEq)]
