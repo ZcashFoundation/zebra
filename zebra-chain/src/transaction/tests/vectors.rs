@@ -44,6 +44,19 @@ fn transactionhash_from_str() {
 }
 
 #[test]
+fn auth_digest_from_str() {
+    zebra_test::init();
+
+    let digest: AuthDigest = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
+        .parse()
+        .unwrap();
+    assert_eq!(
+        format!("{:?}", digest),
+        r#"AuthDigest("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
+    );
+}
+
+#[test]
 fn librustzcash_tx_deserialize_and_round_trip() {
     zebra_test::init();
 
