@@ -1,4 +1,14 @@
-#![allow(clippy::unit_arg)]
+//! Transaction identifiers for Zcash.
+//!
+//! Zcash has two different transaction identifiers, with different widths:
+//! * a 32-byte narrow transaction ID, which uniquely identifies mined transactions
+//!   (transactions that have been committed to the blockchain in blocks), and
+//! * a 64-byte wide transaction ID, which uniquely identifies unmined transactions
+//!   (transactions that are sent by wallets or stored in node mempools).
+//!
+//! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
+//! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
+
 use std::fmt;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -9,7 +19,8 @@ use crate::serialization::SerializationError;
 
 use super::{txid::TxIdBuilder, Transaction};
 
-/// A transaction hash.
+/// A narrow transaction ID, which uniquely identifies mined transactions
+/// (transactions that have been committed to a block in the blockchain).
 ///
 /// Note: Zebra displays transaction and block hashes in big-endian byte-order,
 /// following the u256 convention set by Bitcoin and zcashd.
