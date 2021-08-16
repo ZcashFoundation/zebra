@@ -11,7 +11,7 @@ use crate::{
     amount::{Amount, NonNegative},
     parameters::NetworkUpgrade,
     serialization::ZcashSerialize,
-    transaction::{HashType, SigHash, Transaction},
+    transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
 };
 
@@ -123,4 +123,26 @@ pub(crate) fn sighash(
         )
         .as_ref(),
     )
+}
+
+/// Compute the authorizing data commitment of this transaction as specified
+/// in [ZIP-244].
+///
+/// # Panics
+///
+/// If passed a pre-v5 transaction.
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244.
+pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
+    let alt_tx: zcash_primitives::transaction::Transaction = trans
+        .try_into()
+        .expect("zcash_primitives and Zebra transaction formats must be compatible");
+
+    let digest_bytes: [u8; 32] = alt_tx
+        .auth_commitment()
+        .as_ref()
+        .try_into()
+        .expect("digest has the correct size");
+
+    AuthDigest(digest_bytes)
 }
