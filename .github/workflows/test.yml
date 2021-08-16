@@ -64,7 +64,7 @@ jobs:
       # Build and run test container
       - name: Run all tests
         run: |
-          gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --ssh-flag="-o ServerAliveInterval=5" --zone "$ZONE" --command \
+          gcloud compute ssh "zebrad-tests-$BRANCH_NAME-$SHORT_SHA" --zone "$ZONE" --command \
           "git clone -b $BRANCH_NAME https://github.com/ZcashFoundation/zebra.git &&
           cd zebra/ &&
           docker build --build-arg SHORT_SHA=$SHORT_SHA -f docker/Dockerfile.test -t zebrad-test . &&
