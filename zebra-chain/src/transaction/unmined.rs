@@ -21,6 +21,19 @@ use super::{
 use UnminedTxId::*;
 
 /// A unique identifier for an unmined transaction, regardless of version.
+///
+/// "The transaction ID of a version 4 or earlier transaction is the SHA-256d hash
+/// of the transaction encoding in the pre-v5 format described above.
+///
+/// The transaction ID of a version 5 transaction is as defined in [ZIP-244].
+///
+/// A v5 transaction also has a wtxid (used for example in the peer-to-peer protocol)
+/// as defined in [ZIP-239]."
+/// [Spec: Transaction Identifiers]
+///
+/// [ZIP-239]: https://zips.z.cash/zip-0239
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum UnminedTxId {
