@@ -33,12 +33,60 @@ proptest! {
     }
 
     #[test]
-    fn transaction_hash_display_fromstr_roundtrip(hash in any::<Hash>()) {
+    fn transaction_hash_struct_display_roundtrip(hash in any::<Hash>()) {
         zebra_test::init();
 
         let display = format!("{}", hash);
         let parsed = display.parse::<Hash>().expect("hash should parse");
         prop_assert_eq!(hash, parsed);
+    }
+
+    #[test]
+    fn transaction_hash_string_parse_roundtrip(hash in any::<String>()) {
+        zebra_test::init();
+
+        if let Ok(parsed) = hash.parse::<Hash>() {
+            let display = format!("{}", parsed);
+            prop_assert_eq!(hash, display);
+        }
+    }
+
+    #[test]
+    fn transaction_auth_digest_struct_display_roundtrip(auth_digest in any::<AuthDigest>()) {
+        zebra_test::init();
+
+        let display = format!("{}", auth_digest);
+        let parsed = display.parse::<AuthDigest>().expect("auth digest should parse");
+        prop_assert_eq!(auth_digest, parsed);
+    }
+
+    #[test]
+    fn transaction_auth_digest_string_parse_roundtrip(auth_digest in any::<String>()) {
+        zebra_test::init();
+
+        if let Ok(parsed) = auth_digest.parse::<AuthDigest>() {
+            let display = format!("{}", parsed);
+            prop_assert_eq!(auth_digest, display);
+        }
+    }
+
+    #[test]
+    fn transaction_wtx_id_struct_display_roundtrip(wtx_id in any::<WtxId>()) {
+        zebra_test::init();
+
+        let display = format!("{}", wtx_id);
+        let parsed = display.parse::<WtxId>().expect("wide transaction ID should parse");
+        prop_assert_eq!(wtx_id, parsed);
+    }
+
+    #[test]
+    fn transaction_wtx_id_string_parse_roundtrip(wtx_id in any::<String>()) {
+        zebra_test::init();
+
+        if let Ok(parsed) = wtx_id.parse::<WtxId>() {
+            let display = format!("{}", parsed);
+            prop_assert_eq!(wtx_id, display);
+        }
     }
 
     #[test]
