@@ -468,6 +468,24 @@ fn zip244_txid() -> Result<()> {
 }
 
 #[test]
+fn zip244_auth_digest() -> Result<()> {
+    zebra_test::init();
+
+    for test in zip0244::TEST_VECTORS.iter() {
+        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let auth_digest = transaction.auth_digest();
+        assert_eq!(
+            auth_digest
+                .expect("must have auth_digest since it must be a V5 transaction")
+                .0,
+            test.auth_digest
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_vec143_1() -> Result<()> {
     zebra_test::init();
 
