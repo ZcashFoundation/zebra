@@ -1,6 +1,8 @@
 //! The Bitcoin-inherited Merkle tree of transactions.
 #![allow(clippy::unit_arg)]
 
+use std::convert::TryInto;
+use std::iter;
 use std::{fmt, io::Write};
 
 #[cfg(any(any(test, feature = "proptest-impl"), feature = "proptest-impl"))]
@@ -11,6 +13,9 @@ use crate::transaction::{self, Transaction};
 
 /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
 /// block header to the transactions in the block.
+///
+/// Note: for V5-onward transactions it does not bind to authorizing data
+/// (signature and proofs) which makes it non-malleable [ZIP-244].
 ///
 /// Note that because of a flaw in Bitcoin's design, the `merkle_root` does
 /// not always precisely bind the contents of the block (CVE-2012-2459). It
@@ -61,6 +66,8 @@ use crate::transaction::{self, Transaction};
 /// This vulnerability does not apply to Zebra, because it does not store invalid
 /// data on disk, and because it does not permanently fail blocks or use an
 /// aggressive anti-DoS mechanism.
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
@@ -76,6 +83,22 @@ fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     w.write_all(h1).unwrap();
     w.write_all(h2).unwrap();
     w.finish()
+}
+
+fn auth_data_hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
+    // > Non-leaf hashes in this tree are BLAKE2b-256 hashes personalized by
+    // > the string "ZcashAuthDatHash".
+    // https://zips.z.cash/zip-0244#block-header-changes
+    blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"ZcashAuthDatHash")
+        .to_state()
+        .update(h1)
+        .update(h2)
+        .finalize()
+        .as_bytes()
+        .try_into()
+        .expect("32 byte array")
 }
 
 impl<T> std::iter::FromIterator<T> for Root
@@ -99,7 +122,6 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
         I: IntoIterator<Item = transaction::Hash>,
     {
         let mut hashes = hashes.into_iter().map(|hash| hash.0).collect::<Vec<_>>();
-
         while hashes.len() > 1 {
             hashes = hashes
                 .chunks(2)
@@ -107,6 +129,76 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
                     [h1, h2] => hash(h1, h2),
                     [h1] => hash(h1, h1),
                     _ => unreachable!("chunks(2)"),
+                })
+                .collect();
+        }
+        Self(hashes[0])
+    }
+}
+
+/// The root of the authorizing data Merkle tree, binding the
+/// block header to the authorizing data of the block (signatures, proofs)
+/// as defined in [ZIP-244].
+///
+/// See [`Root`] for an important disclaimer.
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct AuthDataRoot(pub(crate) [u8; 32]);
+
+impl fmt::Debug for AuthDataRoot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("AuthRoot")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl<T> std::iter::FromIterator<T> for AuthDataRoot
+where
+    T: std::convert::AsRef<Transaction>,
+{
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        // > For transaction versions before v5, a placeholder value consisting
+        // > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
+        // > This is only used in the tree committed to by hashAuthDataRoot.
+        // https://zips.z.cash/zip-0244#authorizing-data-commitment
+        transactions
+            .into_iter()
+            .map(|tx| {
+                tx.as_ref()
+                    .auth_digest()
+                    .unwrap_or_else(|| transaction::AuthDigest([0xFF; 32]))
+            })
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<transaction::AuthDigest> for AuthDataRoot {
+    fn from_iter<I>(hashes: I) -> Self
+    where
+        I: IntoIterator<Item = transaction::AuthDigest>,
+    {
+        let mut hashes = hashes.into_iter().map(|hash| hash.0).collect::<Vec<_>>();
+        // > This new commitment is named hashAuthDataRoot and is the root of a
+        // > binary Merkle tree of transaction authorizing data commitments [...]
+        // > padded with leaves having the "null" hash value [0u8; 32].
+        // https://zips.z.cash/zip-0244#block-header-changes
+        // Pad with enough leaves to make the tree full (a power of 2).
+        let pad_count = hashes.len().next_power_of_two() - hashes.len();
+        hashes.extend(iter::repeat([0u8; 32]).take(pad_count));
+        assert!(hashes.len().is_power_of_two());
+
+        while hashes.len() > 1 {
+            hashes = hashes
+                .chunks(2)
+                .map(|chunk| match chunk {
+                    [h1, h2] => auth_data_hash(h1, h2),
+                    _ => unreachable!("number of nodes is always even since tree is full"),
                 })
                 .collect();
         }
@@ -119,7 +211,7 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
 mod tests {
     use super::*;
 
-    use crate::{block::Block, serialization::ZcashDeserialize};
+    use crate::{block::Block, serialization::ZcashDeserialize, transaction::AuthDigest};
 
     #[test]
     fn block_test_vectors() {
@@ -139,5 +231,52 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn auth_digest() {
+        for block_bytes in zebra_test::vectors::BLOCKS.iter() {
+            let block = Block::zcash_deserialize(&**block_bytes).unwrap();
+            let _auth_root = block.transactions.iter().collect::<AuthDataRoot>();
+            // No test vectors for now, so just check it computes without panicking
+        }
+    }
+
+    #[test]
+    fn auth_data_padding() {
+        // Compute the root of a 3-leaf tree with arbitrary leaves
+        let mut v = vec![
+            AuthDigest([0x42; 32]),
+            AuthDigest([0xAA; 32]),
+            AuthDigest([0x77; 32]),
+        ];
+        let root_3 = v.iter().copied().collect::<AuthDataRoot>();
+
+        // Compute the root a 4-leaf tree with the same leaves as before and
+        // an additional all-zeroes leaf.
+        // Since this is the same leaf used as padding in the previous tree,
+        // then both trees must have the same root.
+        v.push(AuthDigest([0x00; 32]));
+        let root_4 = v.iter().copied().collect::<AuthDataRoot>();
+
+        assert_eq!(root_3, root_4);
+    }
+
+    #[test]
+    fn auth_data_pre_v5() {
+        // Compute the AuthDataRoot for a single transaction of an arbitrary pre-V5 block
+        let block =
+            Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES).unwrap();
+        let auth_root = block.transactions.iter().take(1).collect::<AuthDataRoot>();
+
+        // Compute the AuthDataRoot with a single [0xFF; 32] digest.
+        // Since ZIP-244 specifies that this value must be used as the auth digest of
+        // pre-V5 transactions, then the roots must match.
+        let expect_auth_root = vec![AuthDigest([0xFF; 32])]
+            .iter()
+            .copied()
+            .collect::<AuthDataRoot>();
+
+        assert_eq!(auth_root, expect_auth_root);
     }
 }
