@@ -35,19 +35,19 @@ proptest! {
     fn inventory_hash_from_random_bytes(input in vec(any::<u8>(), 0..MAX_INVENTORY_HASH_BYTES)) {
         let deserialized: Result<InventoryHash, _> = input.zcash_deserialize_into();
 
-        if input.len() < 36 {
+        if input.len() >= 4 && (input[1..4] != [0u8; 3] || input[0] > 5 || input[0] == 4) {
+            // Invalid inventory code
+            prop_assert!(matches!(
+                deserialized,
+                Err(SerializationError::Parse("invalid inventory code"))
+            ));
+        } else if input.len() < 36 {
             // Not enough bytes for any inventory hash
             prop_assert!(deserialized.is_err());
             prop_assert_eq!(
                 deserialized.unwrap_err().to_string(),
                 "io error: failed to fill whole buffer"
             );
-        } else if input[1..4] != [0u8; 3] || input[0] > 5 || input[0] == 4 {
-            // Invalid inventory code
-            prop_assert!(matches!(
-                deserialized,
-                Err(SerializationError::Parse("invalid inventory code"))
-            ));
         } else if input[0] == 5 && input.len() < 68 {
             // Not enough bytes for a WTX inventory hash
             prop_assert!(deserialized.is_err());

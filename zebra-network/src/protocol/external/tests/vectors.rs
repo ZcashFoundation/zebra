@@ -22,5 +22,5 @@ fn parses_msg_wtx_inventory_type() {
         .zcash_deserialize_into()
         .expect("Failed to deserialize dummy `InventoryHash::Wtx`");
 
-    assert_eq!(deserialized, InventoryHash::Wtx([0; 64]));
+    assert_eq!(deserialized, InventoryHash::Wtx([0u8; 64].into()));
 }
