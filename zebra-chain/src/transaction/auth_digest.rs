@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt};
+use std::fmt;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -22,17 +22,26 @@ use super::Transaction;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub(crate) [u8; 32]);
 
-impl<Tx> From<Tx> for AuthDigest
-where
-    Tx: Borrow<Transaction>,
-{
+impl From<Transaction> for AuthDigest {
     /// Computes the authorizing data commitment for a transaction.
     ///
     /// # Panics
     ///
     /// If passed a pre-v5 transaction.
-    fn from(transaction: Tx) -> Self {
-        auth_digest(transaction.borrow())
+    fn from(transaction: Transaction) -> Self {
+        // use the ref implementation, to avoid cloning the transaction
+        AuthDigest::from(&transaction)
+    }
+}
+
+impl From<&Transaction> for AuthDigest {
+    /// Computes the authorizing data commitment for a transaction.
+    ///
+    /// # Panics
+    ///
+    /// If passed a pre-v5 transaction.
+    fn from(transaction: &Transaction) -> Self {
+        auth_digest(transaction)
     }
 }
 

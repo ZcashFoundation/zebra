@@ -10,7 +10,6 @@
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
 
 use std::{
-    borrow::Borrow,
     convert::{TryFrom, TryInto},
     fmt,
 };
@@ -34,12 +33,16 @@ use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
-impl<Tx> From<Tx> for Hash
-where
-    Tx: Borrow<Transaction>,
-{
-    fn from(transaction: Tx) -> Self {
-        let hasher = TxIdBuilder::new(transaction.borrow());
+impl From<Transaction> for Hash {
+    fn from(transaction: Transaction) -> Self {
+        // use the ref implementation, to avoid cloning the transaction
+        Hash::from(&transaction)
+    }
+}
+
+impl From<&Transaction> for Hash {
+    fn from(transaction: &Transaction) -> Self {
+        let hasher = TxIdBuilder::new(transaction);
         hasher
             .txid()
             .expect("zcash_primitives and Zebra transaction formats must be compatible")
@@ -128,19 +131,28 @@ impl WtxId {
     }
 }
 
-impl<Tx> From<Tx> for WtxId
-where
-    Tx: Borrow<Transaction>,
-{
+impl From<Transaction> for WtxId {
     /// Computes the wide transaction ID for a transaction.
     ///
     /// # Panics
     ///
     /// If passed a pre-v5 transaction.
-    fn from(transaction: Tx) -> Self {
+    fn from(transaction: Transaction) -> Self {
+        // use the ref implementation, to avoid cloning the transaction
+        WtxId::from(&transaction)
+    }
+}
+
+impl From<&Transaction> for WtxId {
+    /// Computes the wide transaction ID for a transaction.
+    ///
+    /// # Panics
+    ///
+    /// If passed a pre-v5 transaction.
+    fn from(transaction: &Transaction) -> Self {
         Self {
-            id: transaction.borrow().into(),
-            auth_digest: transaction.borrow().into(),
+            id: transaction.into(),
+            auth_digest: transaction.into(),
         }
     }
 }
