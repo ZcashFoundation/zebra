@@ -13,7 +13,7 @@ use std::sync::Arc;
 use proptest_derive::Arbitrary;
 
 use super::{
-    Hash,
+    AuthDigest, Hash,
     Transaction::{self, *},
     WtxId,
 };
@@ -86,6 +86,32 @@ impl UnminedTxId {
     #[allow(dead_code)]
     pub fn from_legacy_id(legacy_tx_id: Hash) -> UnminedTxId {
         Narrow(legacy_tx_id)
+    }
+
+    /// Return the unique ID for this transaction's effects.
+    ///
+    /// # Correctness
+    ///
+    /// This method returns an ID which uniquely identifies
+    /// the effects and authorizing data for v1-v4 transactions.
+    ///
+    /// But for v5 transactions, this ID only identifies the transaction's effects.
+    #[allow(dead_code)]
+    pub fn effect_id(&self) -> Hash {
+        match self {
+            Narrow(effect_id) => *effect_id,
+            Wide(wtx_id) => wtx_id.id,
+        }
+    }
+
+    /// Return the digest of this transaction's authorizing data,
+    /// if it is a v5 transaction.
+    #[allow(dead_code)]
+    pub fn auth_digest(&self) -> Option<AuthDigest> {
+        match self {
+            Narrow(_effect_id) => None,
+            Wide(wtx_id) => Some(wtx_id.auth_digest),
+        }
     }
 }
 
