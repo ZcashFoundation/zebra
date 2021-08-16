@@ -51,11 +51,11 @@ pub(super) enum Handler {
         hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
     },
-    TransactionsByHash {
+    TransactionsById {
         hashes: HashSet<transaction::Hash>,
         transactions: Vec<Arc<Transaction>>,
     },
-    MempoolTransactions,
+    MempoolTransactionIds,
 }
 
 impl Handler {
@@ -91,7 +91,7 @@ impl Handler {
             // After the transaction batch, `zcashd` sends `NotFound` if any transactions are missing:
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
             (
-                Handler::TransactionsByHash {
+                Handler::TransactionsById {
                     mut hashes,
                     mut transactions,
                 },
@@ -106,7 +106,7 @@ impl Handler {
                     if hashes.is_empty() {
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
-                        Handler::TransactionsByHash {
+                        Handler::TransactionsById {
                             hashes,
                             transactions,
                         }
@@ -144,7 +144,7 @@ impl Handler {
             }
             // `zcashd` peers actually return this response
             (
-                Handler::TransactionsByHash {
+                Handler::TransactionsById {
                     hashes,
                     transactions,
                 },
@@ -282,12 +282,12 @@ impl Handler {
                     block_hashes(&items[..]).collect(),
                 )))
             }
-            (Handler::MempoolTransactions, Message::Inv(items))
+            (Handler::MempoolTransactionIds, Message::Inv(items))
                 if items
                     .iter()
                     .all(|item| matches!(item, InventoryHash::Tx(_))) =>
             {
-                Handler::Finished(Ok(Response::TransactionHashes(
+                Handler::Finished(Ok(Response::TransactionIds(
                     transaction_hashes(&items[..]).collect(),
                 )))
             }
@@ -667,7 +667,7 @@ where
                     Err(e) => Err((e, tx)),
                 }
             }
-            (AwaitingRequest, TransactionsByHash(hashes)) => {
+            (AwaitingRequest, TransactionsById(hashes)) => {
                 match self
                     .peer_tx
                     .send(Message::GetData(
@@ -677,7 +677,7 @@ where
                 {
                     Ok(()) => Ok((
                         AwaitingResponse {
-                            handler: Handler::TransactionsByHash {
+                            handler: Handler::TransactionsById {
                                 transactions: Vec::with_capacity(hashes.len()),
                                 hashes,
                             },
@@ -723,11 +723,11 @@ where
                     Err(e) => Err((e, tx)),
                 }
             }
-            (AwaitingRequest, MempoolTransactions) => {
+            (AwaitingRequest, MempoolTransactionIds) => {
                 match self.peer_tx.send(Message::Mempool).await {
                     Ok(()) => Ok((
                         AwaitingResponse {
-                            handler: Handler::MempoolTransactions,
+                            handler: Handler::MempoolTransactionIds,
                             tx,
                             span,
                         },
@@ -742,7 +742,7 @@ where
                     Err(e) => Err((e, tx)),
                 }
             }
-            (AwaitingRequest, AdvertiseTransactions(hashes)) => {
+            (AwaitingRequest, AdvertiseTransactionIds(hashes)) => {
                 match self
                     .peer_tx
                     .send(Message::Inv(hashes.iter().map(|h| (*h).into()).collect()))
@@ -861,7 +861,7 @@ where
                 [InventoryHash::Tx(_), rest @ ..]
                     if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
                 {
-                    Request::TransactionsByHash(transaction_hashes(&items).collect())
+                    Request::TransactionsById(transaction_hashes(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
@@ -879,7 +879,7 @@ where
                 [InventoryHash::Tx(_), rest @ ..]
                     if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
                 {
-                    Request::TransactionsByHash(transaction_hashes(&items).collect())
+                    Request::TransactionsById(transaction_hashes(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("getdata with mixed item types"));
@@ -891,7 +891,7 @@ where
             Message::GetHeaders { known_blocks, stop } => {
                 Request::FindHeaders { known_blocks, stop }
             }
-            Message::Mempool => Request::MempoolTransactions,
+            Message::Mempool => Request::MempoolTransactionIds,
         };
 
         self.drive_peer_request(req).await
@@ -973,7 +973,7 @@ where
                     self.fail_with(e)
                 }
             }
-            Response::TransactionHashes(hashes) => {
+            Response::TransactionIds(hashes) => {
                 if let Err(e) = self
                     .peer_tx
                     .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))

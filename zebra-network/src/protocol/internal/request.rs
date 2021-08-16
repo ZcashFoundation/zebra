@@ -80,7 +80,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Transactions`](super::Response::Transactions).
-    TransactionsByHash(HashSet<transaction::Hash>),
+    TransactionsById(HashSet<transaction::Hash>),
 
     /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
@@ -150,7 +150,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseTransactions(HashSet<transaction::Hash>),
+    AdvertiseTransactionIds(HashSet<transaction::Hash>),
 
     /// Advertise a block to all peers.
     ///
@@ -172,6 +172,6 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::TransactionHashes`](super::Response::TransactionHashes).
-    MempoolTransactions,
+    /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
+    MempoolTransactionIds,
 }

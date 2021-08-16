@@ -37,5 +37,5 @@ pub enum Response {
     Transactions(Vec<Arc<Transaction>>),
 
     /// A list of transaction hashes.
-    TransactionHashes(Vec<transaction::Hash>),
+    TransactionIds(Vec<transaction::Hash>),
 }
