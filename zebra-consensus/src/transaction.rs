@@ -326,7 +326,6 @@ where
         // - verify orchard shielded pool (ZIP-224) (#2105)
         // - ZIP-216 (#1798)
         // - ZIP-244 (#1874)
-        // - validate bindingSigOrchard (#2103)
         // - remaining consensus rules (#2379)
         // - remove `should_panic` from tests
 
@@ -543,6 +542,14 @@ where
                         .oneshot((action.rk, spend_auth_sig, &shielded_sighash).into()),
                 );
             }
+
+            let bvk = orchard_shielded_data.binding_verification_key();
+
+            async_checks.push(
+                primitives::redpallas::VERIFIER
+                    .clone()
+                    .oneshot((bvk, orchard_shielded_data.binding_sig, &shielded_sighash).into()),
+            );
         }
 
         Ok(async_checks)
