@@ -4,6 +4,49 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.15](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.15) - 2021-08-16
+
+Zebra's latest alpha contains the last of the changes to zebra chain state ahead of NU5 testnet activation and before concentrating on mempool work. The remaining NU5 validation will be completed prior to NU5 mainnet activation.
+
+### Added
+
+- Reject connections from outdated peers after network upgrade activation (#2519)
+
+#### Network Upgrade 5
+
+- ZIP-209: Prohibit Negative Shielded Chain Value Pool Balances Partial Implementation (#2546, #2554, #2561, #2569, #2576, #2577, #2578, #2596)
+- ZIP-221: FlyClient - Consensus-Layer Changes Partial Implementation (#2531, #2553, #2583)
+- ZIP-244: Implementation of authorizing data commitment (auth_digest) (#2547)
+- Check remaining transaction value is non-negative (#2566)
+
+### Changed
+
+- Cache note commitment tree roots to speed up chain synchronisation  (#2584)
+- Update state cache version to v9 (#2598)
+- Refactor HistoryTree type into NonEmptyHistoryTree and HistoryTree types (#2582)
+
+#### Testing and CI
+
+- Reduce number of nullifier property test cases (#2574)
+- Ensure `regenerate-stateful-test-disks.yml` syncs to the latest network upgrade (#2601)
+- Increase coverage for generated chains and proptests (#2540, #2567)
+- Remove unreliable tests for generated chains (#2548)
+- Add test-only methods for modifying orchard shielded data and joinsplits (#2580)
+- Generate test chains with valid chain value pools (#2597)
+- Increase timeout of cached database creation (#2581)
+- Use fixed genesis coinbase data in generated genesis blocks (#2568)
+- Generate valid sapling shielded data for property tests (#2579)
+- Optimize build to regenerate the test state faster (#2552)
+
+### Fixed
+
+- Fix the storage of anchors in the state (#2563)
+- Make `zebra-state` compile successfully by itself (#2611)
+
+#### Documentation
+
+- Fix Transparent Value sign and definition (#2555)
+
 ## [Zebra 1.0.0-alpha.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.14) - 2021-07-29
 
 Zebra's latest alpha continues our work on NU5, including Orchard and Transaction V5.
