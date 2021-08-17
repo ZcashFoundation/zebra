@@ -9,7 +9,6 @@ use zebra_chain::{
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
     value_balance::ValueBalance,
-
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
