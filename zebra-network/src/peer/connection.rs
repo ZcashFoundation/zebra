@@ -288,7 +288,7 @@ impl Handler {
                     .all(|item| matches!(item, InventoryHash::Tx(_))) =>
             {
                 Handler::Finished(Ok(Response::TransactionIds(
-                    transaction_hashes(&items[..]).collect(),
+                    transaction_ids(&items[..]).collect(),
                 )))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
@@ -861,7 +861,7 @@ where
                 [InventoryHash::Tx(_), rest @ ..]
                     if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
                 {
-                    Request::TransactionsById(transaction_hashes(&items).collect())
+                    Request::TransactionsById(transaction_ids(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
@@ -879,7 +879,7 @@ where
                 [InventoryHash::Tx(_), rest @ ..]
                     if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
                 {
-                    Request::TransactionsById(transaction_hashes(&items).collect())
+                    Request::TransactionsById(transaction_ids(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("getdata with mixed item types"));
@@ -986,7 +986,7 @@ where
     }
 }
 
-fn transaction_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = transaction::Hash> + '_ {
+fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = transaction::Hash> + '_ {
     items.iter().filter_map(|item| {
         if let InventoryHash::Tx(hash) = item {
             Some(*hash)
