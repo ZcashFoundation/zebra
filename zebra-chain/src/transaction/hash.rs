@@ -7,10 +7,11 @@
 //!   (transactions that are sent by wallets or stored in node mempools).
 //!
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
+//! whether they have been mined or not,
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
 //!
-//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct ID for the
-//! transaction version. They can be used to handle transactions regardless of version,
+//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique ID for 
+//! unmined transactions. They can be used to handle transactions regardless of version,
 //! and get the [`WtxId`] or [`Hash`] when required.
 
 use std::{

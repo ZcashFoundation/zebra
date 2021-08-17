@@ -1,11 +1,12 @@
 //! Unmined Zcash transaction identifiers and transactions.
 //!
-//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct ID for the
-//! transaction version. They can be used to handle transactions regardless of version,
-//! and get the [`WtxId`] or [`Hash`] when required.
-//!
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
+//! whether they have been mined or not,
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
+//!
+//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique ID for 
+//! unmined transactions. They can be used to handle transactions regardless of version,
+//! and get the [`WtxId`] or [`Hash`] when required.
 
 use std::sync::Arc;
 
@@ -39,12 +40,16 @@ use UnminedTxId::*;
 pub enum UnminedTxId {
     /// A narrow unmined transaction identifier.
     ///
-    /// Used to uniquely identify transaction versions 1-4.
+    /// Used to uniquely identify unmined version 1-4 transactions.
+    /// (After v1-4 transactions are mined, they can be uniquely identified using the same [`transaction::Hash`].)
     Narrow(Hash),
 
     /// A wide unmined transaction identifier.
     ///
-    /// Used to uniquely identify transaction version 5.
+    /// Used to uniquely identify unmined version 5 transactions.
+    /// (After v5 transactions are mined, they can be uniquely identified using only their `WtxId.id`.)
+    ///
+    /// For more details, see [`WtxId`].
     Wide(WtxId),
 }
 
