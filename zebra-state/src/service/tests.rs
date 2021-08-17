@@ -8,7 +8,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
-    zebra_chain::value_balance::ValueBalance,
+    value_balance::ValueBalance,
 
 };
 use zebra_test::{prelude::*, transcript::Transcript};
