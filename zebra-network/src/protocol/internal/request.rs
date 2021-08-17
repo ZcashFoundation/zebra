@@ -1,8 +1,8 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use zebra_chain::{
     block,
-    transaction::{self, Transaction},
+    transaction::{UnminedTx, UnminedTxId},
 };
 
 use super::super::types::Nonce;
@@ -83,7 +83,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Transactions`](super::Response::Transactions).
-    TransactionsById(HashSet<transaction::Hash>),
+    TransactionsById(HashSet<UnminedTxId>),
 
     /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
@@ -132,7 +132,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    PushTransaction(Arc<Transaction>),
+    PushTransaction(UnminedTx),
 
     /// Advertise a set of unmined transactions to all peers.
     ///
@@ -156,7 +156,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseTransactionIds(HashSet<transaction::Hash>),
+    AdvertiseTransactionIds(HashSet<UnminedTxId>),
 
     /// Advertise a block to all peers.
     ///

@@ -1,6 +1,6 @@
 use zebra_chain::{
     block::{self, Block},
-    transaction::{self, Transaction},
+    transaction::{UnminedTx, UnminedTxId},
 };
 
 use crate::meta_addr::MetaAddr;
@@ -38,11 +38,11 @@ pub enum Response {
     BlockHeaders(Vec<block::CountedHeader>),
 
     /// A list of unmined transactions.
-    Transactions(Vec<Arc<Transaction>>),
+    Transactions(Vec<UnminedTx>),
 
     /// A list of unmined transaction IDs.
     ///
     /// v4 transactions use a narrow transaction ID, and
     /// v5 transactions use a wide transaction ID.
-    TransactionIds(Vec<transaction::Hash>),
+    TransactionIds(Vec<UnminedTxId>),
 }

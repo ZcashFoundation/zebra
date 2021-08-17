@@ -21,7 +21,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     block::{self, Block},
     serialization::SerializationError,
-    transaction::{self, Transaction},
+    transaction::{UnminedTx, UnminedTxId},
 };
 
 use crate::{
@@ -52,8 +52,8 @@ pub(super) enum Handler {
         blocks: Vec<Arc<Block>>,
     },
     TransactionsById {
-        hashes: HashSet<transaction::Hash>,
-        transactions: Vec<Arc<Transaction>>,
+        pending_ids: HashSet<UnminedTxId>,
+        transactions: Vec<UnminedTx>,
     },
     MempoolTransactionIds,
 }
@@ -92,7 +92,7 @@ impl Handler {
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
             (
                 Handler::TransactionsById {
-                    mut hashes,
+                    mut pending_ids,
                     mut transactions,
                 },
                 Message::Tx(transaction),
@@ -100,14 +100,14 @@ impl Handler {
                 // assumptions:
                 //   - the transaction messages are sent in a single continous batch
                 //   - missing transaction hashes are included in a `NotFound` message
-                if hashes.remove(&transaction.hash()) {
+                if pending_ids.remove(&transaction.id) {
                     // we are in the middle of the continous transaction messages
                     transactions.push(transaction);
-                    if hashes.is_empty() {
+                    if pending_ids.is_empty() {
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
                         Handler::TransactionsById {
-                            hashes,
+                            pending_ids,
                             transactions,
                         }
                     }
@@ -137,18 +137,18 @@ impl Handler {
                         // TODO: is it really an error if we ask for a transaction hash, but the peer
                         // doesn't know it? Should we close the connection on that kind of error?
                         // Should we fake a NotFound response here? (#1515)
-                        let items = hashes.iter().map(|h| InventoryHash::Tx(*h)).collect();
-                        Handler::Finished(Err(PeerError::NotFound(items)))
+                        let missing_transaction_ids = pending_ids.iter().map(Into::into).collect();
+                        Handler::Finished(Err(PeerError::NotFound(missing_transaction_ids)))
                     }
                 }
             }
             // `zcashd` peers actually return this response
             (
                 Handler::TransactionsById {
-                    hashes,
+                    pending_ids,
                     transactions,
                 },
-                Message::NotFound(items),
+                Message::NotFound(missing_invs),
             ) => {
                 // assumptions:
                 //   - the peer eventually returns a transaction or a `NotFound` entry
@@ -159,21 +159,14 @@ impl Handler {
                 // If we're in sync with the peer, then the `NotFound` should contain the remaining
                 // hashes from the handler. If we're not in sync with the peer, we should return
                 // what we got so far, and log an error.
-                let missing_transactions: HashSet<_> = items
-                    .iter()
-                    .filter_map(|inv| match &inv {
-                        InventoryHash::Tx(tx) => Some(tx),
-                        _ => None,
-                    })
-                    .cloned()
-                    .collect();
-                if missing_transactions != hashes {
-                    trace!(?items, ?missing_transactions, ?hashes);
+                let missing_transaction_ids: HashSet<_> = transaction_ids(&missing_invs).collect();
+                if missing_transaction_ids != pending_ids {
+                    trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
                     // if these errors are noisy, we should replace them with debugs
                     error!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
                 }
-                if missing_transactions.len() != items.len() {
-                    trace!(?items, ?missing_transactions, ?hashes);
+                if missing_transaction_ids.len() != missing_invs.len() {
+                    trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
                     error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
                 }
 
@@ -183,7 +176,7 @@ impl Handler {
                 } else {
                     // TODO: is it really an error if we ask for a transaction hash, but the peer
                     // doesn't know it? Should we close the connection on that kind of error? (#1515)
-                    Handler::Finished(Err(PeerError::NotFound(items)))
+                    Handler::Finished(Err(PeerError::NotFound(missing_invs)))
                 }
             }
             // `zcashd` returns requested blocks in a single batch of messages.
@@ -283,12 +276,10 @@ impl Handler {
                 )))
             }
             (Handler::MempoolTransactionIds, Message::Inv(items))
-                if items
-                    .iter()
-                    .all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                if items.iter().all(|item| item.unmined_tx_id().is_some()) =>
             {
                 Handler::Finished(Ok(Response::TransactionIds(
-                    transaction_ids(&items[..]).collect(),
+                    transaction_ids(&items).collect(),
                 )))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
@@ -667,19 +658,19 @@ where
                     Err(e) => Err((e, tx)),
                 }
             }
-            (AwaitingRequest, TransactionsById(hashes)) => {
+            (AwaitingRequest, TransactionsById(ids)) => {
                 match self
                     .peer_tx
                     .send(Message::GetData(
-                        hashes.iter().map(|h| (*h).into()).collect(),
+                        ids.iter().map(Into::into).collect(),
                     ))
                     .await
                 {
                     Ok(()) => Ok((
                         AwaitingResponse {
                             handler: Handler::TransactionsById {
-                                transactions: Vec::with_capacity(hashes.len()),
-                                hashes,
+                                transactions: Vec::with_capacity(ids.len()),
+                                pending_ids: ids,
                             },
                             tx,
                             span,
@@ -858,8 +849,9 @@ where
                 // We don't expect to be advertised multiple blocks at a time,
                 // so we ignore any advertisements of multiple blocks.
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
-                [InventoryHash::Tx(_), rest @ ..]
-                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                tx_ids
+                    if tx_ids.iter().all(|item| item.unmined_tx_id().is_some())
+                        && !tx_ids.is_empty() =>
                 {
                     Request::TransactionsById(transaction_ids(&items).collect())
                 }
@@ -876,8 +868,9 @@ where
                 {
                     Request::BlocksByHash(block_hashes(&items).collect())
                 }
-                [InventoryHash::Tx(_), rest @ ..]
-                    if rest.iter().all(|item| matches!(item, InventoryHash::Tx(_))) =>
+                tx_ids
+                    if tx_ids.iter().all(|item| item.unmined_tx_id().is_some())
+                        && !tx_ids.is_empty() =>
                 {
                     Request::TransactionsById(transaction_ids(&items).collect())
                 }
@@ -986,16 +979,17 @@ where
     }
 }
 
-fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = transaction::Hash> + '_ {
-    items.iter().filter_map(|item| {
-        if let InventoryHash::Tx(hash) = item {
-            Some(*hash)
-        } else {
-            None
-        }
-    })
+/// Map a list of inventory hashes to the corresponding unmined transaction IDs.
+/// Non-transaction inventory hashes are skipped.
+///
+/// v4 transactions use a narrow transaction ID, and
+/// v5 transactions use a wide transaction ID.
+fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTxId> + '_ {
+    items.iter().filter_map(InventoryHash::unmined_tx_id)
 }
 
+/// Map a list of inventory hashes to the corresponding block hashes.
+/// Non-block inventory hashes are skipped.
 fn block_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = block::Hash> + '_ {
     items.iter().filter_map(|item| {
         if let InventoryHash::Block(hash) = item {

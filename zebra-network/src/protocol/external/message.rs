@@ -1,21 +1,21 @@
 //! Definitions of network messages.
 
-use std::error::Error;
-use std::{fmt, net, sync::Arc};
+use std::{error::Error, fmt, net, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block},
-    transaction::Transaction,
+    transaction::UnminedTx,
 };
 
-use super::inv::InventoryHash;
-use super::types::*;
 use crate::meta_addr::MetaAddr;
+
+use super::{inv::InventoryHash, types::*};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use zebra_chain::serialization::arbitrary::datetime_full;
 
@@ -226,7 +226,7 @@ pub enum Message {
     /// This message is used to advertise unmined transactions for the mempool.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
-    Tx(Arc<Transaction>),
+    Tx(UnminedTx),
 
     /// A `notfound` message.
     ///
