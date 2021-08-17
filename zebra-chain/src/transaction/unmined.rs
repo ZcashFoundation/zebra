@@ -1,5 +1,6 @@
 //! Unmined Zcash transaction identifiers and transactions.
 //!
+//! Transaction version 5 is uniquely identified by [`WtxId`] when unmined, and [`Hash`] in the blockchain.
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
 //! whether they have been mined or not,
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
@@ -98,7 +99,8 @@ impl UnminedTxId {
     /// # Correctness
     ///
     /// This method returns an ID which uniquely identifies
-    /// the effects and authorizing data for v1-v4 transactions.
+    /// the effects (spends and outputs) and
+    /// authorizing data (signatures, proofs, and scripts) for v1-v4 transactions.
     ///
     /// But for v5 transactions, this ID only identifies the transaction's effects.
     #[allow(dead_code)]
@@ -110,7 +112,7 @@ impl UnminedTxId {
     }
 
     /// Return the digest of this transaction's authorizing data,
-    /// if it is a v5 transaction.
+    /// (signatures, proofs, and scripts), if it is a v5 transaction.
     #[allow(dead_code)]
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self {

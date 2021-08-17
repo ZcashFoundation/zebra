@@ -6,6 +6,7 @@
 //! * [`WtxId`]: a 64-byte wide transaction ID, which uniquely identifies unmined transactions
 //!   (transactions that are sent by wallets or stored in node mempools).
 //!
+//! Transaction version 5 is uniquely identified by [`WtxId`] when unmined, and [`Hash`] in the blockchain.
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
 //! whether they have been mined or not,
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
