@@ -338,7 +338,7 @@ proptest! {
         for block in finalized_blocks {
             let utxos = &block.new_outputs;
             let block_value_pool = &block.block.chain_value_pool_change(&utxos)?;
-            expected_value_pool += block_value_pool.clone();
+            expected_value_pool += *block_value_pool;
 
             state_service.queue_and_commit_finalized(block);
         }
