@@ -155,6 +155,18 @@ impl fmt::Debug for AuthDataRoot {
     }
 }
 
+impl From<[u8; 32]> for AuthDataRoot {
+    fn from(hash: [u8; 32]) -> Self {
+        AuthDataRoot(hash)
+    }
+}
+
+impl From<AuthDataRoot> for [u8; 32] {
+    fn from(hash: AuthDataRoot) -> Self {
+        hash.0
+    }
+}
+
 impl<T> std::iter::FromIterator<T> for AuthDataRoot
 where
     T: std::convert::AsRef<Transaction>,

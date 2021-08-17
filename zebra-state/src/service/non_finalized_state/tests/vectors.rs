@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::Block,
+    history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
 };
@@ -392,13 +393,13 @@ fn history_tree_is_updated_for_network_upgrade(
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid"),
     );
-    let activation_block = prev_block.make_fake_child();
-    let next_block = activation_block.make_fake_child();
 
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
-    state.commit_new_chain(prev_block.prepare(), &finalized_state)?;
+    state
+        .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
+        .unwrap();
 
     let chain = state.best_chain().unwrap();
     if network_upgrade == NetworkUpgrade::Heartwood {
@@ -413,7 +414,12 @@ fn history_tree_is_updated_for_network_upgrade(
         );
     }
 
-    state.commit_block(activation_block.prepare(), &finalized_state)?;
+    // The Heartwood activation block has an all-zero commitment
+    let activation_block = prev_block.make_fake_child().set_block_commitment([0u8; 32]);
+
+    state
+        .commit_block(activation_block.clone().prepare(), &finalized_state)
+        .unwrap();
 
     let chain = state.best_chain().unwrap();
     assert!(
@@ -426,7 +432,22 @@ fn history_tree_is_updated_for_network_upgrade(
         "history tree must have a single node"
     );
 
-    state.commit_block(next_block.prepare(), &finalized_state)?;
+    // To fix the commitment in the next block we must recreate the history tree
+    let tree = NonEmptyHistoryTree::from_block(
+        Network::Mainnet,
+        activation_block.clone(),
+        &chain.sapling_note_commitment_tree.root(),
+        &chain.orchard_note_commitment_tree.root(),
+    )
+    .unwrap();
+
+    let next_block = activation_block
+        .make_fake_child()
+        .set_block_commitment(tree.hash().into());
+
+    state
+        .commit_block(next_block.prepare(), &finalized_state)
+        .unwrap();
 
     assert!(
         state.best_chain().unwrap().history_tree.as_ref().is_some(),
@@ -434,4 +455,85 @@ fn history_tree_is_updated_for_network_upgrade(
     );
 
     Ok(())
+}
+
+#[test]
+fn commitment_is_validated() {
+    commitment_is_validated_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood);
+    commitment_is_validated_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood);
+    // TODO: we can't test other upgrades until we have a method for creating a FinalizedState
+    // with a HistoryTree.
+}
+
+fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) {
+    let blocks = match network {
+        Network::Mainnet => &*zebra_test::vectors::MAINNET_BLOCKS,
+        Network::Testnet => &*zebra_test::vectors::TESTNET_BLOCKS,
+    };
+    let height = network_upgrade.activation_height(network).unwrap().0;
+
+    let prev_block = Arc::new(
+        blocks
+            .get(&(height - 1))
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+
+    let mut state = NonFinalizedState::new(network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+
+    state
+        .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    // The Heartwood activation block must have an all-zero commitment.
+    // Test error return when committing the block with the wrong commitment
+    let activation_block = prev_block.make_fake_child();
+    let err = state
+        .commit_block(activation_block.clone().prepare(), &finalized_state)
+        .unwrap_err();
+    match err {
+        crate::ValidateContextError::InvalidBlockCommitment(
+            zebra_chain::block::CommitmentError::InvalidChainHistoryActivationReserved { .. },
+        ) => {},
+        _ => panic!("Error must be InvalidBlockCommitment::InvalidChainHistoryActivationReserved instead of {:?}", err),
+    };
+
+    // Test committing the Heartwood activation block with the correct commitment
+    let activation_block = activation_block.set_block_commitment([0u8; 32]);
+    state
+        .commit_block(activation_block.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    // To fix the commitment in the next block we must recreate the history tree
+    let chain = state.best_chain().unwrap();
+    let tree = NonEmptyHistoryTree::from_block(
+        Network::Mainnet,
+        activation_block.clone(),
+        &chain.sapling_note_commitment_tree.root(),
+        &chain.orchard_note_commitment_tree.root(),
+    )
+    .unwrap();
+
+    // Test committing the next block with the wrong commitment
+    let next_block = activation_block.make_fake_child();
+    let err = state
+        .commit_block(next_block.clone().prepare(), &finalized_state)
+        .unwrap_err();
+    match err {
+        crate::ValidateContextError::InvalidBlockCommitment(
+            zebra_chain::block::CommitmentError::InvalidChainHistoryRoot { .. },
+        ) => {}
+        _ => panic!(
+            "Error must be InvalidBlockCommitment::InvalidChainHistoryRoot instead of {:?}",
+            err
+        ),
+    };
+
+    // Test committing the next block with the correct commitment
+    let next_block = next_block.set_block_commitment(tree.hash().into());
+    state
+        .commit_block(next_block.prepare(), &finalized_state)
+        .unwrap();
 }
