@@ -83,7 +83,7 @@ impl From<&WtxId> for UnminedTxId {
 }
 
 impl UnminedTxId {
-    /// Return a new `UnminedTxId` using a v1-v4 legacy transaction ID.
+    /// Create a new `UnminedTxId` using a v1-v4 legacy transaction ID.
     ///
     /// # Correctness
     ///
