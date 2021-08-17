@@ -10,7 +10,11 @@ use zebra_chain::{
         ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
-    transaction,
+    transaction::{
+        self,
+        UnminedTxId::{self, *},
+        WtxId,
+    },
 };
 
 use super::MAX_PROTOCOL_MESSAGE_LEN;
@@ -51,6 +55,29 @@ pub enum InventoryHash {
 }
 
 impl InventoryHash {
+    /// Creates a new inventory hash from a legacy transaction ID.
+    ///
+    /// # Correctness
+    ///
+    /// This method must only be used for v1-v4 transaction IDs.
+    /// [`transaction::Hash`] does not uniquely identify unmined v5 transactions.
+    #[allow(dead_code)]
+    pub fn from_legacy_tx_id(legacy_tx_id: transaction::Hash) -> InventoryHash {
+        InventoryHash::Tx(legacy_tx_id)
+    }
+
+    /// Returns the unmined transaction ID for this inventory hash,
+    /// if this inventory hash is a transaction variant.
+    pub fn unmined_tx_id(&self) -> Option<UnminedTxId> {
+        match self {
+            InventoryHash::Error => None,
+            InventoryHash::Tx(legacy_tx_id) => Some(UnminedTxId::from_legacy_id(*legacy_tx_id)),
+            InventoryHash::Block(_hash) => None,
+            InventoryHash::FilteredBlock(_hash) => None,
+            InventoryHash::Wtx(wtx_id) => Some(UnminedTxId::from(wtx_id)),
+        }
+    }
+
     /// Returns the serialized Zcash network protocol code for the current variant.
     fn code(&self) -> u32 {
         match self {
@@ -63,9 +90,30 @@ impl InventoryHash {
     }
 }
 
-impl From<transaction::Hash> for InventoryHash {
-    fn from(tx: transaction::Hash) -> InventoryHash {
-        InventoryHash::Tx(tx)
+impl From<WtxId> for InventoryHash {
+    fn from(wtx_id: WtxId) -> InventoryHash {
+        InventoryHash::Wtx(wtx_id)
+    }
+}
+
+impl From<&WtxId> for InventoryHash {
+    fn from(wtx_id: &WtxId) -> InventoryHash {
+        InventoryHash::from(*wtx_id)
+    }
+}
+
+impl From<UnminedTxId> for InventoryHash {
+    fn from(tx_id: UnminedTxId) -> InventoryHash {
+        match tx_id {
+            Narrow(hash) => InventoryHash::Tx(hash),
+            Wide(wtx_id) => InventoryHash::Wtx(wtx_id),
+        }
+    }
+}
+
+impl From<&UnminedTxId> for InventoryHash {
+    fn from(tx_id: &UnminedTxId) -> InventoryHash {
+        InventoryHash::from(*tx_id)
     }
 }
 
@@ -74,12 +122,6 @@ impl From<block::Hash> for InventoryHash {
         // Auto-convert to Block rather than FilteredBlock because filtered
         // blocks aren't useful for Zcash.
         InventoryHash::Block(hash)
-    }
-}
-
-impl From<transaction::WtxId> for InventoryHash {
-    fn from(wtx_id: transaction::WtxId) -> InventoryHash {
-        InventoryHash::Wtx(wtx_id)
     }
 }
 
