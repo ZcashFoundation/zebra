@@ -18,7 +18,7 @@ pub mod arbitrary;
 mod tests;
 
 pub use auth_digest::AuthDigest;
-pub use hash::Hash;
+pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;

@@ -3,20 +3,21 @@ use std::convert::{TryFrom, TryInto};
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
-use zebra_test::{zip0143, zip0243, zip0244};
-
-use super::super::*;
 use crate::{
+    amount::Amount,
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{sighash::SigHasher, txid::TxIdBuilder},
+    transaction::{hash::WtxId, sighash::SigHasher, txid::TxIdBuilder, Transaction},
+    transparent::Script,
 };
 
-use crate::{amount::Amount, transaction::Transaction};
+use zebra_test::{
+    vectors::{ZIP143_1, ZIP143_2, ZIP243_1, ZIP243_2, ZIP243_3},
+    zip0143, zip0243, zip0244,
+};
 
-use transparent::Script;
-use zebra_test::vectors::{ZIP143_1, ZIP143_2, ZIP243_1, ZIP243_2, ZIP243_3};
+use super::super::*;
 
 lazy_static! {
     pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {
@@ -28,6 +29,60 @@ lazy_static! {
         sapling_shielded_data: None,
         orchard_shielded_data: None,
     };
+}
+
+#[test]
+fn transactionhash_struct_from_str_roundtrip() {
+    zebra_test::init();
+
+    let hash: Hash = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
+        .parse()
+        .unwrap();
+
+    assert_eq!(
+        format!("{:?}", hash),
+        r#"transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
+    );
+    assert_eq!(
+        hash.to_string(),
+        "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
+    );
+}
+
+#[test]
+fn auth_digest_struct_from_str_roundtrip() {
+    zebra_test::init();
+
+    let digest: AuthDigest = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
+        .parse()
+        .unwrap();
+
+    assert_eq!(
+        format!("{:?}", digest),
+        r#"AuthDigest("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
+    );
+    assert_eq!(
+        digest.to_string(),
+        "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"
+    );
+}
+
+#[test]
+fn wtx_id_struct_from_str_roundtrip() {
+    zebra_test::init();
+
+    let wtx_id: WtxId = "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf0000000000000000000000000000000000000000000000000000000000000001"
+        .parse()
+        .unwrap();
+
+    assert_eq!(
+        format!("{:?}", wtx_id),
+        r#"WtxId { id: transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"), auth_digest: AuthDigest("0000000000000000000000000000000000000000000000000000000000000001") }"#
+    );
+    assert_eq!(
+        wtx_id.to_string(),
+        "3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf0000000000000000000000000000000000000000000000000000000000000001"
+    );
 }
 
 #[test]

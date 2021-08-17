@@ -7,7 +7,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use zebra_chain::{
     block,
     serialization::{
-        ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
+        ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
     transaction,
 };
@@ -45,8 +46,21 @@ pub enum InventoryHash {
     /// [auth_digest]: https://zips.z.cash/zip-0244#authorizing-data-commitment
     /// [zip239]: https://zips.z.cash/zip-0239
     /// [bip339]: https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki
-    // TODO: Actually handle this variant once the mempool is implemented
-    Wtx([u8; 64]),
+    // TODO: Actually handle this variant once the mempool is implemented (#2449)
+    Wtx(transaction::WtxId),
+}
+
+impl InventoryHash {
+    /// Returns the serialized Zcash network protocol code for the current variant.
+    fn code(&self) -> u32 {
+        match self {
+            InventoryHash::Error => 0,
+            InventoryHash::Tx(_tx_id) => 1,
+            InventoryHash::Block(_hash) => 2,
+            InventoryHash::FilteredBlock(_hash) => 3,
+            InventoryHash::Wtx(_wtx_id) => 5,
+        }
+    }
 }
 
 impl From<transaction::Hash> for InventoryHash {
@@ -63,39 +77,43 @@ impl From<block::Hash> for InventoryHash {
     }
 }
 
+impl From<transaction::WtxId> for InventoryHash {
+    fn from(wtx_id: transaction::WtxId) -> InventoryHash {
+        InventoryHash::Wtx(wtx_id)
+    }
+}
+
 impl ZcashSerialize for InventoryHash {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        let (code, bytes): (_, &[u8]) = match self {
-            InventoryHash::Error => (0, &[0; 32]),
-            InventoryHash::Tx(hash) => (1, &hash.0),
-            InventoryHash::Block(hash) => (2, &hash.0),
-            InventoryHash::FilteredBlock(hash) => (3, &hash.0),
-            InventoryHash::Wtx(bytes) => (5, bytes),
-        };
-        writer.write_u32::<LittleEndian>(code)?;
-        writer.write_all(bytes)?;
-        Ok(())
+        writer.write_u32::<LittleEndian>(self.code())?;
+        match self {
+            // Zebra does not supply error codes
+            InventoryHash::Error => writer.write_all(&[0; 32]),
+            InventoryHash::Tx(tx_id) => tx_id.zcash_serialize(writer),
+            InventoryHash::Block(hash) => hash.zcash_serialize(writer),
+            InventoryHash::FilteredBlock(hash) => hash.zcash_serialize(writer),
+            InventoryHash::Wtx(wtx_id) => wtx_id.zcash_serialize(writer),
+        }
     }
 }
 
 impl ZcashDeserialize for InventoryHash {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         let code = reader.read_u32::<LittleEndian>()?;
-        let bytes = reader.read_32_bytes()?;
         match code {
-            0 => Ok(InventoryHash::Error),
-            1 => Ok(InventoryHash::Tx(transaction::Hash(bytes))),
-            2 => Ok(InventoryHash::Block(block::Hash(bytes))),
-            3 => Ok(InventoryHash::FilteredBlock(block::Hash(bytes))),
-            5 => {
-                let auth_digest = reader.read_32_bytes()?;
-
-                let mut wtx_bytes = [0u8; 64];
-                wtx_bytes[..32].copy_from_slice(&bytes);
-                wtx_bytes[32..].copy_from_slice(&auth_digest);
-
-                Ok(InventoryHash::Wtx(wtx_bytes))
+            0 => {
+                // ignore the standard 32-byte error code
+                let _bytes = reader.read_32_bytes()?;
+                Ok(InventoryHash::Error)
             }
+
+            1 => Ok(InventoryHash::Tx(reader.zcash_deserialize_into()?)),
+            2 => Ok(InventoryHash::Block(reader.zcash_deserialize_into()?)),
+            3 => Ok(InventoryHash::FilteredBlock(
+                reader.zcash_deserialize_into()?,
+            )),
+            5 => Ok(InventoryHash::Wtx(reader.zcash_deserialize_into()?)),
+
             _ => Err(SerializationError::Parse("invalid inventory code")),
         }
     }
