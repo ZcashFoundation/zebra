@@ -8,6 +8,8 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
+    zebra_chain::value_balance::ValueBalance,
+
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
@@ -331,7 +333,6 @@ proptest! {
 
         let (mut state_service, _) = StateService::new(Config::ephemeral(), network);
 
-        use zebra_chain::value_balance::ValueBalance;
         prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
 
         let mut expected_value_pool = Ok(ValueBalance::zero());
