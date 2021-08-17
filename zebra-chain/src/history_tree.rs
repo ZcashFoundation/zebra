@@ -481,6 +481,11 @@ impl HistoryTree {
         };
         Ok(())
     }
+
+    /// Return the hash of the tree root if the tree is not empty.
+    pub fn hash(&self) -> Option<ChainHistoryMmrRootHash> {
+        Some(self.0.as_ref()?.hash())
+    }
 }
 
 impl From<NonEmptyHistoryTree> for HistoryTree {

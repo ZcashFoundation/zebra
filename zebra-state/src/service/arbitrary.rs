@@ -62,7 +62,9 @@ pub struct PreparedChain {
 
 impl PreparedChain {
     /// Create a PreparedChain strategy with Heartwood-onward blocks.
-    #[cfg(test)]
+    // dead_code is allowed because the function is called only by tests,
+    // but the code is also compiled when proptest-impl is activated.
+    #[allow(dead_code)]
     pub(crate) fn new_heartwood() -> Self {
         // The history tree only works with Heartwood onward.
         // Since the network will be chosen later, we pick the larger
