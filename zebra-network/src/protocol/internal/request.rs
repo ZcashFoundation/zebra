@@ -147,8 +147,8 @@ pub enum Request {
     /// [`Request::TransactionsById`] against the "inbound" service passed to
     /// [`zebra_network::init`].
     ///
-    /// v4 transactions use a narrow transaction ID, and
-    /// v5 transactions use a wide transaction ID.
+    /// v4 transactions use a legacy transaction ID, and
+    /// v5 transactions use a witnessed transaction ID.
     ///
     /// The peer set routes this request specially, sending it to *every*
     /// available peer.
