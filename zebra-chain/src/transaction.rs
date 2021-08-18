@@ -11,6 +11,7 @@ mod memo;
 mod serialize;
 mod sighash;
 mod txid;
+mod unmined;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -23,8 +24,8 @@ pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
-pub use sighash::HashType;
-pub use sighash::SigHash;
+pub use sighash::{HashType, SigHash};
+pub use unmined::{UnminedTx, UnminedTxId};
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},

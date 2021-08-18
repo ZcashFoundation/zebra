@@ -6,8 +6,14 @@
 //! * [`WtxId`]: a 64-byte wide transaction ID, which uniquely identifies unmined transactions
 //!   (transactions that are sent by wallets or stored in node mempools).
 //!
+//! Transaction version 5 is uniquely identified by [`WtxId`] when unmined, and [`Hash`] in the blockchain.
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
+//! whether they have been mined or not,
 //! so Zebra and the Zcash network protocol don't use wide transaction IDs for them.
+//!
+//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique ID for
+//! unmined transactions. They can be used to handle transactions regardless of version,
+//! and get the [`WtxId`] or [`Hash`] when required.
 
 use std::{
     convert::{TryFrom, TryInto},
@@ -16,6 +22,7 @@ use std::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
@@ -29,6 +36,15 @@ use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 ///
 /// Note: Zebra displays transaction and block hashes in big-endian byte-order,
 /// following the u256 convention set by Bitcoin and zcashd.
+///
+/// "The transaction ID of a version 4 or earlier transaction is the SHA-256d hash
+/// of the transaction encoding in the pre-v5 format described above.
+///
+/// The transaction ID of a version 5 transaction is as defined in [ZIP-244]."
+/// [Spec: Transaction Identifiers]
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
@@ -114,6 +130,13 @@ impl ZcashDeserialize for Hash {
 /// A wide transaction ID, which uniquely identifies unmined v5 transactions.
 ///
 /// Wide transaction IDs are not used for transaction versions 1-4.
+///
+/// "A v5 transaction also has a wtxid (used for example in the peer-to-peer protocol)
+/// as defined in [ZIP-239]."
+/// [Spec: Transaction Identifiers]
+///
+/// [ZIP-239]: https://zips.z.cash/zip-0239
+/// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct WtxId {
