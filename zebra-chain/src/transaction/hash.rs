@@ -6,12 +6,20 @@
 //! * [`WtxId`]: a 64-byte wide transaction ID, which uniquely identifies unmined transactions
 //!   (transactions that are sent by wallets or stored in node mempools).
 //!
-//! Transaction version 5 is uniquely identified by [`WtxId`] when unmined,
-//! and [`Hash`] in the blockchain.
+//! Transaction version 5 uses both these unique identifiers:
+//! * [`Hash`] uniquely identifies the effects of a v5 transaction (spends and outputs),
+//!   so it uniquely identifies the transaction's data after it has been mined into a block;
+//! * [`WtxId`] uniquely identifies the effects and authorizing data of a v5 transaction
+//!   (signatures, proofs, and scripts), so it uniquely identifies the transaction's data
+//!   outside a block. (For example, transactions produced by Zcash wallets, or in node mempools.)
 //!
 //! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
 //! whether they have been mined or not. So Zebra, and the Zcash network protocol,
 //! don't use wide transaction IDs for them.
+//!
+//! There is no unique identifier that only covers the effects of a v1-4 transaction,
+//! so their legacy IDs are malleable, if submitted with different authorizing data.
+//! So the same spends and outputs can have a completely different [`Hash`].
 //!
 //! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique ID for
 //! unmined transactions. They can be used to handle transactions regardless of version,

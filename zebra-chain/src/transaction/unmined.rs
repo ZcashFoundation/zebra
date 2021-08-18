@@ -1,9 +1,10 @@
 //! Unmined Zcash transaction identifiers and transactions.
 //!
 //! Transaction version 5 is uniquely identified by [`WtxId`] when unmined,
-//! and [`Hash`] in the blockchain.
+//! and [`Hash`] in the blockchain. The effects of a v5 transaction (spends and outputs)
+//! are uniquely identified by the same [`Hash`] in both cases.
 //!
-//! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
+//! Transaction versions 1-4 are uniquely identified by legacy [`Hash`] transaction IDs,
 //! whether they have been mined or not. So Zebra, and the Zcash network protocol,
 //! don't use wide transaction IDs for them.
 //!
@@ -44,13 +45,15 @@ pub enum UnminedTxId {
     /// A narrow unmined transaction identifier.
     ///
     /// Used to uniquely identify unmined version 1-4 transactions.
-    /// (After v1-4 transactions are mined, they can be uniquely identified using the same [`transaction::Hash`].)
+    /// (After v1-4 transactions are mined, they can be uniquely identified
+    /// using the same [`transaction::Hash`].)
     Narrow(Hash),
 
     /// A wide unmined transaction identifier.
     ///
     /// Used to uniquely identify unmined version 5 transactions.
-    /// (After v5 transactions are mined, they can be uniquely identified using only their `WtxId.id`.)
+    /// (After v5 transactions are mined, they can be uniquely identified
+    /// using only the [`transaction::Hash`] in their `WtxId.id`.)
     ///
     /// For more details, see [`WtxId`].
     Wide(WtxId),
@@ -96,17 +99,17 @@ impl UnminedTxId {
         Narrow(legacy_tx_id)
     }
 
-    /// Return the unique ID for this transaction's effects.
+    /// Return the unique ID that will be used if this transaction gets mined into a block.
     ///
     /// # Correctness
     ///
-    /// This method returns an ID which uniquely identifies
-    /// the effects (spends and outputs) and
-    /// authorizing data (signatures, proofs, and scripts) for v1-v4 transactions.
+    /// For v1-v4 transactions, this method returns an ID which changes
+    /// if this transaction's effects (spends and outputs) change, or
+    /// if its authorizing data changes (signatures, proofs, and scripts).
     ///
-    /// But for v5 transactions, this ID only identifies the transaction's effects.
+    /// But for v5 transactions, this ID uniquely identifies the transaction's effects.
     #[allow(dead_code)]
-    pub fn effect_id(&self) -> Hash {
+    pub fn mined_id(&self) -> Hash {
         match self {
             Narrow(effect_id) => *effect_id,
             Wide(wtx_id) => wtx_id.id,
