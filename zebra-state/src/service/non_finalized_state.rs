@@ -167,6 +167,7 @@ impl NonFinalizedState {
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
+            finalized_state.current_value_pool(),
         );
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -182,10 +183,10 @@ impl NonFinalizedState {
     fn validate_and_commit(
         &self,
         parent_chain: Chain,
-        prepared: PreparedBlock,
+        mut prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<Chain, ValidateContextError> {
-        check::utxo::transparent_spend(
+        let utxos = check::utxo::transparent_spend(
             &prepared,
             &parent_chain.unspent_utxos(),
             &parent_chain.spent_utxos,
@@ -197,6 +198,7 @@ impl NonFinalizedState {
             &parent_chain.history_tree,
         )?;
 
+        prepared.block_utxos.extend(utxos);
         parent_chain.push(prepared)
     }
 

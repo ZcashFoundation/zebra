@@ -81,6 +81,8 @@ pub struct PreparedBlock {
     // TODO: add these parameters when we can compute anchors.
     // sprout_anchor: sprout::tree::Root,
     // sapling_anchor: sapling::tree::Root,
+    /// Storage for all the utxos related to this block.
+    pub block_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
 }
 
 /// A contextually validated block, ready to be committed directly to the finalized state with
@@ -94,6 +96,7 @@ pub(crate) struct ContextuallyValidBlock {
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) block_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
 }
 
 /// A finalized block, ready to be committed directly to the finalized state with
@@ -145,6 +148,7 @@ impl From<PreparedBlock> for ContextuallyValidBlock {
             height,
             new_outputs,
             transaction_hashes,
+            block_utxos,
         } = prepared;
         Self {
             block,
@@ -152,6 +156,7 @@ impl From<PreparedBlock> for ContextuallyValidBlock {
             height,
             new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
             transaction_hashes,
+            block_utxos,
         }
     }
 }
@@ -164,6 +169,7 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            block_utxos: _,
         } = contextually_valid;
         Self {
             block,

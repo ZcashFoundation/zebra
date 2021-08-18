@@ -8,8 +8,16 @@ use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    block, history_tree::HistoryTree, orchard, parameters::Network, primitives::Groth16Proof,
-    sapling, sprout, transaction, transaction::Transaction::*, transparent,
+    amount::{NegativeAllowed, NonNegative},
+    block,
+    history_tree::HistoryTree,
+    orchard,
+    parameters::Network,
+    primitives::Groth16Proof,
+    sapling, sprout, transaction,
+    transaction::Transaction::*,
+    transparent,
+    value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
 };
 
@@ -60,6 +68,9 @@ pub struct Chain {
 
     /// The cumulative work represented by this partial non-finalized chain.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
+
+    /// The value balance in of this Chain.
+    pub(super) value_balance: ValueBalance<NonNegative>,
 }
 
 impl Chain {
@@ -69,6 +80,7 @@ impl Chain {
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
+        finalized_value_balance: ValueBalance<NonNegative>,
     ) -> Self {
         Self {
             network,
@@ -88,6 +100,7 @@ impl Chain {
             orchard_nullifiers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_tree,
+            value_balance: finalized_value_balance,
         }
     }
 
@@ -323,6 +336,7 @@ impl Chain {
             orchard_nullifiers: self.orchard_nullifiers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
             history_tree,
+            value_balance: self.value_balance,
         }
     }
 }
@@ -350,12 +364,13 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         &mut self,
         contextually_valid: &ContextuallyValidBlock,
     ) -> Result<(), ValidateContextError> {
-        let (block, hash, height, new_outputs, transaction_hashes) = (
+        let (block, hash, height, new_outputs, transaction_hashes, block_utxos) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
+            &contextually_valid.block_utxos,
         );
 
         // add hash to height_by_hash
@@ -429,6 +444,10 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_state_with(sapling_shielded_data_per_spend_anchor)?;
             self.update_chain_state_with(sapling_shielded_data_shared_anchor)?;
             self.update_chain_state_with(orchard_shielded_data)?;
+
+            // add the value balance
+            let value_balance = block.chain_value_pool_change(block_utxos).unwrap();
+            self.update_chain_state_with(&value_balance)?;
         }
 
         // Having updated all the note commitment trees and nullifier sets in
@@ -453,12 +472,13 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     fn revert_chain_state_with(&mut self, contextually_valid: &ContextuallyValidBlock) {
-        let (block, hash, height, new_outputs, transaction_hashes) = (
+        let (block, hash, height, new_outputs, transaction_hashes, block_utxos) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
+            &contextually_valid.block_utxos,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -530,6 +550,11 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
             self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
             self.revert_chain_state_with(orchard_shielded_data);
+
+            // remove the value balance
+            let value_balance = block.chain_value_pool_change(block_utxos).unwrap();
+            use std::ops::Neg;
+            self.revert_chain_state_with(&value_balance.neg());
         }
         let anchor = self
             .sapling_anchors_by_height
@@ -715,6 +740,29 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
                 orchard_shielded_data.nullifiers(),
             );
         }
+    }
+}
+
+impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
+    fn update_chain_state_with(
+        &mut self,
+        value_balance: &ValueBalance<NegativeAllowed>,
+    ) -> Result<(), ValidateContextError> {
+        match self
+            .value_balance
+            .update_with_chain_value_pool_change(*value_balance)
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ValidateContextError::AddValuePool {
+                value_balance_error: e,
+            }),
+        }
+    }
+    fn revert_chain_state_with(&mut self, value_balance: &ValueBalance<NegativeAllowed>) {
+        self.value_balance = self
+            .value_balance
+            .update_with_chain_value_pool_change(*value_balance)
+            .expect("The reverse operation will leave the pools in a previously valid state");
     }
 }
 

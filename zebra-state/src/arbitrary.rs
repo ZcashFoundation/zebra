@@ -16,6 +16,7 @@ impl Prepare for Arc<Block> {
         let height = block.coinbase_height().unwrap();
         let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, transaction_hashes.as_slice());
+        let block_utxos = transparent::utxos_from_ordered_utxos(new_outputs.clone());
 
         PreparedBlock {
             block,
@@ -23,6 +24,7 @@ impl Prepare for Arc<Block> {
             height,
             new_outputs,
             transaction_hashes,
+            block_utxos,
         }
     }
 }
