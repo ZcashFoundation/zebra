@@ -162,6 +162,9 @@ fn block_commitment_is_valid_for_chain_history(
             // >   hashAuthDataRoot    (as described below)
             // >   terminator          [0u8;32]
             // https://zips.z.cash/zip-0244#block-header-changes
+            //
+            // Note that auth data root is from the current block, while
+            // the history tree root is from the previous block.
             let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
                 .hash_length(32)
                 .personal(b"ZcashBlockCommit")
