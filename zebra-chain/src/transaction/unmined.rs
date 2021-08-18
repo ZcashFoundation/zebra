@@ -111,7 +111,7 @@ impl UnminedTxId {
     #[allow(dead_code)]
     pub fn mined_id(&self) -> Hash {
         match self {
-            Legacy(effect_id) => *effect_id,
+            Legacy(legacy_id) => *legacy_id,
             Witnessed(wtx_id) => wtx_id.id,
         }
     }
