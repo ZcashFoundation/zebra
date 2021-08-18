@@ -121,7 +121,7 @@ impl UnminedTxId {
     #[allow(dead_code)]
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self {
-            Legacy(_effect_id) => None,
+            Legacy(_) => None,
             Witnessed(wtx_id) => Some(wtx_id.auth_digest),
         }
     }
