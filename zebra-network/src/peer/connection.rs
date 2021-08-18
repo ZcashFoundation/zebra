@@ -982,8 +982,8 @@ where
 /// Map a list of inventory hashes to the corresponding unmined transaction IDs.
 /// Non-transaction inventory hashes are skipped.
 ///
-/// v4 transactions use a narrow transaction ID, and
-/// v5 transactions use a wide transaction ID.
+/// v4 transactions use a legacy transaction ID, and
+/// v5 transactions use a witnessed transaction ID.
 fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTxId> + '_ {
     items.iter().filter_map(InventoryHash::unmined_tx_id)
 }
