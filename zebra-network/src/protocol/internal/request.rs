@@ -70,8 +70,8 @@ pub enum Request {
 
     /// Request transactions by their unmined transaction ID.
     ///
-    /// v4 transactions use a narrow transaction ID, and
-    /// v5 transactions use a wide transaction ID.
+    /// v4 transactions use a legacy transaction ID, and
+    /// v5 transactions use a witnessed transaction ID.
     ///
     /// This uses a `HashSet` for the same reason as [`Request::BlocksByHash`].
     ///
