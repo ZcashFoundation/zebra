@@ -105,8 +105,8 @@ impl From<&WtxId> for InventoryHash {
 impl From<UnminedTxId> for InventoryHash {
     fn from(tx_id: UnminedTxId) -> InventoryHash {
         match tx_id {
-            Narrow(hash) => InventoryHash::Tx(hash),
-            Wide(wtx_id) => InventoryHash::Wtx(wtx_id),
+            Legacy(hash) => InventoryHash::Tx(hash),
+            Witnessed(wtx_id) => InventoryHash::Wtx(wtx_id),
         }
     }
 }

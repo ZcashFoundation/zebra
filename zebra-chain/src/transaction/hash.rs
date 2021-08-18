@@ -1,9 +1,9 @@
 //! Transaction identifiers for Zcash.
 //!
 //! Zcash has two different transaction identifiers, with different widths:
-//! * [`Hash`]: a 32-byte narrow transaction ID, which uniquely identifies mined transactions
+//! * [`Hash`]: a 32-byte transaction ID, which uniquely identifies mined transactions
 //!   (transactions that have been committed to the blockchain in blocks), and
-//! * [`WtxId`]: a 64-byte wide transaction ID, which uniquely identifies unmined transactions
+//! * [`WtxId`]: a 64-byte witnessed transaction ID, which uniquely identifies unmined transactions
 //!   (transactions that are sent by wallets or stored in node mempools).
 //!
 //! Transaction version 5 uses both these unique identifiers:
@@ -13,9 +13,9 @@
 //!   (signatures, proofs, and scripts), so it uniquely identifies the transaction's data
 //!   outside a block. (For example, transactions produced by Zcash wallets, or in node mempools.)
 //!
-//! Transaction versions 1-4 are uniquely identified by narrow transaction IDs,
+//! Transaction versions 1-4 are uniquely identified by legacy [`Hash`] transaction IDs,
 //! whether they have been mined or not. So Zebra, and the Zcash network protocol,
-//! don't use wide transaction IDs for them.
+//! don't use witnessed transaction IDs for them.
 //!
 //! There is no unique identifier that only covers the effects of a v1-4 transaction,
 //! so their legacy IDs are malleable, if submitted with different authorizing data.
@@ -41,7 +41,7 @@ use crate::serialization::{
 
 use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 
-/// A narrow transaction ID, which uniquely identifies mined v5 transactions,
+/// A transaction ID, which uniquely identifies mined v5 transactions,
 /// and all v1-v4 transactions.
 ///
 /// Note: Zebra displays transaction and block hashes in big-endian byte-order,
@@ -137,9 +137,9 @@ impl ZcashDeserialize for Hash {
     }
 }
 
-/// A wide transaction ID, which uniquely identifies unmined v5 transactions.
+/// A witnessed transaction ID, which uniquely identifies unmined v5 transactions.
 ///
-/// Wide transaction IDs are not used for transaction versions 1-4.
+/// Witnessed transaction IDs are not used for transaction versions 1-4.
 ///
 /// "A v5 transaction also has a wtxid (used for example in the peer-to-peer protocol)
 /// as defined in [ZIP-239]."
@@ -158,14 +158,14 @@ pub struct WtxId {
 }
 
 impl WtxId {
-    /// Return this wide transaction ID as a serialized byte array.
+    /// Return this witnessed transaction ID as a serialized byte array.
     pub fn as_bytes(&self) -> [u8; 64] {
         <[u8; 64]>::from(self)
     }
 }
 
 impl From<Transaction> for WtxId {
-    /// Computes the wide transaction ID for a transaction.
+    /// Computes the witnessed transaction ID for a transaction.
     ///
     /// # Panics
     ///
@@ -177,7 +177,7 @@ impl From<Transaction> for WtxId {
 }
 
 impl From<&Transaction> for WtxId {
-    /// Computes the wide transaction ID for a transaction.
+    /// Computes the witnessed transaction ID for a transaction.
     ///
     /// # Panics
     ///
