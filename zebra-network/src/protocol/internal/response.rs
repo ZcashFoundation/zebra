@@ -42,7 +42,7 @@ pub enum Response {
 
     /// A list of unmined transaction IDs.
     ///
-    /// v4 transactions use a narrow transaction ID, and
-    /// v5 transactions use a wide transaction ID.
+    /// v4 transactions use a legacy transaction ID, and
+    /// v5 transactions use a witnessed transaction ID.
     TransactionIds(Vec<UnminedTxId>),
 }
