@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
+    amount::NonNegative,
     block::Block,
     history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
@@ -275,6 +276,9 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
 
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_current_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(long_chain_block1.prepare(), &finalized_state)?;
