@@ -20,18 +20,19 @@ proptest! {
     ) {
         let (mut recent_sync_lengths, receiver) = RecentSyncLengths::new();
 
-        for update in sync_updates {
+        for (count, update) in sync_updates.into_iter().enumerate() {
             match update {
                 ObtainTips(sync_length) => recent_sync_lengths.push_obtain_tips_length(sync_length),
                 ExtendTips(sync_length) => recent_sync_lengths.push_extend_tips_length(sync_length),
             }
-        }
 
-        prop_assert!(
-            receiver.borrow().len() <= RecentSyncLengths::MAX_RECENT_LENGTHS,
-            "recent sync lengths: {:?}",
-            *receiver.borrow(),
-        );
+            prop_assert_eq!(
+                receiver.borrow().len(),
+                count.min(RecentSyncLengths::MAX_RECENT_LENGTHS),
+                "recent sync lengths: {:?}",
+                *receiver.borrow(),
+            );
+        }
     }
 
     #[test]
@@ -40,26 +41,24 @@ proptest! {
     ) {
         let (mut recent_sync_lengths, receiver) = RecentSyncLengths::new();
 
-        let mut latest_sync_length = None;
-
         for update in sync_updates {
-            match update {
+            let latest_sync_length = match update {
                 ObtainTips(sync_length) => {
                     recent_sync_lengths.push_obtain_tips_length(sync_length);
-                    latest_sync_length = Some(sync_length);
+                    sync_length
                 }
                 ExtendTips(sync_length) => {
                     recent_sync_lengths.push_extend_tips_length(sync_length);
-                    latest_sync_length = Some(sync_length);
+                    sync_length
                 }
-            }
-        }
+            };
 
-        prop_assert_eq!(
-            receiver.borrow().first().cloned(),
-            latest_sync_length,
-            "recent sync lengths: {:?}",
-            *receiver.borrow(),
-        );
+            prop_assert_eq!(
+                receiver.borrow().first().cloned(),
+                Some(latest_sync_length),
+                "recent sync lengths: {:?}",
+                *receiver.borrow(),
+            );
+        }
     }
 }
