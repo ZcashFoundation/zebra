@@ -4,6 +4,7 @@ use futures::stream::FuturesUnordered;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
+    amount::NonNegative,
     block::Block,
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
@@ -325,7 +326,7 @@ proptest! {
     ///    accordingly.
     #[test]
     fn value_pool_is_updated(
-        (network, finalized_blocks, _non_finalized_blocks)
+        (network, finalized_blocks, non_finalized_blocks)
             in continuous_empty_blocks_from_test_vectors(),
     ) {
         zebra_test::init();
@@ -334,16 +335,26 @@ proptest! {
 
         prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
 
-        let mut expected_value_pool = Ok(ValueBalance::zero());
+        let mut expected_finalized_value_pool = Ok(ValueBalance::zero());
         for block in finalized_blocks {
             let utxos = &block.new_outputs;
             let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
-            expected_value_pool += *block_value_pool;
+            expected_finalized_value_pool += *block_value_pool;
 
             state_service.queue_and_commit_finalized(block);
         }
 
-        prop_assert_eq!(state_service.disk.current_value_pool(), expected_value_pool?.constrain()?);
+        prop_assert_eq!(state_service.disk.current_value_pool(), expected_finalized_value_pool?.constrain()?);
+
+        let mut expected_non_finalized_value_pool = Ok(ValueBalance::zero());
+        for block in non_finalized_blocks {
+            let utxos = block.new_outputs.clone();
+            let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos))?;
+            expected_non_finalized_value_pool += *block_value_pool;
+
+            state_service.queue_and_commit_non_finalized(block);
+        }
+        expected_non_finalized_value_pool?.constrain::<NonNegative>()?;
     }
 }
 
