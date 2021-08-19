@@ -99,6 +99,26 @@ pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 400;
 /// serialized size.
 pub const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
 
+/// Convert a tip into its hash and matching progress.
+fn progress_from_tip(
+    checkpoint_list: &CheckpointList,
+    tip: Option<(block::Height, block::Hash)>,
+) -> (Option<block::Hash>, Progress<block::Height>) {
+    match tip {
+        Some((height, hash)) => {
+            if height >= checkpoint_list.max_height() {
+                (None, Progress::FinalCheckpoint)
+            } else {
+                metrics::gauge!("checkpoint.verified.height", height.0 as f64);
+                metrics::gauge!("checkpoint.processing.next.height", height.0 as f64);
+                (Some(hash), Progress::InitialTip(height))
+            }
+        }
+        // We start by verifying the genesis block, by itself
+        None => (None, Progress::BeforeGenesis),
+    }
+}
+
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
@@ -222,19 +242,9 @@ where
     ) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
-        let (initial_tip_hash, verifier_progress) = match initial_tip {
-            Some((height, hash)) => {
-                if height >= checkpoint_list.max_height() {
-                    (None, Progress::FinalCheckpoint)
-                } else {
-                    metrics::gauge!("checkpoint.verified.height", height.0 as f64);
-                    metrics::gauge!("checkpoint.processing.next.height", height.0 as f64);
-                    (Some(hash), Progress::InitialTip(height))
-                }
-            }
-            // We start by verifying the genesis block, by itself
-            None => (None, Progress::BeforeGenesis),
-        };
+        let (initial_tip_hash, verifier_progress) =
+            progress_from_tip(&checkpoint_list, initial_tip);
+
         let (sender, receiver) = mpsc::channel();
         CheckpointVerifier {
             checkpoint_list,
@@ -250,16 +260,9 @@ where
 
     /// Reset the verifier progress back to given tip.
     fn reset_progress(&mut self, tip: Option<(block::Height, block::Hash)>) {
-        self.verifier_progress = match tip {
-            Some((height, _)) => {
-                if height >= self.checkpoint_list.max_height() {
-                    Progress::FinalCheckpoint
-                } else {
-                    Progress::InitialTip(height)
-                }
-            }
-            None => Progress::BeforeGenesis,
-        };
+        let (initial_tip_hash, verifier_progress) = progress_from_tip(&self.checkpoint_list, tip);
+        self.initial_tip_hash = initial_tip_hash;
+        self.verifier_progress = verifier_progress;
     }
 
     /// Return the current verifier's progress.
@@ -993,7 +996,8 @@ where
                     zs::Response::Tip(tip) => tip,
                     _ => unreachable!("wrong response for Tip"),
                 };
-                // TODO: do we need to handle errors?
+                // Ignore errors since send() can fail only when the verifier
+                // is being dropped, and then it doesn't matter anymore.
                 let _ = reset_sender.send(tip);
             }
             result
