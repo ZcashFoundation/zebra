@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::{
     block::{Block, ChainHistoryMmrRootHash, Height},
+    fmt::SummaryDebug,
     orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::{Entry, Tree, V1 as PreOrchard, V2 as OrchardOnward},
@@ -66,7 +67,7 @@ pub struct NonEmptyHistoryTree {
     size: u32,
     /// The peaks of the tree, indexed by their position in the array representation
     /// of the tree. This can be persisted to save the tree.
-    peaks: BTreeMap<u32, Entry>,
+    peaks: SummaryDebug<BTreeMap<u32, Entry>>,
     /// The height of the most recent block added to the tree.
     current_height: Height,
 }
@@ -117,7 +118,7 @@ impl NonEmptyHistoryTree {
             network_upgrade,
             inner,
             size,
-            peaks,
+            peaks: peaks.into(),
             current_height,
         })
     }
@@ -171,7 +172,7 @@ impl NonEmptyHistoryTree {
             network_upgrade,
             inner: tree,
             size: 1,
-            peaks,
+            peaks: peaks.into(),
             current_height: height,
         })
     }
