@@ -45,7 +45,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
 /// sure the contextual validation done by the finalized state works.
 /// Also test if a block with the wrong commitment is correctly rejected.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_fake_activation_heights", test)]
+#[cfg_attr(test_fake_activation_heights, test)]
 fn all_upgrades_and_wrong_commitments() -> Result<()> {
     zebra_test::init();
     // Use a single case and no_shrink() because this is more of a test vector,

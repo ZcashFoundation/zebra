@@ -48,7 +48,7 @@ pub enum NetworkUpgrade {
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-#[cfg(not(feature = "test_fake_activation_heights"))]
+#[cfg(not(test_fake_activation_heights))]
 pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(1), BeforeOverwinter),
@@ -60,7 +60,7 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     // TODO: Add Nu5 mainnet activation height
 ];
 
-#[cfg(feature = "test_fake_activation_heights")]
+#[cfg(test_fake_activation_heights)]
 pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(5), BeforeOverwinter),
@@ -76,7 +76,7 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-#[cfg(not(feature = "test_fake_activation_heights"))]
+#[cfg(not(test_fake_activation_heights))]
 pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(1), BeforeOverwinter),
@@ -88,7 +88,7 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     // TODO: Add Nu5 testnet activation height
 ];
 
-#[cfg(feature = "test_fake_activation_heights")]
+#[cfg(test_fake_activation_heights)]
 pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(5), BeforeOverwinter),
