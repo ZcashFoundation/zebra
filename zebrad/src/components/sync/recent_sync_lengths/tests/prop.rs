@@ -1,5 +1,7 @@
 //! Randomised property tests for recent sync lengths.
 
+use std::cmp::min;
+
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
@@ -28,7 +30,7 @@ proptest! {
 
             prop_assert_eq!(
                 receiver.borrow().len(),
-                count.min(RecentSyncLengths::MAX_RECENT_LENGTHS),
+                min(count + 1, RecentSyncLengths::MAX_RECENT_LENGTHS),
                 "recent sync lengths: {:?}",
                 *receiver.borrow(),
             );
