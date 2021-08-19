@@ -51,7 +51,7 @@ fn all_upgrades_and_wrong_commitments() -> Result<()> {
     // Use a single case and no_shrink() because this is more of a test vector,
     // just using the existing proptest machinery to create test blocks.
     proptest!(ProptestConfig::with_cases(1),
-        |((chain, _count, network, _history_tree) in PreparedChain::default().no_shrink())| {
+        |((chain, _count, network, _history_tree) in PreparedChain::default().with_valid_commitments().no_shrink())| {
 
             let mut state = FinalizedState::new(&Config::ephemeral(), network);
             let mut height = Height(0);

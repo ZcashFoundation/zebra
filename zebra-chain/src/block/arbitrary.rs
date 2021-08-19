@@ -380,6 +380,7 @@ impl Block {
         mut current: LedgerState,
         count: usize,
         check_transparent_coinbase_spend: F,
+        generate_valid_commitments: bool,
     ) -> BoxedStrategy<SummaryDebug<Vec<Arc<Self>>>>
     where
         F: Fn(
@@ -405,7 +406,13 @@ impl Block {
             let mut chain_value_pools = ValueBalance::zero();
             let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
             let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
-            let mut history_tree = HistoryTree::default();
+            // The history tree usually takes care of "creating itself". But this
+            // only works when blocks are pushed to into starting from genesis
+            // (or at least pre-Heartwood, where the tree is not required).
+            // However, this strategy can generate blocks from an arbitrary height,
+            // so we must wait for the first block to create the history tree from it.
+            // This is why `Option` is used here.
+            let mut history_tree: Option<HistoryTree> = None;
 
             for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
@@ -437,52 +444,70 @@ impl Block {
                 block.transactions = new_transactions;
 
                 // fix commitment (must be done after finishing changing the block)
-                let current_height = block.coinbase_height().unwrap();
-                let heartwood_height = NetworkUpgrade::Heartwood
-                    .activation_height(current.network)
-                    .unwrap();
-                let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
-                match current_height.cmp(&heartwood_height) {
-                    std::cmp::Ordering::Less => {}
-                    std::cmp::Ordering::Equal => {
-                        block.header.commitment_bytes = [0u8; 32];
-                    }
-                    std::cmp::Ordering::Greater => {
-                        if nu5_height.is_some() && current_height >= nu5_height.unwrap() {
-                            // From zebra-state/src/service/check.rs
-                            let history_tree_root = history_tree.hash().unwrap();
-                            let auth_data_root = block.auth_data_root();
-                            let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
-                                .hash_length(32)
-                                .personal(b"ZcashBlockCommit")
-                                .to_state()
-                                .update(&<[u8; 32]>::from(history_tree_root)[..])
-                                .update(&<[u8; 32]>::from(auth_data_root))
-                                .update(&[0u8; 32])
-                                .finalize()
-                                .as_bytes()
-                                .try_into()
-                                .expect("32 byte array");
-                            block.header.commitment_bytes = hash_block_commitments;
-                        } else {
-                            block.header.commitment_bytes = history_tree.hash().unwrap().into();
+                if generate_valid_commitments {
+                    let current_height = block.coinbase_height().unwrap();
+                    let heartwood_height = NetworkUpgrade::Heartwood
+                        .activation_height(current.network)
+                        .unwrap();
+                    let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
+                    match current_height.cmp(&heartwood_height) {
+                        std::cmp::Ordering::Less => {}
+                        std::cmp::Ordering::Equal => {
+                            block.header.commitment_bytes = [0u8; 32];
                         }
+                        std::cmp::Ordering::Greater => {
+                            let history_tree_root = match &history_tree {
+                                Some(tree) => tree.hash().unwrap_or_else(|| [0u8; 32].into()),
+                                None => [0u8; 32].into(),
+                            };
+                            if nu5_height.is_some() && current_height >= nu5_height.unwrap() {
+                                // From zebra-state/src/service/check.rs
+                                let auth_data_root = block.auth_data_root();
+                                let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
+                                    .hash_length(32)
+                                    .personal(b"ZcashBlockCommit")
+                                    .to_state()
+                                    .update(&<[u8; 32]>::from(history_tree_root)[..])
+                                    .update(&<[u8; 32]>::from(auth_data_root))
+                                    .update(&[0u8; 32])
+                                    .finalize()
+                                    .as_bytes()
+                                    .try_into()
+                                    .expect("32 byte array");
+                                block.header.commitment_bytes = hash_block_commitments;
+                            } else {
+                                block.header.commitment_bytes = history_tree_root.into();
+                            }
+                        }
+                    }
+                    // update history tree for the next block
+                    if history_tree.is_none() {
+                        history_tree = Some(
+                            HistoryTree::from_block(
+                                current.network,
+                                Arc::new(block.clone()),
+                                &sapling_tree.root(),
+                                &orchard_tree.root(),
+                            )
+                            .unwrap(),
+                        );
+                    } else {
+                        history_tree
+                            .as_mut()
+                            .unwrap()
+                            .push(
+                                Network::Mainnet,
+                                Arc::new(block.clone()),
+                                sapling_tree.root(),
+                                orchard_tree.root(),
+                            )
+                            .unwrap();
                     }
                 }
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it
                 previous_block_hash = Some(block.hash());
-
-                // update history tree for the next block
-                history_tree
-                    .push(
-                        Network::Mainnet,
-                        Arc::new(block.clone()),
-                        sapling_tree.root(),
-                        orchard_tree.root(),
-                    )
-                    .unwrap();
             }
             SummaryDebug(
                 vec.into_iter()
