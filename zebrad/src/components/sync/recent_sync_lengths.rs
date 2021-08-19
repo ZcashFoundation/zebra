@@ -14,9 +14,10 @@ mod tests;
 // TODO: disable the mempool if obtain or extend tips return errors?
 #[derive(Debug)]
 pub struct RecentSyncLengths {
-    ///
+    /// A sender for an array of recent sync lengths.
     sender: watch::Sender<Vec<usize>>,
 
+    /// A local copy of the contents of `sender`.
     // TODO: Replace with calls to `watch::Sender::borrow` once Tokio is updated to 1.0.0 (#2573)
     recent_lengths: Vec<usize>,
 }
