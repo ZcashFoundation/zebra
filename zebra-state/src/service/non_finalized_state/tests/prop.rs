@@ -3,6 +3,7 @@ use std::{env, sync::Arc};
 use zebra_test::prelude::*;
 
 use zebra_chain::{
+    amount::NonNegative,
     block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block},
     fmt::DisplayToDebug,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
@@ -175,6 +176,9 @@ fn rejection_restores_internal_state() -> Result<()> {
                 ))| {
                   let mut state = NonFinalizedState::new(network);
                   let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+
+                  let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+                  finalized_state.set_current_value_pool(fake_value_pool);
 
                   // use `valid_count` as the number of valid blocks before an invalid block
                   let valid_tip_height = chain[valid_count - 1].height;
