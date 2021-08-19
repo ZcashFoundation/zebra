@@ -44,8 +44,9 @@ fn forked_equals_pushed() -> Result<()> {
             // use `fork_at_count` as the fork tip
             let fork_tip_hash = chain[fork_at_count - 1].hash;
 
-            let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
-            let mut partial_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
+            let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+            let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), fake_value_pool);
+            let mut partial_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), fake_value_pool);
 
             for block in chain.iter().take(fork_at_count) {
                 partial_chain = partial_chain.push(block.clone())?;
@@ -115,7 +116,9 @@ fn finalized_equals_pushed() -> Result<()> {
         let chain = &chain[1..];
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, ValueBalance::zero());
+
+        let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, fake_value_pool);
 
         for block in chain.iter().take(finalized_count) {
             full_chain = full_chain.push(block.clone())?;
