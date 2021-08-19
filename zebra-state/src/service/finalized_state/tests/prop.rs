@@ -46,7 +46,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
 /// Also test if a block with the wrong commitment is correctly rejected.
 #[allow(dead_code)]
 #[cfg_attr(test_fake_activation_heights, test)]
-fn all_upgrades_and_wrong_commitments() -> Result<()> {
+fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<()> {
     zebra_test::init();
     // Use a single case and no_shrink() because this is more of a test vector,
     // just using the existing proptest machinery to create test blocks.
