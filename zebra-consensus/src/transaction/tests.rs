@@ -44,21 +44,15 @@ fn v5_fake_transactions() -> Result<(), Report> {
             check::coinbase_tx_no_prevout_joinsplit_spend(&transaction)?;
 
             // validate the sapling shielded data
-            match transaction {
-                Transaction::V5 {
-                    sapling_shielded_data,
-                    ..
-                } => {
-                    if let Some(s) = sapling_shielded_data {
-                        for spend in s.spends_per_anchor() {
-                            check::spend_cv_rk_not_small_order(&spend)?
-                        }
-                        for output in s.outputs() {
-                            check::output_cv_epk_not_small_order(output)?;
-                        }
-                    }
+            if transaction.version() == 5 {
+                for spend in transaction.sapling_spends_per_anchor() {
+                    check::spend_cv_rk_not_small_order(&spend)?;
                 }
-                _ => panic!("we should have no tx other than 5"),
+                for output in transaction.sapling_outputs() {
+                    check::output_cv_epk_not_small_order(output)?;
+                }
+            } else {
+                panic!("we should have no tx other than 5");
             }
         }
     }
