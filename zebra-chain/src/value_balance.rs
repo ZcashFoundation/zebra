@@ -140,7 +140,7 @@ where
     /// value pool.
     ///
     /// See `update_with_block` for details.
-    pub(crate) fn update_with_chain_value_pool_change(
+    pub fn update_with_chain_value_pool_change(
         self,
         chain_value_pool_change: ValueBalance<NegativeAllowed>,
     ) -> Result<ValueBalance<C>, ValueBalanceError> {
