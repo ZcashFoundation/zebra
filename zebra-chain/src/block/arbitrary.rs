@@ -376,6 +376,10 @@ impl Block {
     /// `check_transparent_coinbase_spend` is used to check if
     /// transparent coinbase UTXOs are valid, before using them in blocks.
     /// Use [`allow_all_transparent_coinbase_spends`] to disable this check.
+    ///
+    /// `generate_valid_commitments` specifies if the generated blocks
+    /// should have valid commitments. This makes it much slower so it's better
+    /// to enable only when needed.
     pub fn partial_chain_strategy<F, T, E>(
         mut current: LedgerState,
         count: usize,
@@ -407,7 +411,7 @@ impl Block {
             let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
             let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
             // The history tree usually takes care of "creating itself". But this
-            // only works when blocks are pushed to into starting from genesis
+            // only works when blocks are pushed into it starting from genesis
             // (or at least pre-Heartwood, where the tree is not required).
             // However, this strategy can generate blocks from an arbitrary height,
             // so we must wait for the first block to create the history tree from it.
