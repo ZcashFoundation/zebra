@@ -5,9 +5,10 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, convert::TryInto, path::Path, sync::Arc};
+use std::{borrow::Borrow, collections::HashMap, convert::TryInto, path::Path, sync::Arc};
 
 use zebra_chain::{
+    amount::NonNegative,
     block::{self, Block},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
@@ -15,6 +16,7 @@ use zebra_chain::{
     sapling, sprout,
     transaction::{self, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{service::check, BoxError, Config, FinalizedBlock, HashOrHeight};
@@ -64,6 +66,7 @@ impl FinalizedState {
                 db_options.clone(),
             ),
             rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
         ];
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
@@ -234,6 +237,8 @@ impl FinalizedState {
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
         let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
 
+        let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
+
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty(hash_by_height) {
             assert_eq!(
@@ -325,9 +330,12 @@ impl FinalizedState {
             }
 
             // Index all new transparent outputs
-            for (outpoint, utxo) in new_outputs.into_iter() {
+            for (outpoint, utxo) in new_outputs.borrow().iter() {
                 batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
             }
+
+            // Create a map for all the utxos spent by the block
+            let mut all_utxos_spent_by_block = HashMap::new();
 
             // Index each transaction, spent inputs, nullifiers
             for (transaction_index, (transaction, transaction_hash)) in block
@@ -344,10 +352,13 @@ impl FinalizedState {
                 };
                 batch.zs_insert(tx_by_hash, transaction_hash, transaction_location);
 
-                // Mark all transparent inputs as spent
+                // Mark all transparent inputs as spent, collect them as well.
                 for input in transaction.inputs() {
                     match input {
                         transparent::Input::PrevOut { outpoint, .. } => {
+                            if let Some(utxo) = self.utxo(outpoint) {
+                                all_utxos_spent_by_block.insert(*outpoint, utxo);
+                            }
                             batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
                         }
                         // Coinbase inputs represent new coins,
@@ -404,6 +415,14 @@ impl FinalizedState {
             if let Some(history_tree) = history_tree.as_ref() {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
+
+            // Some utxos are spent in the same block so they will be in `new_outputs`.
+            all_utxos_spent_by_block.extend(new_outputs);
+
+            let current_pool = self.current_value_pool();
+            let new_pool =
+                current_pool.update_with_block(block.borrow(), &all_utxos_spent_by_block)?;
+            batch.zs_insert(tip_chain_value_pool, (), new_pool);
 
             Ok(batch)
         };
@@ -586,6 +605,14 @@ impl FinalizedState {
     #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         self.db.path()
+    }
+
+    /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
+    pub fn current_value_pool(&self) -> ValueBalance<NonNegative> {
+        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
+        self.db
+            .zs_get(value_pool_cf, &())
+            .unwrap_or_else(ValueBalance::zero)
     }
 }
 

@@ -1,8 +1,8 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use zebra_chain::{
     block,
-    transaction::{self, Transaction},
+    transaction::{UnminedTx, UnminedTxId},
 };
 
 use super::super::types::Nonce;
@@ -68,7 +68,10 @@ pub enum Request {
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
 
-    /// Request transactions by hash.
+    /// Request transactions by their unmined transaction ID.
+    ///
+    /// v4 transactions use a legacy transaction ID, and
+    /// v5 transactions use a witnessed transaction ID.
     ///
     /// This uses a `HashSet` for the same reason as [`Request::BlocksByHash`].
     ///
@@ -80,7 +83,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Transactions`](super::Response::Transactions).
-    TransactionsByHash(HashSet<transaction::Hash>),
+    TransactionsById(HashSet<UnminedTxId>),
 
     /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
@@ -122,16 +125,16 @@ pub enum Request {
         stop: Option<block::Hash>,
     },
 
-    /// Push a transaction to a remote peer, without advertising it to them first.
+    /// Push an unmined transaction to a remote peer, without advertising it to them first.
     ///
     /// This is implemented by sending an unsolicited `tx` message.
     ///
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    PushTransaction(Arc<Transaction>),
+    PushTransaction(UnminedTx),
 
-    /// Advertise a set of transactions to all peers.
+    /// Advertise a set of unmined transactions to all peers.
     ///
     /// This is intended to be used in Zebra with a single transaction at a time
     /// (set of size 1), but multiple transactions are permitted because this is
@@ -139,10 +142,13 @@ pub enum Request {
     /// multiple transactions at once.
     ///
     /// This is implemented by sending an `inv` message containing the
-    /// transaction hash, allowing the remote peer to choose whether to download
+    /// unmined transaction ID, allowing the remote peer to choose whether to download
     /// it. Remote peers who choose to download the transaction will generate a
-    /// [`Request::TransactionsByHash`] against the "inbound" service passed to
+    /// [`Request::TransactionsById`] against the "inbound" service passed to
     /// [`zebra_network::init`].
+    ///
+    /// v4 transactions use a legacy transaction ID, and
+    /// v5 transactions use a witnessed transaction ID.
     ///
     /// The peer set routes this request specially, sending it to *every*
     /// available peer.
@@ -150,7 +156,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseTransactions(HashSet<transaction::Hash>),
+    AdvertiseTransactionIds(HashSet<UnminedTxId>),
 
     /// Advertise a block to all peers.
     ///
@@ -172,6 +178,6 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::TransactionHashes`](super::Response::TransactionHashes).
-    MempoolTransactions,
+    /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
+    MempoolTransactionIds,
 }
