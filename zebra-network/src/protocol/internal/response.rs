@@ -1,6 +1,6 @@
 use zebra_chain::{
     block::{self, Block},
-    transaction::{self, Transaction},
+    transaction::{UnminedTx, UnminedTxId},
 };
 
 use crate::meta_addr::MetaAddr;
@@ -18,7 +18,11 @@ pub enum Response {
     ///
     /// Either:
     ///  * the request does not need a response, or
-    ///  * we have no useful data to provide in response to the request.
+    ///  * we have no useful data to provide in response to the request
+    ///
+    /// When Zebra doesn't have any useful data, it always sends no response,
+    /// instead of sending `notfound`. `zcashd` sometimes sends no response,
+    /// and sometimes sends `notfound`.
     Nil,
 
     /// A list of peers, used to respond to `GetPeers`.
@@ -33,9 +37,12 @@ pub enum Response {
     /// A list of block headers.
     BlockHeaders(Vec<block::CountedHeader>),
 
-    /// A list of transactions.
-    Transactions(Vec<Arc<Transaction>>),
+    /// A list of unmined transactions.
+    Transactions(Vec<UnminedTx>),
 
-    /// A list of transaction hashes.
-    TransactionHashes(Vec<transaction::Hash>),
+    /// A list of unmined transaction IDs.
+    ///
+    /// v4 transactions use a legacy transaction ID, and
+    /// v5 transactions use a witnessed transaction ID.
+    TransactionIds(Vec<UnminedTxId>),
 }

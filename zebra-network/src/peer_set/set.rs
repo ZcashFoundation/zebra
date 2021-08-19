@@ -517,12 +517,16 @@ where
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
             }
-            Request::TransactionsByHash(ref hashes) if hashes.len() == 1 => {
+            Request::TransactionsById(ref hashes) if hashes.len() == 1 => {
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
             }
-            Request::AdvertiseTransactions(_) => self.route_all(req),
+
+            // Broadcast advertisements to all peers
+            Request::AdvertiseTransactionIds(_) => self.route_all(req),
             Request::AdvertiseBlock(_) => self.route_all(req),
+
+            // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),
         };
         self.update_metrics();
