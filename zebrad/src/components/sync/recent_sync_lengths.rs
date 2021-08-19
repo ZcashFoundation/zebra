@@ -36,7 +36,7 @@ impl RecentSyncLengths {
     /// Create a new instance of [`RecentSyncLengths`]
     /// and a [`watch::Receiver`] endpoint for receiving recent sync lengths.
     pub fn new() -> (Self, watch::Receiver<Vec<usize>>) {
-        let (sender, receiver) = watch::channel(Vec::with_capacity(Self::MAX_RECENT_LENGTHS));
+        let (sender, receiver) = watch::channel(Vec::new());
 
         (
             RecentSyncLengths {
