@@ -3,6 +3,7 @@
 use halo2::pasta::pallas;
 use serde::{Deserialize, Serialize};
 
+mod auth_digest;
 mod hash;
 mod joinsplit;
 mod lock_time;
@@ -10,19 +11,21 @@ mod memo;
 mod serialize;
 mod sighash;
 mod txid;
+mod unmined;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use hash::Hash;
+pub use auth_digest::AuthDigest;
+pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
-pub use sighash::HashType;
-pub use sighash::SigHash;
+pub use sighash::{HashType, SigHash};
+pub use unmined::{UnminedTx, UnminedTxId};
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
@@ -158,6 +161,22 @@ impl Transaction {
         input: Option<(u32, transparent::Output)>,
     ) -> SigHash {
         sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
+    }
+
+    /// Compute the authorizing data commitment of this transaction as specified
+    /// in [ZIP-244].
+    ///
+    /// Returns None for pre-v5 transactions.
+    ///
+    /// [ZIP-244]: https://zips.z.cash/zip-0244.
+    pub fn auth_digest(&self) -> Option<AuthDigest> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+            Transaction::V5 { .. } => Some(AuthDigest::from(self)),
+        }
     }
 
     // other properties

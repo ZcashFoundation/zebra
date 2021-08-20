@@ -8,6 +8,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
+    value_balance::ValueBalance,
 };
 use zebra_test::{prelude::*, transcript::Transcript};
 
@@ -313,6 +314,36 @@ proptest! {
 
             prop_assert_eq!(*best_tip_height.borrow(), Some(expected_height));
         }
+    }
+
+    /// Test that the value pool is updated accordingly.
+    ///
+    /// 1. Generate a finalized chain and some non-finalized blocks.
+    /// 2. Check that initially the value pool is empty.
+    /// 3. Commit the finalized blocks and check that the value pool is updated accordingly.
+    /// 4. TODO: Commit the non-finalized blocks and check that the value pool is also updated
+    ///    accordingly.
+    #[test]
+    fn value_pool_is_updated(
+        (network, finalized_blocks, _non_finalized_blocks)
+            in continuous_empty_blocks_from_test_vectors(),
+    ) {
+        zebra_test::init();
+
+        let (mut state_service, _) = StateService::new(Config::ephemeral(), network);
+
+        prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
+
+        let mut expected_value_pool = Ok(ValueBalance::zero());
+        for block in finalized_blocks {
+            let utxos = &block.new_outputs;
+            let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
+            expected_value_pool += *block_value_pool;
+
+            state_service.queue_and_commit_finalized(block);
+        }
+
+        prop_assert_eq!(state_service.disk.current_value_pool(), expected_value_pool?.constrain()?);
     }
 }
 

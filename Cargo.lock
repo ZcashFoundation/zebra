@@ -4497,7 +4497,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "aes",
  "bech32",
@@ -4552,7 +4552,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4588,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4623,7 +4623,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.15"
+version = "1.0.0-alpha.16"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4636,9 +4636,10 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "bincode",
+ "blake2b_simd",
  "chrono",
  "color-eyre",
  "dirs",
@@ -4694,7 +4695,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4709,7 +4710,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-alpha.14"
+version = "1.0.0-alpha.15"
 dependencies = [
  "abscissa_core",
  "atty",
@@ -4724,6 +4725,8 @@ dependencies = [
  "metrics-exporter-prometheus",
  "once_cell",
  "pin-project 1.0.7",
+ "proptest",
+ "proptest-derive",
  "regex",
  "semver 1.0.3",
  "sentry",

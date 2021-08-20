@@ -78,7 +78,8 @@ impl StartCmd {
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
         info!("initializing syncer");
-        let syncer = ChainSync::new(&config, peer_set, state, verifier);
+        // TODO: use sync_length_receiver to activate the mempool (#2592)
+        let (syncer, _sync_length_receiver) = ChainSync::new(&config, peer_set, state, verifier);
 
         syncer.sync().await
     }
