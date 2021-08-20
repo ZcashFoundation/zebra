@@ -9,7 +9,7 @@ use crate::{
 use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::transaction::Transaction;
+use crate::{amount::MAX_MONEY, transaction::Transaction};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -32,133 +32,6 @@ impl<C> ValueBalance<C>
 where
     C: Constraint + Copy,
 {
-    /// [Consensus rule]: The remaining value in the transparent transaction value pool MUST
-    /// be nonnegative.
-    ///
-    /// This rule applies to Block and Mempool transactions.
-    ///
-    /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
-    /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
-    //
-    // TODO: move this method to Transaction, so it can handle coinbase transactions as well?
-    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
-        // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
-        // as specified in:
-        // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-        (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
-    }
-
-    /// Returns this value balance, updated with the chain value pool change from `block`.
-    ///
-    /// `utxos` must contain the [`Utxo`]s of every input in this block,
-    /// including UTXOs created by earlier transactions in this block.
-    ///
-    /// "If any of the "Sprout chain value pool balance", "Sapling chain value pool balance",
-    /// or "Orchard chain value pool balance" would become negative in the block chain created
-    /// as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// Nodes MAY relay transactions even if one or more of them cannot be mined due to the
-    /// aforementioned restriction."
-    ///
-    /// https://zips.z.cash/zip-0209#specification
-    ///
-    /// Zebra also checks that the transparent value pool is non-negative,
-    /// which is a consensus rule derived from Bitcoin.
-    ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] for details.
-    pub fn update_with_block(
-        self,
-        block: impl Borrow<Block>,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<C>, ValueBalanceError> {
-        let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
-
-        self.update_with_chain_value_pool_change(chain_value_pool_change)
-    }
-
-    /// Returns this value balance, updated with the chain value pool change from `transaction`.
-    ///
-    /// `outputs` must contain the [`Output`]s of every input in this transaction,
-    /// including UTXOs created by earlier transactions in its block.
-    ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
-    /// for details.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn update_with_transaction(
-        self,
-        transaction: impl Borrow<Transaction>,
-        utxos: &HashMap<transparent::OutPoint, transparent::Output>,
-    ) -> Result<ValueBalance<C>, ValueBalanceError> {
-        use std::ops::Neg;
-
-        // the chain pool (unspent outputs) has the opposite sign to
-        // transaction value balances (inputs - outputs)
-        let chain_value_pool_change = transaction
-            .borrow()
-            .value_balance_from_outputs(utxos)?
-            .neg();
-
-        self.update_with_chain_value_pool_change(chain_value_pool_change)
-    }
-
-    /// Returns this value balance, updated with the chain value pool change from `input`.
-    ///
-    /// `outputs` must contain the [`Output`] spent by `input`,
-    /// (including UTXOs created by earlier transactions in its block).
-    ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool. Inputs remove value from the chain value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
-    /// for details.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn update_with_transparent_input(
-        self,
-        input: impl Borrow<transparent::Input>,
-        utxos: &HashMap<transparent::OutPoint, transparent::Output>,
-    ) -> Result<ValueBalance<C>, ValueBalanceError> {
-        use std::ops::Neg;
-
-        // the chain pool (unspent outputs) has the opposite sign to
-        // transaction value balances (inputs - outputs)
-        let transparent_value_pool_change = input.borrow().value_from_outputs(utxos).neg();
-        let transparent_value_pool_change =
-            ValueBalance::from_transparent_amount(transparent_value_pool_change);
-
-        self.update_with_chain_value_pool_change(transparent_value_pool_change)
-    }
-
-    /// Returns this value balance, updated with a chain value pool change.
-    ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
-    ///
-    /// See `update_with_block` for details.
-    pub fn update_with_chain_value_pool_change(
-        self,
-        chain_value_pool_change: ValueBalance<NegativeAllowed>,
-    ) -> Result<ValueBalance<C>, ValueBalanceError> {
-        let mut chain_value_pool = self
-            .constrain::<NegativeAllowed>()
-            .expect("conversion from NonNegative to NegativeAllowed is always valid");
-        chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
-
-        // Consensus rule: If any of the "Sprout chain value pool balance",
-        // "Sapling chain value pool balance", or "Orchard chain value pool balance"
-        // would become negative in the block chain created as a result of accepting a block,
-        // then all nodes MUST reject the block as invalid.
-        //
-        // Zebra also checks that the transparent value pool is non-negative,
-        // which is a consensus rule derived from Bitcoin.
-        chain_value_pool.constrain()
-    }
-
     /// Creates a [`ValueBalance`] from the given transparent amount.
     pub fn from_transparent_amount(transparent_amount: Amount<C>) -> Self {
         ValueBalance {
@@ -266,6 +139,163 @@ where
             orchard: self.orchard.constrain().map_err(Orchard)?,
         })
     }
+}
+
+impl ValueBalance<NegativeAllowed> {
+    /// [Consensus rule]: The remaining value in the transparent transaction value pool MUST
+    /// be nonnegative.
+    ///
+    /// This rule applies to Block and Mempool transactions.
+    ///
+    /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
+    /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
+    //
+    // TODO: move this method to Transaction, so it can handle coinbase transactions as well?
+    pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
+        // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
+        // as specified in:
+        // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+        (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
+    }
+}
+
+impl ValueBalance<NonNegative> {
+    /// Returns this value balance, updated with the chain value pool change from `block`.
+    ///
+    /// `utxos` must contain the [`Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// "If any of the "Sprout chain value pool balance", "Sapling chain value pool balance",
+    /// or "Orchard chain value pool balance" would become negative in the block chain created
+    /// as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// Nodes MAY relay transactions even if one or more of them cannot be mined due to the
+    /// aforementioned restriction."
+    ///
+    /// https://zips.z.cash/zip-0209#specification
+    ///
+    /// Zebra also checks that the transparent value pool is non-negative,
+    /// which is a consensus rule derived from Bitcoin.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] for details.
+    pub fn update_with_block(
+        self,
+        block: impl Borrow<Block>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+        let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
+
+        self.update_with_chain_value_pool_change(chain_value_pool_change)
+    }
+
+    /// Returns this value balance, updated with the chain value pool change from `transaction`.
+    ///
+    /// `outputs` must contain the [`Output`]s of every input in this transaction,
+    /// including UTXOs created by earlier transactions in its block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
+    /// for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn update_with_transaction(
+        self,
+        transaction: impl Borrow<Transaction>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+        use std::ops::Neg;
+
+        // the chain pool (unspent outputs) has the opposite sign to
+        // transaction value balances (inputs - outputs)
+        let chain_value_pool_change = transaction
+            .borrow()
+            .value_balance_from_outputs(utxos)?
+            .neg();
+
+        self.update_with_chain_value_pool_change(chain_value_pool_change)
+    }
+
+    /// Returns this value balance, updated with the chain value pool change from `input`.
+    ///
+    /// `outputs` must contain the [`Output`] spent by `input`,
+    /// (including UTXOs created by earlier transactions in its block).
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool. Inputs remove value from the chain value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
+    /// for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn update_with_transparent_input(
+        self,
+        input: impl Borrow<transparent::Input>,
+        utxos: &HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+        use std::ops::Neg;
+
+        // the chain pool (unspent outputs) has the opposite sign to
+        // transaction value balances (inputs - outputs)
+        let transparent_value_pool_change = input.borrow().value_from_outputs(utxos).neg();
+        let transparent_value_pool_change =
+            ValueBalance::from_transparent_amount(transparent_value_pool_change);
+
+        self.update_with_chain_value_pool_change(transparent_value_pool_change)
+    }
+
+    /// Returns this value balance, updated with a chain value pool change.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See `update_with_block` for details.
+    pub fn update_with_chain_value_pool_change(
+        self,
+        chain_value_pool_change: ValueBalance<NegativeAllowed>,
+    ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+        let mut chain_value_pool = self
+            .constrain::<NegativeAllowed>()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+        chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
+
+        // Consensus rule: If any of the "Sprout chain value pool balance",
+        // "Sapling chain value pool balance", or "Orchard chain value pool balance"
+        // would become negative in the block chain created as a result of accepting a block,
+        // then all nodes MUST reject the block as invalid.
+        //
+        // Zebra also checks that the transparent value pool is non-negative,
+        // which is a consensus rule derived from Bitcoin.
+        chain_value_pool.constrain()
+    }
+
+    /// Create a fake value pool for testing purposes.
+    ///
+    /// The resulting [`ValueBalance`] will have half of the MAX_MONEY amount on each pool.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn fake_populated_pool() -> ValueBalance<NonNegative> {
+        use std::convert::TryFrom;
+
+        let mut fake_value_pool = ValueBalance::zero();
+
+        let fake_transparent_value_balance =
+            ValueBalance::from_transparent_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+        let fake_sprout_value_balance =
+            ValueBalance::from_sprout_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+        let fake_sapling_value_balance =
+            ValueBalance::from_sapling_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+        let fake_orchard_value_balance =
+            ValueBalance::from_orchard_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+
+        fake_value_pool.set_transparent_value_balance(fake_transparent_value_balance);
+        fake_value_pool.set_sprout_value_balance(fake_sprout_value_balance);
+        fake_value_pool.set_sapling_value_balance(fake_sapling_value_balance);
+        fake_value_pool.set_orchard_value_balance(fake_orchard_value_balance);
+
+        fake_value_pool
+    }
 
     /// To byte array
     pub fn to_bytes(self) -> [u8; 32] {
@@ -282,7 +312,7 @@ where
     }
 
     /// From byte array
-    pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<C>, ValueBalanceError> {
+    pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let transparent = Amount::from_bytes(
             bytes[0..8]
                 .try_into()
