@@ -439,7 +439,7 @@ impl Block {
                         // would be awkward since the genesis block is handled separatedly there.
                         // This forces us to skip the genesis block here too in order to able to use
                         // this to test the finalized state.
-                        if *height != Height(0) {
+                        if generate_valid_commitments && *height != Height(0) {
                             for sapling_note_commitment in transaction.sapling_note_commitments() {
                                 sapling_tree.append(*sapling_note_commitment).unwrap();
                             }

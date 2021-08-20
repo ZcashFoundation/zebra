@@ -89,6 +89,9 @@ impl PreparedChain {
         }
     }
 
+    /// Transform the strategy to use valid commitments in the block.
+    ///
+    /// This is slower so it should be used only when needed.
     #[allow(dead_code)]
     pub(crate) fn with_valid_commitments(mut self) -> Self {
         self.generate_valid_commitments = true;
