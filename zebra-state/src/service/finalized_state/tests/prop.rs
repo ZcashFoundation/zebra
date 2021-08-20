@@ -48,9 +48,11 @@ fn blocks_with_v5_transactions() -> Result<()> {
 #[cfg_attr(test_fake_activation_heights, test)]
 fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<()> {
     zebra_test::init();
-    // Use a single case and no_shrink() because this is more of a test vector,
-    // just using the existing proptest machinery to create test blocks.
-    proptest!(ProptestConfig::with_cases(1),
+    // Use no_shrink() because we're ignoring _count and there is nothing to actually shrink.
+    proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, _count, network, _history_tree) in PreparedChain::default().with_valid_commitments().no_shrink())| {
 
             let mut state = FinalizedState::new(&Config::ephemeral(), network);
