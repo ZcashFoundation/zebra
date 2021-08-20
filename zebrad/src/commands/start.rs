@@ -31,7 +31,7 @@ use tower::builder::ServiceBuilder;
 use crate::components::{tokio::RuntimeRun, Inbound};
 use crate::config::ZebradConfig;
 use crate::{
-    components::{tokio::TokioComponent, ChainSync},
+    components::{mempool, tokio::TokioComponent, ChainSync},
     prelude::*,
 };
 
@@ -79,7 +79,10 @@ impl StartCmd {
 
         info!("initializing syncer");
         // TODO: use sync_length_receiver to activate the mempool (#2592)
-        let (syncer, _sync_length_receiver) = ChainSync::new(&config, peer_set, state, verifier);
+        let (syncer, _sync_length_receiver) =
+            ChainSync::new(&config, peer_set.clone(), state, verifier);
+
+        mempool::Crawler::spawn(peer_set);
 
         syncer.sync().await
     }
