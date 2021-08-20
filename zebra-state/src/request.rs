@@ -1,8 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
+    amount::NegativeAllowed,
     block::{self, Block},
-    transaction, transparent,
+    transaction,
+    transparent::{self, utxos_from_ordered_utxos},
+    value_balance::{ValueBalance, ValueBalanceError},
 };
 
 // Allow *only* this unused import, so that rustdoc link resolution
@@ -78,11 +81,6 @@ pub struct PreparedBlock {
     pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// A precomputed list of the hashes of the transactions in this block.
     pub transaction_hashes: Vec<transaction::Hash>,
-    // TODO: add these parameters when we can compute anchors.
-    // sprout_anchor: sprout::tree::Root,
-    // sapling_anchor: sapling::tree::Root,
-    /// Storage for all the utxos related to this block.
-    pub block_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
 }
 
 /// A contextually validated block, ready to be committed directly to the finalized state with
@@ -90,13 +88,14 @@ pub struct PreparedBlock {
 ///
 /// Used by the state service and non-finalized [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ContextuallyValidBlock {
+pub struct ContextuallyValidBlock {
     pub(crate) block: Arc<Block>,
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
-    pub(crate) block_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    /// The sum of the chain value pool changes of all transactions in this block.
+    pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 }
 
 /// A finalized block, ready to be committed directly to the finalized state with
@@ -112,6 +111,49 @@ pub struct FinalizedBlock {
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     pub(crate) transaction_hashes: Vec<transaction::Hash>,
+}
+
+impl From<&PreparedBlock> for PreparedBlock {
+    fn from(prepared: &PreparedBlock) -> Self {
+        prepared.clone()
+    }
+}
+
+impl ContextuallyValidBlock {
+    /// Create a block that's ready for non-finalized [`Chain`] contextual validation,
+    /// using a [`PreparedBlock`] and the UTXOs it spends.
+    ///
+    /// When combined, `prepared.new_outputs` and `spent_utxos` must contain
+    /// the [`Utxo`]s spent by every transparent input in this block,
+    /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
+    /// [`Chain::update_chain_state_with`] returns success.
+    pub fn with_block_and_spent_utxos(
+        prepared: PreparedBlock,
+        mut spent_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<Self, ValueBalanceError> {
+        let PreparedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        } = prepared;
+
+        // This is redundant for the non-finalized state,
+        // but useful to make some tests pass more easily.
+        spent_utxos.extend(utxos_from_ordered_utxos(new_outputs.clone()));
+
+        Ok(Self {
+            block: block.clone(),
+            hash,
+            height,
+            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
+            transaction_hashes,
+            chain_value_pool_change: block.chain_value_pool_change(&spent_utxos)?,
+        })
+    }
 }
 
 // Doing precomputation in this From impl means that it will be done in
@@ -140,27 +182,6 @@ impl From<Arc<Block>> for FinalizedBlock {
     }
 }
 
-impl From<PreparedBlock> for ContextuallyValidBlock {
-    fn from(prepared: PreparedBlock) -> Self {
-        let PreparedBlock {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-            block_utxos,
-        } = prepared;
-        Self {
-            block,
-            hash,
-            height,
-            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
-            transaction_hashes,
-            block_utxos,
-        }
-    }
-}
-
 impl From<ContextuallyValidBlock> for FinalizedBlock {
     fn from(contextually_valid: ContextuallyValidBlock) -> Self {
         let ContextuallyValidBlock {
@@ -169,7 +190,7 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            block_utxos: _,
+            chain_value_pool_change: _,
         } = contextually_valid;
         Self {
             block,
