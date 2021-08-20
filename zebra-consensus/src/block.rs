@@ -206,8 +206,6 @@ where
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            let block_utxos = transparent::utxos_from_ordered_utxos(new_outputs.clone());
-
             // Finally, submit the block for contextual verification.
             let prepared_block = zs::PreparedBlock {
                 block,
@@ -215,7 +213,6 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                block_utxos,
             };
             match state_service
                 .ready_and()

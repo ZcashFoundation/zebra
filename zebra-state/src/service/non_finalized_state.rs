@@ -25,7 +25,10 @@ use zebra_chain::{
 #[cfg(test)]
 use zebra_chain::sprout;
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
+use crate::{
+    request::ContextuallyValidBlock, FinalizedBlock, HashOrHeight, PreparedBlock,
+    ValidateContextError,
+};
 
 use self::chain::Chain;
 
@@ -183,23 +186,26 @@ impl NonFinalizedState {
     fn validate_and_commit(
         &self,
         parent_chain: Chain,
-        mut prepared: PreparedBlock,
+        prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<Chain, ValidateContextError> {
-        let utxos = check::utxo::transparent_spend(
+        let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &parent_chain.unspent_utxos(),
             &parent_chain.spent_utxos,
             finalized_state,
         )?;
+
         check::block_commitment_is_valid_for_chain_history(
             &prepared,
             self.network,
             &parent_chain.history_tree,
         )?;
 
-        prepared.block_utxos.extend(utxos);
-        parent_chain.push(prepared)
+        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(prepared, spent_utxos)
+            .map_err(ValidateContextError::CalculateBlockChainValueChange)?;
+
+        parent_chain.push(contextual)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.

@@ -181,6 +181,13 @@ pub enum ValidateContextError {
     },
 
     #[error(
+        "error calculating the block chain value pool change: \
+         {0:?}"
+    )]
+    #[non_exhaustive]
+    CalculateBlockChainValueChange(ValueBalanceError),
+
+    #[error(
         "error adding value balances to the chain value pool: \
          {value_balance_error:?}"
     )]

@@ -45,9 +45,9 @@ fn construct_single() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
-        ValueBalance::zero(),
+        ValueBalance::fake_populated_pool(),
     );
-    chain = chain.push(block.prepare())?;
+    chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
 
     assert_eq!(1, chain.blocks.len());
 
@@ -73,11 +73,11 @@ fn construct_many() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
-        ValueBalance::zero(),
+        ValueBalance::fake_populated_pool(),
     );
 
     for block in blocks {
-        chain = chain.push(block.prepare())?;
+        chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
     }
 
     assert_eq!(100, chain.blocks.len());
@@ -100,7 +100,7 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         ValueBalance::zero(),
     );
-    lesser_chain = lesser_chain.push(less_block.prepare())?;
+    lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_chain_pool_change())?;
 
     let mut bigger_chain = Chain::new(
         Network::Mainnet,
@@ -109,7 +109,7 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         ValueBalance::zero(),
     );
-    bigger_chain = bigger_chain.push(more_block.prepare())?;
+    bigger_chain = bigger_chain.push(more_block.prepare().test_with_zero_chain_pool_change())?;
 
     assert!(bigger_chain > lesser_chain);
 

@@ -15,6 +15,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
+    request::ContextuallyValidBlock,
     service::{
         arbitrary::PreparedChain,
         finalized_state::FinalizedState,
@@ -23,7 +24,11 @@ use crate::{
     Config,
 };
 
+/// The default number of proptest cases for long partial chain tests.
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
+
+/// The default number of proptest cases for short partial chain tests.
+const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
 
 /// Check that a forked chain is the same as a chain that had the same blocks appended.
 ///
@@ -48,30 +53,36 @@ fn forked_equals_pushed() -> Result<()> {
             let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), fake_value_pool);
             let mut partial_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), fake_value_pool);
 
-            for block in chain.iter().take(fork_at_count) {
-                partial_chain = partial_chain.push(block.clone())?;
-            }
-            for block in chain.iter() {
-                full_chain = full_chain.push(block.clone())?;
-
-                // check some other properties of generated chains
-                if block.height == block::Height(0) {
-                    prop_assert_eq!(
-                        block
-                            .block
-                            .transactions
-                            .iter()
-                            .flat_map(|t| t.inputs())
-                            .filter_map(|i| i.outpoint())
-                            .count(),
-                        0,
-                        "unexpected transparent prevout input at height {:?}: \
-                         genesis transparent outputs must be ignored, \
-                         so there can not be any spends in the genesis block",
-                        block.height,
-                    );
+            for block in chain
+                .iter()
+                .take(fork_at_count)
+                .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                    partial_chain = partial_chain.push(block)?;
                 }
-            }
+
+            for block in chain
+                .iter()
+                .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                    full_chain = full_chain.push(block.clone())?;
+
+                    // check some other properties of generated chains
+                    if block.height == block::Height(0) {
+                        prop_assert_eq!(
+                            block
+                                .block
+                                .transactions
+                                .iter()
+                                .flat_map(|t| t.inputs())
+                                .filter_map(|i| i.outpoint())
+                                .count(),
+                            0,
+                            "unexpected transparent prevout input at height {:?}: \
+                             genesis transparent outputs must be ignored, \
+                             so there can not be any spends in the genesis block",
+                            block.height,
+                        );
+                    }
+                }
 
             let mut forked = full_chain
                 .fork(
@@ -89,8 +100,11 @@ fn forked_equals_pushed() -> Result<()> {
 
             // Re-add blocks to the fork and check if we arrive at the
             // same original full chain
-            for block in chain.iter().skip(fork_at_count) {
-                forked = forked.push(block.clone())?;
+            for block in chain
+                .iter()
+                .skip(fork_at_count)
+                .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                    forked = forked.push(block)?;
             }
 
             prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
@@ -118,11 +132,15 @@ fn finalized_equals_pushed() -> Result<()> {
         let finalized_count = chain.len() - end_count;
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, fake_value_pool);
 
-        for block in chain.iter().take(finalized_count) {
-            full_chain = full_chain.push(block.clone())?;
-        }
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, fake_value_pool);
+        for block in chain
+            .iter()
+            .take(finalized_count)
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                full_chain = full_chain.push(block)?;
+            }
+
         let mut partial_chain = Chain::new(
             network,
             full_chain.sapling_note_commitment_tree.clone(),
@@ -130,12 +148,19 @@ fn finalized_equals_pushed() -> Result<()> {
             full_chain.history_tree.clone(),
             full_chain.value_balance,
         );
-        for block in chain.iter().skip(finalized_count) {
-            partial_chain = partial_chain.push(block.clone())?;
-        }
-        for block in chain.iter().skip(finalized_count) {
-            full_chain = full_chain.push(block.clone())?;
-        }
+        for block in chain
+            .iter()
+            .skip(finalized_count)
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                partial_chain = partial_chain.push(block.clone())?;
+            }
+
+        for block in chain
+            .iter()
+            .skip(finalized_count)
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                full_chain = full_chain.push(block.clone())?;
+            }
 
         for _ in 0..finalized_count {
             let _finalized = full_chain.pop_root();
@@ -244,7 +269,7 @@ fn different_blocks_different_chains() -> Result<()> {
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                .ok()
                                .and_then(|v| v.parse().ok())
-                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+                               .unwrap_or(DEFAULT_SHORT_CHAIN_PROPTEST_CASES)),
     |((vec1, vec2) in (any::<bool>(), any::<bool>())
       .prop_flat_map(|(is_nu5, is_v5)| {
           // generate a Canopy or NU5 block with v4 or v5 transactions
@@ -270,11 +295,11 @@ fn different_blocks_different_chains() -> Result<()> {
         } else {
             Default::default()
         };
-        let chain1 = Chain::new(Network::Mainnet, Default::default(), Default::default(), finalized_tree1, ValueBalance::zero());
-        let chain2 = Chain::new(Network::Mainnet, Default::default(), Default::default(), finalized_tree2, ValueBalance::zero());
+        let chain1 = Chain::new(Network::Mainnet, Default::default(), Default::default(), finalized_tree1, ValueBalance::fake_populated_pool());
+        let chain2 = Chain::new(Network::Mainnet, Default::default(), Default::default(), finalized_tree2, ValueBalance::fake_populated_pool());
 
-        let block1 = vec1[1].clone().prepare();
-        let block2 = vec2[1].clone().prepare();
+        let block1 = vec1[1].clone().prepare().test_with_zero_spent_utxos();
+        let block2 = vec2[1].clone().prepare().test_with_zero_spent_utxos();
 
         let result1 = chain1.push(block1.clone());
         let result2 = chain2.push(block2.clone());
@@ -325,6 +350,9 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // proof of work
                 chain1.partial_cumulative_work = chain2.partial_cumulative_work;
+
+                // chain value pool
+                chain1.value_balance = chain2.value_balance;
 
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.

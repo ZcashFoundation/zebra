@@ -21,7 +21,7 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
+use crate::{service::check, ContextuallyValidBlock, ValidateContextError};
 
 #[derive(Debug, Clone)]
 pub struct Chain {
@@ -148,21 +148,25 @@ impl Chain {
             self.orchard_nullifiers == other.orchard_nullifiers &&
 
             // proof of work
-            self.partial_cumulative_work == other.partial_cumulative_work
+            self.partial_cumulative_work == other.partial_cumulative_work &&
+
+            // chain value pool balance
+            self.value_balance == other.value_balance
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
     /// If the block is invalid, drop this chain and return an error.
+    ///
+    /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
+    /// [`update_chain_state_with`] returns success.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: PreparedBlock) -> Result<Chain, ValidateContextError> {
-        // the block isn't contextually valid until `update_chain_state_with` returns success
-        let block = ContextuallyValidBlock::from(block);
-
+    pub fn push(mut self, block: ContextuallyValidBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
         self.update_chain_state_with(&block)?;
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
+
         Ok(self)
     }
 
@@ -364,13 +368,13 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         &mut self,
         contextually_valid: &ContextuallyValidBlock,
     ) -> Result<(), ValidateContextError> {
-        let (block, hash, height, new_outputs, transaction_hashes, block_utxos) = (
+        let (block, hash, height, new_outputs, transaction_hashes, chain_value_pool_change) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
-            &contextually_valid.block_utxos,
+            &contextually_valid.chain_value_pool_change,
         );
 
         // add hash to height_by_hash
@@ -446,8 +450,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_state_with(orchard_shielded_data)?;
 
             // add the value balance
-            let value_balance = block.chain_value_pool_change(block_utxos).unwrap();
-            self.update_chain_state_with(&value_balance)?;
+            self.update_chain_state_with(chain_value_pool_change)?;
         }
 
         // Having updated all the note commitment trees and nullifier sets in
@@ -472,13 +475,13 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     fn revert_chain_state_with(&mut self, contextually_valid: &ContextuallyValidBlock) {
-        let (block, hash, height, new_outputs, transaction_hashes, block_utxos) = (
+        let (block, hash, height, new_outputs, transaction_hashes, chain_value_pool_change) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
-            &contextually_valid.block_utxos,
+            &contextually_valid.chain_value_pool_change,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -552,9 +555,8 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_state_with(orchard_shielded_data);
 
             // remove the value balance
-            let value_balance = block.chain_value_pool_change(block_utxos).unwrap();
             use std::ops::Neg;
-            self.revert_chain_state_with(&value_balance.neg());
+            self.revert_chain_state_with(&chain_value_pool_change.neg());
         }
         let anchor = self
             .sapling_anchors_by_height
