@@ -92,7 +92,7 @@ where
             transaction_ids.len()
         );
 
-        // TODO: Download transactions and send them to the mempool
+        // TODO: Download transactions and send them to the mempool (#2650)
 
         Ok(())
     }
