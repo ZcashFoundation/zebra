@@ -106,7 +106,7 @@ proptest! {
     }
 
     #[test]
-    fn value_balance_serialization(value_balance in any::<ValueBalance<NegativeAllowed>>()) {
+    fn value_balance_serialization(value_balance in any::<ValueBalance<NonNegative>>()) {
         zebra_test::init();
 
         let bytes = value_balance.to_bytes();
@@ -119,7 +119,7 @@ proptest! {
     fn value_balance_deserialization(bytes in any::<[u8; 32]>()) {
         zebra_test::init();
 
-        if let Ok(deserialized) = ValueBalance::<NegativeAllowed>::from_bytes(bytes) {
+        if let Ok(deserialized) = ValueBalance::<NonNegative>::from_bytes(bytes) {
             let bytes2 = deserialized.to_bytes();
             prop_assert_eq!(bytes, bytes2);
         }
