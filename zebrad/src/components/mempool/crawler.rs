@@ -58,7 +58,7 @@ where
 
     /// Wait until the mempool is enabled.
     async fn wait_until_enabled(&self) {
-        // TODO: Check if synchronizing up to chain tip has finished (#).
+        // TODO: Check if synchronizing up to chain tip has finished (#2603).
     }
 
     /// Crawl peers for transactions.
