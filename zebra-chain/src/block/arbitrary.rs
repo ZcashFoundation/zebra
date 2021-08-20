@@ -434,11 +434,18 @@ impl Block {
                         &mut utxos,
                         check_transparent_coinbase_spend,
                     ) {
-                        for sapling_note_commitment in transaction.sapling_note_commitments() {
-                            sapling_tree.append(*sapling_note_commitment).unwrap();
-                        }
-                        for orchard_note_commitment in transaction.orchard_note_commitments() {
-                            orchard_tree.append(*orchard_note_commitment).unwrap();
+                        // The FinalizedState does not update the note commitment trees with the genesis block,
+                        // because it doesn't need to (the trees are not used at that point) and updating them
+                        // would be awkward since the genesis block is handled separatedly there.
+                        // This forces us to skip the genesis block here too in order to able to use
+                        // this to test the finalized state.
+                        if *height != Height(0) {
+                            for sapling_note_commitment in transaction.sapling_note_commitments() {
+                                sapling_tree.append(*sapling_note_commitment).unwrap();
+                            }
+                            for orchard_note_commitment in transaction.orchard_note_commitments() {
+                                orchard_tree.append(*orchard_note_commitment).unwrap();
+                            }
                         }
                         new_transactions.push(Arc::new(transaction));
                     }
@@ -500,7 +507,7 @@ impl Block {
                             .as_mut()
                             .unwrap()
                             .push(
-                                Network::Mainnet,
+                                current.network,
                                 Arc::new(block.clone()),
                                 sapling_tree.root(),
                                 orchard_tree.root(),
