@@ -5,7 +5,7 @@ use futures::{
     future::FutureExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use tokio::time::sleep;
+use tokio::{sync::watch, time::sleep};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -21,10 +21,13 @@ use zebra_state as zs;
 use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
+mod recent_sync_lengths;
+
 #[cfg(test)]
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
+use recent_sync_lengths::RecentSyncLengths;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 4;
@@ -193,6 +196,9 @@ where
     // Internal sync state
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
+
+    /// The lengths of recent sync responses.
+    recent_syncs: RecentSyncLengths,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -215,7 +221,14 @@ where
     ///  - peers: the zebra-network peers to contact for downloads
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
-    pub fn new(config: &ZebradConfig, peers: ZN, state: ZS, verifier: ZV) -> Self {
+    ///
+    /// Also returns a [`watch::Receiver`] endpoint for receiving recent sync lengths.
+    pub fn new(
+        config: &ZebradConfig,
+        peers: ZN,
+        state: ZS,
+        verifier: ZV,
+    ) -> (Self, watch::Receiver<Vec<usize>>) {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
@@ -240,23 +253,30 @@ where
             0.95,
             2 * SYNC_RESTART_DELAY,
         );
+
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
-        // Warn the user if we're ignoring their configured lookahead limit
+
         assert!(
             config.sync.lookahead_limit >= MIN_LOOKAHEAD_LIMIT,
             "configured lookahead limit {} too low, must be at least {}",
             config.sync.lookahead_limit,
             MIN_LOOKAHEAD_LIMIT
         );
-        Self {
+
+        let (recent_syncs, sync_length_receiver) = RecentSyncLengths::new();
+
+        let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
             lookahead_limit: config.sync.lookahead_limit,
             tip_network,
             downloads: Box::pin(Downloads::new(block_network, verifier)),
             state,
             prospective_tips: HashSet::new(),
-        }
+            recent_syncs,
+        };
+
+        (new_syncer, sync_length_receiver)
     }
 
     #[instrument(skip(self))]
@@ -466,10 +486,9 @@ where
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
-                    tracing::debug!(
-                        new_hashes = new_download_len - prev_download_len,
-                        "added hashes to download set"
-                    );
+                    let new_hashes = new_download_len - prev_download_len;
+                    tracing::debug!(new_hashes, "added hashes to download set");
+                    metrics::histogram!("sync.obtain.response.hash.count", new_hashes as u64);
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -486,6 +505,15 @@ where
                 return Err(eyre!("queued download of hash behind our chain tip"));
             }
         }
+
+        let new_downloads = download_set.len();
+        tracing::debug!(new_downloads, "queueing new downloads");
+        metrics::gauge!("sync.obtain.queued.hash.count", new_downloads as f64);
+
+        // security: use the actual number of new downloads from all peers,
+        // so a single trailing peer can't toggle our mempool
+        self.recent_syncs.push_obtain_tips_length(new_downloads);
+
         self.request_blocks(download_set).await?;
 
         Ok(())
@@ -594,10 +622,9 @@ where
                         let prev_download_len = download_set.len();
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
-                        tracing::debug!(
-                            new_hashes = new_download_len - prev_download_len,
-                            "added hashes to download set"
-                        );
+                        let new_hashes = new_download_len - prev_download_len;
+                        tracing::debug!(new_hashes, "added hashes to download set");
+                        metrics::histogram!("sync.extend.response.hash.count", new_hashes as u64);
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -605,6 +632,14 @@ where
                 }
             }
         }
+
+        let new_downloads = download_set.len();
+        tracing::debug!(new_downloads, "queueing new downloads");
+        metrics::gauge!("sync.extend.queued.hash.count", new_downloads as f64);
+
+        // security: use the actual number of new downloads from all peers,
+        // so a single trailing peer can't toggle our mempool
+        self.recent_syncs.push_extend_tips_length(new_downloads);
 
         self.request_blocks(download_set).await?;
 
