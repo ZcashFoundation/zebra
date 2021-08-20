@@ -10,6 +10,9 @@ use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
 use zebra_network::{Request, Response};
 
+#[cfg(test)]
+mod tests;
+
 /// The number of peers to request transactions from per crawl event.
 const FANOUT: usize = 4;
 
