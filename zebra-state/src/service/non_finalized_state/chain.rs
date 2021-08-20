@@ -148,7 +148,10 @@ impl Chain {
             self.orchard_nullifiers == other.orchard_nullifiers &&
 
             // proof of work
-            self.partial_cumulative_work == other.partial_cumulative_work
+            self.partial_cumulative_work == other.partial_cumulative_work &&
+
+            // chain value pool balance
+            self.value_balance == other.value_balance
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.

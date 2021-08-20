@@ -23,7 +23,11 @@ use crate::{
     Config,
 };
 
+/// The default number of proptest cases for long partial chain tests.
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
+
+/// The default number of proptest cases for short partial chain tests.
+const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
 
 /// Check that a forked chain is the same as a chain that had the same blocks appended.
 ///
@@ -244,7 +248,7 @@ fn different_blocks_different_chains() -> Result<()> {
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                .ok()
                                .and_then(|v| v.parse().ok())
-                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+                               .unwrap_or(DEFAULT_SHORT_CHAIN_PROPTEST_CASES)),
     |((vec1, vec2) in (any::<bool>(), any::<bool>())
       .prop_flat_map(|(is_nu5, is_v5)| {
           // generate a Canopy or NU5 block with v4 or v5 transactions
@@ -325,6 +329,9 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // proof of work
                 chain1.partial_cumulative_work = chain2.partial_cumulative_work;
+
+                // chain value pool
+                chain1.value_balance = chain2.value_balance;
 
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.
