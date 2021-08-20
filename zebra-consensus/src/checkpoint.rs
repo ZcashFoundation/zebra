@@ -17,10 +17,7 @@ use std::{
     collections::BTreeMap,
     ops::{Bound, Bound::*},
     pin::Pin,
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc,
-    },
+    sync::{mpsc, Arc},
     task::{Context, Poll},
 };
 
@@ -158,10 +155,10 @@ where
 
     /// A channel to receive requests to reset the verifier,
     /// receiving the tip of the state.
-    reset_receiver: Receiver<Option<(block::Height, block::Hash)>>,
+    reset_receiver: mpsc::Receiver<Option<(block::Height, block::Hash)>>,
     /// A channel to send requests to reset the verifier,
     /// passing the tip of the state.
-    reset_sender: Sender<Option<(block::Height, block::Hash)>>,
+    reset_sender: mpsc::Sender<Option<(block::Height, block::Hash)>>,
 }
 
 impl<S> CheckpointVerifier<S>
@@ -948,10 +945,6 @@ where
                 .map_err(VerifyCheckpointError::CommitFinalized)
                 .expect("CheckpointVerifier does not leave dangling receivers")?;
 
-            // Once we get a verified hash, we must commit it to the chain state
-            // as a finalized block, or exit the program, so .expect rather than
-            // propagate errors from the state service.
-            //
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
