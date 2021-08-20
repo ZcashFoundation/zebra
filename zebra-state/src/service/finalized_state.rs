@@ -601,8 +601,7 @@ impl FinalizedState {
     }
 
     /// Allow to set up a fake value pool in the database for testing purposes.
-    //#[cfg(any(test, feature = "proptest-impl"))]
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn set_current_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
         let mut batch = rocksdb::WriteBatch::default();
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
