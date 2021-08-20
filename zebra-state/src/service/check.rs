@@ -1,11 +1,11 @@
 //! Consensus critical contextual checks
 
-use std::{borrow::Borrow, convert::TryInto, sync::Arc};
+use std::{borrow::Borrow, sync::Arc};
 
 use chrono::Duration;
 
 use zebra_chain::{
-    block::{self, Block, CommitmentError},
+    block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError},
     history_tree::HistoryTree,
     parameters::POW_AVERAGING_WINDOW,
     parameters::{Network, NetworkUpgrade},
@@ -150,40 +150,23 @@ fn block_commitment_is_valid_for_chain_history(
             }
         }
         block::Commitment::ChainHistoryBlockTxAuthCommitment(actual_hash_block_commitments) => {
-            let actual_block_commitments: [u8; 32] = actual_hash_block_commitments.into();
             let history_tree_root = history_tree
                 .hash()
                 .expect("the history tree of the previous block must exist since the current block has a ChainHistoryBlockTxAuthCommitment");
             let auth_data_root = block.auth_data_root();
 
-            // > The value of this hash [hashBlockCommitments] is the BLAKE2b-256 hash personalized
-            // > by the string "ZcashBlockCommit" of the following elements:
-            // >   hashLightClientRoot (as described in ZIP 221)
-            // >   hashAuthDataRoot    (as described below)
-            // >   terminator          [0u8;32]
-            // https://zips.z.cash/zip-0244#block-header-changes
-            //
-            // Note that auth data root is from the current block, while
-            // the history tree root is from the previous block.
-            let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
-                .hash_length(32)
-                .personal(b"ZcashBlockCommit")
-                .to_state()
-                .update(&<[u8; 32]>::from(history_tree_root)[..])
-                .update(&<[u8; 32]>::from(auth_data_root))
-                .update(&[0u8; 32])
-                .finalize()
-                .as_bytes()
-                .try_into()
-                .expect("32 byte array");
+            let hash_block_commitments = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &history_tree_root,
+                &auth_data_root,
+            );
 
-            if actual_block_commitments == hash_block_commitments {
+            if actual_hash_block_commitments == hash_block_commitments {
                 Ok(())
             } else {
                 Err(ValidateContextError::InvalidBlockCommitment(
                     CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
-                        actual: actual_block_commitments,
-                        expected: hash_block_commitments,
+                        actual: actual_hash_block_commitments.into(),
+                        expected: hash_block_commitments.into(),
                     },
                 ))
             }

@@ -474,18 +474,12 @@ impl Block {
                             if nu5_height.is_some() && current_height >= nu5_height.unwrap() {
                                 // From zebra-state/src/service/check.rs
                                 let auth_data_root = block.auth_data_root();
-                                let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
-                                    .hash_length(32)
-                                    .personal(b"ZcashBlockCommit")
-                                    .to_state()
-                                    .update(&<[u8; 32]>::from(history_tree_root)[..])
-                                    .update(&<[u8; 32]>::from(auth_data_root))
-                                    .update(&[0u8; 32])
-                                    .finalize()
-                                    .as_bytes()
-                                    .try_into()
-                                    .expect("32 byte array");
-                                block.header.commitment_bytes = hash_block_commitments;
+                                let hash_block_commitments =
+                                    ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                                        &history_tree_root,
+                                        &auth_data_root,
+                                    );
+                                block.header.commitment_bytes = hash_block_commitments.into();
                             } else {
                                 block.header.commitment_bytes = history_tree_root.into();
                             }

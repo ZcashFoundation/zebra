@@ -2,10 +2,13 @@
 
 use thiserror::Error;
 
+use std::convert::TryInto;
+
 use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
 use crate::sapling;
 
 use super::super::block;
+use super::merkle::AuthDataRoot;
 
 /// Zcash blocks contain different kinds of commitments to their contents,
 /// depending on the network and height.
@@ -161,11 +164,6 @@ impl From<ChainHistoryMmrRootHash> for [u8; 32] {
 /// - the transaction authorising data in this block.
 ///
 /// Introduced in NU5.
-//
-// TODO:
-//    - add auth data type
-//    - add a method for hashing chain history and auth data together
-//    - move to a separate file
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 
@@ -178,6 +176,40 @@ impl From<[u8; 32]> for ChainHistoryBlockTxAuthCommitmentHash {
 impl From<ChainHistoryBlockTxAuthCommitmentHash> for [u8; 32] {
     fn from(hash: ChainHistoryBlockTxAuthCommitmentHash) -> Self {
         hash.0
+    }
+}
+
+impl ChainHistoryBlockTxAuthCommitmentHash {
+    /// Compute the block commitment from the history tree root and the
+    /// authorization data root, as specified in [ZIP-244].
+    ///
+    /// `history_tree_root` is the root of the history tree up to and including
+    /// the *previous* block.
+    /// `auth_data_root` is the root of the Merkle tree of authorizing data
+    /// commmitments of each transaction in the *current* block.
+    ///
+    ///  [ZIP-244]: https://zips.z.cash/zip-0244#block-header-changes
+    pub fn from_commitments(
+        history_tree_root: &ChainHistoryMmrRootHash,
+        auth_data_root: &AuthDataRoot,
+    ) -> Self {
+        // > The value of this hash [hashBlockCommitments] is the BLAKE2b-256 hash personalized
+        // > by the string "ZcashBlockCommit" of the following elements:
+        // >   hashLightClientRoot (as described in ZIP 221)
+        // >   hashAuthDataRoot    (as described below)
+        // >   terminator          [0u8;32]
+        let hash_block_commitments: [u8; 32] = blake2b_simd::Params::new()
+            .hash_length(32)
+            .personal(b"ZcashBlockCommit")
+            .to_state()
+            .update(&<[u8; 32]>::from(*history_tree_root)[..])
+            .update(&<[u8; 32]>::from(*auth_data_root))
+            .update(&[0u8; 32])
+            .finalize()
+            .as_bytes()
+            .try_into()
+            .expect("32 byte array");
+        Self(hash_block_commitments)
     }
 }
 
