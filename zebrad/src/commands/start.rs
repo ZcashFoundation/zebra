@@ -25,13 +25,14 @@
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
+use futures::{select, FutureExt};
 use tokio::sync::oneshot;
 use tower::builder::ServiceBuilder;
 
 use crate::components::{tokio::RuntimeRun, Inbound};
 use crate::config::ZebradConfig;
 use crate::{
-    components::{tokio::TokioComponent, ChainSync},
+    components::{mempool, tokio::TokioComponent, ChainSync},
     prelude::*,
 };
 
@@ -79,9 +80,15 @@ impl StartCmd {
 
         info!("initializing syncer");
         // TODO: use sync_length_receiver to activate the mempool (#2592)
-        let (syncer, _sync_length_receiver) = ChainSync::new(&config, peer_set, state, verifier);
+        let (syncer, _sync_length_receiver) =
+            ChainSync::new(&config, peer_set.clone(), state, verifier);
 
-        syncer.sync().await
+        select! {
+            result = syncer.sync().fuse() => result,
+            _ = mempool::Crawler::spawn(peer_set).fuse() => {
+                unreachable!("The mempool crawler only stops if it panics");
+            }
+        }
     }
 }
 
