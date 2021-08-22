@@ -43,20 +43,23 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
-    /// The Sapling note commitment tree of the tip of this Chain.
+    /// The Sapling note commitment tree of the tip of this `Chain`,
+    /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
-    /// The Orchard note commitment tree of the tip of this Chain.
+    /// The Orchard note commitment tree of the tip of this `Chain`,
+    /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
-    /// The ZIP-221 history tree of the tip of this Chain.
+    /// The ZIP-221 history tree of the tip of this `Chain`,
+    /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: HistoryTree,
 
     /// The Sapling anchors created by `blocks`.
     pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
-    /// The Sapling anchors created by each block in the chain.
+    /// The Sapling anchors created by each block in `blocks`.
     pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// The Orchard anchors created by `blocks`.
     pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
-    /// The Orchard anchors created by each block in the chain.
+    /// The Orchard anchors created by each block in `blocks`.
     pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The Sprout nullifiers revealed by `blocks`.
@@ -66,7 +69,11 @@ pub struct Chain {
     /// The Orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
-    /// The cumulative work represented by this partial non-finalized chain.
+    /// The cumulative work represented by `blocks`.
+    ///
+    /// Since the best chain is determined by the largest cumulative work,
+    /// the work represented by finalized blocks can be ignored,
+    /// because they are common to all non-finalized chains.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 
     /// The value balance in of this Chain.
