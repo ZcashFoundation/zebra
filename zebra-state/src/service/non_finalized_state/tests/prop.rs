@@ -146,7 +146,7 @@ fn finalized_equals_pushed() -> Result<()> {
             full_chain.sapling_note_commitment_tree.clone(),
             full_chain.orchard_note_commitment_tree.clone(),
             full_chain.history_tree.clone(),
-            full_chain.value_balance,
+            full_chain.chain_value_pools,
         );
         for block in chain
             .iter()
@@ -352,7 +352,7 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.partial_cumulative_work = chain2.partial_cumulative_work;
 
                 // chain value pool
-                chain1.value_balance = chain2.value_balance;
+                chain1.chain_value_pools = chain2.chain_value_pools;
 
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.
