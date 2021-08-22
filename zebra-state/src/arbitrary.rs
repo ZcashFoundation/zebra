@@ -38,7 +38,6 @@ impl PreparedBlock {
     /// with fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn test_with_zero_spent_utxos(&self) -> ContextuallyValidBlock {
         ContextuallyValidBlock::test_with_zero_spent_utxos(self)
     }
@@ -47,7 +46,6 @@ impl PreparedBlock {
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn test_with_chain_pool_change(
         &self,
         fake_chain_value_pool_change: ValueBalance<NegativeAllowed>,
@@ -59,7 +57,6 @@ impl PreparedBlock {
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyValidBlock {
         ContextuallyValidBlock::test_with_zero_chain_pool_change(self)
     }
@@ -70,7 +67,6 @@ impl ContextuallyValidBlock {
     /// using a [`PreparedBlock`] and fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn test_with_zero_spent_utxos(block: impl Into<PreparedBlock>) -> Self {
         let block = block.into();
 
@@ -101,7 +97,6 @@ impl ContextuallyValidBlock {
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn test_with_chain_pool_change(
         block: impl Into<PreparedBlock>,
         fake_chain_value_pool_change: ValueBalance<NegativeAllowed>,
@@ -128,7 +123,6 @@ impl ContextuallyValidBlock {
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn test_with_zero_chain_pool_change(block: impl Into<PreparedBlock>) -> Self {
         Self::test_with_chain_pool_change(block, ValueBalance::zero())
     }
