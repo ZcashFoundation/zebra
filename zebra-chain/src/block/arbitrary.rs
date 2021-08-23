@@ -11,6 +11,7 @@ use crate::{
     amount::NonNegative,
     block,
     fmt::SummaryDebug,
+    history_tree::HistoryTree,
     parameters::{
         Network,
         NetworkUpgrade::{self, *},
@@ -375,10 +376,15 @@ impl Block {
     /// `check_transparent_coinbase_spend` is used to check if
     /// transparent coinbase UTXOs are valid, before using them in blocks.
     /// Use [`allow_all_transparent_coinbase_spends`] to disable this check.
+    ///
+    /// `generate_valid_commitments` specifies if the generated blocks
+    /// should have valid commitments. This makes it much slower so it's better
+    /// to enable only when needed.
     pub fn partial_chain_strategy<F, T, E>(
         mut current: LedgerState,
         count: usize,
         check_transparent_coinbase_spend: F,
+        generate_valid_commitments: bool,
     ) -> BoxedStrategy<SummaryDebug<Vec<Arc<Self>>>>
     where
         F: Fn(
@@ -402,6 +408,15 @@ impl Block {
             let mut previous_block_hash = None;
             let mut utxos = HashMap::new();
             let mut chain_value_pools = ValueBalance::zero();
+            let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
+            let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
+            // The history tree usually takes care of "creating itself". But this
+            // only works when blocks are pushed into it starting from genesis
+            // (or at least pre-Heartwood, where the tree is not required).
+            // However, this strategy can generate blocks from an arbitrary height,
+            // so we must wait for the first block to create the history tree from it.
+            // This is why `Option` is used here.
+            let mut history_tree: Option<HistoryTree> = None;
 
             for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
@@ -419,6 +434,19 @@ impl Block {
                         &mut utxos,
                         check_transparent_coinbase_spend,
                     ) {
+                        // The FinalizedState does not update the note commitment trees with the genesis block,
+                        // because it doesn't need to (the trees are not used at that point) and updating them
+                        // would be awkward since the genesis block is handled separatedly there.
+                        // This forces us to skip the genesis block here too in order to able to use
+                        // this to test the finalized state.
+                        if generate_valid_commitments && *height != Height(0) {
+                            for sapling_note_commitment in transaction.sapling_note_commitments() {
+                                sapling_tree.append(*sapling_note_commitment).unwrap();
+                            }
+                            for orchard_note_commitment in transaction.orchard_note_commitments() {
+                                orchard_tree.append(*orchard_note_commitment).unwrap();
+                            }
+                        }
                         new_transactions.push(Arc::new(transaction));
                     }
                 }
@@ -426,9 +454,61 @@ impl Block {
                 // delete invalid transactions
                 block.transactions = new_transactions;
 
-                // TODO: if needed, fixup after modifying the block:
-                // - history and authorizing data commitments
-                // - the transaction merkle root
+                // fix commitment (must be done after finishing changing the block)
+                if generate_valid_commitments {
+                    let current_height = block.coinbase_height().unwrap();
+                    let heartwood_height = NetworkUpgrade::Heartwood
+                        .activation_height(current.network)
+                        .unwrap();
+                    let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
+                    match current_height.cmp(&heartwood_height) {
+                        std::cmp::Ordering::Less => {}
+                        std::cmp::Ordering::Equal => {
+                            block.header.commitment_bytes = [0u8; 32];
+                        }
+                        std::cmp::Ordering::Greater => {
+                            let history_tree_root = match &history_tree {
+                                Some(tree) => tree.hash().unwrap_or_else(|| [0u8; 32].into()),
+                                None => [0u8; 32].into(),
+                            };
+                            if nu5_height.is_some() && current_height >= nu5_height.unwrap() {
+                                // From zebra-state/src/service/check.rs
+                                let auth_data_root = block.auth_data_root();
+                                let hash_block_commitments =
+                                    ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                                        &history_tree_root,
+                                        &auth_data_root,
+                                    );
+                                block.header.commitment_bytes = hash_block_commitments.into();
+                            } else {
+                                block.header.commitment_bytes = history_tree_root.into();
+                            }
+                        }
+                    }
+                    // update history tree for the next block
+                    if history_tree.is_none() {
+                        history_tree = Some(
+                            HistoryTree::from_block(
+                                current.network,
+                                Arc::new(block.clone()),
+                                &sapling_tree.root(),
+                                &orchard_tree.root(),
+                            )
+                            .unwrap(),
+                        );
+                    } else {
+                        history_tree
+                            .as_mut()
+                            .unwrap()
+                            .push(
+                                current.network,
+                                Arc::new(block.clone()),
+                                sapling_tree.root(),
+                                orchard_tree.root(),
+                            )
+                            .unwrap();
+                    }
+                }
 
                 // now that we've made all the changes, calculate our block hash,
                 // so the next block can use it

@@ -70,6 +70,7 @@ pub(crate) fn partial_nu5_chain_strategy(
                     init,
                     blocks_after_nu_activation as usize,
                     check::utxo::transparent_coinbase_spend,
+                    false,
                 )
             })
             .prop_map(move |partial_chain| (network, nu_activation, partial_chain))

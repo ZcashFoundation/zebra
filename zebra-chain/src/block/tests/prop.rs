@@ -173,6 +173,7 @@ fn genesis_partial_chain_strategy() -> Result<()> {
             init,
             PREVOUTS_CHAIN_HEIGHT,
             allow_all_transparent_coinbase_spends,
+            false,
         )
     });
 
@@ -222,6 +223,7 @@ fn arbitrary_height_partial_chain_strategy() -> Result<()> {
                 init,
                 PREVOUTS_CHAIN_HEIGHT,
                 allow_all_transparent_coinbase_spends,
+                false,
             )
         });
 
