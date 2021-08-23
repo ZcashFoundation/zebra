@@ -20,7 +20,7 @@ sudo docker run --detach --network host --env GF_SERVER_HTTP_PORT=3030 --env GF_
 ```
 
 Now the grafana dashboard is available at [http://localhost:3030](http://localhost:3030) ; the default username and password is `admin`/`admin`.
-Prometheus scrapes Zebra on `localhost:9999`, and provides the results on `locahost:9090`.
+Prometheus scrapes Zebra on `localhost:9999`, and provides the results on `localhost:9090`.
 
 2. Configure Grafana with a Prometheus HTTP Data Source, using Zebra's `metrics.endpoint_addr`.
 
