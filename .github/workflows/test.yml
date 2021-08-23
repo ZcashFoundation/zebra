@@ -54,7 +54,7 @@ jobs:
           --container-image rust:buster \
           --container-mount-disk mount-path='/mainnet',name="zebrad-cache-$SHORT_SHA-mainnet-canopy" \
           --container-restart-policy never \
-          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-canopy",image=zebrad-cache-9121ae2-mainnet-canopy \
+          --create-disk name="zebrad-cache-$SHORT_SHA-mainnet-canopy",image=zebrad-cache-0fafd6af-mainnet-canopy \
           --machine-type n2-standard-8 \
           --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
           --scopes cloud-platform \

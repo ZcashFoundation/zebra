@@ -803,20 +803,21 @@ where
                             //
                             // TODO: zcashd has a bug where it merges queued inv messages of
                             // the same or different types. So Zebra should split small
-                            // merged inv messages into separate inv messages. (#1799)
+                            // merged inv messages into separate inv messages. (#1768)
                             match hashes.as_slice() {
                                 [hash @ InventoryHash::Block(_)] => {
+                                    debug!(?hash, "registering gossiped block inventory for peer");
                                     let _ = inv_collector.send((*hash, transient_addr));
                                 }
                                 [hashes @ ..] => {
                                     for hash in hashes {
-                                        if matches!(hash, InventoryHash::Tx(_)) {
-                                            debug!(?hash, "registering Tx inventory hash");
+                                        if let Some(unmined_tx_id) = hash.unmined_tx_id() {
+                                            debug!(?unmined_tx_id, "registering unmined transaction inventory for peer");
                                             // The peer set and inv collector use the peer's remote
                                             // address as an identifier
                                             let _ = inv_collector.send((*hash, transient_addr));
                                         } else {
-                                            trace!(?hash, "ignoring non Tx inventory hash")
+                                            trace!(?hash, "ignoring non-transaction inventory hash in multi-hash list")
                                         }
                                     }
                                 }

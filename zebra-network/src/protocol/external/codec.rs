@@ -276,7 +276,7 @@ impl Codec {
             Message::Inv(hashes) => hashes.zcash_serialize(&mut writer)?,
             Message::GetData(hashes) => hashes.zcash_serialize(&mut writer)?,
             Message::NotFound(hashes) => hashes.zcash_serialize(&mut writer)?,
-            Message::Tx(transaction) => transaction.zcash_serialize(&mut writer)?,
+            Message::Tx(transaction) => transaction.transaction.zcash_serialize(&mut writer)?,
             Message::Mempool => { /* Empty payload -- no-op */ }
             Message::FilterLoad {
                 filter,
@@ -910,17 +910,17 @@ mod tests {
 
     #[test]
     fn max_msg_size_round_trip() {
-        use std::sync::Arc;
         use zebra_chain::serialization::ZcashDeserializeInto;
+
         zebra_test::init();
 
         let rt = Runtime::new().unwrap();
 
         // make tests with a Tx message
-        let tx = zebra_test::vectors::DUMMY_TX1
+        let tx: Transaction = zebra_test::vectors::DUMMY_TX1
             .zcash_deserialize_into()
             .unwrap();
-        let msg = Message::Tx(Arc::new(tx));
+        let msg = Message::Tx(tx.into());
 
         use tokio_util::codec::{FramedRead, FramedWrite};
 

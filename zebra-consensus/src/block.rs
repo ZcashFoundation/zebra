@@ -203,9 +203,10 @@ where
             metrics::gauge!("zcash.chain.verified.block.height", height.0 as _);
             metrics::counter!("zcash.chain.verified.block.total", 1);
 
-            // Finally, submit the block for contextual verification.
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
+
+            // Finally, submit the block for contextual verification.
             let prepared_block = zs::PreparedBlock {
                 block,
                 hash,

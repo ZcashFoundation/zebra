@@ -281,7 +281,7 @@ impl Service<zn::Request> for Inbound {
                     .map_ok(zn::Response::Blocks)
                     .boxed()
             }
-            zn::Request::TransactionsByHash(_transactions) => {
+            zn::Request::TransactionsById(_transactions) => {
                 // `zcashd` returns a list of found transactions, followed by a
                 // `NotFound` message if any transactions are missing. `zcashd`
                 // says that Simplified Payment Verification (SPV) clients rely on
@@ -314,7 +314,7 @@ impl Service<zn::Request> for Inbound {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            zn::Request::AdvertiseTransactions(_transactions) => {
+            zn::Request::AdvertiseTransactionIds(_transactions) => {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }
@@ -329,7 +329,7 @@ impl Service<zn::Request> for Inbound {
                 }
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            zn::Request::MempoolTransactions => {
+            zn::Request::MempoolTransactionIds => {
                 debug!("ignoring unimplemented request");
                 async { Ok(zn::Response::Nil) }.boxed()
             }

@@ -182,12 +182,23 @@ fn rejection_restores_internal_state() -> Result<()> {
                   prop_assert!(state.eq_internal_state(&state));
 
                   if let Some(first_block) = chain.next() {
-                      state.commit_new_chain(first_block, &finalized_state)?;
+                      let result = state.commit_new_chain(first_block, &finalized_state);
+                      prop_assert_eq!(
+                          result,
+                          Ok(()),
+                          "PreparedChain should generate a valid first block"
+                      );
                       prop_assert!(state.eq_internal_state(&state));
                   }
 
                   for block in chain {
-                      state.commit_block(block, &finalized_state)?;
+                      let result = state.commit_block(block.clone(), &finalized_state);
+                      prop_assert_eq!(
+                          result,
+                          Ok(()),
+                          "PreparedChain should generate a valid block at {:?}",
+                          block.height,
+                      );
                       prop_assert!(state.eq_internal_state(&state));
                   }
 

@@ -9,7 +9,6 @@ use crate::{
         arbitrary::PreparedChain,
         finalized_state::{FinalizedBlock, FinalizedState},
     },
-    ContextuallyValidBlock,
 };
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
@@ -27,7 +26,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {
                 let hash = state.commit_finalized_direct(
-                    FinalizedBlock::from(ContextuallyValidBlock::from(block.clone())),
+                    FinalizedBlock::from(block.block.clone()),
                     "blocks_with_v5_transactions test"
                 );
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
