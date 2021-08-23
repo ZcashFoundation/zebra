@@ -11,7 +11,7 @@ pub enum TransactionInsertError {
     #[error("transaction did not pass consensus validation")]
     TransactionInvalid(#[from] zebra_consensus::error::TransactionError),
 
-    #[error("transaction is committed in  block {0:?}")]
+    #[error("transaction is committed in block {0:?}")]
     TransactionInBlock(zebra_chain::block::Hash),
 
     #[error("transaction has expired")]
