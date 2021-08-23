@@ -30,86 +30,233 @@ const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 /// The default number of proptest cases for short partial chain tests.
 const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
 
-/// Check that a forked chain is the same as a chain that had the same blocks appended.
-///
-/// Also check for:
-/// - no transparent spends in the genesis block, because genesis transparent outputs are ignored
+/// Check that chain block pushes work with blocks from genesis
 #[test]
-fn forked_equals_pushed() -> Result<()> {
+fn push_genesis_chain() -> Result<()> {
     zebra_test::init();
 
-    proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
-                                          .ok()
-                                          .and_then(|v| v.parse().ok())
-                                          .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, fork_at_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
-            // Skip first block which was used for the history tree; make sure fork_at_count is still valid
-            let fork_at_count = std::cmp::min(fork_at_count, chain.len() - 1);
-            let chain = &chain[1..];
-            // use `fork_at_count` as the fork tip
-            let fork_tip_hash = chain[fork_at_count - 1].hash;
+    proptest!(
+        ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                                   .ok()
+                                   .and_then(|v| v.parse().ok())
+                                   .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+        |((chain, count, network, empty_tree) in PreparedChain::default())| {
+            prop_assert!(empty_tree.is_none());
 
-            let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-            let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), fake_value_pool);
-            let mut partial_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), fake_value_pool);
+            let mut only_chain = Chain::new(network, Default::default(), Default::default(), empty_tree, ValueBalance::zero());
 
             for block in chain
                 .iter()
-                .take(fork_at_count)
-                .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                    partial_chain = partial_chain.push(block)?;
+                .take(count) {
+                    let block =
+                        ContextuallyValidBlock::with_block_and_spent_utxos(
+                            block.clone(),
+                            only_chain.unspent_utxos(),
+                        )?;
+                    only_chain = only_chain.push(block)?;
                 }
 
-            for block in chain
-                .iter()
-                .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                    full_chain = full_chain.push(block.clone())?;
+            prop_assert_eq!(only_chain.blocks.len(), count);
+        });
 
-                    // check some other properties of generated chains
-                    if block.height == block::Height(0) {
-                        prop_assert_eq!(
-                            block
-                                .block
-                                .transactions
-                                .iter()
-                                .flat_map(|t| t.inputs())
-                                .filter_map(|i| i.outpoint())
-                                .count(),
-                            0,
-                            "unexpected transparent prevout input at height {:?}: \
-                             genesis transparent outputs must be ignored, \
-                             so there can not be any spends in the genesis block",
-                            block.height,
-                        );
-                    }
-                }
+    Ok(())
+}
 
-            let mut forked = full_chain
-                .fork(
-                    fork_tip_hash,
-                    Default::default(),
-                    Default::default(),
-                    finalized_tree,
-                )
-                .expect("fork works")
-                .expect("hash is present");
+/// Check that chain block pushes work with history tree blocks
+#[test]
+fn push_history_tree_chain() -> Result<()> {
+    zebra_test::init();
 
-            // the first check is redundant, but it's useful for debugging
-            prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
-            prop_assert!(forked.eq_internal_state(&partial_chain));
+    proptest!(
+    ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                               .ok()
+                               .and_then(|v| v.parse().ok())
+                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+        prop_assert!(finalized_tree.is_some());
 
-            // Re-add blocks to the fork and check if we arrive at the
-            // same original full chain
-            for block in chain
-                .iter()
-                .skip(fork_at_count)
-                .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                    forked = forked.push(block)?;
+        // Skip first block which was used for the history tree.
+        // This skips some transactions which are required to calculate value balances,
+        // so we zero all value balances in this test.
+
+        // make sure count is still valid
+        let count = std::cmp::min(count, chain.len() - 1);
+        let chain = &chain[1..];
+
+        let mut only_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, ValueBalance::zero());
+
+        for block in chain
+            .iter()
+            .take(count)
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                only_chain = only_chain.push(block)?;
             }
 
-            prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
-            prop_assert!(forked.eq_internal_state(&full_chain));
-        });
+        prop_assert_eq!(only_chain.blocks.len(), count);
+    });
+
+    Ok(())
+}
+
+/// Check that a forked genesis chain is the same as a chain that had the same blocks appended.
+///
+/// Also check that:
+/// - there are no transparent spends in the chain from the genesis block,
+///   because genesis transparent outputs are ignored
+/// - transactions only spend transparent outputs from earlier in the block or chain
+/// - chain value balances are non-negative
+#[test]
+fn forked_equals_pushed_genesis() -> Result<()> {
+    zebra_test::init();
+
+    proptest!(
+    ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                               .ok()
+                               .and_then(|v| v.parse().ok())
+                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, fork_at_count, network, empty_tree) in PreparedChain::default())| {
+
+        prop_assert!(empty_tree.is_none());
+
+        // use `fork_at_count` as the fork tip
+        let fork_tip_hash = chain[fork_at_count - 1].hash;
+
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), empty_tree.clone(), ValueBalance::zero());
+        let mut partial_chain = Chain::new(network, Default::default(), Default::default(), empty_tree.clone(), ValueBalance::zero());
+
+        for block in chain.iter().take(fork_at_count).cloned() {
+            let block =
+                ContextuallyValidBlock::with_block_and_spent_utxos(
+                    block,
+                    partial_chain.unspent_utxos(),
+                )?;
+            partial_chain = partial_chain.push(block).expect("partial chain push is valid");
+        }
+
+        for block in chain.iter().cloned() {
+            let block =
+                ContextuallyValidBlock::with_block_and_spent_utxos(
+                    block,
+                    full_chain.unspent_utxos(),
+                )?;
+                full_chain = full_chain.push(block.clone()).expect("full chain push is valid");
+
+                // check some other properties of generated chains
+                if block.height == block::Height(0) {
+                    prop_assert_eq!(
+                        block
+                            .block
+                            .transactions
+                            .iter()
+                            .flat_map(|t| t.inputs())
+                            .filter_map(|i| i.outpoint())
+                            .count(),
+                        0,
+                        "unexpected transparent prevout input at height {:?}: \
+                         genesis transparent outputs must be ignored, \
+                         so there can not be any spends in the genesis block",
+                        block.height,
+                    );
+                }
+            }
+
+        let mut forked = full_chain
+            .fork(
+                fork_tip_hash,
+                Default::default(),
+                Default::default(),
+                empty_tree,
+            )
+            .expect("fork works")
+            .expect("hash is present");
+
+        // the first check is redundant, but it's useful for debugging
+        prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
+        prop_assert!(forked.eq_internal_state(&partial_chain));
+
+        // Re-add blocks to the fork and check if we arrive at the
+        // same original full chain
+        for block in chain.iter().skip(fork_at_count).cloned() {
+            let block =
+                ContextuallyValidBlock::with_block_and_spent_utxos(
+                    block,
+                    forked.unspent_utxos(),
+                )?;
+            forked = forked.push(block).expect("forked chain push is valid");
+        }
+
+        prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
+        prop_assert!(forked.eq_internal_state(&full_chain));
+    });
+
+    Ok(())
+}
+
+/// Check that a forked history tree chain is the same as a chain that had the same blocks appended.
+#[test]
+fn forked_equals_pushed_history_tree() -> Result<()> {
+    zebra_test::init();
+
+    proptest!(
+    ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                               .ok()
+                               .and_then(|v| v.parse().ok())
+                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, fork_at_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+        prop_assert!(finalized_tree.is_some());
+
+        // Skip first block which was used for the history tree.
+        // This skips some transactions which are required to calculate value balances,
+        // so we zero all value balances in this test.
+
+        // make sure fork_at_count is still valid
+        let fork_at_count = std::cmp::min(fork_at_count, chain.len() - 1);
+        let chain = &chain[1..];
+        // use `fork_at_count` as the fork tip
+        let fork_tip_hash = chain[fork_at_count - 1].hash;
+
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
+        let mut partial_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
+
+        for block in chain
+            .iter()
+            .take(fork_at_count)
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                partial_chain = partial_chain.push(block)?;
+            }
+
+        for block in chain
+            .iter()
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                full_chain = full_chain.push(block.clone())?;
+            }
+
+        let mut forked = full_chain
+            .fork(
+                fork_tip_hash,
+                Default::default(),
+                Default::default(),
+                finalized_tree,
+            )
+            .expect("fork works")
+            .expect("hash is present");
+
+        // the first check is redundant, but it's useful for debugging
+        prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
+        prop_assert!(forked.eq_internal_state(&partial_chain));
+
+        // Re-add blocks to the fork and check if we arrive at the
+        // same original full chain
+        for block in chain
+            .iter()
+            .skip(fork_at_count)
+            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+                forked = forked.push(block)?;
+        }
+
+        prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
+        prop_assert!(forked.eq_internal_state(&full_chain));
+    });
 
     Ok(())
 }
@@ -180,82 +327,82 @@ fn rejection_restores_internal_state() -> Result<()> {
     zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
-                                         .ok()
-                                         .and_then(|v| v.parse().ok())
-                                         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-              |((chain, valid_count, network, mut bad_block) in (PreparedChain::default(), any::<bool>(), any::<bool>())
-                .prop_flat_map(|((chain, valid_count, network, _history_tree), is_nu5, is_v5)| {
-                    let next_height = chain[valid_count - 1].height;
-                    (
-                        Just(chain),
-                        Just(valid_count),
-                        Just(network),
-                        // generate a Canopy or NU5 block with v4 or v5 transactions
-                        LedgerState::height_strategy(
-                            next_height,
-                            if is_nu5 { Nu5 } else { Canopy },
-                            if is_nu5 && is_v5 { 5 } else { 4 },
-                            true,
-                        )
-                            .prop_flat_map(Block::arbitrary_with)
-                            .prop_map(DisplayToDebug)
-                    )
-                }
-                ))| {
-                  let mut state = NonFinalizedState::new(network);
-                  let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+                               .ok()
+                               .and_then(|v| v.parse().ok())
+                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, valid_count, network, mut bad_block) in (PreparedChain::default(), any::<bool>(), any::<bool>())
+      .prop_flat_map(|((chain, valid_count, network, _history_tree), is_nu5, is_v5)| {
+          let next_height = chain[valid_count - 1].height;
+          (
+              Just(chain),
+              Just(valid_count),
+              Just(network),
+              // generate a Canopy or NU5 block with v4 or v5 transactions
+              LedgerState::height_strategy(
+                  next_height,
+                  if is_nu5 { Nu5 } else { Canopy },
+                  if is_nu5 && is_v5 { 5 } else { 4 },
+                  true,
+              )
+                  .prop_flat_map(Block::arbitrary_with)
+                  .prop_map(DisplayToDebug)
+          )
+      }
+      ))| {
+        let mut state = NonFinalizedState::new(network);
+        let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
-                  let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-                  finalized_state.set_current_value_pool(fake_value_pool);
+        let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+        finalized_state.set_current_value_pool(fake_value_pool);
 
-                  // use `valid_count` as the number of valid blocks before an invalid block
-                  let valid_tip_height = chain[valid_count - 1].height;
-                  let valid_tip_hash = chain[valid_count - 1].hash;
-                  let mut chain = chain.iter().take(valid_count).cloned();
+        // use `valid_count` as the number of valid blocks before an invalid block
+        let valid_tip_height = chain[valid_count - 1].height;
+        let valid_tip_hash = chain[valid_count - 1].hash;
+        let mut chain = chain.iter().take(valid_count).cloned();
 
-                  prop_assert!(state.eq_internal_state(&state));
+        prop_assert!(state.eq_internal_state(&state));
 
-                  if let Some(first_block) = chain.next() {
-                      let result = state.commit_new_chain(first_block, &finalized_state);
-                      prop_assert_eq!(
-                          result,
-                          Ok(()),
-                          "PreparedChain should generate a valid first block"
-                      );
-                      prop_assert!(state.eq_internal_state(&state));
-                  }
+        if let Some(first_block) = chain.next() {
+            let result = state.commit_new_chain(first_block, &finalized_state);
+            prop_assert_eq!(
+                result,
+                Ok(()),
+                "PreparedChain should generate a valid first block"
+            );
+            prop_assert!(state.eq_internal_state(&state));
+        }
 
-                  for block in chain {
-                      let result = state.commit_block(block.clone(), &finalized_state);
-                      prop_assert_eq!(
-                          result,
-                          Ok(()),
-                          "PreparedChain should generate a valid block at {:?}",
-                          block.height,
-                      );
-                      prop_assert!(state.eq_internal_state(&state));
-                  }
+        for block in chain {
+            let result = state.commit_block(block.clone(), &finalized_state);
+            prop_assert_eq!(
+                result,
+                Ok(()),
+                "PreparedChain should generate a valid block at {:?}",
+                block.height,
+            );
+            prop_assert!(state.eq_internal_state(&state));
+        }
 
-                  prop_assert_eq!(state.best_tip(), Some((valid_tip_height, valid_tip_hash)));
+        prop_assert_eq!(state.best_tip(), Some((valid_tip_height, valid_tip_hash)));
 
-                  let mut reject_state = state.clone();
-                  // the tip check is redundant, but it's useful for debugging
-                  prop_assert_eq!(state.best_tip(), reject_state.best_tip());
-                  prop_assert!(state.eq_internal_state(&reject_state));
+        let mut reject_state = state.clone();
+        // the tip check is redundant, but it's useful for debugging
+        prop_assert_eq!(state.best_tip(), reject_state.best_tip());
+        prop_assert!(state.eq_internal_state(&reject_state));
 
-                  bad_block.header.previous_block_hash = valid_tip_hash;
-                  let bad_block = Arc::new(bad_block.0).prepare();
-                  let reject_result = reject_state.commit_block(bad_block, &finalized_state);
+        bad_block.header.previous_block_hash = valid_tip_hash;
+        let bad_block = Arc::new(bad_block.0).prepare();
+        let reject_result = reject_state.commit_block(bad_block, &finalized_state);
 
-                  if reject_result.is_err() {
-                      prop_assert_eq!(state.best_tip(), reject_state.best_tip());
-                      prop_assert!(state.eq_internal_state(&reject_state));
-                  } else {
-                      // the block just happened to pass all the non-finalized checks
-                      prop_assert_ne!(state.best_tip(), reject_state.best_tip());
-                      prop_assert!(!state.eq_internal_state(&reject_state));
-                  }
-              });
+        if reject_result.is_err() {
+            prop_assert_eq!(state.best_tip(), reject_state.best_tip());
+            prop_assert!(state.eq_internal_state(&reject_state));
+        } else {
+            // the block just happened to pass all the non-finalized checks
+            prop_assert_ne!(state.best_tip(), reject_state.best_tip());
+            prop_assert!(!state.eq_internal_state(&reject_state));
+        }
+    });
 
     Ok(())
 }
