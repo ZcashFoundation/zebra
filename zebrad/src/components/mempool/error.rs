@@ -20,10 +20,3 @@ pub enum TransactionInsertError {
     #[error("transaction fee is too low for the current mempool state")]
     LowFee,
 }
-
-#[derive(Error, Debug, PartialEq)]
-#[allow(dead_code)]
-pub enum TransactionQueryError {
-    #[error("transaction was not found in mempool")]
-    NotInMempool,
-}
