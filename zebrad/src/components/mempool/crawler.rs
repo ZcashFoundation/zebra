@@ -29,7 +29,7 @@ const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
 const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// The mempool transaction crawler.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Crawler<S> {
     peer_set: Timeout<S>,
     // TODO: replace `()` with mempool downloader request type (#2606)
@@ -38,7 +38,7 @@ pub struct Crawler<S> {
 
 impl<S> Crawler<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
@@ -74,14 +74,13 @@ where
     async fn crawl_transactions(&mut self) {
         let requests = stream::repeat(Request::MempoolTransactionIds).take(FANOUT);
         let peer_set = self.peer_set.clone();
-        let download_sender = self.download_sender.clone();
 
         trace!("Crawling for mempool transactions");
 
         peer_set
             .call_all(requests)
             .unordered()
-            .and_then(|response| Crawler::<S>::handle_response(response, download_sender.clone()))
+            .and_then(|response| self.clone().handle_response(response))
             // TODO: Reduce the log level of the errors (#2655).
             .inspect_err(|error| info!("Failed to crawl peer for mempool transactions: {}", error))
             .for_each(|_| async {})
@@ -89,10 +88,7 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(
-        response: Response,
-        _sender: tokio::sync::mpsc::Sender<()>,
-    ) -> Result<(), BoxError> {
+    async fn handle_response(self, response: Response) -> Result<(), BoxError> {
         let transaction_ids = match response {
             Response::TransactionIds(ids) => ids,
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
