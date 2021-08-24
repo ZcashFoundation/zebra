@@ -58,6 +58,7 @@ pub struct PreparedChain {
     chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>, HistoryTree)>>,
     // the strategy for generating LedgerStates. If None, it calls [`LedgerState::genesis_strategy`].
     ledger_strategy: Option<BoxedStrategy<LedgerState>>,
+    generate_valid_commitments: bool,
 }
 
 impl PreparedChain {
@@ -87,6 +88,15 @@ impl PreparedChain {
             ..Default::default()
         }
     }
+
+    /// Transform the strategy to use valid commitments in the block.
+    ///
+    /// This is slower so it should be used only when needed.
+    #[allow(dead_code)]
+    pub(crate) fn with_valid_commitments(mut self) -> Self {
+        self.generate_valid_commitments = true;
+        self
+    }
 }
 
 impl Strategy for PreparedChain {
@@ -112,6 +122,7 @@ impl Strategy for PreparedChain {
                             ledger,
                             MAX_PARTIAL_CHAIN_BLOCKS,
                             check::utxo::transparent_coinbase_spend,
+                            self.generate_valid_commitments,
                         ),
                     )
                 })

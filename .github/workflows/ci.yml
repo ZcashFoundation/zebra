@@ -69,6 +69,15 @@ jobs:
         with:
           command: test
           args: --verbose --all
+
+      - name: Run tests with fake activation heights
+        uses: actions-rs/cargo@v1.0.3
+        env:
+          TEST_FAKE_ACTIVATION_HEIGHTS:
+        with:
+          command: test
+          args: --verbose --all -- with_fake_activation_heights
+
       # Explicitly run any tests that are usually #[ignored]
 
       - name: Run zebrad large sync tests

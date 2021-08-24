@@ -191,7 +191,7 @@ impl NonFinalizedState {
             &parent_chain.spent_utxos,
             finalized_state,
         )?;
-        check::block_commitment_is_valid_for_chain_history(
+        check::prepared_block_commitment_is_valid_for_chain_history(
             &prepared,
             self.network,
             &parent_chain.history_tree,

@@ -16,7 +16,9 @@ pub mod tests;
 
 use std::{collections::HashMap, convert::TryInto, fmt, ops::Neg};
 
-pub use commitment::{ChainHistoryMmrRootHash, Commitment, CommitmentError};
+pub use commitment::{
+    ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
+};
 pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header};
 pub use height::Height;

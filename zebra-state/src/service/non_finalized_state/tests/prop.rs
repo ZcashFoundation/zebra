@@ -244,7 +244,7 @@ fn different_blocks_different_chains() -> Result<()> {
               if is_nu5 && is_v5 { 5 } else { 4 },
               true,
           )})
-      .prop_map(|ledger_state| Block::partial_chain_strategy(ledger_state, 2, allow_all_transparent_coinbase_spends))
+      .prop_map(|ledger_state| Block::partial_chain_strategy(ledger_state, 2, allow_all_transparent_coinbase_spends, false))
       .prop_flat_map(|block_strategy| (block_strategy.clone(), block_strategy))
     )| {
         let prev_block1 = vec1[0].clone();
