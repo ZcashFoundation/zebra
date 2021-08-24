@@ -12,17 +12,15 @@
 //! Otherwise, verification of out-of-order and invalid blocks and transactions can hang
 //! indefinitely.
 
-#[cfg(test)]
-mod tests;
-
-use displaydoc::Display;
-use futures::{FutureExt, TryFutureExt};
 use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use displaydoc::Display;
+use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::instrument;
@@ -41,6 +39,9 @@ use crate::{
     error::TransactionError,
     script, transaction, BoxError, Config,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// The bound for the chain verifier and transaction verifier buffers.
 ///
@@ -64,12 +65,17 @@ const VERIFIER_BUFFER_BOUND: usize = 5;
 /// Block verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
 /// module documentation for details.
-struct ChainVerifier<S>
+struct ChainVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    V: Service<transaction::Request, Response = transaction::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    V::Future: Send + 'static,
 {
-    block: BlockVerifier<S>,
+    block: BlockVerifier<S, V>,
     checkpoint: CheckpointVerifier<S>,
     max_checkpoint_height: block::Height,
 }
@@ -83,10 +89,15 @@ pub enum VerifyChainError {
     Block(#[source] VerifyBlockError),
 }
 
-impl<S> Service<Arc<Block>> for ChainVerifier<S>
+impl<S, V> Service<Arc<Block>> for ChainVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    V: Service<transaction::Request, Response = transaction::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    V::Future: Send + 'static,
 {
     type Response = block::Hash;
     type Error = VerifyChainError;
@@ -166,7 +177,7 @@ pub async fn init<S>(
 ) -> (
     Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>,
     Buffer<
-        BoxService<transaction::Request, zebra_chain::transaction::Hash, TransactionError>,
+        BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
     >,
 )
@@ -204,7 +215,7 @@ where
     };
     tracing::info!(?tip, ?max_checkpoint_height, "initializing chain verifier");
 
-    let block = BlockVerifier::new(network, state_service.clone());
+    let block = BlockVerifier::new(network, state_service.clone(), transaction.clone());
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let chain = ChainVerifier {
         block,

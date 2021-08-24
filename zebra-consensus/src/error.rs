@@ -90,15 +90,23 @@ pub enum TransactionError {
 }
 
 impl From<BoxError> for TransactionError {
-    fn from(err: BoxError) -> Self {
-        // TODO: handle redpallas Error?
+    fn from(mut err: BoxError) -> Self {
+        // TODO: handle redpallas::Error, ScriptInvalid, InvalidSignature
         match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
-            Ok(e) => TransactionError::RedJubjub(*e),
-            Err(e) => TransactionError::InternalDowncastError(format!(
-                "downcast to redjubjub::Error failed, original error: {:?}",
-                e
-            )),
+            Ok(e) => return TransactionError::RedJubjub(*e),
+            Err(e) => err = e,
         }
+
+        // buffered transaction verifier service error
+        match err.downcast::<TransactionError>() {
+            Ok(e) => return *e,
+            Err(e) => err = e,
+        }
+
+        TransactionError::InternalDowncastError(format!(
+            "downcast to known transaction error type failed, original error: {:?}",
+            err,
+        ))
     }
 }
 

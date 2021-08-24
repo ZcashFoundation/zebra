@@ -90,6 +90,10 @@ pub enum Request {
     },
 }
 
+/// The response type for the transaction verifier service.
+/// Responses identify the transaction that was verified.
+pub type Response = zebra_chain::transaction::Hash;
+
 impl Request {
     /// The transaction to verify that's in this request.
     pub fn transaction(&self) -> Arc<Transaction> {
@@ -127,7 +131,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    type Response = transaction::Hash;
+    type Response = Response;
     type Error = TransactionError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;

@@ -406,7 +406,8 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     assert_eq!(
         result,
         Err(TransactionError::InternalDowncastError(
-            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+            "downcast to known transaction error type failed, original error: ScriptInvalid"
+                .to_string()
         ))
     );
 }
@@ -683,7 +684,7 @@ fn v4_with_unsigned_sprout_transfer_is_rejected() {
                 // TODO: Fix error downcast
                 // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
                 TransactionError::InternalDowncastError(
-                    "downcast to redjubjub::Error failed, original error: InvalidSignature"
+                    "downcast to known transaction error type failed, original error: InvalidSignature"
                         .to_string(),
                 )
             )
