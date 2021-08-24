@@ -55,6 +55,7 @@ once_cell = "1.8"
 regex = "1.4.6"
 semver = "1.0.3"
 tempdir = "0.3.7"
+tokio = { version = "0.3.6", features = ["full", "test-util"] }
 
 proptest = "0.10"
 proptest-derive = "0.3"
