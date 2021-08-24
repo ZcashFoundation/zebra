@@ -853,7 +853,7 @@ where
                     if tx_ids.iter().all(|item| item.unmined_tx_id().is_some())
                         && !tx_ids.is_empty() =>
                 {
-                    Request::TransactionsById(transaction_ids(&items).collect())
+                    Request::AdvertiseTransactionIds(transaction_ids(&items).collect())
                 }
                 _ => {
                     self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
