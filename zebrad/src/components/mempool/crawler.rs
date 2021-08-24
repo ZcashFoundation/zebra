@@ -74,27 +74,27 @@ where
         peer_set
             .call_all(requests)
             .unordered()
-            .and_then(handle_response)
+            .and_then(Crawler::<S>::handle_response)
             // TODO: Reduce the log level of the errors (#2655).
             .inspect_err(|error| info!("Failed to crawl peer for mempool transactions: {}", error))
             .for_each(|_| async {})
             .await;
     }
-}
 
-/// Handle a peer's response to the crawler's request for transactions.
-async fn handle_response(response: Response) -> Result<(), BoxError> {
-    let transaction_ids = match response {
-        Response::TransactionIds(ids) => ids,
-        _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
-    };
+    /// Handle a peer's response to the crawler's request for transactions.
+    async fn handle_response(response: Response) -> Result<(), BoxError> {
+        let transaction_ids = match response {
+            Response::TransactionIds(ids) => ids,
+            _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
+        };
 
-    trace!(
-        "Mempool crawler received {} transaction IDs",
-        transaction_ids.len()
-    );
+        trace!(
+            "Mempool crawler received {} transaction IDs",
+            transaction_ids.len()
+        );
 
-    // TODO: Download transactions and send them to the mempool (#2650)
+        // TODO: Download transactions and send them to the mempool (#2650)
 
-    Ok(())
+        Ok(())
+    }
 }
