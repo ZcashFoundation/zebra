@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::BoxError;
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Copy, Clone, Debug, PartialEq)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
     NoCoinbase,
@@ -18,7 +18,7 @@ pub enum SubsidyError {
     FoundersRewardNotFound,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Clone, Debug, PartialEq)]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
     CoinbasePosition,
@@ -108,7 +108,7 @@ impl From<SubsidyError> for BlockError {
     }
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Clone, Debug, PartialEq)]
 pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),
