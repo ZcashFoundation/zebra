@@ -32,6 +32,8 @@ const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 #[derive(Debug)]
 pub struct Crawler<S> {
     peer_set: Timeout<S>,
+    // TODO: replace `()` with mempool downloader request type (#2606)
+    download_sender: tokio::sync::mpsc::Sender<()>,
 }
 
 impl<S> Crawler<S>
@@ -41,8 +43,12 @@ where
 {
     /// Spawn an asynchronous task to run the mempool crawler.
     pub fn spawn(peer_set: S) {
+        // TODO: replace with sender from the mempool downloader (#2606)
+        let (download_sender, _download_receiver) = tokio::sync::mpsc::channel(FANOUT);
+
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
+            download_sender,
         };
 
         tokio::spawn(crawler.run());
@@ -68,13 +74,14 @@ where
     async fn crawl_transactions(&mut self) {
         let requests = stream::repeat(Request::MempoolTransactionIds).take(FANOUT);
         let peer_set = self.peer_set.clone();
+        let download_sender = self.download_sender.clone();
 
         trace!("Crawling for mempool transactions");
 
         peer_set
             .call_all(requests)
             .unordered()
-            .and_then(Crawler::<S>::handle_response)
+            .and_then(|response| Crawler::<S>::handle_response(response, download_sender.clone()))
             // TODO: Reduce the log level of the errors (#2655).
             .inspect_err(|error| info!("Failed to crawl peer for mempool transactions: {}", error))
             .for_each(|_| async {})
@@ -82,7 +89,10 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(response: Response) -> Result<(), BoxError> {
+    async fn handle_response(
+        response: Response,
+        _sender: tokio::sync::mpsc::Sender<()>,
+    ) -> Result<(), BoxError> {
         let transaction_ids = match response {
             Response::TransactionIds(ids) => ids,
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
