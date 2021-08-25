@@ -17,7 +17,7 @@ use std::{
     collections::BTreeMap,
     ops::{Bound, Bound::*},
     pin::Pin,
-    sync::Arc,
+    sync::{mpsc, Arc},
     task::{Context, Poll},
 };
 
@@ -96,6 +96,26 @@ pub const MAX_CHECKPOINT_HEIGHT_GAP: usize = 400;
 /// serialized size.
 pub const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
 
+/// Convert a tip into its hash and matching progress.
+fn progress_from_tip(
+    checkpoint_list: &CheckpointList,
+    tip: Option<(block::Height, block::Hash)>,
+) -> (Option<block::Hash>, Progress<block::Height>) {
+    match tip {
+        Some((height, hash)) => {
+            if height >= checkpoint_list.max_height() {
+                (None, Progress::FinalCheckpoint)
+            } else {
+                metrics::gauge!("checkpoint.verified.height", height.0 as f64);
+                metrics::gauge!("checkpoint.processing.next.height", height.0 as f64);
+                (Some(hash), Progress::InitialTip(height))
+            }
+        }
+        // We start by verifying the genesis block, by itself
+        None => (None, Progress::BeforeGenesis),
+    }
+}
+
 /// A checkpointing block verifier.
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
@@ -132,6 +152,13 @@ where
 
     /// The current progress of this verifier.
     verifier_progress: Progress<block::Height>,
+
+    /// A channel to receive requests to reset the verifier,
+    /// receiving the tip of the state.
+    reset_receiver: mpsc::Receiver<Option<(block::Height, block::Hash)>>,
+    /// A channel to send requests to reset the verifier,
+    /// passing the tip of the state.
+    reset_sender: mpsc::Sender<Option<(block::Height, block::Hash)>>,
 }
 
 impl<S> CheckpointVerifier<S>
@@ -212,19 +239,10 @@ where
     ) -> Self {
         // All the initialisers should call this function, so we only have to
         // change fields or default values in one place.
-        let (initial_tip_hash, verifier_progress) = match initial_tip {
-            Some((height, hash)) => {
-                if height >= checkpoint_list.max_height() {
-                    (None, Progress::FinalCheckpoint)
-                } else {
-                    metrics::gauge!("checkpoint.verified.height", height.0 as f64);
-                    metrics::gauge!("checkpoint.processing.next.height", height.0 as f64);
-                    (Some(hash), Progress::InitialTip(height))
-                }
-            }
-            // We start by verifying the genesis block, by itself
-            None => (None, Progress::BeforeGenesis),
-        };
+        let (initial_tip_hash, verifier_progress) =
+            progress_from_tip(&checkpoint_list, initial_tip);
+
+        let (sender, receiver) = mpsc::channel();
         CheckpointVerifier {
             checkpoint_list,
             network,
@@ -232,7 +250,16 @@ where
             state_service,
             queued: BTreeMap::new(),
             verifier_progress,
+            reset_receiver: receiver,
+            reset_sender: sender,
         }
+    }
+
+    /// Reset the verifier progress back to given tip.
+    fn reset_progress(&mut self, tip: Option<(block::Height, block::Hash)>) {
+        let (initial_tip_hash, verifier_progress) = progress_from_tip(&self.checkpoint_list, tip);
+        self.initial_tip_hash = initial_tip_hash;
+        self.verifier_progress = verifier_progress;
     }
 
     /// Return the current verifier's progress.
@@ -825,6 +852,8 @@ pub enum VerifyCheckpointError {
     #[error(transparent)]
     CommitFinalized(BoxError),
     #[error(transparent)]
+    Tip(BoxError),
+    #[error(transparent)]
     CheckpointList(BoxError),
     #[error(transparent)]
     VerifyBlock(BoxError),
@@ -876,6 +905,12 @@ where
 
     #[instrument(name = "checkpoint", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
+        // Reset the verifier back to the state tip if requested
+        // (e.g. due to an error when committing a block to to the state)
+        if let Ok(tip) = self.reset_receiver.try_recv() {
+            self.reset_progress(tip);
+        }
+
         // Immediately reject all incoming blocks that arrive after we've finished.
         if let FinalCheckpoint = self.previous_checkpoint_height() {
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
@@ -910,17 +945,12 @@ where
                 .map_err(VerifyCheckpointError::CommitFinalized)
                 .expect("CheckpointVerifier does not leave dangling receivers")?;
 
-            // Once we get a verified hash, we must commit it to the chain state
-            // as a finalized block, or exit the program, so .expect rather than
-            // propagate errors from the state service.
-            //
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
                 .oneshot(zs::Request::CommitFinalizedBlock(block.into()))
                 .map_err(VerifyCheckpointError::CommitFinalized)
-                .await
-                .expect("state service commit block failed: verified checkpoints must be committed transactionally")
+                .await?
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
@@ -930,6 +960,8 @@ where
             }
         });
 
+        let state_service = self.state_service.clone();
+        let reset_sender = self.reset_sender.clone();
         async move {
             let result = commit_finalized_block.await;
             // Avoid a panic on shutdown
@@ -939,11 +971,29 @@ where
             // so we don't need to panic here. The persistent state is correct even when the
             // task is cancelled, because block data is committed inside transactions, in
             // height order.
-            if zebra_chain::shutdown::is_shutting_down() {
+            let result = if zebra_chain::shutdown::is_shutting_down() {
                 Err(VerifyCheckpointError::ShuttingDown)
             } else {
                 result.expect("commit_finalized_block should not panic")
+            };
+            if result.is_err() {
+                // If there was an error comitting the block, then this verifier
+                // will be out of sync with the state. In that case, reset
+                // its progress back to the state tip.
+                let tip = match state_service
+                    .oneshot(zs::Request::Tip)
+                    .await
+                    .map_err(Into::into)
+                    .map_err(VerifyCheckpointError::Tip)?
+                {
+                    zs::Response::Tip(tip) => tip,
+                    _ => unreachable!("wrong response for Tip"),
+                };
+                // Ignore errors since send() can fail only when the verifier
+                // is being dropped, and then it doesn't matter anymore.
+                let _ = reset_sender.send(tip);
             }
+            result
         }
         .boxed()
     }

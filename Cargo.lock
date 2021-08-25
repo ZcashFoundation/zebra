@@ -4639,7 +4639,6 @@ name = "zebra-state"
 version = "1.0.0-alpha.15"
 dependencies = [
  "bincode",
- "blake2b_simd",
  "chrono",
  "color-eyre",
  "dirs",

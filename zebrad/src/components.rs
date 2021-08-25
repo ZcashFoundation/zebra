@@ -6,6 +6,7 @@
 //! don't fit the async context well.
 
 mod inbound;
+pub mod mempool;
 pub mod metrics;
 mod sync;
 pub mod tokio;
