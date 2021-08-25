@@ -45,7 +45,7 @@ impl Storage {
     /// as [`State::Evicted`].
     #[allow(dead_code)]
     pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
-        let tx_id = tx.id.clone();
+        let tx_id = tx.id;
 
         // First, check if we should reject this transaction.
         if self.rejected.contains_key(&tx.id) {
@@ -83,10 +83,7 @@ impl Storage {
     /// the mempool.
     #[allow(dead_code)]
     pub fn contains(self, txid: &UnminedTxId) -> bool {
-        match self.verified.iter().find(|tx| &tx.id == txid) {
-            Some(_) => true,
-            None => false,
-        }
+        self.verified.iter().any(|tx| &tx.id == txid)
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
