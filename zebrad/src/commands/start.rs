@@ -55,8 +55,8 @@ impl StartCmd {
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
         info!("initializing verifiers");
-        // TODO: use the mempool verifier to verify mempool transactions (#2637, #2606)
-        let (chain_verifier, _mempool_verifier) = zebra_consensus::chain::init(
+        // TODO: use the transaction verifier to verify mempool transactions (#2637, #2606)
+        let (chain_verifier, _tx_verifier) = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
             state.clone(),
