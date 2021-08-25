@@ -11,7 +11,7 @@ assignees: ''
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra. `git diff --stat <previous-release-tag> origin/main` is also useful to see
+To check if any of the top-level crates need version increments you can use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main)). `git diff --stat <previous-release-tag> origin/main` is also useful to see
 what's changed.
 
 - [ ] Increment the crates that have new commits since the last version update
@@ -63,11 +63,13 @@ Once you know which versions you want to increment, you can find them in the:
 
 Merge all these version increments as one commit, by squashing and rebasing the PR onto the main branch.
 
+After you have your changes pushed start a PR with them using this template by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.16?expand=1&template=release-checklist.md)).
+
 #### Version Tooling
 
 You can use `fastmod` to interactively find and replace versions.
 
-For example, for `zebra-1.0.0-alpha-12`, we did:
+For example, for `zebra-1.0.0-alpha.12`, we did:
 ```
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13'
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.11' '1.0.0-alpha.12'
