@@ -420,8 +420,7 @@ impl FinalizedState {
             all_utxos_spent_by_block.extend(new_outputs);
 
             let current_pool = self.current_value_pool();
-            let new_pool =
-                current_pool.update_with_block(block.borrow(), &all_utxos_spent_by_block)?;
+            let new_pool = current_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
             batch.zs_insert(tip_chain_value_pool, (), new_pool);
 
             Ok(batch)

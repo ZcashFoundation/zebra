@@ -797,7 +797,7 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     ) -> Result<(), ValidateContextError> {
         match self
             .chain_value_pools
-            .update_with_chain_value_pool_change(*block_value_pool_change)
+            .add_chain_value_pool_change(*block_value_pool_change)
         {
             Ok(chain_value_pools) => self.chain_value_pools = chain_value_pools,
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
@@ -835,7 +835,7 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
         if position == RevertPosition::Tip {
             self.chain_value_pools = self
                 .chain_value_pools
-                .update_with_chain_value_pool_change(block_value_pool_change.neg())
+                .add_chain_value_pool_change(block_value_pool_change.neg())
                 .expect("reverting the tip will leave the pools in a previously valid state");
         }
     }
