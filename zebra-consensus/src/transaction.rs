@@ -92,7 +92,13 @@ pub enum Request {
 
 /// The response type for the transaction verifier service.
 /// Responses identify the transaction that was verified.
-pub type Response = zebra_chain::transaction::Hash;
+///
+/// [`Block`] requests can be uniquely identified by [`UnminedTxId::mined_id`],
+/// because the block's authorizing data root will be checked during contextual validation.
+///
+/// [`Mempool`] requests are uniquely identified by the [`UnminedTxId`]
+/// variant for their transaction version.
+pub type Response = zebra_chain::transaction::UnminedTxId;
 
 impl Request {
     /// The transaction to verify that's in this request.
@@ -218,7 +224,7 @@ where
 
             async_checks.check().await?;
 
-            Ok(tx.hash())
+            Ok(tx.unmined_id())
         }
         .instrument(span)
         .boxed()
