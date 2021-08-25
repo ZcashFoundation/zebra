@@ -799,15 +799,17 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
             .chain_value_pools
             .update_with_chain_value_pool_change(*block_value_pool_change)
         {
-            Ok(_) => Ok(()),
+            Ok(chain_value_pools) => self.chain_value_pools = chain_value_pools,
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
                 value_balance_error,
                 chain_value_pools: self.chain_value_pools,
                 block_value_pool_change: *block_value_pool_change,
                 // assume that the current block is added to `blocks` after `update_chain_tip_with`
                 height: self.max_block_height().and_then(|height| height + 1),
-            }),
-        }
+            })?,
+        };
+
+        Ok(())
     }
 
     /// Revert the chain state using a block chain value pool change.
