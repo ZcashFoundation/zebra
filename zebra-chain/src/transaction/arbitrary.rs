@@ -316,21 +316,17 @@ impl Transaction {
 
         let sapling_input = self.sapling_value_balance().constrain::<NonNegative>();
         if let Ok(sapling_input) = sapling_input {
-            if sapling_input != ValueBalance::zero() {
-                match input_chain_value_pools.update_with_chain_value_pool_change(-sapling_input) {
-                    Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                    Err(_) => *self.sapling_value_balance_mut().unwrap() = Amount::zero(),
-                }
+            match input_chain_value_pools.update_with_chain_value_pool_change(-sapling_input) {
+                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                Err(_) => *self.sapling_value_balance_mut().unwrap() = Amount::zero(),
             }
         }
 
         let orchard_input = self.orchard_value_balance().constrain::<NonNegative>();
         if let Ok(orchard_input) = orchard_input {
-            if orchard_input != ValueBalance::zero() {
-                match input_chain_value_pools.update_with_chain_value_pool_change(-orchard_input) {
-                    Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                    Err(_) => *self.orchard_value_balance_mut().unwrap() = Amount::zero(),
-                }
+            match input_chain_value_pools.update_with_chain_value_pool_change(-orchard_input) {
+                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                Err(_) => *self.orchard_value_balance_mut().unwrap() = Amount::zero(),
             }
         }
 
