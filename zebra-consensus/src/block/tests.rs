@@ -1,6 +1,6 @@
 //! Tests for block verification
 
-use crate::parameters::SLOW_START_INTERVAL;
+use crate::{parameters::SLOW_START_INTERVAL, script};
 
 use super::*;
 
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
-use tower::buffer::Buffer;
+use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -19,6 +19,8 @@ use zebra_chain::{
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
+
+use crate::transaction;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<
     Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
@@ -119,7 +121,13 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init_test(network);
 
-    let block_verifier = Buffer::new(BlockVerifier::new(network, state_service.clone()), 1);
+    let script = script::Verifier::new(state_service.clone());
+    let transaction = transaction::Verifier::new(network, script);
+    let transaction = Buffer::new(BoxService::new(transaction), 1);
+    let block_verifier = Buffer::new(
+        BlockVerifier::new(network, state_service.clone(), transaction),
+        1,
+    );
 
     for transcript_data in &[
         &VALID_BLOCK_TRANSCRIPT,

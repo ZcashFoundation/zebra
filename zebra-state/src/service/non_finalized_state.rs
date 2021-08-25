@@ -25,7 +25,10 @@ use zebra_chain::{
 #[cfg(test)]
 use zebra_chain::sprout;
 
-use crate::{FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError};
+use crate::{
+    request::ContextuallyValidBlock, FinalizedBlock, HashOrHeight, PreparedBlock,
+    ValidateContextError,
+};
 
 use self::chain::Chain;
 
@@ -167,6 +170,7 @@ impl NonFinalizedState {
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
+            finalized_state.current_value_pool(),
         );
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -185,7 +189,7 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<Chain, ValidateContextError> {
-        check::utxo::transparent_spend(
+        let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &parent_chain.unspent_utxos(),
             &parent_chain.spent_utxos,
@@ -197,7 +201,21 @@ impl NonFinalizedState {
             &parent_chain.history_tree,
         )?;
 
-        parent_chain.push(prepared)
+        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
+            prepared.clone(),
+            spent_utxos.clone(),
+        )
+        .map_err(|value_balance_error| {
+            ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height: prepared.height,
+                block_hash: prepared.hash,
+                transaction_count: prepared.block.transactions.len(),
+                spent_utxo_count: spent_utxos.len(),
+            }
+        })?;
+
+        parent_chain.push(contextual)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -352,7 +370,7 @@ impl NonFinalizedState {
     }
 
     /// Return the non-finalized portion of the current best chain
-    fn best_chain(&self) -> Option<&Chain> {
+    pub(crate) fn best_chain(&self) -> Option<&Chain> {
         self.chain_set
             .iter()
             .next_back()

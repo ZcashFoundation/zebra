@@ -8,12 +8,20 @@ use multiset::HashMultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    block, history_tree::HistoryTree, orchard, parameters::Network, primitives::Groth16Proof,
-    sapling, sprout, transaction, transaction::Transaction::*, transparent,
+    amount::{NegativeAllowed, NonNegative},
+    block,
+    history_tree::HistoryTree,
+    orchard,
+    parameters::Network,
+    primitives::Groth16Proof,
+    sapling, sprout, transaction,
+    transaction::Transaction::*,
+    transparent,
+    value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{service::check, ContextuallyValidBlock, PreparedBlock, ValidateContextError};
+use crate::{service::check, ContextuallyValidBlock, ValidateContextError};
 
 #[derive(Debug, Clone)]
 pub struct Chain {
@@ -35,20 +43,23 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
-    /// The Sapling note commitment tree of the tip of this Chain.
+    /// The Sapling note commitment tree of the tip of this `Chain`,
+    /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
-    /// The Orchard note commitment tree of the tip of this Chain.
+    /// The Orchard note commitment tree of the tip of this `Chain`,
+    /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
-    /// The ZIP-221 history tree of the tip of this Chain.
+    /// The ZIP-221 history tree of the tip of this `Chain`,
+    /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: HistoryTree,
 
     /// The Sapling anchors created by `blocks`.
     pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
-    /// The Sapling anchors created by each block in the chain.
+    /// The Sapling anchors created by each block in `blocks`.
     pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// The Orchard anchors created by `blocks`.
     pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
-    /// The Orchard anchors created by each block in the chain.
+    /// The Orchard anchors created by each block in `blocks`.
     pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The Sprout nullifiers revealed by `blocks`.
@@ -58,8 +69,20 @@ pub struct Chain {
     /// The Orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
-    /// The cumulative work represented by this partial non-finalized chain.
+    /// The cumulative work represented by `blocks`.
+    ///
+    /// Since the best chain is determined by the largest cumulative work,
+    /// the work represented by finalized blocks can be ignored,
+    /// because they are common to all non-finalized chains.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
+
+    /// The chain value pool balances of the tip of this `Chain`,
+    /// including the block value pool changes from all finalized blocks,
+    /// and the non-finalized blocks in this chain.
+    ///
+    /// When a new chain is created from the finalized tip,
+    /// it is initialized with the finalized tip chain value pool balances.
+    pub(crate) chain_value_pools: ValueBalance<NonNegative>,
 }
 
 impl Chain {
@@ -69,6 +92,7 @@ impl Chain {
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
+        finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
         Self {
             network,
@@ -88,6 +112,7 @@ impl Chain {
             orchard_nullifiers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_tree,
+            chain_value_pools: finalized_tip_chain_value_pools,
         }
     }
 
@@ -135,21 +160,25 @@ impl Chain {
             self.orchard_nullifiers == other.orchard_nullifiers &&
 
             // proof of work
-            self.partial_cumulative_work == other.partial_cumulative_work
+            self.partial_cumulative_work == other.partial_cumulative_work &&
+
+            // chain value pool balances
+            self.chain_value_pools == other.chain_value_pools
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
     /// If the block is invalid, drop this chain and return an error.
+    ///
+    /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
+    /// [`update_chain_state_with`] returns success.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: PreparedBlock) -> Result<Chain, ValidateContextError> {
-        // the block isn't contextually valid until `update_chain_state_with` returns success
-        let block = ContextuallyValidBlock::from(block);
-
+    pub fn push(mut self, block: ContextuallyValidBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
-        self.update_chain_state_with(&block)?;
+        self.update_chain_tip_with(&block)?;
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
+
         Ok(self)
     }
 
@@ -165,7 +194,7 @@ impl Chain {
             .expect("only called while blocks is populated");
 
         // update cumulative data members
-        self.revert_chain_state_with(&block);
+        self.revert_chain_with(&block, RevertPosition::Root);
 
         // return the prepared block
         block
@@ -269,15 +298,24 @@ impl Chain {
             "Non-finalized chains must have at least one block to be valid"
         );
 
-        self.revert_chain_state_with(&block);
+        self.revert_chain_with(&block, RevertPosition::Tip);
     }
 
+    /// Return the non-finalized tip height for this chain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called while the chain is empty,
+    /// or while the chain is updating its internal state with the first block.
     pub fn non_finalized_tip_height(&self) -> block::Height {
-        *self
-            .blocks
-            .keys()
-            .next_back()
+        self.max_block_height()
             .expect("only called while blocks is populated")
+    }
+
+    /// Return the non-finalized tip height for this chain,
+    /// or `None` if `self.blocks` is empty.
+    fn max_block_height(&self) -> Option<block::Height> {
+        self.blocks.keys().next_back().cloned()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -323,39 +361,54 @@ impl Chain {
             orchard_nullifiers: self.orchard_nullifiers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
             history_tree,
+            chain_value_pools: self.chain_value_pools,
         }
     }
 }
 
-/// Helper trait to organize inverse operations done on the `Chain` type. Used to
-/// overload the `update_chain_state_with` and `revert_chain_state_with` methods
-/// based on the type of the argument.
-///
-/// This trait was motivated by the length of the `push` and `pop_root` functions
-/// and fear that it would be easy to introduce bugs when updating them unless
-/// the code was reorganized to keep related operations adjacent to eachother.
-trait UpdateWith<T> {
-    /// Update `Chain` cumulative data members to add data that are derived from
-    /// `T`
-    fn update_chain_state_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
+/// The revert position being performed on a chain.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+enum RevertPosition {
+    /// The chain root is being reverted via [`pop_root`],
+    /// when a block is finalized.
+    Root,
 
-    /// Update `Chain` cumulative data members to remove data that are derived
-    /// from `T`
-    fn revert_chain_state_with(&mut self, _: &T);
+    /// The chain tip is being reverted via [`pop_tip`],
+    /// when a chain is forked.
+    Tip,
+}
+
+/// Helper trait to organize inverse operations done on the `Chain` type.
+///
+/// Used to overload update and revert methods, based on the type of the argument,
+/// and the position of the removed block in the chain.
+///
+/// This trait was motivated by the length of the `push`, `pop_root`, and `pop_tip` functions,
+/// and fear that it would be easy to introduce bugs when updating them,
+/// unless the code was reorganized to keep related operations adjacent to each other.
+trait UpdateWith<T> {
+    /// When `T` is added to the chain tip,
+    /// update `Chain` cumulative data members to add data that are derived from `T`.
+    fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
+
+    /// When `T` is removed from `position` in the chain,
+    /// revert `Chain` cumulative data members to remove data that are derived from `T`.
+    fn revert_chain_with(&mut self, _: &T, position: RevertPosition);
 }
 
 impl UpdateWith<ContextuallyValidBlock> for Chain {
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
-    fn update_chain_state_with(
+    fn update_chain_tip_with(
         &mut self,
         contextually_valid: &ContextuallyValidBlock,
     ) -> Result<(), ValidateContextError> {
-        let (block, hash, height, new_outputs, transaction_hashes) = (
+        let (block, hash, height, new_outputs, transaction_hashes, chain_value_pool_change) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
+            &contextually_valid.chain_value_pool_change,
         );
 
         // add hash to height_by_hash
@@ -420,15 +473,15 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             );
 
             // add the utxos this produced
-            self.update_chain_state_with(new_outputs)?;
+            self.update_chain_tip_with(new_outputs)?;
             // add the utxos this consumed
-            self.update_chain_state_with(inputs)?;
+            self.update_chain_tip_with(inputs)?;
 
             // add the shielded data
-            self.update_chain_state_with(joinsplit_data)?;
-            self.update_chain_state_with(sapling_shielded_data_per_spend_anchor)?;
-            self.update_chain_state_with(sapling_shielded_data_shared_anchor)?;
-            self.update_chain_state_with(orchard_shielded_data)?;
+            self.update_chain_tip_with(joinsplit_data)?;
+            self.update_chain_tip_with(sapling_shielded_data_per_spend_anchor)?;
+            self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
+            self.update_chain_tip_with(orchard_shielded_data)?;
         }
 
         // Having updated all the note commitment trees and nullifier sets in
@@ -448,17 +501,25 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             orchard_root,
         )?;
 
+        // update the chain value pool balances
+        self.update_chain_tip_with(chain_value_pool_change)?;
+
         Ok(())
     }
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
-    fn revert_chain_state_with(&mut self, contextually_valid: &ContextuallyValidBlock) {
-        let (block, hash, height, new_outputs, transaction_hashes) = (
+    fn revert_chain_with(
+        &mut self,
+        contextually_valid: &ContextuallyValidBlock,
+        position: RevertPosition,
+    ) {
+        let (block, hash, height, new_outputs, transaction_hashes, chain_value_pool_change) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
             &contextually_valid.transaction_hashes,
+            &contextually_valid.chain_value_pool_change,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -521,16 +582,17 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             );
 
             // remove the utxos this produced
-            self.revert_chain_state_with(new_outputs);
+            self.revert_chain_with(new_outputs, position);
             // remove the utxos this consumed
-            self.revert_chain_state_with(inputs);
+            self.revert_chain_with(inputs, position);
 
             // remove the shielded data
-            self.revert_chain_state_with(joinsplit_data);
-            self.revert_chain_state_with(sapling_shielded_data_per_spend_anchor);
-            self.revert_chain_state_with(sapling_shielded_data_shared_anchor);
-            self.revert_chain_state_with(orchard_shielded_data);
+            self.revert_chain_with(joinsplit_data, position);
+            self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
+            self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
+            self.revert_chain_with(orchard_shielded_data, position);
         }
+
         let anchor = self
             .sapling_anchors_by_height
             .remove(&height)
@@ -547,11 +609,14 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.orchard_anchors.remove(&anchor),
             "Orchard anchor must be present if block was added to chain"
         );
+
+        // revert the chain value pool balances, if needed
+        self.revert_chain_with(chain_value_pool_change, position);
     }
 }
 
 impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
-    fn update_chain_state_with(
+    fn update_chain_tip_with(
         &mut self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<(), ValidateContextError> {
@@ -560,9 +625,10 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
         Ok(())
     }
 
-    fn revert_chain_state_with(
+    fn revert_chain_with(
         &mut self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        _position: RevertPosition,
     ) {
         self.created_utxos
             .retain(|outpoint, _| !utxos.contains_key(outpoint));
@@ -570,7 +636,7 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
 }
 
 impl UpdateWith<Vec<transparent::Input>> for Chain {
-    fn update_chain_state_with(
+    fn update_chain_tip_with(
         &mut self,
         inputs: &Vec<transparent::Input>,
     ) -> Result<(), ValidateContextError> {
@@ -585,7 +651,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
         Ok(())
     }
 
-    fn revert_chain_state_with(&mut self, inputs: &Vec<transparent::Input>) {
+    fn revert_chain_with(&mut self, inputs: &Vec<transparent::Input>, _position: RevertPosition) {
         for consumed_utxo in inputs {
             match consumed_utxo {
                 transparent::Input::PrevOut { outpoint, .. } => {
@@ -602,7 +668,7 @@ impl UpdateWith<Vec<transparent::Input>> for Chain {
 
 impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     #[instrument(skip(self, joinsplit_data))]
-    fn update_chain_state_with(
+    fn update_chain_tip_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
@@ -621,9 +687,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     ///
     /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
     #[instrument(skip(self, joinsplit_data))]
-    fn revert_chain_state_with(
+    fn revert_chain_with(
         &mut self,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        _position: RevertPosition,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
             check::nullifier::remove_from_non_finalized_chain(
@@ -639,7 +706,7 @@ where
     AnchorV: sapling::AnchorVariant + Clone,
 {
     #[instrument(skip(self, sapling_shielded_data))]
-    fn update_chain_state_with(
+    fn update_chain_tip_with(
         &mut self,
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
@@ -662,9 +729,10 @@ where
     ///
     /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
     #[instrument(skip(self, sapling_shielded_data))]
-    fn revert_chain_state_with(
+    fn revert_chain_with(
         &mut self,
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        _position: RevertPosition,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             // Note commitments are not removed from the tree here because we
@@ -681,7 +749,7 @@ where
 
 impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
-    fn update_chain_state_with(
+    fn update_chain_tip_with(
         &mut self,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
@@ -704,7 +772,11 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     ///
     /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
     #[instrument(skip(self, orchard_shielded_data))]
-    fn revert_chain_state_with(&mut self, orchard_shielded_data: &Option<orchard::ShieldedData>) {
+    fn revert_chain_with(
+        &mut self,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        _position: RevertPosition,
+    ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // Note commitments are not removed from the tree here because we
             // don't support that operation yet. Instead, we recreate the tree
@@ -714,6 +786,57 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),
             );
+        }
+    }
+}
+
+impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
+    fn update_chain_tip_with(
+        &mut self,
+        block_value_pool_change: &ValueBalance<NegativeAllowed>,
+    ) -> Result<(), ValidateContextError> {
+        match self
+            .chain_value_pools
+            .add_chain_value_pool_change(*block_value_pool_change)
+        {
+            Ok(chain_value_pools) => self.chain_value_pools = chain_value_pools,
+            Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
+                value_balance_error,
+                chain_value_pools: self.chain_value_pools,
+                block_value_pool_change: *block_value_pool_change,
+                // assume that the current block is added to `blocks` after `update_chain_tip_with`
+                height: self.max_block_height().and_then(|height| height + 1),
+            })?,
+        };
+
+        Ok(())
+    }
+
+    /// Revert the chain state using a block chain value pool change.
+    ///
+    /// When forking from the tip, subtract the block's chain value pool change.
+    ///
+    /// When finalizing the root, leave the chain value pool balances unchanged.
+    /// [`chain_value_pools`] tracks the chain value pools for all finalized blocks,
+    /// and the non-finalized blocks in this chain.
+    /// So finalizing the root doesn't change the set of blocks it tracks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chain pool value balance is invalid
+    /// after we subtract the block value pool change.
+    fn revert_chain_with(
+        &mut self,
+        block_value_pool_change: &ValueBalance<NegativeAllowed>,
+        position: RevertPosition,
+    ) {
+        use std::ops::Neg;
+
+        if position == RevertPosition::Tip {
+            self.chain_value_pools = self
+                .chain_value_pools
+                .add_chain_value_pool_change(block_value_pool_change.neg())
+                .expect("reverting the tip will leave the pools in a previously valid state");
         }
     }
 }

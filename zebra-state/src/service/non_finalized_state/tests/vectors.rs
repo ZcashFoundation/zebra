@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use zebra_chain::{
+    amount::NonNegative,
     block::Block,
     history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
+    value_balance::ValueBalance,
 };
 use zebra_test::prelude::*;
 
@@ -28,6 +30,7 @@ fn construct_empty() {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
 }
 
@@ -42,8 +45,9 @@ fn construct_single() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::fake_populated_pool(),
     );
-    chain = chain.push(block.prepare())?;
+    chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
 
     assert_eq!(1, chain.blocks.len());
 
@@ -69,10 +73,11 @@ fn construct_many() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::fake_populated_pool(),
     );
 
     for block in blocks {
-        chain = chain.push(block.prepare())?;
+        chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
     }
 
     assert_eq!(100, chain.blocks.len());
@@ -93,16 +98,18 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::fake_populated_pool(),
     );
-    lesser_chain = lesser_chain.push(less_block.prepare())?;
+    lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_spent_utxos())?;
 
     let mut bigger_chain = Chain::new(
         Network::Mainnet,
         Default::default(),
         Default::default(),
         Default::default(),
+        ValueBalance::zero(),
     );
-    bigger_chain = bigger_chain.push(more_block.prepare())?;
+    bigger_chain = bigger_chain.push(more_block.prepare().test_with_zero_spent_utxos())?;
 
     assert!(bigger_chain > lesser_chain);
 
@@ -178,6 +185,9 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_current_value_pool(fake_value_pool);
+
     state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
     state.commit_block(block2.clone().prepare(), &finalized_state)?;
     state.commit_block(child.prepare(), &finalized_state)?;
@@ -226,6 +236,9 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_current_value_pool(fake_value_pool);
+
     assert_eq!(0, state.chain_set.len());
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     assert_eq!(1, state.chain_set.len());
@@ -269,6 +282,9 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
 
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_current_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(long_chain_block1.prepare(), &finalized_state)?;
@@ -314,6 +330,9 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_current_value_pool(fake_value_pool);
+
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(long_chain_block1.prepare(), &finalized_state)?;
     state.commit_block(long_chain_block2.prepare(), &finalized_state)?;
@@ -355,6 +374,9 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 
     let mut state = NonFinalizedState::new(network);
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_current_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(less_work_child.prepare(), &finalized_state)?;

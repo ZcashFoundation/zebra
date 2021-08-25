@@ -64,7 +64,7 @@ async fn verifiers_from_network(
         + 'static,
 ) {
     let state_service = zs::init_test(network);
-    let chain_verifier =
+    let (chain_verifier, _transaction_verifier) =
         crate::chain::init(Config::default(), network, state_service.clone()).await;
 
     (chain_verifier, state_service)
@@ -153,7 +153,8 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
 
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
-    let chain_verifier = super::init(config.clone(), network, zs::init_test(network)).await;
+    let (chain_verifier, _transaction_verifier) =
+        super::init(config.clone(), network, zs::init_test(network)).await;
 
     // Add a timeout layer
     let chain_verifier =

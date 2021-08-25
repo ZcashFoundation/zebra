@@ -55,7 +55,8 @@ impl StartCmd {
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
         info!("initializing verifiers");
-        let verifier = zebra_consensus::chain::init(
+        // TODO: use the transaction verifier to verify mempool transactions (#2637, #2606)
+        let (chain_verifier, _tx_verifier) = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
             state.clone(),
@@ -70,7 +71,11 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(20)
-            .service(Inbound::new(setup_rx, state.clone(), verifier.clone()));
+            .service(Inbound::new(
+                setup_rx,
+                state.clone(),
+                chain_verifier.clone(),
+            ));
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, Some(best_tip_height)).await;
@@ -81,7 +86,7 @@ impl StartCmd {
         info!("initializing syncer");
         // TODO: use sync_length_receiver to activate the mempool (#2592)
         let (syncer, _sync_length_receiver) =
-            ChainSync::new(&config, peer_set.clone(), state, verifier);
+            ChainSync::new(&config, peer_set.clone(), state, chain_verifier);
 
         select! {
             result = syncer.sync().fuse() => result,

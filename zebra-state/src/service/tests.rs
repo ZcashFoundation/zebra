@@ -1,10 +1,11 @@
-use std::{env, sync::Arc};
+use std::{convert::TryInto, env, sync::Arc};
 
 use futures::stream::FuturesUnordered;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
+    fmt::SummaryDebug,
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
@@ -321,11 +322,11 @@ proptest! {
     /// 1. Generate a finalized chain and some non-finalized blocks.
     /// 2. Check that initially the value pool is empty.
     /// 3. Commit the finalized blocks and check that the value pool is updated accordingly.
-    /// 4. TODO: Commit the non-finalized blocks and check that the value pool is also updated
+    /// 4. Commit the non-finalized blocks and check that the value pool is also updated
     ///    accordingly.
     #[test]
     fn value_pool_is_updated(
-        (network, finalized_blocks, _non_finalized_blocks)
+        (network, finalized_blocks, non_finalized_blocks)
             in continuous_empty_blocks_from_test_vectors(),
     ) {
         zebra_test::init();
@@ -333,17 +334,65 @@ proptest! {
         let (mut state_service, _) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
+        prop_assert_eq!(
+            state_service.mem.best_chain().map(|chain| chain.chain_value_pools).unwrap_or_else(ValueBalance::zero),
+            ValueBalance::zero()
+        );
 
-        let mut expected_value_pool = Ok(ValueBalance::zero());
+        // the slow start rate for the first few blocks, as in the spec
+        const SLOW_START_RATE: i64 = 62500;
+        // the expected transparent pool value, calculated using the slow start rate
+        let mut expected_transparent_pool = ValueBalance::zero();
+
+        let mut expected_finalized_value_pool = Ok(ValueBalance::zero());
         for block in finalized_blocks {
-            let utxos = &block.new_outputs;
-            let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
-            expected_value_pool += *block_value_pool;
+            // the genesis block has a zero-valued transparent output,
+            // which is not included in the UTXO set
+            if block.height > block::Height(0) {
+                let utxos = &block.new_outputs;
+                let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
+                expected_finalized_value_pool += *block_value_pool;
+            }
 
-            state_service.queue_and_commit_finalized(block);
+            state_service.queue_and_commit_finalized(block.clone());
+
+            prop_assert_eq!(
+                state_service.disk.current_value_pool(),
+                expected_finalized_value_pool.clone()?.constrain()?
+            );
+
+            let transparent_value = SLOW_START_RATE * i64::from(block.height.0);
+            let transparent_value = transparent_value.try_into().unwrap();
+            let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
+            expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
+            prop_assert_eq!(
+                state_service.disk.current_value_pool(),
+                expected_transparent_pool
+            );
         }
 
-        prop_assert_eq!(state_service.disk.current_value_pool(), expected_value_pool?.constrain()?);
+        let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
+        for block in non_finalized_blocks {
+            let utxos = block.new_outputs.clone();
+            let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos))?;
+            expected_non_finalized_value_pool += *block_value_pool;
+
+            state_service.queue_and_commit_non_finalized(block.clone());
+
+            prop_assert_eq!(
+                state_service.mem.best_chain().unwrap().chain_value_pools,
+                expected_non_finalized_value_pool.clone()?.constrain()?
+            );
+
+            let transparent_value = SLOW_START_RATE * i64::from(block.height.0);
+            let transparent_value = transparent_value.try_into().unwrap();
+            let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
+            expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
+            prop_assert_eq!(
+                state_service.mem.best_chain().unwrap().chain_value_pools,
+                expected_transparent_pool
+            );
+        }
     }
 }
 
@@ -352,8 +401,13 @@ proptest! {
 /// Selects either the mainnet or testnet chain test vector and randomly splits the chain in two
 /// lists of blocks. The first containing the blocks to be finalized (which always includes at
 /// least the genesis block) and the blocks to be stored in the non-finalized state.
-fn continuous_empty_blocks_from_test_vectors(
-) -> impl Strategy<Value = (Network, Vec<FinalizedBlock>, Vec<PreparedBlock>)> {
+fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
+    Value = (
+        Network,
+        SummaryDebug<Vec<FinalizedBlock>>,
+        SummaryDebug<Vec<PreparedBlock>>,
+    ),
+> {
     any::<Network>()
         .prop_flat_map(|network| {
             // Select the test vector based on the network
@@ -389,6 +443,10 @@ fn continuous_empty_blocks_from_test_vectors(
                 .map(|prepared_block| FinalizedBlock::from(prepared_block.block))
                 .collect();
 
-            (network, finalized_blocks, non_finalized_blocks)
+            (
+                network,
+                finalized_blocks.into(),
+                non_finalized_blocks.into(),
+            )
         })
 }
