@@ -301,12 +301,21 @@ impl Chain {
         self.revert_chain_with(&block, RevertPosition::Tip);
     }
 
+    /// Return the non-finalized tip height for this chain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called while the chain is empty,
+    /// or while the chain is updating its internal state with the first block.
     pub fn non_finalized_tip_height(&self) -> block::Height {
-        *self
-            .blocks
-            .keys()
-            .next_back()
+        self.max_block_height()
             .expect("only called while blocks is populated")
+    }
+
+    /// Return the non-finalized tip height for this chain,
+    /// or `None` if `self.blocks` is empty.
+    fn max_block_height(&self) -> Option<block::Height> {
+        self.blocks.keys().next_back().cloned()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -791,8 +800,12 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
             .update_with_chain_value_pool_change(*block_value_pool_change)
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(ValidateContextError::AddValuePool {
-                value_balance_error: e,
+            Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
+                value_balance_error,
+                chain_value_pools: self.chain_value_pools,
+                block_value_pool_change: *block_value_pool_change,
+                // assume that the current block is added to `blocks` after `update_chain_tip_with`
+                height: self.max_block_height().and_then(|height| height + 1),
             }),
         }
     }

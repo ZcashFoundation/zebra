@@ -201,8 +201,19 @@ impl NonFinalizedState {
             &parent_chain.history_tree,
         )?;
 
-        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(prepared, spent_utxos)
-            .map_err(ValidateContextError::CalculateBlockChainValueChange)?;
+        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
+            prepared.clone(),
+            spent_utxos.clone(),
+        )
+        .map_err(|value_balance_error| {
+            ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height: prepared.height,
+                block_hash: prepared.hash,
+                transaction_count: prepared.block.transactions.len(),
+                spent_utxo_count: spent_utxos.len(),
+            }
+        })?;
 
         parent_chain.push(contextual)
     }
