@@ -11,8 +11,7 @@ assignees: ''
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments you can use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main)). `git diff --stat <previous-release-tag> origin/main` is also useful to see
-what's changed.
+To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra and use the last modified dates of each crate. Alternatively you can use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main)). `git diff --stat <previous-release-tag> origin/main` is also useful to see what's changed.
 
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
