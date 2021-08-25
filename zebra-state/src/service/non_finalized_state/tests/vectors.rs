@@ -98,9 +98,9 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
-        ValueBalance::zero(),
+        ValueBalance::fake_populated_pool(),
     );
-    lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_chain_pool_change())?;
+    lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_spent_utxos())?;
 
     let mut bigger_chain = Chain::new(
         Network::Mainnet,
@@ -109,7 +109,7 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         ValueBalance::zero(),
     );
-    bigger_chain = bigger_chain.push(more_block.prepare().test_with_zero_chain_pool_change())?;
+    bigger_chain = bigger_chain.push(more_block.prepare().test_with_zero_spent_utxos())?;
 
     assert!(bigger_chain > lesser_chain);
 
