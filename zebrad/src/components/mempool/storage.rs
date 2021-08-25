@@ -8,8 +8,10 @@ use zebra_consensus::error::TransactionError;
 
 use super::MempoolError;
 
+#[allow(dead_code)]
 const MEMPOOL_SIZE: usize = 2;
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum State {
     /// Rejected because verification failed.
@@ -41,6 +43,7 @@ impl Storage {
     ///
     /// If its insertion results in evicting other transactions, they will be tracked
     /// as [`State::Evicted`].
+    #[allow(dead_code)]
     pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
         let tx_id = tx.id.clone();
 
@@ -78,6 +81,7 @@ impl Storage {
 
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
     /// the mempool.
+    #[allow(dead_code)]
     pub fn contains(self, txid: &UnminedTxId) -> bool {
         match self.verified.iter().find(|tx| &tx.id == txid) {
             Some(_) => true,

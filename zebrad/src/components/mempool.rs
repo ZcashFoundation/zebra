@@ -25,6 +25,7 @@ pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Request {
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
@@ -50,6 +51,7 @@ pub struct Mempool {
 }
 
 impl Mempool {
+    #[allow(dead_code)]
     pub(crate) fn new(_network: Network) -> Self {
         Mempool {
             storage: Default::default(),
