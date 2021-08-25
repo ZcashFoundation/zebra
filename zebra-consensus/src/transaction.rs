@@ -63,7 +63,7 @@ where
 ///
 /// Transaction verification has slightly different consensus rules, depending on
 /// whether the transaction is to be included in a block on in the mempool.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
     Block {
