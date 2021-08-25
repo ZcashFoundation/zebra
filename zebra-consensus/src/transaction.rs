@@ -139,6 +139,14 @@ impl Request {
     pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
         NetworkUpgrade::current(network, self.height())
     }
+
+    /// Returns true if the request is a mempool request.
+    pub fn is_mempool(&self) -> bool {
+        match self {
+            Request::Block { .. } => false,
+            Request::Mempool { .. } => true,
+        }
+    }
 }
 
 impl<ZS> Service<Request> for Verifier<ZS>
@@ -157,11 +165,7 @@ where
 
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
-        let is_mempool = match req {
-            Request::Block { .. } => false,
-            Request::Mempool { .. } => true,
-        };
-        if is_mempool {
+        if req.is_mempool() {
             // XXX determine exactly which rules apply to mempool transactions
             unimplemented!("Zebra does not yet have a mempool (#2309)");
         }
