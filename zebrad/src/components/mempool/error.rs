@@ -1,22 +1,25 @@
-//! Errors that can occur when adding transactions to the mempool or querying it.
+//! Errors that can occur when manipulating transactions in the mempool.
 
 use thiserror::Error;
 
 #[derive(Error, Clone, Debug, PartialEq)]
 #[allow(dead_code)]
-pub enum TransactionInsertError {
+pub enum MempoolError {
     #[error("transaction already exists in mempool")]
     InMempool,
 
     #[error("transaction did not pass consensus validation")]
-    TransactionInvalid(#[from] zebra_consensus::error::TransactionError),
+    Invalid(#[from] zebra_consensus::error::TransactionError),
 
     #[error("transaction is committed in block {0:?}")]
-    TransactionInBlock(zebra_chain::block::Hash),
+    InBlock(zebra_chain::block::Hash),
 
     #[error("transaction has expired")]
-    TransactionExpired,
+    Expired,
 
     #[error("transaction fee is too low for the current mempool state")]
     LowFee,
+
+    #[error("transaction was not found in mempool")]
+    NotInMempool,
 }
