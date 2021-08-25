@@ -1,4 +1,4 @@
-use std::{env, sync::Arc};
+use std::{convert::TryInto, env, sync::Arc};
 
 use futures::stream::FuturesUnordered;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
@@ -339,6 +339,11 @@ proptest! {
             ValueBalance::zero()
         );
 
+        // the slow start rate for the first few blocks, as in the spec
+        const SLOW_START_RATE: i64 = 62500;
+        // the expected transparent pool value, calculated using the slow start rate
+        let mut expected_transparent_pool = ValueBalance::zero();
+
         let mut expected_finalized_value_pool = Ok(ValueBalance::zero());
         for block in finalized_blocks {
             // the genesis block has a zero-valued transparent output,
@@ -349,11 +354,20 @@ proptest! {
                 expected_finalized_value_pool += *block_value_pool;
             }
 
-            state_service.queue_and_commit_finalized(block);
+            state_service.queue_and_commit_finalized(block.clone());
 
             prop_assert_eq!(
                 state_service.disk.current_value_pool(),
                 expected_finalized_value_pool.clone()?.constrain()?
+            );
+
+            let transparent_value = SLOW_START_RATE * i64::from(block.height.0);
+            let transparent_value = transparent_value.try_into().unwrap();
+            let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
+            expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
+            prop_assert_eq!(
+                state_service.disk.current_value_pool(),
+                expected_transparent_pool
             );
         }
 
@@ -363,11 +377,20 @@ proptest! {
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos))?;
             expected_non_finalized_value_pool += *block_value_pool;
 
-            state_service.queue_and_commit_non_finalized(block);
+            state_service.queue_and_commit_non_finalized(block.clone());
 
             prop_assert_eq!(
                 state_service.mem.best_chain().unwrap().chain_value_pools,
                 expected_non_finalized_value_pool.clone()?.constrain()?
+            );
+
+            let transparent_value = SLOW_START_RATE * i64::from(block.height.0);
+            let transparent_value = transparent_value.try_into().unwrap();
+            let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
+            expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
+            prop_assert_eq!(
+                state_service.mem.best_chain().unwrap().chain_value_pools,
+                expected_transparent_pool
             );
         }
     }
