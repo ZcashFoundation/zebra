@@ -370,7 +370,7 @@ impl NonFinalizedState {
     }
 
     /// Return the non-finalized portion of the current best chain
-    fn best_chain(&self) -> Option<&Chain> {
+    pub(crate) fn best_chain(&self) -> Option<&Chain> {
         self.chain_set
             .iter()
             .next_back()

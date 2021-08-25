@@ -4,8 +4,7 @@ use futures::stream::FuturesUnordered;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
-    amount::NonNegative,
-    block::Block,
+    block::{self, Block},
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
@@ -322,7 +321,7 @@ proptest! {
     /// 1. Generate a finalized chain and some non-finalized blocks.
     /// 2. Check that initially the value pool is empty.
     /// 3. Commit the finalized blocks and check that the value pool is updated accordingly.
-    /// 4. TODO: Commit the non-finalized blocks and check that the value pool is also updated
+    /// 4. Commit the non-finalized blocks and check that the value pool is also updated
     ///    accordingly.
     #[test]
     fn value_pool_is_updated(
@@ -334,27 +333,42 @@ proptest! {
         let (mut state_service, _) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
+        prop_assert_eq!(
+            state_service.mem.best_chain().map(|chain| chain.chain_value_pools).unwrap_or_else(ValueBalance::zero),
+            ValueBalance::zero()
+        );
 
         let mut expected_finalized_value_pool = Ok(ValueBalance::zero());
         for block in finalized_blocks {
-            let utxos = &block.new_outputs;
-            let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
-            expected_finalized_value_pool += *block_value_pool;
+            // the genesis block has a zero-valued transparent output,
+            // which is not included in the UTXO set
+            if block.height > block::Height(0) {
+                let utxos = &block.new_outputs;
+                let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
+                expected_finalized_value_pool += *block_value_pool;
+            }
 
             state_service.queue_and_commit_finalized(block);
+
+            prop_assert_eq!(
+                state_service.disk.current_value_pool(),
+                expected_finalized_value_pool.clone()?.constrain()?
+            );
         }
 
-        prop_assert_eq!(state_service.disk.current_value_pool(), expected_finalized_value_pool?.constrain()?);
-
-        let mut expected_non_finalized_value_pool = Ok(ValueBalance::zero());
+        let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
         for block in non_finalized_blocks {
             let utxos = block.new_outputs.clone();
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos))?;
             expected_non_finalized_value_pool += *block_value_pool;
 
             state_service.queue_and_commit_non_finalized(block);
+
+            prop_assert_eq!(
+                state_service.mem.best_chain().unwrap().chain_value_pools,
+                expected_non_finalized_value_pool.clone()?.constrain()?
+            );
         }
-        expected_non_finalized_value_pool?.constrain::<NonNegative>()?;
     }
 }
 

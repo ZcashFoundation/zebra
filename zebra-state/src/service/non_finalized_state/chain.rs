@@ -82,7 +82,7 @@ pub struct Chain {
     ///
     /// When a new chain is created from the finalized tip,
     /// it is initialized with the finalized tip chain value pool balances.
-    pub(super) chain_value_pools: ValueBalance<NonNegative>,
+    pub(crate) chain_value_pools: ValueBalance<NonNegative>,
 }
 
 impl Chain {
