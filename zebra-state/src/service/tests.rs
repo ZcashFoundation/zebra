@@ -5,6 +5,7 @@ use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block},
+    fmt::SummaryDebug,
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction, transparent,
@@ -377,8 +378,13 @@ proptest! {
 /// Selects either the mainnet or testnet chain test vector and randomly splits the chain in two
 /// lists of blocks. The first containing the blocks to be finalized (which always includes at
 /// least the genesis block) and the blocks to be stored in the non-finalized state.
-fn continuous_empty_blocks_from_test_vectors(
-) -> impl Strategy<Value = (Network, Vec<FinalizedBlock>, Vec<PreparedBlock>)> {
+fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
+    Value = (
+        Network,
+        SummaryDebug<Vec<FinalizedBlock>>,
+        SummaryDebug<Vec<PreparedBlock>>,
+    ),
+> {
     any::<Network>()
         .prop_flat_map(|network| {
             // Select the test vector based on the network
@@ -414,6 +420,10 @@ fn continuous_empty_blocks_from_test_vectors(
                 .map(|prepared_block| FinalizedBlock::from(prepared_block.block))
                 .collect();
 
-            (network, finalized_blocks, non_finalized_blocks)
+            (
+                network,
+                finalized_blocks.into(),
+                non_finalized_blocks.into(),
+            )
         })
 }
