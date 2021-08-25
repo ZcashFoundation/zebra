@@ -420,8 +420,7 @@ impl FinalizedState {
             all_utxos_spent_by_block.extend(new_outputs);
 
             let current_pool = self.current_value_pool();
-            let new_pool =
-                current_pool.update_with_block(block.borrow(), &all_utxos_spent_by_block)?;
+            let new_pool = current_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
             batch.zs_insert(tip_chain_value_pool, (), new_pool);
 
             Ok(batch)
@@ -613,6 +612,16 @@ impl FinalizedState {
         self.db
             .zs_get(value_pool_cf, &())
             .unwrap_or_else(ValueBalance::zero)
+    }
+
+    /// Allow to set up a fake value pool in the database for testing purposes.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn set_current_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
+        let mut batch = rocksdb::WriteBatch::default();
+        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
+        batch.zs_insert(value_pool_cf, (), fake_value_pool);
+        self.db.write(batch).unwrap();
     }
 }
 

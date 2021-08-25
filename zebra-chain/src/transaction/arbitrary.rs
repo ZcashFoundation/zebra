@@ -293,7 +293,7 @@ impl Transaction {
 
         for input in self.inputs() {
             input_chain_value_pools = input_chain_value_pools
-                .update_with_transparent_input(input, outputs)
+                .add_transparent_input(input, outputs)
                 .expect("find_valid_utxo_for_spend only spends unspent transparent outputs");
         }
 
@@ -304,7 +304,7 @@ impl Transaction {
         //       so at least one of the values in each JoinSplit is zero
         for input in self.input_values_from_sprout_mut() {
             match input_chain_value_pools
-                .update_with_chain_value_pool_change(ValueBalance::from_sprout_amount(input.neg()))
+                .add_chain_value_pool_change(ValueBalance::from_sprout_amount(input.neg()))
             {
                 Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
                 // set the invalid input value to zero
@@ -316,21 +316,17 @@ impl Transaction {
 
         let sapling_input = self.sapling_value_balance().constrain::<NonNegative>();
         if let Ok(sapling_input) = sapling_input {
-            if sapling_input != ValueBalance::zero() {
-                match input_chain_value_pools.update_with_chain_value_pool_change(-sapling_input) {
-                    Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                    Err(_) => *self.sapling_value_balance_mut().unwrap() = Amount::zero(),
-                }
+            match input_chain_value_pools.add_chain_value_pool_change(-sapling_input) {
+                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                Err(_) => *self.sapling_value_balance_mut().unwrap() = Amount::zero(),
             }
         }
 
         let orchard_input = self.orchard_value_balance().constrain::<NonNegative>();
         if let Ok(orchard_input) = orchard_input {
-            if orchard_input != ValueBalance::zero() {
-                match input_chain_value_pools.update_with_chain_value_pool_change(-orchard_input) {
-                    Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                    Err(_) => *self.orchard_value_balance_mut().unwrap() = Amount::zero(),
-                }
+            match input_chain_value_pools.add_chain_value_pool_change(-orchard_input) {
+                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                Err(_) => *self.orchard_value_balance_mut().unwrap() = Amount::zero(),
             }
         }
 
@@ -344,7 +340,7 @@ impl Transaction {
             .neg();
 
         let chain_value_pools = chain_value_pools
-            .update_with_transaction(self, outputs)
+            .add_transaction(self, outputs)
             .unwrap_or_else(|err| {
                 panic!(
                     "unexpected chain value pool error: {:?}, \n\
