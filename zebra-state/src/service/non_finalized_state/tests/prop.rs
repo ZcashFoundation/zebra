@@ -1,4 +1,4 @@
-use std::{env, sync::Arc};
+use std::{collections::BTreeMap, env, sync::Arc};
 
 use zebra_test::prelude::*;
 
@@ -31,6 +31,8 @@ const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
 
 /// Check that chain block pushes work with blocks from genesis
+///
+/// Logs extra debugging information when the chain value balances fail.
 #[test]
 fn push_genesis_chain() -> Result<()> {
     zebra_test::init();
@@ -44,17 +46,29 @@ fn push_genesis_chain() -> Result<()> {
             prop_assert!(empty_tree.is_none());
 
             let mut only_chain = Chain::new(network, Default::default(), Default::default(), empty_tree, ValueBalance::zero());
+            // contains the block value pool changes and chain value pool balances for each height
+            let mut chain_values = BTreeMap::new();
 
-            for block in chain
-                .iter()
-                .take(count) {
-                    let block =
-                        ContextuallyValidBlock::with_block_and_spent_utxos(
-                            block.clone(),
-                            only_chain.unspent_utxos(),
-                        )?;
-                    only_chain = only_chain.push(block)?;
-                }
+            chain_values.insert(None, (None, only_chain.chain_value_pools.into()));
+
+            for block in chain.iter().take(count).cloned() {
+                let block =
+                    ContextuallyValidBlock::with_block_and_spent_utxos(
+                        block,
+                        only_chain.unspent_utxos(),
+                    )
+                    .map_err(|e| (e, chain_values.clone()))
+                    .expect("invalid block value pool change");
+
+                chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), None));
+
+                only_chain = only_chain
+                    .push(block.clone())
+                    .map_err(|e| (e, chain_values.clone()))
+                    .expect("invalid chain value pools");
+
+                chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), only_chain.chain_value_pools.into()));
+            }
 
             prop_assert_eq!(only_chain.blocks.len(), count);
         });
@@ -77,7 +91,7 @@ fn push_history_tree_chain() -> Result<()> {
 
         // Skip first block which was used for the history tree.
         // This skips some transactions which are required to calculate value balances,
-        // so we zero all value balances in this test.
+        // so we zero all transparent inputs in this test.
 
         // make sure count is still valid
         let count = std::cmp::min(count, chain.len() - 1);
@@ -207,7 +221,7 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
 
         // Skip first block which was used for the history tree.
         // This skips some transactions which are required to calculate value balances,
-        // so we zero all value balances in this test.
+        // so we zero all transparent inputs in this test.
 
         // make sure fork_at_count is still valid
         let fork_at_count = std::cmp::min(fork_at_count, chain.len() - 1);
@@ -261,30 +275,33 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
     Ok(())
 }
 
-/// Check that a chain with some blocks finalized is the same as
+/// Check that a genesis chain with some blocks finalized is the same as
 /// a chain that never had those blocks added.
 #[test]
-fn finalized_equals_pushed() -> Result<()> {
+fn finalized_equals_pushed_genesis() -> Result<()> {
     zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
-                                      .ok()
-                                      .and_then(|v| v.parse().ok())
-                                      .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-    |((chain, end_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
-        // Skip first block which was used for the history tree; make sure end_count is still valid
-        let end_count = std::cmp::min(end_count, chain.len() - 1);
-        let chain = &chain[1..];
+                                         .ok()
+                                         .and_then(|v| v.parse().ok())
+                                         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, end_count, network, empty_tree) in PreparedChain::default())| {
+
+        // This test starts a partial chain from the middle of `chain`,
+        // so it doesn't have the unspent UTXOs needed to calculate value balances.
+
+        prop_assert!(empty_tree.is_none());
+
         // use `end_count` as the number of non-finalized blocks at the end of the chain
         let finalized_count = chain.len() - end_count;
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
 
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, fake_value_pool);
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), empty_tree, fake_value_pool);
         for block in chain
             .iter()
             .take(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
                 full_chain = full_chain.push(block)?;
             }
 
@@ -298,14 +315,14 @@ fn finalized_equals_pushed() -> Result<()> {
         for block in chain
             .iter()
             .skip(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
                 partial_chain = partial_chain.push(block.clone())?;
             }
 
         for block in chain
             .iter()
             .skip(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
                 full_chain = full_chain.push(block.clone())?;
             }
 
@@ -320,10 +337,79 @@ fn finalized_equals_pushed() -> Result<()> {
     Ok(())
 }
 
-/// Check that rejected blocks do not change the internal state of a chain
+/// Check that a history tree chain with some blocks finalized is the same as
+/// a chain that never had those blocks added.
+#[test]
+fn finalized_equals_pushed_history_tree() -> Result<()> {
+    zebra_test::init();
+
+    proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                                         .ok()
+                                         .and_then(|v| v.parse().ok())
+                                         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, end_count, network, finalized_tree) in PreparedChain::new_heartwood())| {
+
+
+        prop_assert!(finalized_tree.is_some());
+
+        // Skip first block which was used for the history tree; make sure end_count is still valid
+        //
+        // This skips some transactions which are required to calculate value balances,
+        // so we zero all transparent inputs in this test.
+        //
+        // This test also starts a partial chain from the middle of `chain`,
+        // so it doesn't have the unspent UTXOs needed to calculate value balances.
+        let end_count = std::cmp::min(end_count, chain.len() - 1);
+        let chain = &chain[1..];
+        // use `end_count` as the number of non-finalized blocks at the end of the chain
+        let finalized_count = chain.len() - end_count;
+
+        let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+
+        let mut full_chain = Chain::new(network, Default::default(), Default::default(), finalized_tree, fake_value_pool);
+        for block in chain
+            .iter()
+            .take(finalized_count)
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+                full_chain = full_chain.push(block)?;
+            }
+
+        let mut partial_chain = Chain::new(
+            network,
+            full_chain.sapling_note_commitment_tree.clone(),
+            full_chain.orchard_note_commitment_tree.clone(),
+            full_chain.history_tree.clone(),
+            full_chain.chain_value_pools,
+        );
+        for block in chain
+            .iter()
+            .skip(finalized_count)
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+                partial_chain = partial_chain.push(block.clone())?;
+            }
+
+        for block in chain
+            .iter()
+            .skip(finalized_count)
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+                full_chain = full_chain.push(block.clone())?;
+            }
+
+        for _ in 0..finalized_count {
+            let _finalized = full_chain.pop_root();
+        }
+
+        prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
+        prop_assert!(full_chain.eq_internal_state(&partial_chain));
+    });
+
+    Ok(())
+}
+
+/// Check that rejected blocks do not change the internal state of a genesis chain
 /// in a non-finalized state.
 #[test]
-fn rejection_restores_internal_state() -> Result<()> {
+fn rejection_restores_internal_state_genesis() -> Result<()> {
     zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
