@@ -75,6 +75,12 @@ impl From<&Transaction> for UnminedTxId {
     }
 }
 
+impl From<Arc<Transaction>> for UnminedTxId {
+    fn from(transaction: Arc<Transaction>) -> Self {
+        transaction.as_ref().into()
+    }
+}
+
 impl From<WtxId> for UnminedTxId {
     fn from(wtx_id: WtxId) -> Self {
         Witnessed(wtx_id)

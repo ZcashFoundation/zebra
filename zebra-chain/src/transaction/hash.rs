@@ -28,6 +28,7 @@
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
+    sync::Arc,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -72,6 +73,12 @@ impl From<&Transaction> for Hash {
         hasher
             .txid()
             .expect("zcash_primitives and Zebra transaction formats must be compatible")
+    }
+}
+
+impl From<Arc<Transaction>> for Hash {
+    fn from(transaction: Arc<Transaction>) -> Self {
+        Hash::from(transaction.as_ref())
     }
 }
 
@@ -187,6 +194,17 @@ impl From<&Transaction> for WtxId {
             id: transaction.into(),
             auth_digest: transaction.into(),
         }
+    }
+}
+
+impl From<Arc<Transaction>> for WtxId {
+    /// Computes the witnessed transaction ID for a transaction.
+    ///
+    /// # Panics
+    ///
+    /// If passed a pre-v5 transaction.
+    fn from(transaction: Arc<Transaction>) -> Self {
+        transaction.as_ref().into()
     }
 }
 
