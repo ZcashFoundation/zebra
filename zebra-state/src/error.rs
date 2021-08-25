@@ -4,8 +4,12 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    amount, block, history_tree::HistoryTreeError, orchard, sapling, sprout, transparent,
-    value_balance::ValueBalanceError, work::difficulty::CompactDifficulty,
+    amount::{self, NegativeAllowed, NonNegative},
+    block,
+    history_tree::HistoryTreeError,
+    orchard, sapling, sprout, transaction, transparent,
+    value_balance::{ValueBalance, ValueBalanceError},
+    work::difficulty::CompactDifficulty,
 };
 
 use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
@@ -142,42 +146,72 @@ pub enum ValidateContextError {
     },
 
     #[error(
-        "the remaining value in the transparent transaction value pool MUST be nonnegative: \
-         {amount_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
-         {transaction_hash:?}"
+        "the remaining value in the transparent transaction value pool MUST be nonnegative:\n\
+         {amount_error:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
     )]
     #[non_exhaustive]
     NegativeRemainingTransactionValue {
         amount_error: amount::Error,
         height: block::Height,
         tx_index_in_block: usize,
-        transaction_hash: zebra_chain::transaction::Hash,
+        transaction_hash: transaction::Hash,
     },
 
     #[error(
-        "error calculating the remaining value in the transaction value pool: \
-         {amount_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
-         {transaction_hash:?}"
+        "error calculating the remaining value in the transaction value pool:\n\
+         {amount_error:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
     )]
     #[non_exhaustive]
     CalculateRemainingTransactionValue {
         amount_error: amount::Error,
         height: block::Height,
         tx_index_in_block: usize,
-        transaction_hash: zebra_chain::transaction::Hash,
+        transaction_hash: transaction::Hash,
     },
 
     #[error(
-        "error calculating value balances for the remaining value in the transaction value pool: \
-         {value_balance_error:?}, {height:?}, index in block: {tx_index_in_block:?}, \
-         {transaction_hash:?}"
+        "error calculating value balances for the remaining value in the transaction value pool:\n\
+         {value_balance_error:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
     )]
     #[non_exhaustive]
     CalculateTransactionValueBalances {
         value_balance_error: ValueBalanceError,
         height: block::Height,
         tx_index_in_block: usize,
-        transaction_hash: zebra_chain::transaction::Hash,
+        transaction_hash: transaction::Hash,
+    },
+
+    #[error(
+        "error calculating the block chain value pool change:\n\
+         {value_balance_error:?},\n\
+         {height:?}, {block_hash:?},\n\
+         transactions: {transaction_count:?}, spent UTXOs: {spent_utxo_count:?}"
+    )]
+    #[non_exhaustive]
+    CalculateBlockChainValueChange {
+        value_balance_error: ValueBalanceError,
+        height: block::Height,
+        block_hash: block::Hash,
+        transaction_count: usize,
+        spent_utxo_count: usize,
+    },
+
+    #[error(
+        "error adding value balances to the chain value pool:\n\
+         {value_balance_error:?},\n\
+         {chain_value_pools:?},\n\
+         {block_value_pool_change:?},\n\
+         {height:?}"
+    )]
+    #[non_exhaustive]
+    AddValuePool {
+        value_balance_error: ValueBalanceError,
+        chain_value_pools: ValueBalance<NonNegative>,
+        block_value_pool_change: ValueBalance<NegativeAllowed>,
+        height: Option<block::Height>,
     },
 
     #[error("error in Sapling note commitment tree")]

@@ -160,7 +160,7 @@ impl ValueBalance<NegativeAllowed> {
 }
 
 impl ValueBalance<NonNegative> {
-    /// Returns this value balance, updated with the chain value pool change from `block`.
+    /// Return the sum of the chain value pool change from `block`, and this value balance.
     ///
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
@@ -181,17 +181,17 @@ impl ValueBalance<NonNegative> {
     /// value pool.
     ///
     /// See [`Block::chain_value_pool_change`] for details.
-    pub fn update_with_block(
+    pub fn add_block(
         self,
         block: impl Borrow<Block>,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
 
-        self.update_with_chain_value_pool_change(chain_value_pool_change)
+        self.add_chain_value_pool_change(chain_value_pool_change)
     }
 
-    /// Returns this value balance, updated with the chain value pool change from `transaction`.
+    /// Return the sum of the chain value pool change from `transaction`, and this value balance.
     ///
     /// `outputs` must contain the [`Output`]s of every input in this transaction,
     /// including UTXOs created by earlier transactions in its block.
@@ -202,7 +202,7 @@ impl ValueBalance<NonNegative> {
     /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
     /// for details.
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn update_with_transaction(
+    pub fn add_transaction(
         self,
         transaction: impl Borrow<Transaction>,
         utxos: &HashMap<transparent::OutPoint, transparent::Output>,
@@ -216,10 +216,10 @@ impl ValueBalance<NonNegative> {
             .value_balance_from_outputs(utxos)?
             .neg();
 
-        self.update_with_chain_value_pool_change(chain_value_pool_change)
+        self.add_chain_value_pool_change(chain_value_pool_change)
     }
 
-    /// Returns this value balance, updated with the chain value pool change from `input`.
+    /// Return the sum of the chain value pool change from `input`, and this value balance.
     ///
     /// `outputs` must contain the [`Output`] spent by `input`,
     /// (including UTXOs created by earlier transactions in its block).
@@ -230,7 +230,7 @@ impl ValueBalance<NonNegative> {
     /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
     /// for details.
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn update_with_transparent_input(
+    pub fn add_transparent_input(
         self,
         input: impl Borrow<transparent::Input>,
         utxos: &HashMap<transparent::OutPoint, transparent::Output>,
@@ -243,16 +243,16 @@ impl ValueBalance<NonNegative> {
         let transparent_value_pool_change =
             ValueBalance::from_transparent_amount(transparent_value_pool_change);
 
-        self.update_with_chain_value_pool_change(transparent_value_pool_change)
+        self.add_chain_value_pool_change(transparent_value_pool_change)
     }
 
-    /// Returns this value balance, updated with a chain value pool change.
+    /// Return the sum of the chain value pool change, and this value balance.
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.
     ///
-    /// See `update_with_block` for details.
-    pub fn update_with_chain_value_pool_change(
+    /// See `add_block` for details.
+    pub fn add_chain_value_pool_change(
         self,
         chain_value_pool_change: ValueBalance<NegativeAllowed>,
     ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
