@@ -19,7 +19,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
-    transaction::{self, HashType, SigHash, Transaction},
+    transaction::{self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId},
     transparent,
 };
 
@@ -63,7 +63,7 @@ where
 ///
 /// Transaction verification has slightly different consensus rules, depending on
 /// whether the transaction is to be included in a block on in the mempool.
-#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
     Block {
@@ -81,7 +81,7 @@ pub enum Request {
     /// Note: coinbase transactions are invalid in the mempool
     Mempool {
         /// The transaction itself.
-        transaction: Arc<Transaction>,
+        transaction: UnminedTx,
         /// The height of the next block.
         ///
         /// The next block is the first block that could possibly contain a
@@ -105,7 +105,16 @@ impl Request {
     pub fn transaction(&self) -> Arc<Transaction> {
         match self {
             Request::Block { transaction, .. } => transaction.clone(),
-            Request::Mempool { transaction, .. } => transaction.clone(),
+            Request::Mempool { transaction, .. } => transaction.transaction.clone(),
+        }
+    }
+
+    /// The unmined transaction ID for the transaction in this request.
+    pub fn tx_id(&self) -> UnminedTxId {
+        match self {
+            // TODO: get the precalculated ID from the block verifier
+            Request::Block { transaction, .. } => transaction.unmined_id(),
+            Request::Mempool { transaction, .. } => transaction.id,
         }
     }
 
@@ -161,10 +170,11 @@ where
         let network = self.network;
 
         let tx = req.transaction();
-        let span = tracing::debug_span!("tx", hash = %tx.hash());
+        let id = req.tx_id();
+        let span = tracing::debug_span!("tx", ?id);
 
         async move {
-            tracing::trace!(?tx);
+            tracing::trace!(?req);
 
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
@@ -224,7 +234,7 @@ where
 
             async_checks.check().await?;
 
-            Ok(tx.unmined_id())
+            Ok(id)
         }
         .instrument(span)
         .boxed()
