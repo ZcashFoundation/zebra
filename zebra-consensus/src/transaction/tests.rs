@@ -254,7 +254,7 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
             .next()
             .expect("At least one fake V5 transaction in the test vectors");
 
-        let expected_hash = transaction.hash();
+        let expected_hash = transaction.unmined_id();
 
         let result = verifier
             .oneshot(Request::Block {
@@ -298,7 +298,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
         sapling_shielded_data: None,
     };
 
-    let transaction_hash = transaction.hash();
+    let transaction_hash = transaction.unmined_id();
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
@@ -341,7 +341,7 @@ async fn v4_coinbase_transaction_is_accepted() {
         sapling_shielded_data: None,
     };
 
-    let transaction_hash = transaction.hash();
+    let transaction_hash = transaction.unmined_id();
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
@@ -445,7 +445,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
         network_upgrade,
     };
 
-    let transaction_hash = transaction.hash();
+    let transaction_hash = transaction.unmined_id();
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
@@ -494,7 +494,7 @@ async fn v5_coinbase_transaction_is_accepted() {
         orchard_shielded_data: None,
     };
 
-    let transaction_hash = transaction.hash();
+    let transaction_hash = transaction.unmined_id();
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
@@ -616,7 +616,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             _ => unreachable!("Mock transaction was created incorrectly"),
         }
 
-        let expected_hash = transaction.hash();
+        let expected_hash = transaction.unmined_id();
 
         // Test the transaction verifier
         let result = verifier
@@ -707,7 +707,7 @@ fn v4_with_sapling_spends() {
             .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
             .expect("No transaction found with Sapling spends");
 
-        let expected_hash = transaction.hash();
+        let expected_hash = transaction.unmined_id();
 
         // Initialize the verifier
         let state_service =
@@ -747,7 +747,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
             })
             .expect("No transaction found with Sapling outputs and no Sapling spends");
 
-        let expected_hash = transaction.hash();
+        let expected_hash = transaction.unmined_id();
 
         // Initialize the verifier
         let state_service =
@@ -785,7 +785,7 @@ fn v5_with_sapling_spends() {
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
                 .expect("No transaction found with Sapling spends");
 
-        let expected_hash = transaction.hash();
+        let expected_hash = transaction.unmined_id();
         let height = transaction
             .expiry_height()
             .expect("Transaction is missing expiry height");

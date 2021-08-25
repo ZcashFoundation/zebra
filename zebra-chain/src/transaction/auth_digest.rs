@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -42,6 +42,17 @@ impl From<&Transaction> for AuthDigest {
     /// If passed a pre-v5 transaction.
     fn from(transaction: &Transaction) -> Self {
         auth_digest(transaction)
+    }
+}
+
+impl From<Arc<Transaction>> for AuthDigest {
+    /// Computes the authorizing data commitment for a transaction.
+    ///
+    /// # Panics
+    ///
+    /// If passed a pre-v5 transaction.
+    fn from(transaction: Arc<Transaction>) -> Self {
+        transaction.as_ref().into()
     }
 }
 
