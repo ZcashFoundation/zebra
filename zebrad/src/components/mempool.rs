@@ -10,7 +10,10 @@ use std::{
 use futures::future::FutureExt;
 use tower::Service;
 
-use zebra_chain::transaction::{UnminedTx, UnminedTxId};
+use zebra_chain::{
+    parameters::Network,
+    transaction::{UnminedTx, UnminedTxId},
+};
 
 use crate::BoxError;
 
@@ -21,16 +24,16 @@ mod storage;
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
 
+#[derive(Debug)]
 pub enum Request {
-    Store(UnminedTx),
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
 }
 
+#[derive(Debug)]
 pub enum Response {
-    Stored(UnminedTxId),
-    TransactionIds(Vec<UnminedTxId>),
     Transactions(Vec<UnminedTx>),
+    TransactionIds(Vec<UnminedTxId>),
 }
 
 /// Mempool async management and query service.
@@ -38,9 +41,20 @@ pub enum Response {
 /// The mempool is the set of all verified transactions that this node is aware
 /// of that have yet to be confirmed by the Zcash network. A transaction is
 /// confirmed when it has been included in a block ('mined').
-#[derive(Default)]
 pub struct Mempool {
+    /// The Mempool storage itself.
+    ///
+    /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
+    /// inject transactions into `storage`, as thye must be verified beforehand.
     storage: storage::Storage,
+}
+
+impl Mempool {
+    pub(crate) fn new(_network: Network) -> Self {
+        Mempool {
+            storage: Default::default(),
+        }
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -56,17 +70,12 @@ impl Service<Request> for Mempool {
     #[instrument(name = "mempool", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            Request::Store(tx) => {
-                let rsp = self.storage.insert(tx).map(Response::Stored);
-
-                async move { rsp }.boxed()
-            }
             Request::TransactionIds => {
-                let res = self.storage.tx_ids();
+                let res = self.storage.clone().tx_ids();
                 async move { Ok(Response::TransactionIds(res)) }.boxed()
             }
             Request::TransactionsById(ids) => {
-                let rsp = Ok(self.storage.transactions(ids)).map(Response::Transactions);
+                let rsp = Ok(self.storage.clone().transactions(ids)).map(Response::Transactions);
                 async move { rsp }.boxed()
             }
         }

@@ -1,25 +1,33 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use zebra_chain::transaction::{UnminedTx, UnminedTxId};
+use zebra_chain::{
+    block,
+    transaction::{UnminedTx, UnminedTxId},
+};
+use zebra_consensus::error::TransactionError;
+
+use super::MempoolError;
 
 const MEMPOOL_SIZE: usize = 2;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum State {
     /// Rejected because verification failed.
-    Invalid,
+    Invalid(TransactionError),
     /// An otherwise valid mempool transaction was mined into a block, therefore
     /// no longer belongs in the mempool.
-    Confirmed,
+    Confirmed(block::Hash),
     /// Stayed in mempool for too long without being mined.
     // TODO(2021-08-20): set expiration at 2 weeks? This is what Bitcoin does.
     Expired,
-    /// Otherwise valid transaction removed from mempool, say because of LRU
-    /// cache replacement.
-    Evicted,
+    /// Transaction fee is too low for the current mempool state.
+    LowFee,
+    /// Otherwise valid transaction removed from mempool, say because of FIFO
+    /// (first in, first out) policy.
+    Victim,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool.  Currently this is a
     /// cache of size 2.
@@ -33,12 +41,25 @@ impl Storage {
     ///
     /// If its insertion results in evicting other transactions, they will be tracked
     /// as [`State::Evicted`].
-    pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, &State> {
+    pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
         let tx_id = tx.id.clone();
 
         // First, check if we should reject this transaction.
         if self.rejected.contains_key(&tx.id) {
-            return Err(self.rejected.get(&tx.id).unwrap());
+            return Err(match self.rejected.get(&tx.id).unwrap() {
+                State::Invalid(e) => MempoolError::Invalid(e.clone()),
+                State::Expired => MempoolError::Expired,
+                State::Confirmed(block_hash) => MempoolError::InBlock(*block_hash),
+                State::Victim => MempoolError::Victim,
+                State::LowFee => MempoolError::LowFee,
+            });
+        }
+
+        // If `tx` is already in the mempool, we don't change anything.
+        //
+        // TODO: Should it get bumped up to the top?
+        if self.verified.contains(&tx) {
+            return Err(MempoolError::InMempool);
         }
 
         // Then, we insert into the pool.
@@ -47,7 +68,7 @@ impl Storage {
         // Once inserted, we evict transactions over the pool size limit in FIFO
         // order.
         for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
-            let _ = self.rejected.insert(evicted_tx.id, State::Evicted);
+            let _ = self.rejected.insert(evicted_tx.id, State::Victim);
         }
 
         assert_eq!(self.verified.len(), MEMPOOL_SIZE);
