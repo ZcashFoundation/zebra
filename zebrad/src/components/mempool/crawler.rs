@@ -52,17 +52,16 @@ where
     }
 
     /// Periodically crawl peers for transactions to include in the mempool.
-    pub async fn run(self) -> Result<(), BoxError> {
-        loop {
-            self.wait_until_enabled().await;
+    ///
+    /// Runs until the [`SyncStatus`] loses its connection to the chain syncer, which happens when
+    /// Zebra is shutting down.
+    pub async fn run(mut self) -> Result<(), BoxError> {
+        while self.status.wait_until_close_to_tip().await.is_ok() {
             self.crawl_transactions().await?;
             sleep(RATE_LIMIT_DELAY).await;
         }
-    }
 
-    /// Wait until the mempool is enabled.
-    async fn wait_until_enabled(&self) {
-        // TODO: Check if synchronizing up to chain tip has finished (#2603).
+        Ok(())
     }
 
     /// Crawl peers for transactions.
