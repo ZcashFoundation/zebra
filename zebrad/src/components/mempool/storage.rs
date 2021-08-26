@@ -11,7 +11,6 @@ use super::MempoolError;
 #[cfg(test)]
 pub mod tests;
 
-#[allow(dead_code)]
 const MEMPOOL_SIZE: usize = 2;
 
 #[allow(dead_code)]
