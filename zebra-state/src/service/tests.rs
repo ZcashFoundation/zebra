@@ -296,16 +296,16 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, best_tip_height_receiver) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, chain_tip_receiver) = StateService::new(Config::ephemeral(), network);
 
-        prop_assert_eq!(*best_tip_height_receiver.borrow(), None);
+        prop_assert_eq!(chain_tip_receiver.best_tip_height(), None);
 
         for block in finalized_blocks {
             let expected_height = block.height;
 
             state_service.queue_and_commit_finalized(block);
 
-            prop_assert_eq!(*best_tip_height_receiver.borrow(), Some(expected_height));
+            prop_assert_eq!(chain_tip_receiver.best_tip_height(), Some(expected_height));
         }
 
         for block in non_finalized_blocks {
@@ -313,7 +313,7 @@ proptest! {
 
             state_service.queue_and_commit_non_finalized(block);
 
-            prop_assert_eq!(*best_tip_height_receiver.borrow(), Some(expected_height));
+            prop_assert_eq!(chain_tip_receiver.best_tip_height(), Some(expected_height));
         }
     }
 

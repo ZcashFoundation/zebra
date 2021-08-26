@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
 
@@ -28,11 +28,11 @@ use crate::{
 };
 
 use self::{
-    chain_tip::ChainTipSender,
+    chain_tip::{ChainTipReceiver, ChainTipSender},
     non_finalized_state::{NonFinalizedState, QueuedBlocks},
 };
 
-mod chain_tip;
+pub mod chain_tip;
 pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
@@ -75,8 +75,8 @@ pub(crate) struct StateService {
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub fn new(config: Config, network: Network) -> (Self, watch::Receiver<Option<block::Height>>) {
-        let (mut chain_tip_sender, best_tip_height_receiver) = ChainTipSender::new();
+    pub fn new(config: Config, network: Network) -> (Self, ChainTipReceiver) {
+        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new();
         let disk = FinalizedState::new(&config, network);
 
         if let Some(finalized_height) = disk.finalized_tip_height() {
@@ -121,7 +121,7 @@ impl StateService {
         }
         tracing::info!("no legacy chain found");
 
-        (state, best_tip_height_receiver)
+        (state, chain_tip_receiver)
     }
 
     /// Queue a finalized block for verification and storage in the finalized state.
@@ -771,6 +771,7 @@ impl Service<Request> for StateService {
 }
 
 /// Initialize a state service from the provided [`Config`].
+/// Returns a boxed state service, and a receiver for state chain tip updates.
 ///
 /// Each `network` has its own separate on-disk database.
 ///
@@ -781,13 +782,10 @@ impl Service<Request> for StateService {
 pub fn init(
     config: Config,
     network: Network,
-) -> (
-    BoxService<Request, Response, BoxError>,
-    watch::Receiver<Option<block::Height>>,
-) {
-    let (state_service, best_tip_height_receiver) = StateService::new(config, network);
+) -> (BoxService<Request, Response, BoxError>, ChainTipReceiver) {
+    let (state_service, chain_tip_receiver) = StateService::new(config, network);
 
-    (BoxService::new(state_service), best_tip_height_receiver)
+    (BoxService::new(state_service), chain_tip_receiver)
 }
 
 /// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.

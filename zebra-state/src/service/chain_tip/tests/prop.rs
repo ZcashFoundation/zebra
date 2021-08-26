@@ -7,10 +7,10 @@ use super::super::ChainTipSender;
 
 proptest! {
     #[test]
-    fn best_tip_value_is_heighest_of_latest_finalized_and_non_finalized_heights(
+    fn best_tip_is_highest_of_latest_finalized_and_non_finalized_heights(
         height_updates in any::<Vec<HeightUpdate>>(),
     ) {
-        let (mut chain_tip_sender, receiver) = ChainTipSender::new();
+        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new();
 
         let mut latest_finalized_height = None;
         let mut latest_non_finalized_height = None;
@@ -36,7 +36,7 @@ proptest! {
             (None, non_finalized_height) => non_finalized_height,
         };
 
-        prop_assert_eq!(*receiver.borrow(), expected_height);
+        prop_assert_eq!(chain_tip_receiver.best_tip_height(), expected_height);
     }
 }
 
