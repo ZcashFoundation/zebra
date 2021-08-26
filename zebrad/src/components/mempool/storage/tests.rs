@@ -20,7 +20,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
     let mut storage: Storage = Default::default();
 
-    // Get transactions from test vectors
+    // Get transactions from the first 10 blocks of the Zcash blockchain
     let (total_transactions, unmined_transactions) = unmined_transactions_in_blocks(10, network);
 
     // Insert them all to the storage
@@ -34,29 +34,19 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // The rest of the transactions will be in rejected
     assert_eq!(storage.rejected.len(), total_transactions - MEMPOOL_SIZE);
 
-    // TODO: Resolve the following checks with a loop for when `MEMPOOL_SIZE` changes:
+    // Make sure the last MEMPOOL_SIZE transactions we sent are in the verified
+    for count in 1..MEMPOOL_SIZE {
+        assert!(storage
+            .clone()
+            .contains(&unmined_transactions[total_transactions - count].id));
+    }
 
-    // Make sure the last 2 transactions we sent are in the verified
-    assert_eq!(
-        storage
+    // Anything greater should not be in the verified
+    for count in MEMPOOL_SIZE + 1..total_transactions {
+        assert!(!storage
             .clone()
-            .contains(&unmined_transactions[total_transactions - 1].id),
-        true
-    );
-    assert_eq!(
-        storage
-            .clone()
-            .contains(&unmined_transactions[total_transactions - 2].id),
-        true
-    );
-
-    // But the third one is not
-    assert_eq!(
-        storage
-            .clone()
-            .contains(&unmined_transactions[total_transactions - 3].id),
-        false
-    );
+            .contains(&unmined_transactions[total_transactions - count].id));
+    }
 
     Ok(())
 }
