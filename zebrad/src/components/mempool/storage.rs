@@ -70,11 +70,13 @@ impl Storage {
 
         // Once inserted, we evict transactions over the pool size limit in FIFO
         // order.
-        for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
-            let _ = self.rejected.insert(evicted_tx.id, State::Victim);
-        }
+        if self.verified.len() > MEMPOOL_SIZE {
+            for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
+                let _ = self.rejected.insert(evicted_tx.id, State::Victim);
+            }
 
-        assert_eq!(self.verified.len(), MEMPOOL_SIZE);
+            assert_eq!(self.verified.len(), MEMPOOL_SIZE);
+        }
 
         Ok(tx_id)
     }
