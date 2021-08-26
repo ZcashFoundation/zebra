@@ -57,7 +57,7 @@ pub struct Handshake<S, C = NoChainTip> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
-    chain_tip_receiver: Option<C>,
+    chain_tip_receiver: C,
 }
 
 /// The peer address that we are handshaking with.
@@ -307,7 +307,7 @@ pub struct Builder<S, C = NoChainTip> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
-    chain_tip_receiver: Option<C>,
+    chain_tip_receiver: C,
 }
 
 impl<S, C> Builder<S, C>
@@ -374,9 +374,18 @@ where
     /// constant over network upgrade activations.
     ///
     /// Use [`NoChainTip`] to explicitly provide no chain tip.
-    pub fn with_chain_tip_receiver(mut self, chain_tip_receiver: C) -> Self {
-        self.chain_tip_receiver = Some(chain_tip_receiver);
-        self
+    pub fn with_chain_tip_receiver<NewC>(self, chain_tip_receiver: NewC) -> Builder<S, NewC> {
+        Builder {
+            chain_tip_receiver,
+            // TODO: Until Rust RFC 2528 reaches stable, we can't do `..self`
+            config: self.config,
+            inbound_service: self.inbound_service,
+            timestamp_collector: self.timestamp_collector,
+            our_services: self.our_services,
+            user_agent: self.user_agent,
+            relay: self.relay,
+            inv_collector: self.inv_collector,
+        }
     }
 
     /// Whether to request that peers relay transactions to our node.  Optional.
@@ -425,14 +434,13 @@ where
     }
 }
 
-impl<S, C> Handshake<S, C>
+impl<S> Handshake<S, NoChainTip>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
-    C: ChainTip,
 {
     /// Create a builder that configures a [`Handshake`] service.
-    pub fn builder() -> Builder<S, C> {
+    pub fn builder() -> Builder<S, NoChainTip> {
         // We don't derive `Default` because the derive inserts a `where S:
         // Default` bound even though `Option<S>` implements `Default` even if
         // `S` does not.
@@ -444,7 +452,7 @@ where
             our_services: None,
             relay: None,
             inv_collector: None,
-            chain_tip_receiver: None,
+            chain_tip_receiver: NoChainTip,
         }
     }
 }

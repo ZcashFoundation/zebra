@@ -21,25 +21,3 @@ impl ChainTip for NoChainTip {
         None
     }
 }
-
-// convenience implementations for optional chain tips
-
-impl<T> ChainTip for Option<T>
-where
-    T: ChainTip,
-{
-    fn best_tip_height(&self) -> Option<block::Height> {
-        self.as_ref()
-            .and_then(|chain_tip| chain_tip.best_tip_height())
-    }
-}
-
-impl<T> ChainTip for &Option<T>
-where
-    T: ChainTip,
-{
-    fn best_tip_height(&self) -> Option<block::Height> {
-        self.as_ref()
-            .and_then(|chain_tip| chain_tip.best_tip_height())
-    }
-}
