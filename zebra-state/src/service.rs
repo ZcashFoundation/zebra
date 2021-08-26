@@ -7,12 +7,13 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use non_finalized_state::{NonFinalizedState, QueuedBlocks};
 use tokio::sync::{oneshot, watch};
-#[cfg(any(test, feature = "proptest-impl"))]
-use tower::buffer::Buffer;
 use tower::{util::BoxService, Service};
 use tracing::instrument;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use tower::buffer::Buffer;
+
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, NetworkUpgrade},
@@ -21,13 +22,17 @@ use zebra_chain::{
     transparent,
 };
 
-use self::best_tip_height::ChainTipSender;
 use crate::{
     constants, request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config,
     FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
 };
 
-mod best_tip_height;
+use self::{
+    chain_tip::ChainTipSender,
+    non_finalized_state::{NonFinalizedState, QueuedBlocks},
+};
+
+mod chain_tip;
 pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
