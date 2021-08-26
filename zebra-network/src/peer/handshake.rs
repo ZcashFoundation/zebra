@@ -13,18 +13,17 @@ use futures::{
     channel::{mpsc, oneshot},
     future, FutureExt, SinkExt, StreamExt,
 };
-use tokio::{
-    net::TcpStream,
-    sync::{broadcast, watch},
-    task::JoinError,
-    time::timeout,
-};
+use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
 
-use zebra_chain::{block, parameters::Network};
+use zebra_chain::{
+    block,
+    chain_tip::{ChainTip, NoChainTip},
+    parameters::Network,
+};
 
 use crate::{
     constants,
@@ -48,7 +47,7 @@ use super::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerEr
 /// - launched in a separate task, and
 /// - wrapped in a timeout.
 #[derive(Clone)]
-pub struct Handshake<S> {
+pub struct Handshake<S, C = NoChainTip> {
     config: Config,
     inbound_service: S,
     timestamp_collector: mpsc::Sender<MetaAddrChange>,
@@ -58,7 +57,7 @@ pub struct Handshake<S> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
-    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: Option<C>,
 }
 
 /// The peer address that we are handshaking with.
@@ -300,7 +299,7 @@ impl fmt::Debug for ConnectedAddr {
 }
 
 /// A builder for `Handshake`.
-pub struct Builder<S> {
+pub struct Builder<S, C = NoChainTip> {
     config: Option<Config>,
     inbound_service: Option<S>,
     timestamp_collector: Option<mpsc::Sender<MetaAddrChange>>,
@@ -308,13 +307,14 @@ pub struct Builder<S> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
-    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: Option<C>,
 }
 
-impl<S> Builder<S>
+impl<S, C> Builder<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
+    C: ChainTip,
 {
     /// Provide a config.  Mandatory.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -372,11 +372,10 @@ where
     ///
     /// If this is unset, the minimum accepted protocol version for peer connections is kept
     /// constant over network upgrade activations.
-    pub fn with_chain_tip_receiver(
-        mut self,
-        chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
-    ) -> Self {
-        self.chain_tip_receiver = chain_tip_receiver;
+    ///
+    /// Use [`NoChainTip`] to explicitly provide no chain tip.
+    pub fn with_chain_tip_receiver(mut self, chain_tip_receiver: C) -> Self {
+        self.chain_tip_receiver = Some(chain_tip_receiver);
         self
     }
 
@@ -391,7 +390,7 @@ where
     /// Consume this builder and produce a [`Handshake`].
     ///
     /// Returns an error only if any mandatory field was unset.
-    pub fn finish(self) -> Result<Handshake<S>, &'static str> {
+    pub fn finish(self) -> Result<Handshake<S, C>, &'static str> {
         let config = self.config.ok_or("did not specify config")?;
         let inbound_service = self
             .inbound_service
@@ -426,13 +425,14 @@ where
     }
 }
 
-impl<S> Handshake<S>
+impl<S, C> Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
+    C: ChainTip,
 {
     /// Create a builder that configures a [`Handshake`] service.
-    pub fn builder() -> Builder<S> {
+    pub fn builder() -> Builder<S, C> {
         // We don't derive `Default` because the derive inserts a `where S:
         // Default` bound even though `Option<S>` implements `Default` even if
         // `S` does not.
@@ -463,7 +463,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: impl ChainTip,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -577,7 +577,7 @@ pub async fn negotiate_version(
 
     // SECURITY: Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
-    let height = chain_tip_receiver.and_then(|height| *height.borrow());
+    let height = chain_tip_receiver.best_tip_height();
     let min_version = Version::min_remote_for_height(config.network, height);
     if remote_version < min_version {
         // Disconnect if peer is using an obsolete version.
@@ -601,10 +601,11 @@ pub async fn negotiate_version(
 
 pub type HandshakeRequest = (TcpStream, ConnectedAddr);
 
-impl<S> Service<HandshakeRequest> for Handshake<S>
+impl<S, C> Service<HandshakeRequest> for Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
 {
     type Response = Client;
     type Error = BoxError;
