@@ -1,3 +1,5 @@
+//! Asynchronous verification of transactions.
+//!
 use std::{
     collections::HashMap,
     future::Future,
@@ -50,6 +52,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
+    /// Create a new transaction verifier.
     pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
         Self {
             network,

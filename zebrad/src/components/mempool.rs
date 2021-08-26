@@ -20,6 +20,7 @@ use crate::BoxError;
 mod crawler;
 mod error;
 mod storage;
+pub mod downloads;
 
 #[cfg(test)]
 mod tests;

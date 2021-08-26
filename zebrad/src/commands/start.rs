@@ -56,7 +56,7 @@ impl StartCmd {
 
         info!("initializing verifiers");
         // TODO: use the transaction verifier to verify mempool transactions (#2637, #2606)
-        let (chain_verifier, _tx_verifier) = zebra_consensus::chain::init(
+        let (chain_verifier, tx_verifier) = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
             state.clone(),
@@ -75,6 +75,7 @@ impl StartCmd {
                 setup_rx,
                 state.clone(),
                 chain_verifier.clone(),
+                tx_verifier.clone(),
             ));
 
         let (peer_set, address_book) =

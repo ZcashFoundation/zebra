@@ -17,10 +17,12 @@ use zebra_network as zn;
 use zebra_state as zs;
 
 use zebra_chain::block::{self, Block};
-use zebra_consensus::chain::VerifyChainError;
+use zebra_consensus::transaction;
+use zebra_consensus::{chain::VerifyChainError, error::TransactionError};
 use zebra_network::AddressBook;
 
 // Re-use the syncer timeouts for consistency.
+use super::mempool::downloads::Downloads as TxDownloads;
 use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 mod downloads;
@@ -29,7 +31,12 @@ use downloads::Downloads;
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Verifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
+type TxVerifier = Buffer<
+    BoxService<transaction::Request, transaction::Response, TransactionError>,
+    transaction::Request,
+>;
 type InboundDownloads = Downloads<Timeout<Outbound>, Timeout<Verifier>, State>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>>;
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>);
 
@@ -47,6 +54,10 @@ pub enum Setup {
         /// A service that verifies downloaded blocks. Given to `downloads`
         /// after the network is set up.
         verifier: Verifier,
+
+        /// A service that verifies downloaded transactions. Given to `tx_downloads`
+        /// after the network is set up.
+        tx_verifier: TxVerifier,
     },
 
     /// Network setup is complete.
@@ -58,6 +69,8 @@ pub enum Setup {
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
         downloads: Pin<Box<InboundDownloads>>,
+
+        tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
 
     /// Temporary state used in the service's internal network initialization
@@ -118,11 +131,13 @@ impl Inbound {
         network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,
         verifier: Verifier,
+        tx_verifier: TxVerifier,
     ) -> Self {
         Self {
             network_setup: Setup::AwaitingNetwork {
                 network_setup,
                 verifier,
+                tx_verifier,
             },
             state,
         }
@@ -155,17 +170,23 @@ impl Service<zn::Request> for Inbound {
             Setup::AwaitingNetwork {
                 mut network_setup,
                 verifier,
+                tx_verifier,
             } => match network_setup.try_recv() {
                 Ok((outbound, address_book)) => {
                     let downloads = Box::pin(Downloads::new(
-                        Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
+                        Timeout::new(outbound.clone(), BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
+                    ));
+                    let tx_downloads = Box::pin(TxDownloads::new(
+                        Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
+                        Timeout::new(tx_verifier, BLOCK_VERIFY_TIMEOUT),
                     ));
                     result = Ok(());
                     Setup::Initialized {
                         address_book,
                         downloads,
+                        tx_downloads,
                     }
                 }
                 Err(TryRecvError::Empty) => {
@@ -174,6 +195,7 @@ impl Service<zn::Request> for Inbound {
                     Setup::AwaitingNetwork {
                         network_setup,
                         verifier,
+                        tx_verifier,
                     }
                 }
                 Err(error @ TryRecvError::Closed) => {
@@ -195,13 +217,16 @@ impl Service<zn::Request> for Inbound {
             Setup::Initialized {
                 address_book,
                 mut downloads,
+                mut tx_downloads,
             } => {
                 while let Poll::Ready(Some(_)) = downloads.as_mut().poll_next(cx) {}
+                while let Poll::Ready(Some(_)) = tx_downloads.as_mut().poll_next(cx) {}
 
                 result = Ok(());
                 Setup::Initialized {
                     address_book,
                     downloads,
+                    tx_downloads,
                 }
             }
         };
@@ -312,10 +337,12 @@ impl Service<zn::Request> for Inbound {
             }
             zn::Request::PushTransaction(_transaction) => {
                 debug!("ignoring unimplemented request");
+                // TODO: send to Tx Download & Verify Stream
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseTransactionIds(_transactions) => {
                 debug!("ignoring unimplemented request");
+                // TODO: send to Tx Download & Verify Stream
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
