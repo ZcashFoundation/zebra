@@ -1,6 +1,6 @@
 use super::*;
 use color_eyre::Report;
-use std::{collections::HashSet, iter::FromIterator};
+use std::collections::HashSet;
 use storage::tests::unmined_transactions_in_blocks;
 use tower::ServiceExt;
 
@@ -32,7 +32,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
     };
 
     // Test `Request::TransactionsById`
-    let hash_set: HashSet<UnminedTxId> = HashSet::from_iter(transaction_ids.iter().map(|&id| id));
+    let hash_set = transaction_ids.iter().copied().collect::<HashSet<_>>();
     let response = service
         .oneshot(Request::TransactionsById(hash_set))
         .await
