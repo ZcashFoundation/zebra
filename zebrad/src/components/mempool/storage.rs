@@ -28,13 +28,13 @@ pub enum State {
     LowFee,
     /// Otherwise valid transaction removed from mempool, say because of FIFO
     /// (first in, first out) policy.
-    Victim,
+    Excess,
 }
 
 #[derive(Clone, Default)]
 pub struct Storage {
-    /// The set of verified transactions in the mempool. Currently this is a
-    /// cache of size 2.
+    /// The set of verified transactions in the mempool. This is a
+    /// cache of size [`MEMPOOL_SIZE`].
     verified: VecDeque<UnminedTx>,
     /// The set of rejected transactions by id, and their rejection reasons.
     rejected: HashMap<UnminedTxId, State>,
@@ -44,7 +44,7 @@ impl Storage {
     /// Insert a [`UnminedTx`] into the mempool.
     ///
     /// If its insertion results in evicting other transactions, they will be tracked
-    /// as [`State::Evicted`].
+    /// as [`State::Excess`].
     #[allow(dead_code)]
     pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
         let tx_id = tx.id;
@@ -55,14 +55,15 @@ impl Storage {
                 State::Invalid(e) => MempoolError::Invalid(e.clone()),
                 State::Expired => MempoolError::Expired,
                 State::Confirmed(block_hash) => MempoolError::InBlock(*block_hash),
-                State::Victim => MempoolError::Victim,
+                State::Excess => MempoolError::Excess,
                 State::LowFee => MempoolError::LowFee,
             });
         }
 
         // If `tx` is already in the mempool, we don't change anything.
         //
-        // TODO: Should it get bumped up to the top?
+        // Security: transactions must not get refreshed by new queries,
+        // because that allows malicious peers to keep transactions live forever.
         if self.verified.contains(&tx) {
             return Err(MempoolError::InMempool);
         }
@@ -74,7 +75,7 @@ impl Storage {
         // order.
         if self.verified.len() > MEMPOOL_SIZE {
             for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
-                let _ = self.rejected.insert(evicted_tx.id, State::Victim);
+                let _ = self.rejected.insert(evicted_tx.id, State::Excess);
             }
 
             assert_eq!(self.verified.len(), MEMPOOL_SIZE);

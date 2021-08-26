@@ -24,5 +24,5 @@ pub enum MempoolError {
     NotInMempool,
 
     #[error("transaction evicted from the mempool due to size restrictions")]
-    Victim,
+    Excess,
 }
