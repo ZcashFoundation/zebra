@@ -473,6 +473,12 @@ impl FinalizedState {
             })
     }
 
+    /// Returns the tip block, if there is one.
+    pub fn tip_block(&self) -> Option<Arc<Block>> {
+        let (height, _hash) = self.tip()?;
+        self.block(height.into())
+    }
+
     /// Returns the height of the given block if it exists.
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();

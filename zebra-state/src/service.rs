@@ -77,8 +77,7 @@ impl StateService {
 
     pub fn new(config: Config, network: Network) -> (Self, ChainTipReceiver) {
         let disk = FinalizedState::new(&config, network);
-        let (chain_tip_sender, chain_tip_receiver) =
-            ChainTipSender::new(disk.finalized_tip_height());
+        let (chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(disk.tip_block());
 
         let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();
@@ -130,7 +129,7 @@ impl StateService {
 
         self.disk.queue_and_commit_finalized((finalized, rsp_tx));
         self.chain_tip_sender
-            .set_finalized_height(self.disk.finalized_tip_height());
+            .set_finalized_tip(self.disk.tip_block());
 
         rsp_rx
     }
@@ -192,14 +191,12 @@ impl StateService {
         let finalized_tip_height = self.disk.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         );
-        let non_finalized_tip_height = self.mem.best_tip().map(|(height, _hash)| height);
-
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
         self.chain_tip_sender
-            .set_finalized_height(finalized_tip_height);
+            .set_finalized_tip(self.disk.tip_block());
         self.chain_tip_sender
-            .set_best_non_finalized_height(non_finalized_tip_height);
+            .set_best_non_finalized_tip(self.mem.best_tip_block());
 
         tracing::trace!("finished processing queued block");
         rsp_rx
