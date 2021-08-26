@@ -87,6 +87,10 @@ impl ChainTipSender {
 /// A receiver for recent changes to the non-finalized and finalized chain tips.
 ///
 /// The latest changes are available from all cloned instances of this type.
+///
+/// The chain tip data is based on:
+/// * the best non-finalized chain tip, if available, or
+/// * the finalized tip.
 #[derive(Clone, Debug)]
 pub struct ChainTipReceiver {
     receiver: watch::Receiver<ChainTipData>,
@@ -101,14 +105,17 @@ impl ChainTipReceiver {
 
 impl ChainTip for ChainTipReceiver {
     /// Return the height of the best chain tip.
-    ///
-    /// The returned block height comes from:
-    /// * the best non-finalized chain tip, if available, or
-    /// * the finalized tip.
     fn best_tip_height(&self) -> Option<block::Height> {
         self.receiver
             .borrow()
             .as_ref()
             .and_then(|block| block.coinbase_height())
+    }
+
+    /// Return the block hash of the best chain tip.
+    fn best_tip_hash(&self) -> Option<block::Hash> {
+        // TODO: get the hash from the state and store it in the sender,
+        //       so we don't have to recalculate it every time
+        self.receiver.borrow().as_ref().map(|block| block.hash())
     }
 }
