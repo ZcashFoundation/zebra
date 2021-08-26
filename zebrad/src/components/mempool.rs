@@ -46,7 +46,7 @@ pub struct Mempool {
     /// The Mempool storage itself.
     ///
     /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
-    /// inject transactions into `storage`, as thye must be verified beforehand.
+    /// inject transactions into `storage`, as they must be verified beforehand.
     storage: storage::Storage,
 }
 
