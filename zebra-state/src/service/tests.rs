@@ -290,22 +290,22 @@ proptest! {
     /// 4. Commit the non-finalized blocks and check that the best tip height is also updated
     ///    accordingly.
     #[test]
-    fn best_tip_height_is_updated(
+    fn chain_tip_sender_is_updated(
         (network, finalized_blocks, non_finalized_blocks)
             in continuous_empty_blocks_from_test_vectors(),
     ) {
         zebra_test::init();
 
-        let (mut state_service, best_tip_height) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, best_tip_height_receiver) = StateService::new(Config::ephemeral(), network);
 
-        prop_assert_eq!(*best_tip_height.borrow(), None);
+        prop_assert_eq!(*best_tip_height_receiver.borrow(), None);
 
         for block in finalized_blocks {
             let expected_height = block.height;
 
             state_service.queue_and_commit_finalized(block);
 
-            prop_assert_eq!(*best_tip_height.borrow(), Some(expected_height));
+            prop_assert_eq!(*best_tip_height_receiver.borrow(), Some(expected_height));
         }
 
         for block in non_finalized_blocks {
@@ -313,7 +313,7 @@ proptest! {
 
             state_service.queue_and_commit_non_finalized(block);
 
-            prop_assert_eq!(*best_tip_height.borrow(), Some(expected_height));
+            prop_assert_eq!(*best_tip_height_receiver.borrow(), Some(expected_height));
         }
     }
 

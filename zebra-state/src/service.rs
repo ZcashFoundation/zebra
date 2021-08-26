@@ -21,7 +21,7 @@ use zebra_chain::{
     transparent,
 };
 
-use self::best_tip_height::BestTipHeight;
+use self::best_tip_height::ChainTipSender;
 use crate::{
     constants, request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config,
     FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
@@ -64,18 +64,18 @@ pub(crate) struct StateService {
     /// Instant tracking the last time `pending_utxos` was pruned
     last_prune: Instant,
     /// The current best chain tip height.
-    best_tip_height: BestTipHeight,
+    chain_tip_sender: ChainTipSender,
 }
 
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> (Self, watch::Receiver<Option<block::Height>>) {
-        let (mut best_tip_height, best_tip_height_receiver) = BestTipHeight::new();
+        let (mut chain_tip_sender, best_tip_height_receiver) = ChainTipSender::new();
         let disk = FinalizedState::new(&config, network);
 
         if let Some(finalized_height) = disk.finalized_tip_height() {
-            best_tip_height.set_finalized_height(finalized_height);
+            chain_tip_sender.set_finalized_height(finalized_height);
         }
 
         let mem = NonFinalizedState::new(network);
@@ -89,7 +89,7 @@ impl StateService {
             pending_utxos,
             network,
             last_prune: Instant::now(),
-            best_tip_height,
+            chain_tip_sender,
         };
 
         tracing::info!("starting legacy chain check");
@@ -129,7 +129,7 @@ impl StateService {
         self.disk.queue_and_commit_finalized((finalized, rsp_tx));
 
         if let Some(finalized_height) = self.disk.finalized_tip_height() {
-            self.best_tip_height.set_finalized_height(finalized_height);
+            self.chain_tip_sender.set_finalized_height(finalized_height);
         }
 
         rsp_rx
@@ -196,9 +196,9 @@ impl StateService {
 
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
-        self.best_tip_height
+        self.chain_tip_sender
             .set_finalized_height(finalized_tip_height);
-        self.best_tip_height
+        self.chain_tip_sender
             .set_best_non_finalized_height(non_finalized_tip_height);
 
         tracing::trace!("finished processing queued block");
@@ -780,9 +780,9 @@ pub fn init(
     BoxService<Request, Response, BoxError>,
     watch::Receiver<Option<block::Height>>,
 ) {
-    let (state_service, best_tip_height) = StateService::new(config, network);
+    let (state_service, best_tip_height_receiver) = StateService::new(config, network);
 
-    (BoxService::new(state_service), best_tip_height)
+    (BoxService::new(state_service), best_tip_height_receiver)
 }
 
 /// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.

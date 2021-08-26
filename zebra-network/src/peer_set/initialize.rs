@@ -63,7 +63,7 @@ type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 pub async fn init<S>(
     config: Config,
     inbound_service: S,
-    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -92,7 +92,7 @@ where
             .with_timestamp_collector(timestamp_collector)
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
-            .with_best_tip_height(best_tip_height)
+            .with_chain_tip_receiver(chain_tip_receiver)
             .want_transactions(true)
             .finish()
             .expect("configured all required parameters");

@@ -10,7 +10,7 @@ mod tests;
 /// The block height is determined based on the current finalized block height and the current best
 /// non-finalized chain's tip block height. The height is made available from a [`watch::Receiver`].
 #[derive(Debug)]
-pub struct BestTipHeight {
+pub struct ChainTipSender {
     finalized: Option<block::Height>,
     non_finalized: Option<block::Height>,
     sender: watch::Sender<Option<block::Height>>,
@@ -18,14 +18,14 @@ pub struct BestTipHeight {
     active_value: Option<block::Height>,
 }
 
-impl BestTipHeight {
-    /// Create a new instance of [`BestTipHeight`] and the [`watch::Receiver`] endpoint for the
+impl ChainTipSender {
+    /// Create a new instance of [`ChainTipSender`] and the [`watch::Receiver`] endpoint for the
     /// current best tip block height.
     pub fn new() -> (Self, watch::Receiver<Option<block::Height>>) {
         let (sender, receiver) = watch::channel(None);
 
         (
-            BestTipHeight {
+            ChainTipSender {
                 finalized: None,
                 non_finalized: None,
                 sender,

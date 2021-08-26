@@ -58,7 +58,7 @@ pub struct Handshake<S> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
-    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 /// The peer address that we are handshaking with.
@@ -308,7 +308,7 @@ pub struct Builder<S> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
-    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 impl<S> Builder<S>
@@ -372,11 +372,11 @@ where
     ///
     /// If this is unset, the minimum accepted protocol version for peer connections is kept
     /// constant over network upgrade activations.
-    pub fn with_best_tip_height(
+    pub fn with_chain_tip_receiver(
         mut self,
-        best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+        chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
     ) -> Self {
-        self.best_tip_height = best_tip_height;
+        self.chain_tip_receiver = chain_tip_receiver;
         self
     }
 
@@ -421,7 +421,7 @@ where
             our_services,
             relay,
             parent_span: Span::current(),
-            best_tip_height: self.best_tip_height,
+            chain_tip_receiver: self.chain_tip_receiver,
         })
     }
 }
@@ -444,7 +444,7 @@ where
             our_services: None,
             relay: None,
             inv_collector: None,
-            best_tip_height: None,
+            chain_tip_receiver: None,
         }
     }
 }
@@ -463,7 +463,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: Option<watch::Receiver<Option<block::Height>>>,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -577,7 +577,7 @@ pub async fn negotiate_version(
 
     // SECURITY: Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
-    let height = best_tip_height.and_then(|height| *height.borrow());
+    let height = chain_tip_receiver.and_then(|height| *height.borrow());
     let min_version = Version::min_remote_for_height(config.network, height);
     if remote_version < min_version {
         // Disconnect if peer is using an obsolete version.
@@ -634,7 +634,7 @@ where
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
-        let best_tip_height = self.best_tip_height.clone();
+        let chain_tip_receiver = self.chain_tip_receiver.clone();
 
         let fut = async move {
             debug!(
@@ -665,7 +665,7 @@ where
                     user_agent,
                     our_services,
                     relay,
-                    best_tip_height,
+                    chain_tip_receiver,
                 ),
             )
             .await??;
