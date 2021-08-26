@@ -1,3 +1,5 @@
+use zebra_chain::chain_tip::ChainTip;
+
 use super::super::ChainTipSender;
 
 #[test]

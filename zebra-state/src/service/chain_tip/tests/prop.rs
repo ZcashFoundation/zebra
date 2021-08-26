@@ -1,7 +1,7 @@
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
-use zebra_chain::block;
+use zebra_chain::{block, chain_tip::ChainTip};
 
 use super::super::ChainTipSender;
 

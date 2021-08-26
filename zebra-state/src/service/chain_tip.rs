@@ -1,6 +1,6 @@
 use tokio::sync::watch;
 
-use zebra_chain::block;
+use zebra_chain::{block, chain_tip::ChainTip};
 
 #[cfg(test)]
 mod tests;
@@ -78,13 +78,15 @@ impl ChainTipReceiver {
     fn new(receiver: watch::Receiver<Option<block::Height>>) -> Self {
         Self { receiver }
     }
+}
 
+impl ChainTip for ChainTipReceiver {
     /// Return the height of the best chain tip.
     ///
     /// The returned block height comes from:
     /// * the best non-finalized chain tip, if available, or
     /// * the finalized tip.
-    pub fn best_tip_height(&self) -> Option<block::Height> {
+    fn best_tip_height(&self) -> Option<block::Height> {
         *self.receiver.borrow()
     }
 }
