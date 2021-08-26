@@ -21,6 +21,9 @@ mod crawler;
 mod error;
 mod storage;
 
+#[cfg(test)]
+mod tests;
+
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
 
@@ -42,6 +45,7 @@ pub enum Response {
 /// The mempool is the set of all verified transactions that this node is aware
 /// of that have yet to be confirmed by the Zcash network. A transaction is
 /// confirmed when it has been included in a block ('mined').
+#[derive(Clone)]
 pub struct Mempool {
     /// The Mempool storage itself.
     ///

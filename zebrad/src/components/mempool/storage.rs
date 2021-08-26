@@ -9,7 +9,7 @@ use zebra_consensus::error::TransactionError;
 use super::MempoolError;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 #[allow(dead_code)]
 const MEMPOOL_SIZE: usize = 2;

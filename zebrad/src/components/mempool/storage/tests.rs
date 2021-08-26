@@ -51,7 +51,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     Ok(())
 }
 
-fn unmined_transactions_in_blocks(
+pub fn unmined_transactions_in_blocks(
     last_block_height: u32,
     network: Network,
 ) -> (usize, Vec<UnminedTx>) {
