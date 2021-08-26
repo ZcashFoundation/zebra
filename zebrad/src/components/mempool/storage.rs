@@ -34,7 +34,7 @@ pub enum State {
 
 #[derive(Clone, Default)]
 pub struct Storage {
-    /// The set of verified transactions in the mempool.  Currently this is a
+    /// The set of verified transactions in the mempool. Currently this is a
     /// cache of size 2.
     verified: VecDeque<UnminedTx>,
     /// The set of rejected transactions by id, and their rejection reasons.
