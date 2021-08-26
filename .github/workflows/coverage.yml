@@ -30,13 +30,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v1
 
-      - name: Install rustfilt symbol demangler
-        run: |
-          cargo install rustfilt
-
       - name: Install cargo-llvm-cov cargo command
-        run: |
-          cargo install cargo-llvm-cov --version ^0.1.0-alpha.4
+        run: cargo install cargo-llvm-cov
 
       - name: Generate code coverage
         env:
@@ -45,4 +40,4 @@ jobs:
         run: cargo llvm-cov --lcov > lcov.info
 
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.5.2
+        uses: codecov/codecov-action@v2.0.3
