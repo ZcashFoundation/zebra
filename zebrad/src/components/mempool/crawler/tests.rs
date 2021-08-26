@@ -1,14 +1,17 @@
 use std::time::Duration;
 
 use tokio::{
-    sync::mpsc::{self, UnboundedReceiver},
+    sync::{
+        mpsc::{self, UnboundedReceiver},
+        watch,
+    },
     time::{self, timeout},
 };
 use tower::{buffer::Buffer, util::BoxService, BoxError};
 
 use zebra_network::{Request, Response};
 
-use super::{Crawler, FANOUT, RATE_LIMIT_DELAY};
+use super::{Crawler, MempoolStatus, FANOUT, RATE_LIMIT_DELAY};
 
 /// The number of iterations to crawl while testing.
 ///
@@ -30,7 +33,11 @@ const ERROR_MARGIN: Duration = Duration::from_millis(100);
 async fn crawler_requests_for_transaction_ids() {
     let (peer_set, mut requests) = mock_peer_set();
 
-    Crawler::spawn(peer_set);
+    // Mock the latest sync length in a state that enables the mempool.
+    let (_, latest_sync_length) = watch::channel(vec![0; 5]);
+    let mempool_status = MempoolStatus::new(latest_sync_length);
+
+    Crawler::spawn(peer_set, mempool_status);
 
     time::pause();
 
