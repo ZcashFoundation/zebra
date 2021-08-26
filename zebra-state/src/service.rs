@@ -76,12 +76,9 @@ impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub fn new(config: Config, network: Network) -> (Self, ChainTipReceiver) {
-        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new();
         let disk = FinalizedState::new(&config, network);
-
-        if let Some(finalized_height) = disk.finalized_tip_height() {
-            chain_tip_sender.set_finalized_height(finalized_height);
-        }
+        let (chain_tip_sender, chain_tip_receiver) =
+            ChainTipSender::new(disk.finalized_tip_height());
 
         let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();
@@ -132,10 +129,8 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         self.disk.queue_and_commit_finalized((finalized, rsp_tx));
-
-        if let Some(finalized_height) = self.disk.finalized_tip_height() {
-            self.chain_tip_sender.set_finalized_height(finalized_height);
-        }
+        self.chain_tip_sender
+            .set_finalized_height(self.disk.finalized_tip_height());
 
         rsp_rx
     }

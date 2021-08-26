@@ -10,30 +10,30 @@ proptest! {
     fn best_tip_is_highest_of_latest_finalized_and_non_finalized_heights(
         height_updates in any::<Vec<HeightUpdate>>(),
     ) {
-        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new();
+        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(None);
 
         let mut latest_finalized_height = None;
         let mut latest_non_finalized_height = None;
+        let mut seen_non_finalized_tip = false;
 
         for update in height_updates {
             match update {
                 HeightUpdate::Finalized(height) => {
                     chain_tip_sender.set_finalized_height(height);
-                    latest_finalized_height = Some(height);
+                    latest_finalized_height = height;
                 }
                 HeightUpdate::NonFinalized(height) => {
                     chain_tip_sender.set_best_non_finalized_height(height);
                     latest_non_finalized_height = height;
+                    seen_non_finalized_tip = true;
                 }
             }
         }
 
-        let expected_height = match (latest_finalized_height, latest_non_finalized_height) {
-            (Some(finalized_height), Some(non_finalized_height)) => {
-                Some(finalized_height.max(non_finalized_height))
-            }
-            (finalized_height, None) => finalized_height,
-            (None, non_finalized_height) => non_finalized_height,
+        let expected_height = if seen_non_finalized_tip {
+            latest_non_finalized_height
+        } else {
+            latest_finalized_height
         };
 
         prop_assert_eq!(chain_tip_receiver.best_tip_height(), expected_height);
@@ -42,6 +42,6 @@ proptest! {
 
 #[derive(Arbitrary, Clone, Copy, Debug)]
 enum HeightUpdate {
-    Finalized(block::Height),
+    Finalized(Option<block::Height>),
     NonFinalized(Option<block::Height>),
 }
