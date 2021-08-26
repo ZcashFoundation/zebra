@@ -132,11 +132,22 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    // hashes
+    // identifiers and hashes
 
-    /// Compute the hash (id) of this transaction.
+    /// Compute the hash (mined transaction ID) of this transaction.
+    ///
+    /// The hash uniquely identifies mined v5 transactions,
+    /// and all v1-v4 transactions, whether mined or unmined.
     pub fn hash(&self) -> Hash {
         Hash::from(self)
+    }
+
+    /// Compute the unmined transaction ID of this transaction.
+    ///
+    /// This ID uniquely identifies unmined transactions,
+    /// regardless of version.
+    pub fn unmined_id(&self) -> UnminedTxId {
+        UnminedTxId::from(self)
     }
 
     /// Calculate the sighash for the current transaction
