@@ -1,8 +1,8 @@
 use super::*;
 
-use zebra_chain::parameters::Network;
-
-use zebra_chain::{block::Block, serialization::ZcashDeserializeInto, transaction::UnminedTx};
+use zebra_chain::{
+    block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction::UnminedTx,
+};
 
 use color_eyre::eyre::Result;
 
