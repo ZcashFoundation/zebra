@@ -62,6 +62,17 @@ proptest! {
 
         let expected_hash = expected_tip.as_ref().map(|block| block.block.hash());
         prop_assert_eq!(chain_tip_receiver.best_tip_hash(), expected_hash);
+
+        let expected_transaction_ids: Vec<_> = expected_tip
+            .as_ref()
+            .iter()
+            .flat_map(|block| block.block.transactions.clone())
+            .map(|transaction| transaction.hash())
+            .collect();
+        prop_assert_eq!(
+            chain_tip_receiver.best_tip_mined_transaction_ids(),
+            expected_transaction_ids
+        );
     }
 }
 

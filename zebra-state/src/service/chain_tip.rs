@@ -5,6 +5,7 @@ use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block},
     chain_tip::ChainTip,
+    transaction,
 };
 
 use crate::{request::ContextuallyValidBlock, FinalizedBlock};
@@ -23,6 +24,10 @@ pub struct ChainTipBlock {
     pub(crate) block: Arc<Block>,
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
+
+    /// The mined transaction IDs of the transactions in `block`,
+    /// in the same order as `block.transactions`.
+    pub(crate) transaction_hashes: Vec<transaction::Hash>,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {
@@ -32,13 +37,14 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             hash,
             height,
             new_outputs: _,
-            transaction_hashes: _,
+            transaction_hashes,
             chain_value_pool_change: _,
         } = contextually_valid;
         Self {
             block,
             hash,
             height,
+            transaction_hashes,
         }
     }
 }
@@ -50,12 +56,13 @@ impl From<FinalizedBlock> for ChainTipBlock {
             hash,
             height,
             new_outputs: _,
-            transaction_hashes: _,
+            transaction_hashes,
         } = finalized;
         Self {
             block,
             hash,
             height,
+            transaction_hashes,
         }
     }
 }
@@ -167,5 +174,17 @@ impl ChainTip for ChainTipReceiver {
     /// Return the block hash of the best chain tip.
     fn best_tip_hash(&self) -> Option<block::Hash> {
         self.receiver.borrow().as_ref().map(|block| block.hash)
+    }
+
+    /// Return the mined transaction IDs of the transactions in the best chain tip block.
+    ///
+    /// All transactions with these mined IDs should be rejected from the mempool,
+    /// even if their authorizing data is different.
+    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash> {
+        self.receiver
+            .borrow()
+            .as_ref()
+            .map(|block| block.transaction_hashes.clone())
+            .unwrap_or_default()
     }
 }
