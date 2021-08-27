@@ -127,11 +127,9 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        self.disk.queue_and_commit_finalized((finalized, rsp_tx));
-        // TODO: move into the finalized state,
-        //       so we can clone committed `Arc<Block>`s before they get dropped
+        let tip_block = self.disk.queue_and_commit_finalized((finalized, rsp_tx));
         self.chain_tip_sender
-            .set_finalized_tip(self.disk.tip_block());
+            .set_finalized_tip(tip_block.map(|finalized| finalized.block));
 
         rsp_rx
     }
