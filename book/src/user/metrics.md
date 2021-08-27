@@ -10,7 +10,7 @@ This requires supporting infrastructure to collect and visualize metrics, for ex
    endpoint_addr = "127.0.0.1:9999"
    ```
 
-2. Run Zebra:
+2. Run Zebra, and specify the path to the `zebrad.toml` file, for example:
    ```
    zebrad -c zebrad.toml start
    ```
