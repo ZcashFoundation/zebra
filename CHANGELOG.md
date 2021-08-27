@@ -12,24 +12,24 @@ Zebra's latest alpha finishes most of the state work needed for NU5 testnet acti
 
 #### Network Upgrade 5
 
-- Finished ZIP-209: Prohibit Negative Shielded Chain Value Pool Balances Partial Implementation (#2599, #2649, #2656, #2648, #2644)
+- Finished ZIP-209: Prohibit Negative Shielded Chain Value Pool Balances (#2599, #2649, #2656, #2648, #2644)
 - ZIP-221 and ZIP-244: Commitment validation in non-finalized state and checkpoint verifier (#2609, #2633)
 - Orchard binding_verification_key support (#2441)
 
 #### Mempool
 
 - Mempool component, storage and errors (#2615, #2651)
-- Create transaction crawler for the mempool (#2646, #2672)
+- Create a transaction crawler for the mempool (#2646, #2672)
 - Create and use types for unmined transactions and their IDs (#2634, #2666)
 - ZIP-239: Implement mempool transaction v5 data structures and network messages (#2618, #2638)
 - Return a transaction verifier from `zebra_consensus::init` (#2665)
 - Provide recent syncer response lengths as a watch channel (#2602)
 - Derive Copy and Clone for zebra-consensus errors (#2664)
-- ChainTip creation and usage (#2677, #2676)
+- ChainTip trait creation and usage (#2677, #2676)
 
 #### Metrics
 
-- Add a network message grafana dashboard (#2673)
+- Add a network message to the grafana dashboard (#2673)
 
 ##### Documentation
 
