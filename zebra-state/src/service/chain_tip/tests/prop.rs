@@ -17,9 +17,11 @@ proptest! {
             .unwrap_or(DEFAULT_BLOCK_VEC_PROPTEST_CASES))
     )]
 
+    /// Check that the best tip uses the non-finalized tip if available,
+    /// or otherwise the finalized tip.
     #[test]
-    fn best_tip_is_highest_of_latest_finalized_and_non_finalized_heights(
-        height_updates in any::<Vec<BlockUpdate>>(),
+    fn best_tip_is_latest_non_finalized_then_latest_finalized(
+        tip_updates in any::<Vec<BlockUpdate>>(),
     ) {
         let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(None);
 
@@ -27,7 +29,7 @@ proptest! {
         let mut latest_non_finalized_tip = None;
         let mut seen_non_finalized_tip = false;
 
-        for update in height_updates {
+        for update in tip_updates {
             match update {
                 BlockUpdate::Finalized(block) => {
                     chain_tip_sender.set_finalized_tip(block.clone());
@@ -48,9 +50,12 @@ proptest! {
         } else {
             latest_finalized_tip
         };
-        let expected_height = expected_tip.and_then(|block| block.coinbase_height());
 
+        let expected_height = expected_tip.as_ref().and_then(|block| block.coinbase_height());
         prop_assert_eq!(chain_tip_receiver.best_tip_height(), expected_height);
+
+        let expected_hash = expected_tip.as_ref().map(|block| block.hash());
+        prop_assert_eq!(chain_tip_receiver.best_tip_hash(), expected_hash);
     }
 }
 
