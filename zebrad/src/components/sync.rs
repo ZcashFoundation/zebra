@@ -22,12 +22,14 @@ use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
 mod recent_sync_lengths;
+mod status;
 
 #[cfg(test)]
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
 use recent_sync_lengths::RecentSyncLengths;
+pub use status::SyncStatus;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 4;
