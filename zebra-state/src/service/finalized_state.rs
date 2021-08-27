@@ -146,15 +146,27 @@ impl FinalizedState {
     ///
     /// After queueing a finalized block, this method checks whether the newly
     /// queued block (and any of its descendants) can be committed to the state.
-    pub fn queue_and_commit_finalized(&mut self, queued: QueuedFinalized) {
+    ///
+    /// Returns the highest finalized tip block committed from the queue,
+    /// or `None` if no blocks were committed in this call.
+    /// (Use [`tip_block`] to get the finalized tip, regardless of when it was committed.)
+    pub fn queue_and_commit_finalized(
+        &mut self,
+        queued: QueuedFinalized,
+    ) -> Option<FinalizedBlock> {
+        let mut highest_queue_commit = None;
+
         let prev_hash = queued.0.block.header.previous_block_hash;
         let height = queued.0.height;
         self.queued_by_prev_hash.insert(prev_hash, queued);
 
         while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
-            self.commit_finalized(queued_block);
-            metrics::counter!("state.finalized.committed.block.count", 1);
-            metrics::gauge!("state.finalized.committed.block.height", height.0 as _);
+            if let Ok(finalized) = self.commit_finalized(queued_block) {
+                highest_queue_commit = Some(finalized);
+            } else {
+                // the last block in the queue failed, so we can't commit the next block
+                break;
+            }
         }
 
         if self.queued_by_prev_hash.is_empty() {
@@ -173,6 +185,8 @@ impl FinalizedState {
             "state.finalized.queued.block.count",
             self.queued_by_prev_hash.len() as f64
         );
+
+        highest_queue_commit
     }
 
     /// Returns the hash of the current finalized tip block.
@@ -453,10 +467,32 @@ impl FinalizedState {
     /// order. This function is called by [`queue`], which ensures order.
     /// It is intentionally not exposed as part of the public API of the
     /// [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedFinalized) {
+    fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
         let (finalized, rsp_tx) = queued_block;
-        let result = self.commit_finalized_direct(finalized, "CommitFinalized request");
+        let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
+
+        let block_result;
+        if result.is_ok() {
+            metrics::counter!("state.finalized.committed.block.count", 1);
+            metrics::gauge!(
+                "state.finalized.committed.block.height",
+                finalized.height.0 as _
+            );
+
+            block_result = Ok(finalized);
+        } else {
+            metrics::counter!("state.finalized.error.block.count", 1);
+            metrics::gauge!(
+                "state.finalized.error.block.height",
+                finalized.height.0 as _
+            );
+
+            block_result = Err(());
+        }
+
         let _ = rsp_tx.send(result.map_err(Into::into));
+
+        block_result
     }
 
     /// Returns the tip height and hash if there is one.
