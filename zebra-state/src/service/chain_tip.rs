@@ -77,11 +77,17 @@ impl ChainTipSender {
     fn update(&mut self, new_tip: impl Into<Option<Arc<Block>>>) {
         let new_tip = new_tip.into();
 
-        if new_tip.is_none() {
-            return;
-        }
+        let needs_update = match (new_tip.as_ref(), self.active_value.as_ref()) {
+            // Check if the `Arc<Block>` allocations are different.
+            // Zebra re-uses `Arc`s, and ensures block uniqueness,
+            // so there should not be any `Arc`s with duplicate block data.
+            // If there are, they will just result in a redundant update for the same block.
+            (Some(new_tip), Some(active_value)) => !Arc::ptr_eq(new_tip, active_value),
+            (Some(_new_tip), None) => true,
+            (None, _active_value) => false,
+        };
 
-        if new_tip != self.active_value {
+        if needs_update {
             let _ = self.sender.send(new_tip.clone());
             self.active_value = new_tip;
         }
