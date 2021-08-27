@@ -85,12 +85,12 @@ impl StartCmd {
 
         info!("initializing syncer");
         // TODO: use sync_status to activate the mempool (#2592)
-        let (syncer, _sync_status) =
+        let (syncer, sync_status) =
             ChainSync::new(&config, peer_set.clone(), state, chain_verifier);
 
         select! {
             result = syncer.sync().fuse() => result,
-            _ = mempool::Crawler::spawn(peer_set).fuse() => {
+            _ = mempool::Crawler::spawn(peer_set, sync_status).fuse() => {
                 unreachable!("The mempool crawler only stops if it panics");
             }
         }

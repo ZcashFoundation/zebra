@@ -8,7 +8,7 @@ use tower::{buffer::Buffer, util::BoxService, BoxError};
 
 use zebra_network::{Request, Response};
 
-use super::{Crawler, FANOUT, RATE_LIMIT_DELAY};
+use super::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY};
 
 /// The number of iterations to crawl while testing.
 ///
@@ -30,7 +30,13 @@ const ERROR_MARGIN: Duration = Duration::from_millis(100);
 async fn crawler_requests_for_transaction_ids() {
     let (peer_set, mut requests) = mock_peer_set();
 
-    Crawler::spawn(peer_set);
+    // Mock the latest sync length in a state that enables the mempool.
+    let (sync_status, mut recent_sync_lengths) = SyncStatus::new();
+    for _ in 0..5 {
+        recent_sync_lengths.push_extend_tips_length(0);
+    }
+
+    Crawler::spawn(peer_set, sync_status);
 
     time::pause();
 

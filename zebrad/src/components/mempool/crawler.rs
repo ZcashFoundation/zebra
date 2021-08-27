@@ -10,6 +10,8 @@ use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
 use zebra_network::{Request, Response};
 
+use super::super::sync::SyncStatus;
+
 #[cfg(test)]
 mod tests;
 
@@ -31,6 +33,7 @@ const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// The mempool transaction crawler.
 pub struct Crawler<S> {
     peer_set: Mutex<Timeout<S>>,
+    status: SyncStatus,
 }
 
 impl<S> Crawler<S>
@@ -39,9 +42,10 @@ where
     S::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(peer_set: S) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(peer_set: S, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Mutex::new(Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT)),
+            status,
         };
 
         tokio::spawn(crawler.run())
