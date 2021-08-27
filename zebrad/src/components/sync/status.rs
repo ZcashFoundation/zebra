@@ -2,6 +2,9 @@ use tokio::sync::watch;
 
 use super::RecentSyncLengths;
 
+#[cfg(test)]
+mod tests;
+
 /// A helper type to determine if the synchronizer has likely reached the chain tip.
 ///
 /// This type can be used as a handle, so cloning it is cheap.
