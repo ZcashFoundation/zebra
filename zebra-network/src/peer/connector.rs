@@ -10,6 +10,8 @@ use tokio::net::TcpStream;
 use tower::{discover::Change, Service, ServiceExt};
 use tracing_futures::Instrument;
 
+use zebra_chain::chain_tip::{ChainTip, NoChainTip};
+
 use crate::{BoxError, Request, Response};
 
 use super::{Client, ConnectedAddr, Handshake};
@@ -17,11 +19,11 @@ use super::{Client, ConnectedAddr, Handshake};
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
-pub struct Connector<S> {
-    handshaker: Handshake<S>,
+pub struct Connector<S, C = NoChainTip> {
+    handshaker: Handshake<S, C>,
 }
 
-impl<S: Clone> Clone for Connector<S> {
+impl<S: Clone, C: Clone> Clone for Connector<S, C> {
     fn clone(&self) -> Self {
         Connector {
             handshaker: self.handshaker.clone(),
@@ -29,16 +31,17 @@ impl<S: Clone> Clone for Connector<S> {
     }
 }
 
-impl<S> Connector<S> {
-    pub fn new(handshaker: Handshake<S>) -> Self {
+impl<S, C> Connector<S, C> {
+    pub fn new(handshaker: Handshake<S, C>) -> Self {
         Connector { handshaker }
     }
 }
 
-impl<S> Service<SocketAddr> for Connector<S>
+impl<S, C> Service<SocketAddr> for Connector<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
 {
     type Response = Change<SocketAddr, Client>;
     type Error = BoxError;

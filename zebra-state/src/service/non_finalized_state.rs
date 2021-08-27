@@ -318,6 +318,12 @@ impl NonFinalizedState {
         Some((height, hash))
     }
 
+    /// Returns the block at the tip of the best chain.
+    pub fn best_tip_block(&self) -> Option<Arc<Block>> {
+        let (height, _hash) = self.best_tip()?;
+        self.best_block(height.into())
+    }
+
     /// Returns the height of `hash` in the best chain.
     pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         let best_chain = self.best_chain()?;
