@@ -7,15 +7,18 @@ use std::{
 };
 
 use futures::future::{FutureExt, TryFutureExt};
-
 use tokio::net::TcpStream;
 use tower::{
     util::{BoxService, Oneshot},
     Service,
 };
 
-use crate::{peer, BoxError, Config, Request, Response};
-use peer::ConnectedAddr;
+use zebra_chain::chain_tip::NoChainTip;
+
+use crate::{
+    peer::{self, ConnectedAddr},
+    BoxError, Config, Request, Response,
+};
 
 /// Use the provided TCP connection to create a Zcash connection completely
 /// isolated from all other node state.
@@ -55,6 +58,7 @@ pub fn connect_isolated(
             Ok::<Response, Box<dyn std::error::Error + Send + Sync + 'static>>(Response::Nil)
         }))
         .with_user_agent(user_agent)
+        .with_chain_tip_receiver(NoChainTip)
         .finish()
         .expect("provided mandatory builder parameters");
 
