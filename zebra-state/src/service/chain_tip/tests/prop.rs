@@ -1,47 +1,68 @@
+use std::{env, sync::Arc};
+
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
-use zebra_chain::{block, chain_tip::ChainTip};
+use zebra_chain::{block::Block, chain_tip::ChainTip};
 
 use super::super::ChainTipSender;
 
+const DEFAULT_BLOCK_VEC_PROPTEST_CASES: u32 = 4;
+
 proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_BLOCK_VEC_PROPTEST_CASES))
+    )]
+
+    /// Check that the best tip uses the non-finalized tip if available,
+    /// or otherwise the finalized tip.
     #[test]
-    fn best_tip_is_highest_of_latest_finalized_and_non_finalized_heights(
-        height_updates in any::<Vec<HeightUpdate>>(),
+    fn best_tip_is_latest_non_finalized_then_latest_finalized(
+        tip_updates in any::<Vec<BlockUpdate>>(),
     ) {
-        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new();
+        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(None);
 
-        let mut latest_finalized_height = None;
-        let mut latest_non_finalized_height = None;
+        let mut latest_finalized_tip = None;
+        let mut latest_non_finalized_tip = None;
+        let mut seen_non_finalized_tip = false;
 
-        for update in height_updates {
+        for update in tip_updates {
             match update {
-                HeightUpdate::Finalized(height) => {
-                    chain_tip_sender.set_finalized_height(height);
-                    latest_finalized_height = Some(height);
+                BlockUpdate::Finalized(block) => {
+                    chain_tip_sender.set_finalized_tip(block.clone());
+                    if block.is_some() {
+                        latest_finalized_tip = block;
+                    }
                 }
-                HeightUpdate::NonFinalized(height) => {
-                    chain_tip_sender.set_best_non_finalized_height(height);
-                    latest_non_finalized_height = height;
+                BlockUpdate::NonFinalized(block) => {
+                    chain_tip_sender.set_best_non_finalized_tip(block.clone());
+                    if block.is_some() {
+                        latest_non_finalized_tip = block;
+                        seen_non_finalized_tip = true;
+                    }
                 }
             }
         }
 
-        let expected_height = match (latest_finalized_height, latest_non_finalized_height) {
-            (Some(finalized_height), Some(non_finalized_height)) => {
-                Some(finalized_height.max(non_finalized_height))
-            }
-            (finalized_height, None) => finalized_height,
-            (None, non_finalized_height) => non_finalized_height,
+        let expected_tip = if seen_non_finalized_tip {
+            latest_non_finalized_tip
+        } else {
+            latest_finalized_tip
         };
 
+        let expected_height = expected_tip.as_ref().and_then(|block| block.coinbase_height());
         prop_assert_eq!(chain_tip_receiver.best_tip_height(), expected_height);
+
+        let expected_hash = expected_tip.as_ref().map(|block| block.hash());
+        prop_assert_eq!(chain_tip_receiver.best_tip_hash(), expected_hash);
     }
 }
 
-#[derive(Arbitrary, Clone, Copy, Debug)]
-enum HeightUpdate {
-    Finalized(block::Height),
-    NonFinalized(Option<block::Height>),
+#[derive(Arbitrary, Clone, Debug)]
+enum BlockUpdate {
+    Finalized(Option<Arc<Block>>),
+    NonFinalized(Option<Arc<Block>>),
 }
