@@ -289,7 +289,7 @@ impl NonFinalizedState {
         None
     }
 
-    /// Returns the [`Block`] at a given height or hash in the best chain.
+    /// Returns the [`ContextuallyValidBlock`] at a given height or hash in the best chain.
     pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<ContextuallyValidBlock> {
         let best_chain = self.best_chain()?;
         let height =
