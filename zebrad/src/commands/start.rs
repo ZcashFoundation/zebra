@@ -50,7 +50,7 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let (state_service, best_tip_height) =
+        let (state_service, chain_tip_receiver) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
@@ -78,7 +78,7 @@ impl StartCmd {
             ));
 
         let (peer_set, address_book) =
-            zebra_network::init(config.network.clone(), inbound, Some(best_tip_height)).await;
+            zebra_network::init(config.network.clone(), inbound, chain_tip_receiver).await;
         setup_tx
             .send((peer_set.clone(), address_book))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
