@@ -14,7 +14,7 @@ jobs:
   coverage:
     name: Coverage (+nightly)
     # The large timeout is to accommodate nightly builds
-    timeout-minutes: 45
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2.3.4
@@ -27,8 +27,6 @@ jobs:
           override: true
           profile: minimal
           components: llvm-tools-preview
-
-      - uses: Swatinem/rust-cache@v1
 
       - name: Install cargo-llvm-cov cargo command
         run: cargo install cargo-llvm-cov
