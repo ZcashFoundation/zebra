@@ -12,11 +12,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     TryFutureExt,
 };
-use tokio::{
-    net::TcpListener,
-    sync::{broadcast, watch},
-    time::Instant,
-};
+use tokio::{net::TcpListener, sync::broadcast, time::Instant};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -29,10 +25,10 @@ use crate::{
     BoxError, Config, Request, Response,
 };
 
-use zebra_chain::{block, parameters::Network};
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
-use super::CandidateSet;
-use super::PeerSet;
+use super::{CandidateSet, PeerSet};
+
 use peer::Client;
 
 #[cfg(test)]
@@ -40,7 +36,8 @@ mod tests;
 
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
-/// Initialize a peer set.
+/// Initialize a peer set, using a network `config`, `inbound_service`,
+/// and `chain_tip_receiver`.
 ///
 /// The peer set abstracts away peer management to provide a
 /// [`tower::Service`] representing "the network" that load-balances requests
@@ -57,13 +54,15 @@ type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 /// cause the peer set to shrink when the inbound service is unable to keep up
 /// with the volume of inbound requests.
 ///
+/// Use [`NoChainTip`] to explicitly provide no chain tip receiver.
+///
 /// In addition to returning a service for outbound requests, this method
 /// returns a shared [`AddressBook`] updated with last-seen timestamps for
 /// connected peers.
-pub async fn init<S>(
+pub async fn init<S, C>(
     config: Config,
     inbound_service: S,
-    best_tip_height: Option<watch::Receiver<Option<block::Height>>>,
+    chain_tip_receiver: C,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -71,6 +70,7 @@ pub async fn init<S>(
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + 'static,
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
@@ -92,7 +92,7 @@ where
             .with_timestamp_collector(timestamp_collector)
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
-            .with_best_tip_height(best_tip_height)
+            .with_chain_tip_receiver(chain_tip_receiver)
             .want_transactions(true)
             .finish()
             .expect("configured all required parameters");
