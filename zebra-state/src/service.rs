@@ -195,18 +195,8 @@ impl StateService {
         );
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
-        let best_non_finalized_tip = self.mem.best_tip_block();
-
-        // skip finalized updates if they would be ignored anyway
-        if best_non_finalized_tip.is_some() {
-            self.chain_tip_sender
-                .set_best_non_finalized_tip(best_non_finalized_tip);
-        } else {
-            // TODO: move into the finalized state,
-            //       so we can clone committed `Arc<Block>`s before they get dropped
-            self.chain_tip_sender
-                .set_finalized_tip(self.disk.tip_block());
-        }
+        self.chain_tip_sender
+            .set_best_non_finalized_tip(self.mem.best_tip_block());
 
         tracing::trace!("finished processing queued block");
         rsp_rx
