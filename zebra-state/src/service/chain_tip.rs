@@ -77,6 +77,10 @@ impl ChainTipSender {
     fn update(&mut self, new_tip: impl Into<Option<Arc<Block>>>) {
         let new_tip = new_tip.into();
 
+        if new_tip.is_none() {
+            return;
+        }
+
         if new_tip != self.active_value {
             let _ = self.sender.send(new_tip.clone());
             self.active_value = new_tip;

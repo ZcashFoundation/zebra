@@ -33,7 +33,9 @@ proptest! {
             match update {
                 BlockUpdate::Finalized(block) => {
                     chain_tip_sender.set_finalized_tip(block.clone());
-                    latest_finalized_tip = block;
+                    if block.is_some() {
+                        latest_finalized_tip = block;
+                    }
                 }
                 BlockUpdate::NonFinalized(block) => {
                     chain_tip_sender.set_best_non_finalized_tip(block.clone());
