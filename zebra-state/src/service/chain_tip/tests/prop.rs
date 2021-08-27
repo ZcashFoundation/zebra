@@ -5,6 +5,8 @@ use proptest_derive::Arbitrary;
 
 use zebra_chain::{block::Block, chain_tip::ChainTip};
 
+use crate::{service::chain_tip::ChainTipBlock, FinalizedBlock};
+
 use super::super::ChainTipSender;
 
 const DEFAULT_BLOCK_VEC_PROPTEST_CASES: u32 = 4;
@@ -32,12 +34,14 @@ proptest! {
         for update in tip_updates {
             match update {
                 BlockUpdate::Finalized(block) => {
+                    let block = block.map(FinalizedBlock::from).map(ChainTipBlock::from);
                     chain_tip_sender.set_finalized_tip(block.clone());
                     if block.is_some() {
                         latest_finalized_tip = block;
                     }
                 }
                 BlockUpdate::NonFinalized(block) => {
+                    let block = block.map(FinalizedBlock::from).map(ChainTipBlock::from);
                     chain_tip_sender.set_best_non_finalized_tip(block.clone());
                     if block.is_some() {
                         latest_non_finalized_tip = block;
@@ -53,10 +57,10 @@ proptest! {
             latest_finalized_tip
         };
 
-        let expected_height = expected_tip.as_ref().and_then(|block| block.coinbase_height());
+        let expected_height = expected_tip.as_ref().and_then(|block| block.block.coinbase_height());
         prop_assert_eq!(chain_tip_receiver.best_tip_height(), expected_height);
 
-        let expected_hash = expected_tip.as_ref().map(|block| block.hash());
+        let expected_hash = expected_tip.as_ref().map(|block| block.block.hash());
         prop_assert_eq!(chain_tip_receiver.best_tip_hash(), expected_hash);
     }
 }

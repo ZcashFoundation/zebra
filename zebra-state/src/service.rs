@@ -23,8 +23,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants, request::HashOrHeight, BoxError, CloneError, CommitBlockError, Config,
-    FinalizedBlock, PreparedBlock, Request, Response, ValidateContextError,
+    constants, request::HashOrHeight, service::chain_tip::ChainTipBlock, BoxError, CloneError,
+    CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request, Response,
+    ValidateContextError,
 };
 
 use self::{
@@ -77,7 +78,11 @@ impl StateService {
 
     pub fn new(config: Config, network: Network) -> (Self, ChainTipReceiver) {
         let disk = FinalizedState::new(&config, network);
-        let (chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(disk.tip_block());
+        let initial_tip = disk
+            .tip_block()
+            .map(FinalizedBlock::from)
+            .map(ChainTipBlock::from);
+        let (chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(initial_tip);
 
         let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();
@@ -127,9 +132,11 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        let tip_block = self.disk.queue_and_commit_finalized((finalized, rsp_tx));
-        self.chain_tip_sender
-            .set_finalized_tip(tip_block.map(|finalized| finalized.block));
+        let tip_block = self
+            .disk
+            .queue_and_commit_finalized((finalized, rsp_tx))
+            .map(ChainTipBlock::from);
+        self.chain_tip_sender.set_finalized_tip(tip_block);
 
         rsp_rx
     }
@@ -193,8 +200,8 @@ impl StateService {
         );
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
-        self.chain_tip_sender
-            .set_best_non_finalized_tip(self.mem.best_tip_block());
+        let tip_block = self.mem.best_tip_block().map(ChainTipBlock::from);
+        self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
         tracing::trace!("finished processing queued block");
         rsp_rx
@@ -320,6 +327,7 @@ impl StateService {
     pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         self.mem
             .best_block(hash_or_height)
+            .map(|contextual| contextual.block)
             .or_else(|| self.disk.block(hash_or_height))
     }
 

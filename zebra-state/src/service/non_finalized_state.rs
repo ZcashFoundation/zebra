@@ -289,16 +289,13 @@ impl NonFinalizedState {
         None
     }
 
-    /// Returns the `block` at a given height or hash in the best chain.
-    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+    /// Returns the [`Block`] at a given height or hash in the best chain.
+    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<ContextuallyValidBlock> {
         let best_chain = self.best_chain()?;
         let height =
             hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
 
-        best_chain
-            .blocks
-            .get(&height)
-            .map(|prepared| prepared.block.clone())
+        best_chain.blocks.get(&height).map(Clone::clone)
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
@@ -319,7 +316,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the block at the tip of the best chain.
-    pub fn best_tip_block(&self) -> Option<Arc<Block>> {
+    pub fn best_tip_block(&self) -> Option<ContextuallyValidBlock> {
         let (height, _hash) = self.best_tip()?;
         self.best_block(height.into())
     }
