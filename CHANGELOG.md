@@ -18,13 +18,14 @@ Zebra's latest alpha finishes most of the state work needed for NU5 testnet acti
 
 #### Mempool
 
-- Create initial transaction crawler for the mempool (#2646)
-- Enumerate mempool errors (#2615)
+- Mempool component, storage and errors (#2615, #2651)
+- Create transaction crawler for the mempool (#2646, #2672)
 - Create and use types for unmined transactions and their IDs (#2634, #2666)
 - ZIP-239: Implement mempool transaction v5 data structures and network messages (#2618, #2638)
 - Return a transaction verifier from `zebra_consensus::init` (#2665)
 - Provide recent syncer response lengths as a watch channel (#2602)
 - Derive Copy and Clone for zebra-consensus errors (#2664)
+- ChainTip creation and usage (#2677, #2676)
 
 #### Metrics
 
@@ -32,7 +33,7 @@ Zebra's latest alpha finishes most of the state work needed for NU5 testnet acti
 
 ##### Documentation
 
-- Describe how to import a Grafana dashboard (#2678)
+- Refactor Zebra metrics docs (#2678, #2687)
 
 ### Fixed
 
