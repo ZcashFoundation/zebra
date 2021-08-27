@@ -1,5 +1,7 @@
 use tokio::sync::watch;
 
+use super::RecentSyncLengths;
+
 /// A helper type to determine if the synchronizer has likely reached the chain tip.
 ///
 /// This type can be used as a handle, so cloning it is cheap.
@@ -13,8 +15,11 @@ impl SyncStatus {
     ///
     /// The status is determined based on the latest counts of synchronized blocks, observed
     /// through `latest_sync_length`.
-    pub fn new(latest_sync_length: watch::Receiver<Vec<usize>>) -> Self {
-        SyncStatus { latest_sync_length }
+    pub fn new() -> (Self, RecentSyncLengths) {
+        let (recent_sync_lengths, latest_sync_length) = RecentSyncLengths::new();
+        let status = SyncStatus { latest_sync_length };
+
+        (status, recent_sync_lengths)
     }
 
     /// Wait until the synchronization is likely close to the tip.
