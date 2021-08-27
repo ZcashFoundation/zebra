@@ -1,16 +1,13 @@
 use tokio::sync::watch;
 
-use zebra_chain::block;
+use zebra_chain::{block, chain_tip::ChainTip};
 
 #[cfg(test)]
 mod tests;
 
-/// A helper type to determine the best chain tip block height.
-///
-/// The block height is determined based on the current finalized block height and the current best
-/// non-finalized chain's tip block height. The height is made available from a [`watch::Receiver`].
+/// A sender for recent changes to the non-finalized and finalized chain tips.
 #[derive(Debug)]
-pub struct BestTipHeight {
+pub struct ChainTipSender {
     finalized: Option<block::Height>,
     non_finalized: Option<block::Height>,
     sender: watch::Sender<Option<block::Height>>,
@@ -18,20 +15,19 @@ pub struct BestTipHeight {
     active_value: Option<block::Height>,
 }
 
-impl BestTipHeight {
-    /// Create a new instance of [`BestTipHeight`] and the [`watch::Receiver`] endpoint for the
-    /// current best tip block height.
-    pub fn new() -> (Self, watch::Receiver<Option<block::Height>>) {
+impl ChainTipSender {
+    /// Create new linked instances of [`ChainTipSender`] and [`ChainTipReceiver`].
+    pub fn new() -> (Self, ChainTipReceiver) {
         let (sender, receiver) = watch::channel(None);
 
         (
-            BestTipHeight {
+            ChainTipSender {
                 finalized: None,
                 non_finalized: None,
                 sender,
                 active_value: None,
             },
-            receiver,
+            ChainTipReceiver::new(receiver),
         )
     }
 
@@ -66,5 +62,31 @@ impl BestTipHeight {
             let _ = self.sender.send(new_value);
             self.active_value = new_value;
         }
+    }
+}
+
+/// A receiver for recent changes to the non-finalized and finalized chain tips.
+///
+/// The latest changes are available from all cloned instances of this type.
+#[derive(Clone, Debug)]
+pub struct ChainTipReceiver {
+    receiver: watch::Receiver<Option<block::Height>>,
+}
+
+impl ChainTipReceiver {
+    /// Create a new chain tip receiver from a watch channel receiver.
+    fn new(receiver: watch::Receiver<Option<block::Height>>) -> Self {
+        Self { receiver }
+    }
+}
+
+impl ChainTip for ChainTipReceiver {
+    /// Return the height of the best chain tip.
+    ///
+    /// The returned block height comes from:
+    /// * the best non-finalized chain tip, if available, or
+    /// * the finalized tip.
+    fn best_tip_height(&self) -> Option<block::Height> {
+        *self.receiver.borrow()
     }
 }
