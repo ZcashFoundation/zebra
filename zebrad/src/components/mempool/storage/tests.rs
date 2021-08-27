@@ -35,17 +35,16 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     assert_eq!(storage.rejected.len(), total_transactions - MEMPOOL_SIZE);
 
     // Make sure the last MEMPOOL_SIZE transactions we sent are in the verified
-    for count in 1..MEMPOOL_SIZE {
-        assert!(storage
-            .clone()
-            .contains(&unmined_transactions[total_transactions - count].id));
+    for tx in unmined_transactions.iter().rev().take(MEMPOOL_SIZE) {
+        assert!(storage.clone().contains(&tx.id));
     }
 
     // Anything greater should not be in the verified
-    for count in MEMPOOL_SIZE + 1..total_transactions {
-        assert!(!storage
-            .clone()
-            .contains(&unmined_transactions[total_transactions - count].id));
+    for tx in unmined_transactions
+        .iter()
+        .take(unmined_transactions.len() - MEMPOOL_SIZE)
+    {
+        assert!(!storage.clone().contains(&tx.id));
     }
 
     Ok(())
