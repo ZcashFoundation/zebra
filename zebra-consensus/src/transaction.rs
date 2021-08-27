@@ -168,11 +168,6 @@ where
 
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
-        if req.is_mempool() {
-            // XXX determine exactly which rules apply to mempool transactions
-            unimplemented!("Zebra does not yet have a mempool (#2309)");
-        }
-
         let script_verifier = self.script_verifier.clone();
         let network = self.network;
 
@@ -187,7 +182,11 @@ where
             check::has_inputs_and_outputs(&tx)?;
 
             if tx.is_coinbase() {
-                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+                if req.is_mempool() {
+                    return Err(TransactionError::CoinbaseInMempool);
+                } else {
+                    check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+                }
             }
 
             // [Canopy onward]: `vpub_old` MUST be zero.

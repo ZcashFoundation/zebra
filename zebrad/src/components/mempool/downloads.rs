@@ -4,6 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use color_eyre::eyre::eyre;
 use futures::{
     future::TryFutureExt,
     ready,
@@ -14,9 +15,10 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::{block::Height, transaction::UnminedTxId};
+use zebra_chain::transaction::UnminedTxId;
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
+use zebra_state as zs;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -30,16 +32,16 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// We use a small concurrency limit, to prevent memory denial-of-service
 /// attacks.
 ///
-/// The maximum block size is 2 million bytes. A deserialized malicious
-/// block with ~225_000 transparent outputs can take up 9MB of RAM. As of
+/// The maximum transaction size is 2 million bytes. A deserialized malicious
+/// transaction with ~225_000 transparent outputs can take up 9MB of RAM. As of
 /// February 2021, a growing `Vec` can allocate up to 2x its current length,
-/// leading to an overall memory usage of 18MB per malicious block. (See
+/// leading to an overall memory usage of 18MB per malicious transaction. (See
 /// #1880 for more details.)
 ///
-/// Malicious blocks will eventually timeout or fail contextual validation.
+/// Malicious transactions will eventually timeout or fail contextual validation.
 /// Once validation fails, the block is dropped, and its memory is deallocated.
 ///
-/// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
+/// Since Zebra keeps an `inv` index, inbound downloads for malicious transactions
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
 const MAX_INBOUND_CONCURRENCY: usize = 10;
@@ -64,12 +66,14 @@ pub enum DownloadAction {
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV>
+pub struct Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
 {
     // Services
     /// A service that forwards requests to connected peers, and returns their
@@ -78,6 +82,9 @@ where
 
     /// A service that verifies downloaded transactions.
     verifier: ZV,
+
+    /// A service that manages cached blockchain state.
+    state: ZS,
 
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
@@ -89,12 +96,14 @@ where
     cancel_handles: HashMap<UnminedTxId, oneshot::Sender<()>>,
 }
 
-impl<ZN, ZV> Stream for Downloads<ZN, ZV>
+impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
 {
     type Item = Result<UnminedTxId, BoxError>;
 
@@ -131,12 +140,14 @@ where
     }
 }
 
-impl<ZN, ZV> Downloads<ZN, ZV>
+impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
 {
     /// Initialize a new download stream with the provided `network` and
     /// `verifier` services.
@@ -144,10 +155,11 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV) -> Self {
+    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
         Self {
             network,
             verifier,
+            state,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
         }
@@ -183,6 +195,7 @@ where
 
         let network = self.network.clone();
         let verifier = self.verifier.clone();
+        let state = self.state.clone();
 
         let fut = async move {
             // TODO: adapt this for transaction / mempool
@@ -195,6 +208,14 @@ where
             //     Ok(_) => unreachable!("wrong response"),
             //     Err(e) => Err(e),
             // }?;
+
+            let height = match state.oneshot(zs::Request::Tip).await {
+                Ok(zs::Response::Tip(None)) => Err("no block at the tip".into()),
+                Ok(zs::Response::Tip(Some((height, _hash)))) => Ok(height),
+                Ok(_) => unreachable!("wrong response"),
+                Err(e) => Err(e),
+            }?;
+            let height = (height + 1).ok_or_else(|| eyre!("no next height"))?;
 
             let tx = if let zn::Response::Transactions(txs) = network
                 .oneshot(zn::Request::TransactionsById(
@@ -210,13 +231,16 @@ where
             };
             metrics::counter!("gossip.downloaded.transaction.count", 1);
 
-            verifier
+            let result = verifier
                 .oneshot(tx::Request::Mempool {
                     transaction: tx,
-                    // TODO: pass correct height
-                    height: Height(0),
+                    height,
                 })
-                .await
+                .await;
+
+            tracing::debug!(?txid, ?result, "verified transaction for the mempool");
+
+            result
         }
         .map_ok(|hash| {
             metrics::counter!("gossip.verified.transaction.count", 1);

@@ -41,6 +41,9 @@ pub enum TransactionError {
     #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
     CoinbaseHasEnableSpendsOrchard,
 
+    #[error("coinbase transaction MUST NOT exist in mempool")]
+    CoinbaseInMempool,
+
     #[error("coinbase transaction failed subsidy validation")]
     Subsidy(#[from] SubsidyError),
 

@@ -21,6 +21,8 @@ use zebra_consensus::transaction;
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError};
 use zebra_network::AddressBook;
 
+use crate::components::sync::{TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT};
+
 // Re-use the syncer timeouts for consistency.
 use super::mempool::downloads::Downloads as TxDownloads;
 use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
@@ -36,7 +38,7 @@ type TxVerifier = Buffer<
     transaction::Request,
 >;
 type InboundDownloads = Downloads<Timeout<Outbound>, Timeout<Verifier>, State>;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>);
 
@@ -179,8 +181,9 @@ impl Service<zn::Request> for Inbound {
                         self.state.clone(),
                     ));
                     let tx_downloads = Box::pin(TxDownloads::new(
-                        Timeout::new(outbound, BLOCK_DOWNLOAD_TIMEOUT),
-                        Timeout::new(tx_verifier, BLOCK_VERIFY_TIMEOUT),
+                        Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
+                        Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
+                        self.state.clone(),
                     ));
                     result = Ok(());
                     Setup::Initialized {
@@ -340,9 +343,18 @@ impl Service<zn::Request> for Inbound {
                 // TODO: send to Tx Download & Verify Stream
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            zn::Request::AdvertiseTransactionIds(_transactions) => {
-                debug!("ignoring unimplemented request");
-                // TODO: send to Tx Download & Verify Stream
+            zn::Request::AdvertiseTransactionIds(transactions) => {
+                if let Setup::Initialized { tx_downloads, .. } = &mut self.network_setup {
+                    // TODO: check if we're close to the tip before proceeding?
+                    // what do we do if it's not?
+                    for txid in transactions {
+                        tx_downloads.download_and_verify(txid);
+                    }
+                } else {
+                    info!(
+                        "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
+                    );
+                }
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {

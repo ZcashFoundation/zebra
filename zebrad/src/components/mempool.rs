@@ -18,9 +18,9 @@ use zebra_chain::{
 use crate::BoxError;
 
 mod crawler;
+pub mod downloads;
 mod error;
 mod storage;
-pub mod downloads;
 
 #[cfg(test)]
 mod tests;
