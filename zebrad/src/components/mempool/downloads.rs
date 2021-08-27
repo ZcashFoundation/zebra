@@ -4,7 +4,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use color_eyre::eyre::{eyre, Report};
 use futures::{
     future::TryFutureExt,
     ready,
@@ -12,7 +11,7 @@ use futures::{
 };
 use pin_project::pin_project;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{hedge, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{block::Height, transaction::UnminedTxId};
@@ -21,16 +20,45 @@ use zebra_network as zn;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct AlwaysHedge;
+/// The maximum number of concurrent inbound download and verify tasks.
+///
+/// We expect the syncer to download and verify checkpoints, so this bound
+/// can be small.
+///
+/// ## Security
+///
+/// We use a small concurrency limit, to prevent memory denial-of-service
+/// attacks.
+///
+/// The maximum block size is 2 million bytes. A deserialized malicious
+/// block with ~225_000 transparent outputs can take up 9MB of RAM. As of
+/// February 2021, a growing `Vec` can allocate up to 2x its current length,
+/// leading to an overall memory usage of 18MB per malicious block. (See
+/// #1880 for more details.)
+///
+/// Malicious blocks will eventually timeout or fail contextual validation.
+/// Once validation fails, the block is dropped, and its memory is deallocated.
+///
+/// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
+/// will be directed to the malicious node that originally gossiped the hash.
+/// Therefore, this attack can be carried out by a single malicious node.
+const MAX_INBOUND_CONCURRENCY: usize = 10;
 
-impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
-    fn can_retry(&self, _req: &Request) -> bool {
-        true
-    }
-    fn clone_request(&self, req: &Request) -> Option<Request> {
-        Some(req.clone())
-    }
+/// The action taken in response to a peer's gossiped transaction hash.
+pub enum DownloadAction {
+    /// The transaction hash was successfully queued for download and verification.
+    AddedToQueue,
+
+    /// The transaction hash is already queued, so this request was ignored.
+    ///
+    /// Another peer has already gossiped the same hash to us.
+    AlreadyQueued,
+
+    /// The queue is at capacity, so this request was ignored.
+    ///
+    /// The sync service should discover this transaction later, when we are closer
+    /// to the tip. The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
+    FullQueue,
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
@@ -127,80 +155,90 @@ where
 
     /// Queue a transaction for download and verification.
     ///
-    /// This method waits for the network to become ready, and returns an error
-    /// only if the network service fails. It returns immediately after queuing
-    /// the request.
+    /// Returns the action taken in response to the queue request.
     #[instrument(skip(self, txid), fields(txid = %txid))]
-    pub async fn download_and_verify(&mut self, txid: UnminedTxId) -> Result<(), Report> {
+    pub fn download_and_verify(&mut self, txid: UnminedTxId) -> DownloadAction {
         if self.cancel_handles.contains_key(&txid) {
-            return Err(eyre!("duplicate txid queued for download: {:?}", txid));
+            tracing::debug!(
+                ?txid,
+                queue_len = self.pending.len(),
+                ?MAX_INBOUND_CONCURRENCY,
+                "transaction id already queued for inbound download: ignored transaction"
+            );
+            return DownloadAction::AlreadyQueued;
         }
 
-        // We construct the transaction requests sequentially, waiting for the peer
-        // set to be ready to process each request. This ensures that we start
-        // transaction downloads in the order we want them (though they may resolve
-        // out of order), and it means that we respect backpressure. Otherwise,
-        // if we waited for readiness and did the service call in the spawned
-        // tasks, all of the spawned tasks would race each other waiting for the
-        // network to become ready.
-        tracing::debug!("waiting to request transaction");
-        let tx_req = self.network.ready_and().await.map_err(|e| eyre!(e))?.call(
-            zn::Request::TransactionsById(std::iter::once(txid).collect()),
-        );
-        tracing::debug!("requested transaction");
+        if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
+            tracing::info!(
+                ?txid,
+                queue_len = self.pending.len(),
+                ?MAX_INBOUND_CONCURRENCY,
+                "too many transactions queued for inbound download: ignored transaction"
+            );
+            return DownloadAction::FullQueue;
+        }
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
-        let mut verifier = self.verifier.clone();
-        let task = tokio::spawn(
-            async move {
-                // TODO: if the verifier and cancel are both ready, which should
-                //       we prefer? (Currently, select! chooses one at random.)
-                let rsp = tokio::select! {
-                    _ = &mut cancel_rx => {
-                        tracing::trace!("task cancelled prior to download completion");
-                        metrics::counter!("mempool.cancelled.transaction.count", 1);
-                        return Err("canceled trasaction download".into())
-                    }
-                    rsp = tx_req => rsp?,
-                };
+        let network = self.network.clone();
+        let verifier = self.verifier.clone();
 
-                let tx = if let zn::Response::Transactions(txs) = rsp {
-                    txs.into_iter()
-                        .next()
-                        .expect("successful response has the transaction in it")
-                } else {
-                    unreachable!("wrong response to transaction request");
-                };
-                metrics::counter!("mempoool.downloaded.transaction.count", 1);
+        let fut = async move {
+            // TODO: adapt this for transaction / mempool
+            // // Check if the block is already in the state.
+            // // BUG: check if the hash is in any chain (#862).
+            // // Depth only checks the main chain.
+            // match state.oneshot(zs::Request::Depth(hash)).await {
+            //     Ok(zs::Response::Depth(None)) => Ok(()),
+            //     Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
+            //     Ok(_) => unreachable!("wrong response"),
+            //     Err(e) => Err(e),
+            // }?;
 
-                let rsp = verifier.ready_and().await?.call(tx::Request::Mempool {
+            let tx = if let zn::Response::Transactions(txs) = network
+                .oneshot(zn::Request::TransactionsById(
+                    std::iter::once(txid).collect(),
+                ))
+                .await?
+            {
+                txs.into_iter()
+                    .next()
+                    .expect("successful response has the transaction in it")
+            } else {
+                unreachable!("wrong response to transaction request");
+            };
+            metrics::counter!("gossip.downloaded.transaction.count", 1);
+
+            verifier
+                .oneshot(tx::Request::Mempool {
                     transaction: tx,
-                    // TODO: which height to use?
+                    // TODO: pass correct height
                     height: Height(0),
-                });
-                // TODO: if the verifier and cancel are both ready, which should
-                //       we prefer? (Currently, select! chooses one at random.)
-                let verification = tokio::select! {
-                    _ = &mut cancel_rx => {
-                        tracing::trace!("task cancelled prior to verification");
-                        metrics::counter!("mempool.cancelled.verify.count", 1);
-                        return Err("canceled transaction verification".into())
-                    }
-                    verification = rsp => verification,
-                };
-                if verification.is_ok() {
-                    metrics::counter!("mempool.verified.transaction.count", 1);
-                }
+                })
+                .await
+        }
+        .map_ok(|hash| {
+            metrics::counter!("gossip.verified.transaction.count", 1);
+            hash
+        })
+        // Tack the hash onto the error so we can remove the cancel handle
+        // on failure as well as on success.
+        .map_err(move |e| (e, txid))
+        .in_current_span();
 
-                verification
+        let task = tokio::spawn(async move {
+            // TODO: if the verifier and cancel are both ready, which should we
+            //       prefer? (Currently, select! chooses one at random.)
+            tokio::select! {
+                _ = &mut cancel_rx => {
+                    tracing::trace!("task cancelled prior to completion");
+                    metrics::counter!("gossip.cancelled.count", 1);
+                    Err(("canceled".into(), txid))
+                }
+                verification = fut => verification,
             }
-            .in_current_span()
-            // Tack the hash onto the error so we can remove the cancel handle
-            // on failure as well as on success.
-            .map_err(move |e| (e, txid)),
-        );
+        });
 
         self.pending.push(task);
         // XXX replace with expect_none when stable
@@ -209,25 +247,14 @@ where
             "transactions are only queued once"
         );
 
-        Ok(())
-    }
+        tracing::debug!(
+            ?txid,
+            queue_len = self.pending.len(),
+            ?MAX_INBOUND_CONCURRENCY,
+            "queued transaction hash for download"
+        );
+        metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
 
-    /// Cancel all running tasks and reset the downloader state.
-    pub fn cancel_all(&mut self) {
-        // Replace the pending task list with an empty one and drop it.
-        let _ = std::mem::take(&mut self.pending);
-        // Signal cancellation to all running tasks.
-        // Since we already dropped the JoinHandles above, they should
-        // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
-            let _ = cancel.send(());
-        }
-        assert!(self.pending.is_empty());
-        assert!(self.cancel_handles.is_empty());
-    }
-
-    /// Get the number of currently in-flight download tasks.
-    pub fn in_flight(&self) -> usize {
-        self.pending.len()
+        DownloadAction::AddedToQueue
     }
 }
