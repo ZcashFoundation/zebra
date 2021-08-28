@@ -1,3 +1,6 @@
+// TODO: Remove this attribute once this type is used (#2603).
+#![allow(dead_code)]
+
 use tokio::sync::watch;
 
 use super::RecentSyncLengths;
