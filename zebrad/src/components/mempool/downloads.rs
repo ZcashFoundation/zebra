@@ -24,7 +24,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The maximum number of concurrent inbound download and verify tasks.
 ///
-/// We expect the syncer to download and verify checkpoints, so this bound
+/// We expect the mempool crawler to download and verify most mempool transactions, so this bound
 /// can be small.
 ///
 /// ## Security
@@ -33,13 +33,11 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// attacks.
 ///
 /// The maximum transaction size is 2 million bytes. A deserialized malicious
-/// transaction with ~225_000 transparent outputs can take up 9MB of RAM. As of
-/// February 2021, a growing `Vec` can allocate up to 2x its current length,
-/// leading to an overall memory usage of 18MB per malicious transaction. (See
-/// #1880 for more details.)
+/// transaction with ~225_000 transparent outputs can take up 9MB of RAM.
+/// (See #1880 for more details.)
 ///
-/// Malicious transactions will eventually timeout or fail contextual validation.
-/// Once validation fails, the block is dropped, and its memory is deallocated.
+/// Malicious transactions will eventually timeout or fail validation.
+/// Once validation fails, the transaction is dropped, and its memory is deallocated.
 ///
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious transactions
 /// will be directed to the malicious node that originally gossiped the hash.
@@ -53,13 +51,15 @@ pub enum DownloadAction {
 
     /// The transaction hash is already queued, so this request was ignored.
     ///
-    /// Another peer has already gossiped the same hash to us.
+    /// Another peer has already gossiped the same hash to us, or the mempool crawler has fetched it.
     AlreadyQueued,
 
     /// The queue is at capacity, so this request was ignored.
     ///
-    /// The sync service should discover this transaction later, when we are closer
-    /// to the tip. The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
+    /// The mempool crawler should discover this transaction later.
+    /// If it is mined into a block, it will be downloaded by the syncer, or the inbound block downloader.
+    ///
+    /// The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
     FullQueue,
 }
 
@@ -265,7 +265,6 @@ where
         });
 
         self.pending.push(task);
-        // XXX replace with expect_none when stable
         assert!(
             self.cancel_handles.insert(txid, cancel_tx).is_none(),
             "transactions are only queued once"
