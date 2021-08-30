@@ -2,11 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use zebra_chain::{
-    block::{self, Block},
-    chain_tip::ChainTip,
-    transaction,
-};
+use zebra_chain::{block, chain_tip::ChainTip, transaction};
 
 use crate::{request::ContextuallyValidBlock, FinalizedBlock};
 
@@ -21,7 +17,6 @@ type ChainTipData = Option<ChainTipBlock>;
 /// Used to efficiently update the [`ChainTipSender`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainTipBlock {
-    pub(crate) block: Arc<Block>,
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
 
@@ -33,7 +28,7 @@ pub struct ChainTipBlock {
 impl From<ContextuallyValidBlock> for ChainTipBlock {
     fn from(contextually_valid: ContextuallyValidBlock) -> Self {
         let ContextuallyValidBlock {
-            block,
+            block: _,
             hash,
             height,
             new_outputs: _,
@@ -41,7 +36,6 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             chain_value_pool_change: _,
         } = contextually_valid;
         Self {
-            block,
             hash,
             height,
             transaction_hashes,
@@ -52,14 +46,13 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
 impl From<FinalizedBlock> for ChainTipBlock {
     fn from(finalized: FinalizedBlock) -> Self {
         let FinalizedBlock {
-            block,
+            block: _,
             hash,
             height,
             new_outputs: _,
             transaction_hashes,
         } = finalized;
         Self {
-            block,
             hash,
             height,
             transaction_hashes,
