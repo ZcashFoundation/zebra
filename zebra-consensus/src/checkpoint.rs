@@ -32,7 +32,7 @@ use zebra_chain::{
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     work::equihash,
 };
-use zebra_state as zs;
+use zebra_state::{self as zs, FinalizedBlock};
 
 use crate::{block::VerifyBlockError, error::BlockError, BoxError};
 
@@ -49,10 +49,8 @@ use types::{TargetHeight, TargetHeight::*};
 /// An unverified block, which is in the queue for checkpoint verification.
 #[derive(Debug)]
 struct QueuedBlock {
-    /// The block data.
-    block: Arc<Block>,
-    /// `block`'s cached header hash.
-    hash: block::Hash,
+    /// The block, with additional precalculated data.
+    block: FinalizedBlock,
     /// The transmitting end of the oneshot channel for this block's result.
     tx: oneshot::Sender<Result<block::Hash, VerifyCheckpointError>>,
 }
@@ -467,6 +465,8 @@ where
 
     /// Check that the block height, proof of work, and Merkle root are valid.
     ///
+    /// Returns a [`FinalizedBlock`] with precalculated block data.
+    ///
     /// ## Security
     ///
     /// Checking the proof of work makes resource exhaustion attacks harder to
@@ -475,7 +475,7 @@ where
     /// Checking the Merkle root ensures that the block hash binds the block
     /// contents. To prevent malleability (CVE-2012-2459), we also need to check
     /// whether the transaction hashes are unique.
-    fn check_block(&self, block: &Block) -> Result<block::Height, VerifyCheckpointError> {
+    fn check_block(&self, block: Arc<Block>) -> Result<FinalizedBlock, VerifyCheckpointError> {
         let hash = block.hash();
         let height = block
             .coinbase_height()
@@ -485,40 +485,46 @@ where
         crate::block::check::difficulty_is_valid(&block.header, self.network, &height, &hash)?;
         crate::block::check::equihash_solution_is_valid(&block.header)?;
 
-        let transaction_hashes = block
-            .transactions
-            .iter()
-            .map(|tx| tx.hash())
-            .collect::<Vec<_>>();
+        // don't do precalculation until the block passes basic difficulty checks
+        let block = FinalizedBlock::with_hash_and_height(block, hash, height);
 
-        crate::block::check::merkle_root_validity(self.network, block, &transaction_hashes)?;
+        crate::block::check::merkle_root_validity(
+            self.network,
+            &block.block,
+            &block.transaction_hashes,
+        )?;
 
-        Ok(height)
+        Ok(block)
     }
 
-    /// Queue `block` for verification, and return the `Receiver` for the
-    /// block's verification result.
+    /// Queue `block` for verification.
+    ///
+    /// Returns precalculated data for the block,
+    /// and the `Receiver` for the block's verification result.
     ///
     /// Verification will finish when the chain to the next checkpoint is
     /// complete, and the caller will be notified via the channel.
     ///
-    /// If the block does not have a coinbase height, sends an error on `tx`,
-    /// and does not queue the block.
+    /// If the block does not pass basic validity checks,
+    /// returns an error immediately.
     fn queue_block(
         &mut self,
         block: Arc<Block>,
-    ) -> oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>> {
+    ) -> Result<
+        (
+            FinalizedBlock,
+            oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>>,
+        ),
+        VerifyCheckpointError,
+    > {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
         // Check that the height and Merkle roots are valid.
-        let height = match self.check_block(&block) {
-            Ok(height) => height,
-            Err(error) => {
-                tx.send(Err(error)).expect("rx has not been dropped yet");
-                return rx;
-            }
-        };
+        let block = self.check_block(block)?;
+
+        let height = block.height;
+        let hash = block.hash;
 
         // Since we're using Arc<Block>, each entry is a single pointer to the
         // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
@@ -528,16 +534,14 @@ where
             .entry(height)
             .or_insert_with(|| QueuedBlockList::with_capacity(1));
 
-        let hash = block.hash();
-
         // Replace older requests by newer ones by swapping the oneshot.
         for qb in qblocks.iter_mut() {
-            if qb.hash == hash {
+            if qb.block.hash == hash {
                 let e = VerifyCheckpointError::NewerRequest { height, hash };
                 tracing::trace!(?e, "failing older of duplicate requests");
                 let old_tx = std::mem::replace(&mut qb.tx, tx);
                 let _ = old_tx.send(Err(e));
-                return rx;
+                return Ok((block, rx));
             }
         }
 
@@ -546,11 +550,14 @@ where
             let e = VerifyCheckpointError::QueuedLimit;
             tracing::warn!(?e);
             let _ = tx.send(Err(e));
-            return rx;
+            return Ok((block, rx));
         }
 
         // Add the block to the list of queued blocks at this height
-        let new_qblock = QueuedBlock { block, hash, tx };
+        let new_qblock = QueuedBlock {
+            block: block.clone(),
+            tx,
+        };
         // This is a no-op for the first block in each QueuedBlockList.
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
@@ -567,7 +574,7 @@ where
         let is_checkpoint = self.checkpoint_list.contains(height);
         tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
 
-        rx
+        Ok((block, rx))
     }
 
     /// During checkpoint range processing, process all the blocks at `height`.
@@ -606,21 +613,21 @@ where
         // If there are any side-chain blocks, they fail validation.
         let mut valid_qblock = None;
         for qblock in qblocks.drain(..) {
-            if qblock.hash == expected_hash {
+            if qblock.block.hash == expected_hash {
                 if valid_qblock.is_none() {
                     // The first valid block at the current height
                     valid_qblock = Some(qblock);
                 } else {
                     unreachable!("unexpected duplicate block {:?} {:?}: duplicate blocks should be rejected before being queued",
-                                 height, qblock.hash);
+                                 height, qblock.block.hash);
                 }
             } else {
-                tracing::info!(?height, ?qblock.hash, ?expected_hash,
+                tracing::info!(?height, ?qblock.block.hash, ?expected_hash,
                                "Side chain hash at height in CheckpointVerifier");
                 let _ = qblock
                     .tx
                     .send(Err(VerifyCheckpointError::UnexpectedSideChain {
-                        found: qblock.hash,
+                        found: qblock.block.hash,
                         expected: expected_hash,
                     }));
             }
@@ -693,7 +700,7 @@ where
         for current_height in range_heights {
             let valid_qblock = self.process_height(current_height, expected_hash);
             if let Some(qblock) = valid_qblock {
-                expected_hash = qblock.block.header.previous_block_hash;
+                expected_hash = qblock.block.block.header.previous_block_hash;
                 // Add the block to the end of the pending block list
                 // (since we're walking the chain backwards, the list is
                 // in reverse chain order)
@@ -714,11 +721,10 @@ where
                 // The order here shouldn't matter, but add the blocks in
                 // height order, for consistency.
                 for vblock in rev_valid_blocks.drain(..).rev() {
-                    let height = vblock
-                        .block
-                        .coinbase_height()
-                        .expect("queued blocks have a block height");
-                    self.queued.entry(height).or_default().push(vblock);
+                    self.queued
+                        .entry(vblock.block.height)
+                        .or_default()
+                        .push(vblock);
                 }
 
                 // Make sure the current progress hasn't changed
@@ -757,7 +763,7 @@ where
         // in height order.
         for qblock in rev_valid_blocks.drain(..).rev() {
             // Sending can fail, but there's nothing we can do about it.
-            let _ = qblock.tx.send(Ok(qblock.hash));
+            let _ = qblock.tx.send(Ok(qblock.block.hash));
         }
 
         // Finally, update the checkpoint bounds
@@ -916,7 +922,11 @@ where
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
-        let rx = self.queue_block(block.clone());
+        let (block, rx) = match self.queue_block(block) {
+            Ok((block, rx)) => (block, rx),
+            Err(e) => return async { Err(e) }.boxed(),
+        };
+
         self.process_checkpoint_range();
 
         metrics::gauge!("checkpoint.queued_slots", self.queued.len() as f64);
@@ -929,6 +939,8 @@ where
         // verifier to reject blocks not already in the state as
         // already-verified.
         //
+        // # Dropped Receivers
+        //
         // To commit blocks transactionally on a per-checkpoint basis, we must
         // commit all verified blocks in a checkpoint range, regardless of
         // whether or not the response futures for each block were dropped.
@@ -937,6 +949,12 @@ where
         // commit-if-verified logic. This task will always execute, except if
         // the program is interrupted, in which case there is no longer a
         // checkpoint verifier to keep in sync with the state.
+        //
+        // # State Commit Failures
+        //
+        // If the state commit fails due to corrupt block data,
+        // we don't reject the entire checkpoint.
+        // Instead, we reset the verifier to the successfully committed state tip.
         let state_service = self.state_service.clone();
         let commit_finalized_block = tokio::spawn(async move {
             let hash = rx
@@ -948,7 +966,7 @@ where
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .oneshot(zs::Request::CommitFinalizedBlock(block.into()))
+                .oneshot(zs::Request::CommitFinalizedBlock(block))
                 .map_err(VerifyCheckpointError::CommitFinalized)
                 .await?
             {
