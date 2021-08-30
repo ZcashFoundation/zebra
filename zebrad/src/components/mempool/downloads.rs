@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use color_eyre::eyre::eyre;
@@ -20,7 +21,25 @@ use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
 
+use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Controls how long we wait for a transaction download request to complete.
+///
+/// This is currently equal to [`crate::components::sync::BLOCK_DOWNLOAD_TIMEOUT`] for
+/// consistency, even though parts of the rationale used for defining the value
+/// don't apply here (e.g. we can drop transactions hashes when the queue is full).
+pub(crate) const TRANSACTION_DOWNLOAD_TIMEOUT: Duration = BLOCK_DOWNLOAD_TIMEOUT;
+
+/// Controls how long we wait for a transaction verify request to complete.
+///
+/// This is currently equal to [`crate::components::sync::BLOCK_VERIFY_TIMEOUT`] for
+/// consistency.
+///
+/// This timeout may lead to denial of service, which will be handled in
+/// https://github.com/ZcashFoundation/zebra/issues/2694
+pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 
 /// The maximum number of concurrent inbound download and verify tasks.
 ///

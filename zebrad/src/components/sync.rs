@@ -116,14 +116,6 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 /// failure loop.
 pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Controls how long we wait for a transaction download request to complete.
-/// TODO: review value and rationale
-pub(super) const TRANSACTION_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Controls how long we wait for a transaction verify request to complete.
-/// TODO: review value and rationale
-pub(super) const TRANSACTION_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
-
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
 /// This delay should be long enough to:
