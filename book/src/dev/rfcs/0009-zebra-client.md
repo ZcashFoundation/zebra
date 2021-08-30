@@ -308,7 +308,7 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
     - generate unified address from a new seed phrase (or one provided by the user)
     - user can just backup seed phrase rather than a set of private keys
     - handles arbitrary keys from `zcashd` and other wallets, even if they weren't generated from a seed phrase
-    - handles Sprout funds without `zebra-client` having to support Sprout balances
+    - ~handles Sprout funds without `zebra-client` having to support Sprout balances~
     - startup is incredibly fast
         - sweep takes a few minutes to be confirmed
         - scanning the entire chain could take hours
@@ -334,6 +334,8 @@ Protocol, or something similar?
 - authenticate queries for a particular viewing key by proving knowledge of the
 viewing key (requires crypto). this could allow public access to the client
 endpoint
+
+- Use Unified Addresses only, no legacy addrs.
 
 <!-- Think about what the natural extension and evolution of your proposal would -->
 <!-- be and how it would affect Zebra and Zcash as a whole. Try to use this -->
