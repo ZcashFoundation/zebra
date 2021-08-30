@@ -155,11 +155,8 @@ where
             // the header binds to the transactions in the blocks.
 
             // Precomputing this avoids duplicating transaction hash computations.
-            let transaction_hashes = block
-                .transactions
-                .iter()
-                .map(|t| t.hash())
-                .collect::<Vec<_>>();
+            let transaction_hashes: Arc<[_]> =
+                block.transactions.iter().map(|t| t.hash()).collect();
 
             check::merkle_root_validity(network, &block, &transaction_hashes)?;
 
