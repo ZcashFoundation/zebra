@@ -117,8 +117,7 @@ where
         // If no download and verify tasks have exited since the last poll, this
         // task is scheduled for wakeup when the next task becomes ready.
         //
-        // TODO:
-        // This would be cleaner with poll_map #63514, but that's nightly only.
+        // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("transaction download and verify tasks must not panic") {
                 Ok(hash) => {
