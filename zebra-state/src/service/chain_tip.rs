@@ -2,11 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use zebra_chain::{
-    block::{self, Block},
-    chain_tip::ChainTip,
-    transaction,
-};
+use zebra_chain::{block, chain_tip::ChainTip, transaction};
 
 use crate::{request::ContextuallyValidBlock, FinalizedBlock};
 
@@ -21,19 +17,18 @@ type ChainTipData = Option<ChainTipBlock>;
 /// Used to efficiently update the [`ChainTipSender`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainTipBlock {
-    pub(crate) block: Arc<Block>,
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
 
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
-    pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {
     fn from(contextually_valid: ContextuallyValidBlock) -> Self {
         let ContextuallyValidBlock {
-            block,
+            block: _,
             hash,
             height,
             new_outputs: _,
@@ -41,7 +36,6 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             chain_value_pool_change: _,
         } = contextually_valid;
         Self {
-            block,
             hash,
             height,
             transaction_hashes,
@@ -52,14 +46,13 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
 impl From<FinalizedBlock> for ChainTipBlock {
     fn from(finalized: FinalizedBlock) -> Self {
         let FinalizedBlock {
-            block,
+            block: _,
             hash,
             height,
             new_outputs: _,
             transaction_hashes,
         } = finalized;
         Self {
-            block,
             hash,
             height,
             transaction_hashes,
@@ -180,11 +173,11 @@ impl ChainTip for ChainTipReceiver {
     ///
     /// All transactions with these mined IDs should be rejected from the mempool,
     /// even if their authorizing data is different.
-    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash> {
+    fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.receiver
             .borrow()
             .as_ref()
             .map(|block| block.transaction_hashes.clone())
-            .unwrap_or_default()
+            .unwrap_or_else(|| Arc::new([]))
     }
 }
