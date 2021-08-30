@@ -32,10 +32,8 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// attacks.
 ///
 /// The maximum block size is 2 million bytes. A deserialized malicious
-/// block with ~225_000 transparent outputs can take up 9MB of RAM. As of
-/// February 2021, a growing `Vec` can allocate up to 2x its current length,
-/// leading to an overall memory usage of 18MB per malicious block. (See
-/// #1880 for more details.)
+/// block with ~225_000 transparent outputs can take up 9MB of RAM.
+/// (See #1880 for more details.)
 ///
 /// Malicious blocks will eventually timeout or fail contextual validation.
 /// Once validation fails, the block is dropped, and its memory is deallocated.
@@ -116,8 +114,7 @@ where
         // If no download and verify tasks have exited since the last poll, this
         // task is scheduled for wakeup when the next task becomes ready.
         //
-        // TODO:
-        // This would be cleaner with poll_map #63514, but that's nightly only.
+        // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("block download and verify tasks must not panic") {
                 Ok(hash) => {
@@ -245,7 +242,6 @@ where
         });
 
         self.pending.push(task);
-        // XXX replace with expect_none when stable
         assert!(
             self.cancel_handles.insert(hash, cancel_tx).is_none(),
             "blocks are only queued once"
