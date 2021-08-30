@@ -55,6 +55,15 @@ struct QueuedBlock {
     tx: oneshot::Sender<Result<block::Hash, VerifyCheckpointError>>,
 }
 
+/// The unverified block, with a receiver for the [`QueuedBlock`]'s result.
+#[derive(Debug)]
+struct RequestBlock {
+    /// The block, with additional precalculated data.
+    block: FinalizedBlock,
+    /// The receiving end of the oneshot channel for this block's result.
+    rx: oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>>,
+}
+
 /// A list of unverified blocks at a particular height.
 ///
 /// Typically contains a single block, but might contain more if a peer
@@ -498,33 +507,28 @@ where
     }
 
     /// Queue `block` for verification.
-    ///
-    /// Returns precalculated data for the block,
-    /// and the `Receiver` for the block's verification result.
+    /// On success, returns a [`RequestBlock`] containing the block,
+    /// precalculated request data, and the queued result receiver.
     ///
     /// Verification will finish when the chain to the next checkpoint is
     /// complete, and the caller will be notified via the channel.
     ///
     /// If the block does not pass basic validity checks,
     /// returns an error immediately.
-    fn queue_block(
-        &mut self,
-        block: Arc<Block>,
-    ) -> Result<
-        (
-            FinalizedBlock,
-            oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>>,
-        ),
-        VerifyCheckpointError,
-    > {
+    fn queue_block(&mut self, block: Arc<Block>) -> Result<RequestBlock, VerifyCheckpointError> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
         // Check that the height and Merkle roots are valid.
         let block = self.check_block(block)?;
-
         let height = block.height;
         let hash = block.hash;
+
+        let new_qblock = QueuedBlock {
+            block: block.clone(),
+            tx,
+        };
+        let req_block = RequestBlock { block, rx };
 
         // Since we're using Arc<Block>, each entry is a single pointer to the
         // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
@@ -539,9 +543,9 @@ where
             if qb.block.hash == hash {
                 let e = VerifyCheckpointError::NewerRequest { height, hash };
                 tracing::trace!(?e, "failing older of duplicate requests");
-                let old_tx = std::mem::replace(&mut qb.tx, tx);
+                let old_tx = std::mem::replace(&mut qb.tx, new_qblock.tx);
                 let _ = old_tx.send(Err(e));
-                return Ok((block, rx));
+                return Ok(req_block);
             }
         }
 
@@ -549,15 +553,10 @@ where
         if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
             let e = VerifyCheckpointError::QueuedLimit;
             tracing::warn!(?e);
-            let _ = tx.send(Err(e));
-            return Ok((block, rx));
+            return Err(e);
         }
 
         // Add the block to the list of queued blocks at this height
-        let new_qblock = QueuedBlock {
-            block: block.clone(),
-            tx,
-        };
         // This is a no-op for the first block in each QueuedBlockList.
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
@@ -574,7 +573,7 @@ where
         let is_checkpoint = self.checkpoint_list.contains(height);
         tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
 
-        Ok((block, rx))
+        Ok(req_block)
     }
 
     /// During checkpoint range processing, process all the blocks at `height`.
@@ -922,8 +921,8 @@ where
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
-        let (block, rx) = match self.queue_block(block) {
-            Ok((block, rx)) => (block, rx),
+        let req_block = match self.queue_block(block) {
+            Ok(req_block) => req_block,
             Err(e) => return async { Err(e) }.boxed(),
         };
 
@@ -957,7 +956,8 @@ where
         // Instead, we reset the verifier to the successfully committed state tip.
         let state_service = self.state_service.clone();
         let commit_finalized_block = tokio::spawn(async move {
-            let hash = rx
+            let hash = req_block
+                .rx
                 .await
                 .map_err(Into::into)
                 .map_err(VerifyCheckpointError::CommitFinalized)
@@ -966,7 +966,7 @@ where
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .oneshot(zs::Request::CommitFinalizedBlock(block))
+                .oneshot(zs::Request::CommitFinalizedBlock(req_block.block))
                 .map_err(VerifyCheckpointError::CommitFinalized)
                 .await?
             {
