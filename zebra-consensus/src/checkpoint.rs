@@ -507,6 +507,7 @@ where
     }
 
     /// Queue `block` for verification.
+    ///
     /// On success, returns a [`RequestBlock`] containing the block,
     /// precalculated request data, and the queued result receiver.
     ///
