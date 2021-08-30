@@ -8,6 +8,10 @@ fn best_tip_is_initially_empty() {
 
     assert_eq!(chain_tip_receiver.best_tip_height(), None);
     assert_eq!(chain_tip_receiver.best_tip_hash(), None);
+    assert_eq!(
+        chain_tip_receiver.best_tip_mined_transaction_ids(),
+        Vec::new()
+    );
 }
 
 #[test]
@@ -16,4 +20,8 @@ fn empty_chain_tip_is_empty() {
 
     assert_eq!(chain_tip_receiver.best_tip_height(), None);
     assert_eq!(chain_tip_receiver.best_tip_hash(), None);
+    assert_eq!(
+        chain_tip_receiver.best_tip_mined_transaction_ids(),
+        Vec::new()
+    );
 }

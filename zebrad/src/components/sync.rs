@@ -5,7 +5,7 @@ use futures::{
     future::FutureExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use tokio::{sync::watch, time::sleep};
+use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -22,12 +22,14 @@ use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
 mod recent_sync_lengths;
+mod status;
 
 #[cfg(test)]
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
 use recent_sync_lengths::RecentSyncLengths;
+pub use status::SyncStatus;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 4;
@@ -222,13 +224,8 @@ where
     ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
     ///
-    /// Also returns a [`watch::Receiver`] endpoint for receiving recent sync lengths.
-    pub fn new(
-        config: &ZebradConfig,
-        peers: ZN,
-        state: ZS,
-        verifier: ZV,
-    ) -> (Self, watch::Receiver<Vec<usize>>) {
+    /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
+    pub fn new(config: &ZebradConfig, peers: ZN, state: ZS, verifier: ZV) -> (Self, SyncStatus) {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
@@ -264,7 +261,7 @@ where
             MIN_LOOKAHEAD_LIMIT
         );
 
-        let (recent_syncs, sync_length_receiver) = RecentSyncLengths::new();
+        let (sync_status, recent_syncs) = SyncStatus::new();
 
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
@@ -276,7 +273,7 @@ where
             recent_syncs,
         };
 
-        (new_syncer, sync_length_receiver)
+        (new_syncer, sync_status)
     }
 
     #[instrument(skip(self))]

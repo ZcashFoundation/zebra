@@ -1,6 +1,6 @@
 //! Chain tip interfaces.
 
-use crate::block;
+use crate::{block, transaction};
 
 /// An interface for querying the chain tip.
 ///
@@ -13,6 +13,12 @@ pub trait ChainTip {
 
     /// Return the block hash of the best chain tip.
     fn best_tip_hash(&self) -> Option<block::Hash>;
+
+    /// Return the mined transaction IDs of the transactions in the best chain tip block.
+    ///
+    /// All transactions with these mined IDs should be rejected from the mempool,
+    /// even if their authorizing data is different.
+    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash>;
 }
 
 /// A chain tip that is always empty.
@@ -26,5 +32,9 @@ impl ChainTip for NoChainTip {
 
     fn best_tip_hash(&self) -> Option<block::Hash> {
         None
+    }
+
+    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash> {
+        Vec::new()
     }
 }
