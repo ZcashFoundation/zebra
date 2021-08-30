@@ -376,7 +376,8 @@ impl Transaction {
         }
     }
 
-    /// Returns `true` if this transaction is a coinbase transaction.
+    /// Returns `true` if this transaction is a coinbase transaction,
+    /// that is, has a single input and it is a coinbase input.
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
             && matches!(

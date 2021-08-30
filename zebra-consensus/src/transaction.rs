@@ -182,11 +182,10 @@ where
             check::has_inputs_and_outputs(&tx)?;
 
             if tx.is_coinbase() {
-                if req.is_mempool() {
-                    return Err(TransactionError::CoinbaseInMempool);
-                } else {
-                    check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-                }
+                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+            }
+            if req.is_mempool() && tx.contains_coinbase_input() {
+                return Err(TransactionError::CoinbaseInMempool);
             }
 
             // [Canopy onward]: `vpub_old` MUST be zero.
