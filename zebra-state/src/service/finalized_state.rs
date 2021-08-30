@@ -355,7 +355,7 @@ impl FinalizedState {
             for (transaction_index, (transaction, transaction_hash)) in block
                 .transactions
                 .iter()
-                .zip(transaction_hashes.into_iter())
+                .zip(transaction_hashes.iter())
                 .enumerate()
             {
                 let transaction_location = TransactionLocation {

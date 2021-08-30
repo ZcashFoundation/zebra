@@ -80,7 +80,7 @@ pub struct PreparedBlock {
     /// earlier transaction.
     pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// A precomputed list of the hashes of the transactions in this block.
-    pub transaction_hashes: Vec<transaction::Hash>,
+    pub transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 /// A contextually validated block, ready to be committed directly to the finalized state with
@@ -93,7 +93,7 @@ pub struct ContextuallyValidBlock {
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
-    pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 }
@@ -110,7 +110,7 @@ pub struct FinalizedBlock {
     pub(crate) hash: block::Hash,
     pub(crate) height: block::Height,
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
-    pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 impl From<&PreparedBlock> for PreparedBlock {
@@ -165,12 +165,8 @@ impl From<Arc<Block>> for FinalizedBlock {
             .coinbase_height()
             .expect("finalized blocks must have a valid coinbase height");
         let hash = block.hash();
-        let transaction_hashes = block
-            .transactions
-            .iter()
-            .map(|tx| tx.hash())
-            .collect::<Vec<_>>();
-        let new_outputs = transparent::new_outputs(&block, transaction_hashes.as_slice());
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let new_outputs = transparent::new_outputs(&block, &transaction_hashes);
 
         Self {
             block,
