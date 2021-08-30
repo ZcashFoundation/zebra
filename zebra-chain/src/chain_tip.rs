@@ -1,5 +1,7 @@
 //! Chain tip interfaces.
 
+use std::sync::Arc;
+
 use crate::{block, transaction};
 
 /// An interface for querying the chain tip.
@@ -18,7 +20,7 @@ pub trait ChainTip {
     ///
     /// All transactions with these mined IDs should be rejected from the mempool,
     /// even if their authorizing data is different.
-    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash>;
+    fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]>;
 }
 
 /// A chain tip that is always empty.
@@ -34,7 +36,7 @@ impl ChainTip for NoChainTip {
         None
     }
 
-    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash> {
-        Vec::new()
+    fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
+        Arc::new([])
     }
 }

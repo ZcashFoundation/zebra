@@ -27,7 +27,7 @@ pub struct ChainTipBlock {
 
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
-    pub(crate) transaction_hashes: Vec<transaction::Hash>,
+    pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {
@@ -180,11 +180,11 @@ impl ChainTip for ChainTipReceiver {
     ///
     /// All transactions with these mined IDs should be rejected from the mempool,
     /// even if their authorizing data is different.
-    fn best_tip_mined_transaction_ids(&self) -> Vec<transaction::Hash> {
+    fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.receiver
             .borrow()
             .as_ref()
             .map(|block| block.transaction_hashes.clone())
-            .unwrap_or_default()
+            .unwrap_or_else(|| Arc::new([]))
     }
 }
