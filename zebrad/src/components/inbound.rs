@@ -21,6 +21,7 @@ use zebra_consensus::transaction;
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError};
 use zebra_network::AddressBook;
 
+use super::mempool as mp;
 use super::mempool::downloads::{
     Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
@@ -38,13 +39,14 @@ use downloads::Downloads as BlockDownloads;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type Mempool = Buffer<BoxService<mp::Request, mp::Response, mp::BoxError>, mp::Request>;
 type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
 type TxVerifier = Buffer<
     BoxService<transaction::Request, transaction::Response, TransactionError>,
     transaction::Request,
 >;
 type InboundBlockDownloads = BlockDownloads<Timeout<Outbound>, Timeout<BlockVerifier>, State>;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State, Mempool>;
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>);
 
@@ -134,7 +136,7 @@ pub struct Inbound {
     state: State,
 
     /// A service that manages transactions in the memory pool.
-    mempool: mempool::Mempool,
+    mempool: Mempool,
 }
 
 impl Inbound {
@@ -143,7 +145,7 @@ impl Inbound {
         state: State,
         block_verifier: BlockVerifier,
         tx_verifier: TxVerifier,
-        mempool: mempool::Mempool,
+        mempool: Mempool,
     ) -> Self {
         Self {
             network_setup: Setup::AwaitingNetwork {
@@ -195,6 +197,7 @@ impl Service<zn::Request> for Inbound {
                         Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
                         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
                         self.state.clone(),
+                        self.mempool.clone(),
                     ));
                     result = Ok(());
                     Setup::Initialized {
@@ -352,6 +355,7 @@ impl Service<zn::Request> for Inbound {
             zn::Request::PushTransaction(_transaction) => {
                 debug!("ignoring unimplemented request");
                 // TODO: send to Tx Download & Verify Stream
+                // https://github.com/ZcashFoundation/zebra/issues/2692
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseTransactionIds(transactions) => {

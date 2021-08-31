@@ -15,7 +15,7 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use crate::BoxError;
+pub use crate::BoxError;
 
 mod crawler;
 pub mod downloads;

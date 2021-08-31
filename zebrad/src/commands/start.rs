@@ -28,7 +28,9 @@ use color_eyre::eyre::{eyre, Report};
 use futures::{select, FutureExt};
 use tokio::sync::oneshot;
 use tower::builder::ServiceBuilder;
+use tower::util::BoxService;
 
+use crate::components::mempool::Mempool;
 use crate::components::{tokio::RuntimeRun, Inbound};
 use crate::config::ZebradConfig;
 use crate::{
@@ -68,6 +70,8 @@ impl StartCmd {
         let mempool = mempool::Mempool::new(config.network.network);
 
         info!("initializing network");
+        let mempool_service = BoxService::new(Mempool::new(config.network.network));
+        let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
         // in response to excess load.
@@ -78,6 +82,7 @@ impl StartCmd {
             .service(Inbound::new(
                 setup_rx,
                 state.clone(),
+                mempool.clone(),
                 chain_verifier.clone(),
                 tx_verifier.clone(),
                 mempool,
