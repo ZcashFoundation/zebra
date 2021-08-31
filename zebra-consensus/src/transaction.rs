@@ -279,6 +279,9 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
+
+        Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
+
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
         Ok(
@@ -297,6 +300,29 @@ where
                 &shielded_sighash,
             )?),
         )
+    }
+
+    /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
+    fn verify_v4_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            // Supports V4 transactions
+            NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5 => Ok(()),
+
+            // Does not support V4 transactions
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verify a V5 transaction.
@@ -328,9 +354,10 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
-        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
+
+        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
         let _async_checks = Self::verify_transparent_inputs_and_outputs(
             &request,
