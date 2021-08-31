@@ -576,11 +576,11 @@ impl ZcashDeserialize for Transaction {
                 let id = reader.read_u32::<LittleEndian>()?;
                 // Consensus rules:
                 // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, and the version group ID MUST be 0x892F2085.
-                // > 
+                // >
                 // > [NU5 onward] The transaction version number MUST be 4 or 5.
                 // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
                 //
-                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus                
+                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
                 if id != SAPLING_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
                         "expected SAPLING_VERSION_GROUP_ID",
@@ -657,7 +657,7 @@ impl ZcashDeserialize for Transaction {
                 // > [NU5 onward] The transaction version number MUST be 4 or 5. ...
                 // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
                 //
-                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus      
+                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
                 let id = reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
