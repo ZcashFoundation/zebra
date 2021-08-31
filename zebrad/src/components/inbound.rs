@@ -32,12 +32,12 @@ use downloads::Downloads;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
-type Verifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
+type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
 type TxVerifier = Buffer<
     BoxService<transaction::Request, transaction::Response, TransactionError>,
     transaction::Request,
 >;
-type InboundDownloads = Downloads<Timeout<Outbound>, Timeout<Verifier>, State>;
+type InboundDownloads = Downloads<Timeout<Outbound>, Timeout<BlockVerifier>, State>;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>);
@@ -53,9 +53,9 @@ pub enum Setup {
         /// after the network is set up.
         network_setup: oneshot::Receiver<NetworkSetupData>,
 
-        /// A service that verifies downloaded blocks. Given to `downloads`
+        /// A service that verifies downloaded blocks. Given to `block_downloads`
         /// after the network is set up.
-        verifier: Verifier,
+        block_verifier: BlockVerifier,
 
         /// A service that verifies downloaded transactions. Given to `tx_downloads`
         /// after the network is set up.
@@ -70,7 +70,7 @@ pub enum Setup {
         address_book: Arc<std::sync::Mutex<zn::AddressBook>>,
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
-        downloads: Pin<Box<InboundDownloads>>,
+        block_downloads: Pin<Box<InboundDownloads>>,
 
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
@@ -132,13 +132,13 @@ impl Inbound {
     pub fn new(
         network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,
-        verifier: Verifier,
+        block_verifier: BlockVerifier,
         tx_verifier: TxVerifier,
     ) -> Self {
         Self {
             network_setup: Setup::AwaitingNetwork {
                 network_setup,
-                verifier,
+                block_verifier,
                 tx_verifier,
             },
             state,
@@ -171,13 +171,13 @@ impl Service<zn::Request> for Inbound {
         self.network_setup = match self.take_setup() {
             Setup::AwaitingNetwork {
                 mut network_setup,
-                verifier,
+                block_verifier,
                 tx_verifier,
             } => match network_setup.try_recv() {
                 Ok((outbound, address_book)) => {
-                    let downloads = Box::pin(Downloads::new(
+                    let block_downloads = Box::pin(Downloads::new(
                         Timeout::new(outbound.clone(), BLOCK_DOWNLOAD_TIMEOUT),
-                        Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT),
+                        Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
                     ));
                     let tx_downloads = Box::pin(TxDownloads::new(
@@ -188,7 +188,7 @@ impl Service<zn::Request> for Inbound {
                     result = Ok(());
                     Setup::Initialized {
                         address_book,
-                        downloads,
+                        block_downloads,
                         tx_downloads,
                     }
                 }
@@ -197,7 +197,7 @@ impl Service<zn::Request> for Inbound {
                     result = Ok(());
                     Setup::AwaitingNetwork {
                         network_setup,
-                        verifier,
+                        block_verifier,
                         tx_verifier,
                     }
                 }
@@ -219,16 +219,16 @@ impl Service<zn::Request> for Inbound {
             // Clean up completed download tasks, ignoring their results
             Setup::Initialized {
                 address_book,
-                mut downloads,
+                mut block_downloads,
                 mut tx_downloads,
             } => {
-                while let Poll::Ready(Some(_)) = downloads.as_mut().poll_next(cx) {}
+                while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
                 while let Poll::Ready(Some(_)) = tx_downloads.as_mut().poll_next(cx) {}
 
                 result = Ok(());
                 Setup::Initialized {
                     address_book,
-                    downloads,
+                    block_downloads,
                     tx_downloads,
                 }
             }
@@ -358,8 +358,11 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
-                if let Setup::Initialized { downloads, .. } = &mut self.network_setup {
-                    downloads.download_and_verify(hash);
+                if let Setup::Initialized {
+                    block_downloads, ..
+                } = &mut self.network_setup
+                {
+                    block_downloads.download_and_verify(hash);
                 } else {
                     info!(
                         ?hash,
