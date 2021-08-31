@@ -67,7 +67,19 @@ checksum = "884391ef1066acaa41e766ba8f596341b96e93ce34f9a43e7d24bf0a0eaf0561"
 dependencies = [
  "aes-soft",
  "aesni",
- "cipher",
+ "cipher 0.2.5",
+]
+
+[[package]]
+name = "aes"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e8b47f52ea9bae42228d07ec09eb676433d7c4ed1ebdf0f1d1c29ed446f1ab8"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cipher 0.3.0",
+ "cpufeatures",
+ "opaque-debug",
 ]
 
 [[package]]
@@ -76,7 +88,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be14c7498ea50828a38d0e24a765ed2effe92a705885b57d029cd67d45744072"
 dependencies = [
- "cipher",
+ "cipher 0.2.5",
  "opaque-debug",
 ]
 
@@ -86,7 +98,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea2e11f5e94c2f7d386164cc2aa1f97823fed6f259e486940a71c174dd01b0ce"
 dependencies = [
- "cipher",
+ "cipher 0.2.5",
  "opaque-debug",
 ]
 
@@ -431,7 +443,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57a0e8073e8baa88212fb5823574c02ebccb395136ba9a164ab89379ec6072f0"
 dependencies = [
  "block-padding",
- "cipher",
+ "cipher 0.2.5",
 ]
 
 [[package]]
@@ -574,6 +586,15 @@ name = "cipher"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12f8e7987cbd042a63249497f41aed09f8e65add917ea6566effbc56578d6801"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
+name = "cipher"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
 dependencies = [
  "generic-array",
 ]
@@ -1197,7 +1218,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a25080721bbcd2cd4d765b7d607ea350425fa087ce53cd3e31afcacdab850352"
 dependencies = [
- "aes",
+ "aes 0.6.0",
  "block-modes",
  "num-bigint",
  "num-integer",
@@ -2278,7 +2299,7 @@ name = "orchard"
 version = "0.0.0"
 source = "git+https://github.com/zcash/orchard.git?rev=37b1b7f357cd34d93f9c55bb96efd05ab4e84408#37b1b7f357cd34d93f9c55bb96efd05ab4e84408"
 dependencies = [
- "aes",
+ "aes 0.6.0",
  "arrayvec 0.7.1",
  "bitvec",
  "blake2b_simd",
@@ -4458,7 +4479,7 @@ name = "zcash_primitives"
 version = "0.5.0"
 source = "git+https://github.com/zcash/librustzcash.git?rev=0c3ed159985affa774e44d10172d4471d798a85a#0c3ed159985affa774e44d10172d4471d798a85a"
 dependencies = [
- "aes",
+ "aes 0.6.0",
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",
@@ -4499,7 +4520,7 @@ dependencies = [
 name = "zebra-chain"
 version = "1.0.0-alpha.16"
 dependencies = [
- "aes",
+ "aes 0.7.5",
  "bech32",
  "bigint",
  "bitflags",

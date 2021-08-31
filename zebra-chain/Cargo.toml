@@ -13,7 +13,7 @@ proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test", "rand
 bench = ["zebra-test"]
 
 [dependencies]
-aes = "0.6"
+aes = "0.7"
 bech32 = "0.8.1"
 bigint = "4"
 bitflags = "1.2.1"
