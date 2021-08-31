@@ -75,7 +75,7 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
         Network::Mainnet => mainnet_transcript,
         Network::Testnet => testnet_transcript,
     } {
-        let (service, _) = zebra_state::init(Config::ephemeral(), network);
+        let (service, _, _) = zebra_state::init(Config::ephemeral(), network);
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;
