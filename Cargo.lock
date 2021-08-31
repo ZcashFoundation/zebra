@@ -1240,9 +1240,9 @@ checksum = "4c7e4c2612746b0df8fed4ce0c69156021b704c9aefa360311c04e6e9e002eed"
 
 [[package]]
 name = "futures"
-version = "0.3.15"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e7e43a803dae2fa37c1f6a8fe121e1f7bf9548b4dfc0522a42f34145dadfc27"
+checksum = "a12aa0eb539080d55c3f2d45a67c3b58b6b0773c1a3ca2dfec66d58c97fd66ca"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -1281,9 +1281,9 @@ dependencies = [
 
 [[package]]
 name = "futures-executor"
-version = "0.3.15"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "badaa6a909fac9e7236d0620a2f57f7664640c56575b71a7552fbd68deafab79"
+checksum = "45025be030969d763025784f7f355043dc6bc74093e4ecc5000ca4dc50d8745c"
 dependencies = [
  "futures-core",
  "futures-task",
@@ -3765,7 +3765,7 @@ version = "0.2.12"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
- "futures 0.3.15",
+ "futures 0.3.17",
  "futures-core",
  "pin-project 1.0.7",
  "rand 0.8.4",
@@ -4516,7 +4516,7 @@ dependencies = [
  "ed25519-zebra",
  "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "fpe",
- "futures 0.3.15",
+ "futures 0.3.17",
  "group",
  "halo2",
  "hex",
@@ -4560,7 +4560,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "displaydoc",
- "futures 0.3.15",
+ "futures 0.3.17",
  "futures-util",
  "jubjub",
  "lazy_static",
@@ -4594,7 +4594,7 @@ dependencies = [
  "byteorder",
  "bytes 0.6.0",
  "chrono",
- "futures 0.3.15",
+ "futures 0.3.17",
  "hex",
  "indexmap",
  "lazy_static",
@@ -4643,7 +4643,7 @@ dependencies = [
  "color-eyre",
  "dirs",
  "displaydoc",
- "futures 0.3.15",
+ "futures 0.3.17",
  "halo2",
  "hex",
  "itertools 0.10.1",
@@ -4673,7 +4673,7 @@ name = "zebra-test"
 version = "1.0.0-alpha.13"
 dependencies = [
  "color-eyre",
- "futures 0.3.15",
+ "futures 0.3.17",
  "hex",
  "lazy_static",
  "once_cell",
@@ -4716,7 +4716,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "dirs",
- "futures 0.3.15",
+ "futures 0.3.17",
  "gumdrop",
  "hyper 0.14.0-dev",
  "inferno",
