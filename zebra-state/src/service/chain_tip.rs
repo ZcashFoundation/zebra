@@ -60,7 +60,7 @@ impl From<FinalizedBlock> for ChainTipBlock {
     }
 }
 
-/// A sender for recent changes to the non-finalized and finalized chain tips.
+/// A sender for changes to the non-finalized and finalized chain tips.
 #[derive(Debug)]
 pub struct ChainTipSender {
     /// Have we got any chain tips from the non-finalized state?
@@ -87,14 +87,14 @@ impl ChainTipSender {
             sender,
             active_value: None,
         };
-        let receiver = CurrentChainTip::new(receiver);
+        let current = CurrentChainTip::new(receiver);
 
         sender.update(initial_tip);
 
-        (sender, receiver)
+        (sender, current)
     }
 
-    /// Update the current finalized tip.
+    /// Update the latest finalized tip.
     ///
     /// May trigger an update to the best tip.
     pub fn set_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
@@ -103,7 +103,7 @@ impl ChainTipSender {
         }
     }
 
-    /// Update the current non-finalized tip.
+    /// Update the latest non-finalized tip.
     ///
     /// May trigger an update to the best tip.
     pub fn set_best_non_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
@@ -139,7 +139,7 @@ impl ChainTipSender {
     }
 }
 
-/// A receiver for recent changes to the non-finalized and finalized chain tips.
+/// Efficient access to the state's current best chain tip.
 ///
 /// The latest changes are available from all cloned instances of this type.
 ///
@@ -148,11 +148,12 @@ impl ChainTipSender {
 /// * the finalized tip.
 #[derive(Clone, Debug)]
 pub struct CurrentChainTip {
+    /// The receiver for the current chain tip's data.
     receiver: watch::Receiver<ChainTipData>,
 }
 
 impl CurrentChainTip {
-    /// Create a new chain tip receiver from a watch channel receiver.
+    /// Create a new [`CurrentChainTip`] from a watch channel receiver.
     fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
         Self { receiver }
     }
