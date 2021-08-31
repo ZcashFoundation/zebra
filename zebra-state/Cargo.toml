@@ -18,7 +18,7 @@ regex = "1"
 serde = { version = "1", features = ["serde_derive"] }
 bincode = "1"
 
-futures = "0.3.15"
+futures = "0.3.17"
 metrics = "0.13.0-alpha.8"
 tower = { version = "0.4", features = ["buffer", "util"] }
 tracing = "0.1"
