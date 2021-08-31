@@ -35,7 +35,7 @@ pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
 pub use response::Response;
-pub use service::{chain_tip::ChainTipReceiver, init};
+pub use service::{chain_tip::CurrentChainTip, init};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::init_test;

@@ -29,7 +29,7 @@ use crate::{
 };
 
 use self::{
-    chain_tip::{ChainTipReceiver, ChainTipSender},
+    chain_tip::{CurrentChainTip, ChainTipSender},
     non_finalized_state::{NonFinalizedState, QueuedBlocks},
 };
 
@@ -76,7 +76,7 @@ pub(crate) struct StateService {
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub fn new(config: Config, network: Network) -> (Self, ChainTipReceiver) {
+    pub fn new(config: Config, network: Network) -> (Self, CurrentChainTip) {
         let disk = FinalizedState::new(&config, network);
         let initial_tip = disk
             .tip_block()
@@ -780,7 +780,7 @@ impl Service<Request> for StateService {
 pub fn init(
     config: Config,
     network: Network,
-) -> (BoxService<Request, Response, BoxError>, ChainTipReceiver) {
+) -> (BoxService<Request, Response, BoxError>, CurrentChainTip) {
     let (state_service, chain_tip_receiver) = StateService::new(config, network);
 
     (BoxService::new(state_service), chain_tip_receiver)

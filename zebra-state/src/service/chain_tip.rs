@@ -9,7 +9,7 @@ use crate::{request::ContextuallyValidBlock, FinalizedBlock};
 #[cfg(test)]
 mod tests;
 
-/// The internal watch channel data type for [`ChainTipSender`] and [`ChainTipReceiver`].
+/// The internal watch channel data type for [`ChainTipSender`] and [`CurrentChainTip`].
 type ChainTipData = Option<ChainTipBlock>;
 
 /// A chain tip block, with precalculated block data.
@@ -78,16 +78,16 @@ pub struct ChainTipSender {
 }
 
 impl ChainTipSender {
-    /// Create new linked instances of [`ChainTipSender`] and [`ChainTipReceiver`],
+    /// Create new linked instances of [`ChainTipSender`] and [`CurrentChainTip`],
     /// using `initial_tip` as the tip.
-    pub fn new(initial_tip: impl Into<Option<ChainTipBlock>>) -> (Self, ChainTipReceiver) {
+    pub fn new(initial_tip: impl Into<Option<ChainTipBlock>>) -> (Self, CurrentChainTip) {
         let (sender, receiver) = watch::channel(None);
         let mut sender = ChainTipSender {
             non_finalized_tip: false,
             sender,
             active_value: None,
         };
-        let receiver = ChainTipReceiver::new(receiver);
+        let receiver = CurrentChainTip::new(receiver);
 
         sender.update(initial_tip);
 
@@ -147,18 +147,18 @@ impl ChainTipSender {
 /// * the best non-finalized chain tip, if available, or
 /// * the finalized tip.
 #[derive(Clone, Debug)]
-pub struct ChainTipReceiver {
+pub struct CurrentChainTip {
     receiver: watch::Receiver<ChainTipData>,
 }
 
-impl ChainTipReceiver {
+impl CurrentChainTip {
     /// Create a new chain tip receiver from a watch channel receiver.
     fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
         Self { receiver }
     }
 }
 
-impl ChainTip for ChainTipReceiver {
+impl ChainTip for CurrentChainTip {
     /// Return the height of the best chain tip.
     fn best_tip_height(&self) -> Option<block::Height> {
         self.receiver.borrow().as_ref().map(|block| block.height)
