@@ -10,6 +10,8 @@ use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
 use zebra_network::{Request, Response};
 
+use super::super::sync::SyncStatus;
+
 #[cfg(test)]
 mod tests;
 
@@ -31,6 +33,7 @@ const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// The mempool transaction crawler.
 pub struct Crawler<S> {
     peer_set: Mutex<Timeout<S>>,
+    status: SyncStatus,
 }
 
 impl<S> Crawler<S>
@@ -39,26 +42,26 @@ where
     S::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(peer_set: S) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(peer_set: S, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Mutex::new(Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT)),
+            status,
         };
 
         tokio::spawn(crawler.run())
     }
 
     /// Periodically crawl peers for transactions to include in the mempool.
-    pub async fn run(self) -> Result<(), BoxError> {
-        loop {
-            self.wait_until_enabled().await;
+    ///
+    /// Runs until the [`SyncStatus`] loses its connection to the chain syncer, which happens when
+    /// Zebra is shutting down.
+    pub async fn run(mut self) -> Result<(), BoxError> {
+        while self.status.wait_until_close_to_tip().await.is_ok() {
             self.crawl_transactions().await?;
             sleep(RATE_LIMIT_DELAY).await;
         }
-    }
 
-    /// Wait until the mempool is enabled.
-    async fn wait_until_enabled(&self) {
-        // TODO: Check if synchronizing up to chain tip has finished (#2603).
+        Ok(())
     }
 
     /// Crawl peers for transactions.

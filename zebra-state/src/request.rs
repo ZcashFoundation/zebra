@@ -79,9 +79,13 @@ pub struct PreparedBlock {
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
     pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    /// A precomputed list of the hashes of the transactions in this block.
+    /// A precomputed list of the hashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
 }
+
+// Some fields are pub(crate), so we can add whatever db-format-dependent
+// precomputation we want here without leaking internal details.
 
 /// A contextually validated block, ready to be committed directly to the finalized state with
 /// no checks, if it becomes the root of the best non-finalized chain.
@@ -104,13 +108,26 @@ pub struct ContextuallyValidBlock {
 /// This is exposed for use in checkpointing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FinalizedBlock {
-    // These are pub(crate) so we can add whatever db-format-dependent
-    // precomputation we want here without leaking internal details.
-    pub(crate) block: Arc<Block>,
-    pub(crate) hash: block::Hash,
-    pub(crate) height: block::Height,
+    /// The block to commit to the state.
+    pub block: Arc<Block>,
+    /// The hash of the block.
+    pub hash: block::Hash,
+    /// The height of the block.
+    pub height: block::Height,
+    /// New transparent outputs created in this block, indexed by
+    /// [`Outpoint`](transparent::Outpoint).
+    ///
+    /// Each output is tagged with its transaction index in the block.
+    /// (The outputs of earlier transactions in a block can be spent by later
+    /// transactions.)
+    ///
+    /// Note: although these transparent outputs are newly created, they may not
+    /// be unspent, since a later transaction in a block can spend outputs of an
+    /// earlier transaction.
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
-    pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
+    /// A precomputed list of the hashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
+    pub transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 impl From<&PreparedBlock> for PreparedBlock {
@@ -118,6 +135,10 @@ impl From<&PreparedBlock> for PreparedBlock {
         prepared.clone()
     }
 }
+
+// Doing precomputation in these impls means that it will be done in
+// the *service caller*'s task, not inside the service call itself.
+// This allows moving work out of the single-threaded state service.
 
 impl ContextuallyValidBlock {
     /// Create a block that's ready for non-finalized [`Chain`] contextual validation,
@@ -156,15 +177,17 @@ impl ContextuallyValidBlock {
     }
 }
 
-// Doing precomputation in this From impl means that it will be done in
-// the *service caller*'s task, not inside the service call itself.
-// This allows moving work out of the single-threaded state service.
-impl From<Arc<Block>> for FinalizedBlock {
-    fn from(block: Arc<Block>) -> Self {
-        let height = block
-            .coinbase_height()
-            .expect("finalized blocks must have a valid coinbase height");
-        let hash = block.hash();
+impl FinalizedBlock {
+    /// Create a block that's ready to be committed to the finalized state,
+    /// using a precalculated [`block::Hash`] and [`block::Height`].
+    ///
+    /// Note: a [`FinalizedBlock`] isn't actually finalized
+    /// until [`Request::CommitFinalizedBlock`] returns success.
+    pub fn with_hash_and_height(
+        block: Arc<Block>,
+        hash: block::Hash,
+        height: block::Height,
+    ) -> Self {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_outputs(&block, &transaction_hashes);
 
@@ -175,6 +198,17 @@ impl From<Arc<Block>> for FinalizedBlock {
             new_outputs,
             transaction_hashes,
         }
+    }
+}
+
+impl From<Arc<Block>> for FinalizedBlock {
+    fn from(block: Arc<Block>) -> Self {
+        let hash = block.hash();
+        let height = block
+            .coinbase_height()
+            .expect("finalized blocks must have a valid coinbase height");
+
+        FinalizedBlock::with_hash_and_height(block, hash, height)
     }
 }
 
