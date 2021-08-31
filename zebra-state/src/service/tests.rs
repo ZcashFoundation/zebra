@@ -91,7 +91,7 @@ async fn test_populated_state_responds_correctly(
                     Ok(Response::Transaction(Some(transaction.clone()))),
                 ));
 
-                let from_coinbase = transaction.is_coinbase();
+                let from_coinbase = transaction.has_valid_coinbase_transaction_inputs();
                 for (index, output) in transaction.outputs().iter().cloned().enumerate() {
                     let outpoint = transparent::OutPoint {
                         hash: transaction_hash,

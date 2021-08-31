@@ -376,9 +376,9 @@ impl Transaction {
         }
     }
 
-    /// Returns `true` if this transaction is a coinbase transaction,
-    /// that is, has a single input and it is a coinbase input.
-    pub fn is_coinbase(&self) -> bool {
+    /// Returns `true` if this transaction has valid inputs for a coinbase
+    /// transaction, that is, has a single input and it is a coinbase input.
+    pub fn has_valid_coinbase_transaction_inputs(&self) -> bool {
         self.inputs().len() == 1
             && matches!(
                 self.inputs().get(0),
@@ -387,7 +387,7 @@ impl Transaction {
     }
 
     /// Returns `true` if transaction contains any coinbase inputs.
-    pub fn contains_coinbase_input(&self) -> bool {
+    pub fn has_any_coinbase_inputs(&self) -> bool {
         self.inputs()
             .iter()
             .any(|input| matches!(input, transparent::Input::Coinbase { .. }))

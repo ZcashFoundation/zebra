@@ -181,11 +181,11 @@ where
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
 
-            if tx.is_coinbase() {
-                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-            }
-            if req.is_mempool() && tx.contains_coinbase_input() {
+            if req.is_mempool() && tx.has_any_coinbase_inputs() {
                 return Err(TransactionError::CoinbaseInMempool);
+            }
+            if tx.has_valid_coinbase_transaction_inputs() {
+                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
             }
 
             // [Canopy onward]: `vpub_old` MUST be zero.
@@ -390,7 +390,7 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
-        if transaction.is_coinbase() {
+        if transaction.has_valid_coinbase_transaction_inputs() {
             // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
             // Coinbase transactions don't have any PrevOut inputs.
             Ok(AsyncChecks::new())
