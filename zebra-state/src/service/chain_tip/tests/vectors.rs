@@ -52,6 +52,7 @@ fn chain_tip_change_is_initially_not_ready() {
     assert_eq!(first, None);
 
     // also test our manual `Clone` impl
+    #[allow(clippy::redundant_clone)]
     let first_clone = chain_tip_change
         .clone()
         .next()
