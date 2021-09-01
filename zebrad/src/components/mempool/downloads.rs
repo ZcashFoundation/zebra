@@ -228,18 +228,6 @@ where
         let mempool = self.mempool.clone();
 
         let fut = async move {
-            // Check if the transaction is already in the state.
-            match state
-                .ready_and()
-                .await?
-                .call(zs::Request::Transaction(txid.mined_id()))
-                .await
-            {
-                Ok(zs::Response::Transaction(None)) => Ok(()),
-                Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
-                Ok(_) => unreachable!("wrong response"),
-                Err(e) => Err(e),
-            }?;
             // Check if the transaction is already in the mempool.
             match mempool
                 .oneshot(mp::Request::TransactionsById(
@@ -254,6 +242,18 @@ where
                         Err("already present in mempool".into())
                     }
                 }
+                Ok(_) => unreachable!("wrong response"),
+                Err(e) => Err(e),
+            }?;
+            // Check if the transaction is already in the state.
+            match state
+                .ready_and()
+                .await?
+                .call(zs::Request::Transaction(txid.mined_id()))
+                .await
+            {
+                Ok(zs::Response::Transaction(None)) => Ok(()),
+                Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(e),
             }?;
