@@ -45,7 +45,7 @@ where
 impl From<PreparedBlock> for ChainTipBlock {
     fn from(prepared: PreparedBlock) -> Self {
         let PreparedBlock {
-            block: _,
+            block,
             hash,
             height,
             new_outputs: _,
@@ -55,6 +55,7 @@ impl From<PreparedBlock> for ChainTipBlock {
             hash,
             height,
             transaction_hashes,
+            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }

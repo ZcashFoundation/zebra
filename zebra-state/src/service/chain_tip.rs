@@ -37,12 +37,21 @@ pub struct ChainTipBlock {
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+
+    /// The hash of the previous block in the best chain.
+    /// This block is immediately behind the best chain tip.
+    ///
+    /// ## Note
+    ///
+    /// If the best chain fork has changed, or some blocks have been skipped,
+    /// this hash will be different to the last returned `ChainTipBlock.hash`.
+    pub(crate) previous_block_hash: block::Hash,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {
     fn from(contextually_valid: ContextuallyValidBlock) -> Self {
         let ContextuallyValidBlock {
-            block: _,
+            block,
             hash,
             height,
             new_outputs: _,
@@ -53,6 +62,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             hash,
             height,
             transaction_hashes,
+            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }
@@ -60,7 +70,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
 impl From<FinalizedBlock> for ChainTipBlock {
     fn from(finalized: FinalizedBlock) -> Self {
         let FinalizedBlock {
-            block: _,
+            block,
             hash,
             height,
             new_outputs: _,
@@ -70,6 +80,7 @@ impl From<FinalizedBlock> for ChainTipBlock {
             hash,
             height,
             transaction_hashes,
+            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }
@@ -227,8 +238,13 @@ pub struct ChainTipChange {
     /// The receiver for the current chain tip's data.
     receiver: watch::Receiver<ChainTipData>,
 
-    /// The most recent hash provided by this instance.
-    previous_change_hash: Option<block::Hash>,
+    /// The most recent [`block::Hash`] provided by this instance.
+    ///
+    /// ## Note
+    ///
+    /// If the best chain fork has changed, or some blocks have been skipped,
+    /// this hash will be different to the last returned `ChainTipBlock.hash`.
+    last_change_hash: Option<block::Hash>,
 }
 
 /// Actions that we can take in response to a [`ChainTipChange`].
@@ -288,18 +304,38 @@ impl ChainTipChange {
     pub async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
         let block = self.tip_block_change().await?;
 
-        // TODO: handle resets here
+        let action = self.action(block.clone());
 
-        self.previous_change_hash = Some(block.hash);
+        self.last_change_hash = Some(block.hash);
 
-        Ok(Grow { block })
+        Ok(action)
+    }
+
+    /// Return an action based on `block` and the last change we returned.
+    fn action(&self, block: ChainTipBlock) -> TipAction {
+        // check for an edge case that's dealt with by other code
+        assert!(
+            Some(block.hash) != self.last_change_hash,
+            "ChainTipSender ignores unchanged tips"
+        );
+
+        // check if we need a reset
+        if Some(block.previous_block_hash) != self.last_change_hash {
+            // we've either:
+            // - just initialized this instance,
+            // - changed the best chain to another fork (a rollback), or
+            // - skipped some blocks in the best chain
+            TipAction::reset_with(block)
+        } else {
+            TipAction::grow_with(block)
+        }
     }
 
     /// Create a new [`ChainTipChange`] from a watch channel receiver.
     fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
         Self {
             receiver,
-            previous_change_hash: None,
+            last_change_hash: None,
         }
     }
 
@@ -318,11 +354,6 @@ impl ChainTipChange {
             // Wait until there is actually Some block,
             // so we don't have `Option`s inside `TipAction`s.
             if let Some(block) = self.best_tip_block() {
-                assert!(
-                    Some(block.hash) != self.previous_change_hash,
-                    "ChainTipSender must ignore unchanged tips"
-                );
-
                 return Ok(block);
             }
         }
@@ -340,7 +371,7 @@ impl Clone for ChainTipChange {
         Self {
             receiver: self.receiver.clone(),
             // clear the previous change hash, so the first action is a reset
-            previous_change_hash: None,
+            last_change_hash: None,
         }
     }
 }
@@ -357,6 +388,19 @@ impl TipAction {
         match self {
             Grow { block } => block.hash,
             Reset { hash, .. } => *hash,
+        }
+    }
+
+    /// Returns a [`Grow`] based on `block`.
+    pub(crate) fn grow_with(block: ChainTipBlock) -> Self {
+        Grow { block }
+    }
+
+    /// Returns a [`Reset`] based on `block`.
+    pub(crate) fn reset_with(block: ChainTipBlock) -> Self {
+        Reset {
+            height: block.height,
+            hash: block.hash,
         }
     }
 }
