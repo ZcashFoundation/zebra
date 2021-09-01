@@ -9,15 +9,19 @@ use zebra_chain::{
     parameters::Network,
     transaction::{UnminedTx, UnminedTxId},
 };
-use zebra_consensus::Config;
+use zebra_consensus::Config as ConsensusConfig;
 use zebra_network::{Request, Response};
+
+use zebra_state::Config as StateConfig;
 
 #[tokio::test]
 async fn mempool_requests_for_transaction_ids() {
     let network = Network::Mainnet;
-    let config = Config::default();
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
 
-    let state_service = zebra_state::init_test(network);
+    let (state, _) = zebra_state::init(state_config, network);
+    let state_service = ServiceBuilder::new().buffer(1).service(state);
     let mut mempool_service = Mempool::new(network);
 
     let added_transaction_ids: Vec<UnminedTxId> =
@@ -27,20 +31,19 @@ async fn mempool_requests_for_transaction_ids() {
             .collect();
 
     let (chain_verifier, _transaction_verifier) =
-        zebra_consensus::chain::init(config.clone(), network, zebra_state::init_test(network))
+        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
     let (_setup_tx, setup_rx) = oneshot::channel();
 
-    let inbound_service =
-        ServiceBuilder::new()
-            .load_shed()
-            .buffer(20)
-            .service(super::Inbound::new(
-                setup_rx,
-                state_service.clone(),
-                chain_verifier.clone(),
-                mempool_service,
-            ));
+    let inbound_service = ServiceBuilder::new()
+        .load_shed()
+        .buffer(1)
+        .service(super::Inbound::new(
+            setup_rx,
+            state_service,
+            chain_verifier.clone(),
+            mempool_service,
+        ));
 
     let request = inbound_service
         .oneshot(Request::MempoolTransactionIds)
