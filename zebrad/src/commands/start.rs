@@ -63,6 +63,9 @@ impl StartCmd {
         )
         .await;
 
+        info!("initializing mempool");
+        let mempool = mempool::Mempool::new(config.network.network);
+
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
@@ -75,6 +78,7 @@ impl StartCmd {
                 setup_rx,
                 state.clone(),
                 chain_verifier.clone(),
+                mempool,
             ));
 
         let (peer_set, address_book) =

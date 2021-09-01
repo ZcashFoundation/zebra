@@ -21,9 +21,15 @@ use zebra_consensus::chain::VerifyChainError;
 use zebra_network::AddressBook;
 
 // Re-use the syncer timeouts for consistency.
-use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+use super::{
+    mempool,
+    sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
+};
 
 mod downloads;
+#[cfg(test)]
+mod tests;
+
 use downloads::Downloads;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -111,6 +117,9 @@ pub struct Inbound {
 
     /// A service that manages cached blockchain state.
     state: State,
+
+    /// A service that manages transactions in the memory pool.
+    mempool: mempool::Mempool,
 }
 
 impl Inbound {
@@ -118,6 +127,7 @@ impl Inbound {
         network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,
         verifier: Verifier,
+        mempool: mempool::Mempool,
     ) -> Self {
         Self {
             network_setup: Setup::AwaitingNetwork {
@@ -125,6 +135,7 @@ impl Inbound {
                 verifier,
             },
             state,
+            mempool,
         }
     }
 
@@ -330,8 +341,11 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::MempoolTransactionIds => {
-                debug!("ignoring unimplemented request");
-                async { Ok(zn::Response::Nil) }.boxed()
+                self.mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
+                    mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids),
+                    _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
+                })
+                .boxed()
             }
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");

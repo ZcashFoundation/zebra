@@ -26,6 +26,8 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
+#[cfg(test)]
+pub use self::storage::tests::unmined_transactions_in_blocks;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -51,7 +53,7 @@ pub struct Mempool {
     ///
     /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
     /// inject transactions into `storage`, as transactions must be verified beforehand.
-    storage: storage::Storage,
+    pub storage: storage::Storage,
 }
 
 impl Mempool {
