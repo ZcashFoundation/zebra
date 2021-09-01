@@ -8,7 +8,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-use crate::{request::ContextuallyValidBlock, PreparedBlock};
+use crate::{request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, PreparedBlock};
 
 /// Mocks computation done during semantic validation
 pub trait Prepare {
@@ -28,6 +28,32 @@ impl Prepare for Arc<Block> {
             hash,
             height,
             new_outputs,
+            transaction_hashes,
+        }
+    }
+}
+
+impl<T> From<T> for ChainTipBlock
+where
+    T: Prepare,
+{
+    fn from(block: T) -> Self {
+        block.prepare().into()
+    }
+}
+
+impl From<PreparedBlock> for ChainTipBlock {
+    fn from(prepared: PreparedBlock) -> Self {
+        let PreparedBlock {
+            block: _,
+            hash,
+            height,
+            new_outputs: _,
+            transaction_hashes,
+        } = prepared;
+        Self {
+            hash,
+            height,
             transaction_hashes,
         }
     }

@@ -29,7 +29,7 @@ use crate::{
 };
 
 use self::{
-    chain_tip::{ChainTipReceiver, ChainTipSender},
+    chain_tip::{ChainTipChange, ChainTipSender, LatestChainTip},
     non_finalized_state::{NonFinalizedState, QueuedBlocks},
 };
 
@@ -76,13 +76,14 @@ pub(crate) struct StateService {
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub fn new(config: Config, network: Network) -> (Self, ChainTipReceiver) {
+    pub fn new(config: Config, network: Network) -> (Self, LatestChainTip, ChainTipChange) {
         let disk = FinalizedState::new(&config, network);
         let initial_tip = disk
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
-        let (chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(initial_tip);
+        let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
+            ChainTipSender::new(initial_tip);
 
         let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();
@@ -122,7 +123,7 @@ impl StateService {
         }
         tracing::info!("no legacy chain found");
 
-        (state, chain_tip_receiver)
+        (state, latest_chain_tip, chain_tip_change)
     }
 
     /// Queue a finalized block for verification and storage in the finalized state.
@@ -769,7 +770,7 @@ impl Service<Request> for StateService {
 }
 
 /// Initialize a state service from the provided [`Config`].
-/// Returns a boxed state service, and a receiver for state chain tip updates.
+/// Returns a boxed state service, and receivers for state chain tip updates.
 ///
 /// Each `network` has its own separate on-disk database.
 ///
@@ -780,10 +781,18 @@ impl Service<Request> for StateService {
 pub fn init(
     config: Config,
     network: Network,
-) -> (BoxService<Request, Response, BoxError>, ChainTipReceiver) {
-    let (state_service, chain_tip_receiver) = StateService::new(config, network);
+) -> (
+    BoxService<Request, Response, BoxError>,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    let (state_service, latest_chain_tip, chain_tip_change) = StateService::new(config, network);
 
-    (BoxService::new(state_service), chain_tip_receiver)
+    (
+        BoxService::new(state_service),
+        latest_chain_tip,
+        chain_tip_change,
+    )
 }
 
 /// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.
@@ -791,7 +800,7 @@ pub fn init(
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let (state_service, _) = StateService::new(Config::ephemeral(), network);
+    let (state_service, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
 }
