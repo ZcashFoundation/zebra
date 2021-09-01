@@ -11,7 +11,6 @@ use zebra_chain::{
 };
 use zebra_consensus::Config as ConsensusConfig;
 use zebra_network::{Request, Response};
-
 use zebra_state::Config as StateConfig;
 
 #[tokio::test]
