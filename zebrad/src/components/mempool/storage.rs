@@ -103,4 +103,12 @@ impl Storage {
             .filter(|tx| tx_ids.contains(&tx.id))
             .collect()
     }
+
+    /// Returns the set of [`UnminedTxId`]s matching ids in the rejected list.
+    pub fn rejected_transactions(self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTxId> {
+        tx_ids
+            .into_iter()
+            .filter(|tx| self.rejected.contains_key(tx))
+            .collect()
+    }
 }

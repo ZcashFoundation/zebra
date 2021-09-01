@@ -225,38 +225,10 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
-        let mempool = self.mempool.clone();
+        let mut mempool = self.mempool.clone();
 
         let fut = async move {
-            // Check if the transaction is already in the mempool.
-            match mempool
-                .oneshot(mp::Request::TransactionsById(
-                    [txid].iter().cloned().collect(),
-                ))
-                .await
-            {
-                Ok(mp::Response::Transactions(txs)) => {
-                    if txs.is_empty() {
-                        Ok(())
-                    } else {
-                        Err("already present in mempool".into())
-                    }
-                }
-                Ok(_) => unreachable!("wrong response"),
-                Err(e) => Err(e),
-            }?;
-            // Check if the transaction is already in the state.
-            match state
-                .ready_and()
-                .await?
-                .call(zs::Request::Transaction(txid.mined_id()))
-                .await
-            {
-                Ok(zs::Response::Transaction(None)) => Ok(()),
-                Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
-                Ok(_) => unreachable!("wrong response"),
-                Err(e) => Err(e),
-            }?;
+            Self::should_download(&mut state, &mut mempool, txid).await?;
 
             let height = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Err("no block at the tip".into()),
@@ -328,5 +300,68 @@ where
         metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
 
         DownloadAction::AddedToQueue
+    }
+
+    /// Check if transaction should be downloaded and verified.
+    ///
+    /// If it is already in the mempool (or in its rejected list)
+    /// or in state, then it shouldn't be downloaded (and an error is returned).
+    async fn should_download(
+        state: &mut ZS,
+        mempool: &mut ZM,
+        txid: UnminedTxId,
+    ) -> Result<(), BoxError> {
+        // Check if the transaction is already in the mempool.
+        match mempool
+            .ready_and()
+            .await?
+            .call(mp::Request::TransactionsById(
+                [txid].iter().cloned().collect(),
+            ))
+            .await
+        {
+            Ok(mp::Response::Transactions(txs)) => {
+                if txs.is_empty() {
+                    Ok(())
+                } else {
+                    Err("already present in mempool".into())
+                }
+            }
+            Ok(_) => unreachable!("wrong response"),
+            Err(e) => Err(e),
+        }?;
+
+        // Check if the transaction is in the mempool rejected list.
+        match mempool
+            .oneshot(mp::Request::RejectedTransactionsById(
+                [txid].iter().cloned().collect(),
+            ))
+            .await
+        {
+            Ok(mp::Response::TransactionIds(txs)) => {
+                if txs.is_empty() {
+                    Ok(())
+                } else {
+                    Err("in mempool rejected list".into())
+                }
+            }
+            Ok(_) => unreachable!("wrong response"),
+            Err(e) => Err(e),
+        }?;
+
+        // Check if the transaction is already in the state.
+        match state
+            .ready_and()
+            .await?
+            .call(zs::Request::Transaction(txid.mined_id()))
+            .await
+        {
+            Ok(zs::Response::Transaction(None)) => Ok(()),
+            Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
+            Ok(_) => unreachable!("wrong response"),
+            Err(e) => Err(e),
+        }?;
+
+        Ok(())
     }
 }
