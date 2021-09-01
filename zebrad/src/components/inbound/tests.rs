@@ -12,14 +12,8 @@ use zebra_chain::{
 use zebra_consensus::Config;
 use zebra_network::{Request, Response};
 
-#[test]
-fn mempool_requests_for_transaction_ids() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime");
-    let _guard = runtime.enter();
-
+#[tokio::test]
+async fn mempool_requests_for_transaction_ids() {
     let network = Network::Mainnet;
     let config = Config::default();
 
@@ -32,31 +26,29 @@ fn mempool_requests_for_transaction_ids() {
             .map(|t| t.id)
             .collect();
 
-    runtime.block_on(async move {
-        let (chain_verifier, _transaction_verifier) =
-            zebra_consensus::chain::init(config.clone(), network, zebra_state::init_test(network))
-                .await;
-        let (_setup_tx, setup_rx) = oneshot::channel();
-
-        let inbound_service =
-            ServiceBuilder::new()
-                .load_shed()
-                .buffer(20)
-                .service(super::Inbound::new(
-                    setup_rx,
-                    state_service.clone(),
-                    chain_verifier.clone(),
-                    mempool_service,
-                ));
-
-        let request = inbound_service
-            .oneshot(Request::MempoolTransactionIds)
+    let (chain_verifier, _transaction_verifier) =
+        zebra_consensus::chain::init(config.clone(), network, zebra_state::init_test(network))
             .await;
-        match request {
-            Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-            _ => panic!("in this test we are pretty sure there is always a correct response"),
-        };
-    });
+    let (_setup_tx, setup_rx) = oneshot::channel();
+
+    let inbound_service =
+        ServiceBuilder::new()
+            .load_shed()
+            .buffer(20)
+            .service(super::Inbound::new(
+                setup_rx,
+                state_service.clone(),
+                chain_verifier.clone(),
+                mempool_service,
+            ));
+
+    let request = inbound_service
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+    match request {
+        Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
+        _ => panic!("in this test we are pretty sure there is always a correct response"),
+    };
 }
 
 fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
