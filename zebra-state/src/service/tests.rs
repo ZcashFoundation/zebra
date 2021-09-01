@@ -312,14 +312,13 @@ proptest! {
         for block in finalized_blocks {
             let expected_block = block.clone();
 
-            let expected_action;
-            if expected_block.height <= block::Height(1) {
+            let expected_action = if expected_block.height <= block::Height(1) {
                 // 0: reset by both initialization and the Genesis network upgrade
                 // 1: reset by the BeforeOverwinter network upgrade
-                expected_action = TipAction::reset_with(expected_block.clone().into());
+                TipAction::reset_with(expected_block.clone().into())
             } else {
-                expected_action = TipAction::grow_with(expected_block.clone().into());
-            }
+                TipAction::grow_with(expected_block.clone().into())
+            };
 
             state_service.queue_and_commit_finalized(block);
 
