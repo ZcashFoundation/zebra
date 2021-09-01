@@ -398,6 +398,11 @@ where
     ) -> Result<(), TransactionError> {
         match network_upgrade {
             // Supports V5 transactions
+            //
+            // Consensus rules:
+            // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             NetworkUpgrade::Nu5 => Ok(()),
 
             // Does not support V5 transactions

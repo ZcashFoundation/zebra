@@ -28,7 +28,7 @@ use super::mempool::downloads::{
 use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 mod downloads;
-use downloads::Downloads;
+use downloads::Downloads as BlockDownloads;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
@@ -37,7 +37,7 @@ type TxVerifier = Buffer<
     BoxService<transaction::Request, transaction::Response, TransactionError>,
     transaction::Request,
 >;
-type InboundDownloads = Downloads<Timeout<Outbound>, Timeout<BlockVerifier>, State>;
+type InboundBlockDownloads = BlockDownloads<Timeout<Outbound>, Timeout<BlockVerifier>, State>;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>);
@@ -70,7 +70,7 @@ pub enum Setup {
         address_book: Arc<std::sync::Mutex<zn::AddressBook>>,
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
-        block_downloads: Pin<Box<InboundDownloads>>,
+        block_downloads: Pin<Box<InboundBlockDownloads>>,
 
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
@@ -175,7 +175,7 @@ impl Service<zn::Request> for Inbound {
                 tx_verifier,
             } => match network_setup.try_recv() {
                 Ok((outbound, address_book)) => {
-                    let block_downloads = Box::pin(Downloads::new(
+                    let block_downloads = Box::pin(BlockDownloads::new(
                         Timeout::new(outbound.clone(), BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
