@@ -1,4 +1,4 @@
-//! Chain tip interfaces.
+//! Zebra interfaces for access to chain tip information.
 
 use std::sync::Arc;
 

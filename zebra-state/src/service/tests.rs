@@ -1,6 +1,6 @@
 use std::{convert::TryInto, env, sync::Arc};
 
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, FutureExt};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
@@ -17,7 +17,7 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     constants, init_test,
-    service::StateService,
+    service::{chain_tip::TipAction::*, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
     BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
 };
@@ -297,24 +297,48 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, chain_tip_receiver) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
 
-        prop_assert_eq!(chain_tip_receiver.best_tip_height(), None);
+        prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
+        prop_assert_eq!(
+            chain_tip_change
+                .tip_change()
+                .now_or_never()
+                .transpose()
+                .expect("watch sender is not dropped"),
+            None
+        );
 
         for block in finalized_blocks {
-            let expected_height = block.height;
+            let expected_block = block.clone();
 
             state_service.queue_and_commit_finalized(block);
 
-            prop_assert_eq!(chain_tip_receiver.best_tip_height(), Some(expected_height));
+            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
+            prop_assert_eq!(
+                chain_tip_change
+                    .tip_change()
+                    .now_or_never()
+                    .transpose()
+                    .expect("watch sender is not dropped"),
+                Some(Grow { block: expected_block.into() })
+            );
         }
 
         for block in non_finalized_blocks {
-            let expected_height = block.height;
+            let expected_block = block.clone();
 
             state_service.queue_and_commit_non_finalized(block);
 
-            prop_assert_eq!(chain_tip_receiver.best_tip_height(), Some(expected_height));
+            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
+            prop_assert_eq!(
+                chain_tip_change
+                    .tip_change()
+                    .now_or_never()
+                    .transpose()
+                    .expect("watch sender is not dropped"),
+                Some(Grow { block: expected_block.into() })
+            );
         }
     }
 
@@ -332,7 +356,7 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, _) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, _, _) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
         prop_assert_eq!(

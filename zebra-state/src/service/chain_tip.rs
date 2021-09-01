@@ -1,3 +1,10 @@
+//! Access to Zebra chain tip information.
+//!
+//! Zebra has 3 different interfaces for access to chain tip information:
+//! * [zebra_state::Request](crate::request): [tower::Service] requests about chain state,
+//! * [LatestChainTip] for efficient access to the current best tip, and
+//! * [ChainTipChange] to `await` specific changes to the chain tip.
+
 use std::sync::Arc;
 
 use tokio::sync::watch;
@@ -6,23 +13,30 @@ use zebra_chain::{block, chain_tip::ChainTip, transaction};
 
 use crate::{request::ContextuallyValidBlock, FinalizedBlock};
 
+use TipAction::*;
+
 #[cfg(test)]
 mod tests;
 
-/// The internal watch channel data type for [`ChainTipSender`] and [`ChainTipReceiver`].
+/// The internal watch channel data type for [`ChainTipSender`], [`LatestChainTip`],
+/// and [`ChainTipChange`].
 type ChainTipData = Option<ChainTipBlock>;
 
 /// A chain tip block, with precalculated block data.
 ///
-/// Used to efficiently update the [`ChainTipSender`].
+/// Used to efficiently update [`ChainTipSender`], [`LatestChainTip`],
+/// and [`ChainTipChange`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainTipBlock {
-    pub(crate) hash: block::Hash,
-    pub(crate) height: block::Height,
+    /// The hash of the best chain tip block.
+    pub hash: block::Hash,
+
+    /// The height of the best chain tip block.
+    pub height: block::Height,
 
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
-    pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
+    pub transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {
@@ -60,7 +74,7 @@ impl From<FinalizedBlock> for ChainTipBlock {
     }
 }
 
-/// A sender for recent changes to the non-finalized and finalized chain tips.
+/// A sender for changes to the non-finalized and finalized chain tips.
 #[derive(Debug)]
 pub struct ChainTipSender {
     /// Have we got any chain tips from the non-finalized state?
@@ -78,23 +92,28 @@ pub struct ChainTipSender {
 }
 
 impl ChainTipSender {
-    /// Create new linked instances of [`ChainTipSender`] and [`ChainTipReceiver`],
+    /// Create new linked instances of [`ChainTipSender`], [`LatestChainTip`], and [`ChainTipChange`],
     /// using `initial_tip` as the tip.
-    pub fn new(initial_tip: impl Into<Option<ChainTipBlock>>) -> (Self, ChainTipReceiver) {
+    pub fn new(
+        initial_tip: impl Into<Option<ChainTipBlock>>,
+    ) -> (Self, LatestChainTip, ChainTipChange) {
         let (sender, receiver) = watch::channel(None);
+
         let mut sender = ChainTipSender {
             non_finalized_tip: false,
             sender,
             active_value: None,
         };
-        let receiver = ChainTipReceiver::new(receiver);
+
+        let current = LatestChainTip::new(receiver.clone());
+        let change = ChainTipChange::new(receiver);
 
         sender.update(initial_tip);
 
-        (sender, receiver)
+        (sender, current, change)
     }
 
-    /// Update the current finalized tip.
+    /// Update the latest finalized tip.
     ///
     /// May trigger an update to the best tip.
     pub fn set_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
@@ -103,7 +122,7 @@ impl ChainTipSender {
         }
     }
 
-    /// Update the current non-finalized tip.
+    /// Update the latest non-finalized tip.
     ///
     /// May trigger an update to the best tip.
     pub fn set_best_non_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
@@ -139,26 +158,35 @@ impl ChainTipSender {
     }
 }
 
-/// A receiver for recent changes to the non-finalized and finalized chain tips.
+/// Efficient access to the state's current best chain tip.
 ///
-/// The latest changes are available from all cloned instances of this type.
+/// Each method returns data from the latest tip,
+/// regardless of how many times you call it.
+///
+/// Cloned instances provide identical tip data.
 ///
 /// The chain tip data is based on:
 /// * the best non-finalized chain tip, if available, or
 /// * the finalized tip.
+///
+/// ## Note
+///
+/// If a lot of blocks are committed at the same time,
+/// the latest tip will skip some blocks in the chain.
 #[derive(Clone, Debug)]
-pub struct ChainTipReceiver {
+pub struct LatestChainTip {
+    /// The receiver for the current chain tip's data.
     receiver: watch::Receiver<ChainTipData>,
 }
 
-impl ChainTipReceiver {
-    /// Create a new chain tip receiver from a watch channel receiver.
+impl LatestChainTip {
+    /// Create a new [`LatestChainTip`] from a watch channel receiver.
     fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
         Self { receiver }
     }
 }
 
-impl ChainTip for ChainTipReceiver {
+impl ChainTip for LatestChainTip {
     /// Return the height of the best chain tip.
     fn best_tip_height(&self) -> Option<block::Height> {
         self.receiver.borrow().as_ref().map(|block| block.height)
@@ -179,5 +207,156 @@ impl ChainTip for ChainTipReceiver {
             .as_ref()
             .map(|block| block.transaction_hashes.clone())
             .unwrap_or_else(|| Arc::new([]))
+    }
+}
+
+/// A chain tip change monitor.
+///
+/// Awaits changes and resets of the state's best chain tip,
+/// returning the latest [`TipAction`] once the state is updated.
+///
+/// Each cloned instance separately tracks the last block data it provided.
+/// If the best chain fork has changed since the last [`tip_change`] on that instance,
+/// it returns a [`Reset`].
+///
+/// The chain tip data is based on:
+/// * the best non-finalized chain tip, if available, or
+/// * the finalized tip.
+#[derive(Debug)]
+pub struct ChainTipChange {
+    /// The receiver for the current chain tip's data.
+    receiver: watch::Receiver<ChainTipData>,
+
+    /// The most recent hash provided by this instance.
+    previous_change_hash: Option<block::Hash>,
+}
+
+/// Actions that we can take in response to a [`ChainTipChange`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TipAction {
+    /// The chain tip was updated continuously,
+    /// using a child `block` of the previous block.
+    ///
+    /// The genesis block action is a `Grow`.
+    Grow {
+        /// Information about the block used to grow the chain.
+        block: ChainTipBlock,
+    },
+
+    /// The chain tip was reset to a block with `height` and `hash`.
+    ///
+    /// Resets can happen for different reasons:
+    /// * a newly created or cloned [`ChainTipChange`], which is behind the current tip,
+    /// * extending the chain with a network upgrade activation block,
+    /// * switching to a different best [`Chain`], also known as a rollback, and
+    /// * receiving multiple blocks since the previous change.
+    ///
+    /// To keep the code and tests simple, Zebra performs the same reset actions,
+    /// regardless of the reset reason.
+    ///
+    /// `Reset`s do not have the transaction hashes from the tip block,
+    /// because all transactions should be cleared by a reset.
+    Reset {
+        /// The block height of the tip, after the chain reset.
+        height: block::Height,
+
+        /// The block hash of the tip, after the chain reset.
+        ///
+        /// Mainly useful for logging and debugging.
+        hash: block::Hash,
+    },
+}
+
+impl ChainTipChange {
+    /// Wait until the tip has changed, then return the corresponding [`TipAction`].
+    ///
+    /// The returned action describes how the tip has changed
+    /// since the last call to this method.
+    ///
+    /// If there have been no changes since the last time this method was called,
+    /// it waits for the next tip change before returning.
+    ///
+    /// If there have been multiple changes since the last time this method was called,
+    /// they are combined into a single [`TipAction::Reset`].
+    ///
+    /// Returns an error if communication with the state is lost.
+    ///
+    /// ## Note
+    ///
+    /// If a lot of blocks are committed at the same time,
+    /// the change will skip some blocks, and return a [`Reset`].
+    pub async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
+        let block = self.tip_block_change().await?;
+
+        // TODO: handle resets here
+
+        self.previous_change_hash = Some(block.hash);
+
+        Ok(Grow { block })
+    }
+
+    /// Create a new [`ChainTipChange`] from a watch channel receiver.
+    fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
+        Self {
+            receiver,
+            previous_change_hash: None,
+        }
+    }
+
+    /// Wait until the next chain tip change, then return the corresponding [`ChainTipBlock`].
+    ///
+    /// Returns an error if communication with the state is lost.
+    async fn tip_block_change(&mut self) -> Result<ChainTipBlock, watch::error::RecvError> {
+        loop {
+            // If there are multiple changes while this code is executing,
+            // we don't rely on getting the first block or the latest block
+            // after the change notification.
+            // Any block update after the change will do,
+            // we'll catch up with the tip after the next change.
+            self.receiver.changed().await?;
+
+            // Wait until there is actually Some block,
+            // so we don't have `Option`s inside `TipAction`s.
+            if let Some(block) = self.best_tip_block() {
+                assert!(
+                    Some(block.hash) != self.previous_change_hash,
+                    "ChainTipSender must ignore unchanged tips"
+                );
+
+                return Ok(block);
+            }
+        }
+    }
+
+    /// Return the current best [`ChainTipBlock`],
+    /// or `None` if no block has been committed yet.
+    fn best_tip_block(&self) -> Option<ChainTipBlock> {
+        self.receiver.borrow().clone()
+    }
+}
+
+impl Clone for ChainTipChange {
+    fn clone(&self) -> Self {
+        Self {
+            receiver: self.receiver.clone(),
+            // clear the previous change hash, so the first action is a reset
+            previous_change_hash: None,
+        }
+    }
+}
+
+impl TipAction {
+    /// Is this tip action a [`Reset`]?
+    pub fn is_reset(&self) -> bool {
+        matches!(self, Reset { .. })
+    }
+
+    /// Returns the block hash of this tip action,
+    /// regardless of the underlying variant.
+    pub fn best_tip_hash(&self) -> block::Hash {
+        match self {
+            Grow { block } => block.hash,
+            Reset { hash, .. } => *hash,
+        }
     }
 }

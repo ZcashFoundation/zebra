@@ -37,7 +37,7 @@ mod tests;
 type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
-/// and `chain_tip_receiver`.
+/// and `latest_chain_tip`.
 ///
 /// The peer set abstracts away peer management to provide a
 /// [`tower::Service`] representing "the network" that load-balances requests
@@ -62,7 +62,7 @@ type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 pub async fn init<S, C>(
     config: Config,
     inbound_service: S,
-    chain_tip_receiver: C,
+    latest_chain_tip: C,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -92,7 +92,7 @@ where
             .with_timestamp_collector(timestamp_collector)
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
-            .with_chain_tip_receiver(chain_tip_receiver)
+            .with_latest_chain_tip(latest_chain_tip)
             .want_transactions(true)
             .finish()
             .expect("configured all required parameters");
