@@ -120,7 +120,7 @@ proptest! {
         ///    looping repeatedly while [`SyncStatus`] reports that it is close to the chain tip.
         /// 2. Waits until [`SyncStatus`] reports that it is close to the chain tip.
         /// 3. Notifies the main task that it awoke, i.e., that the [`SyncStatus`] has finished
-        ///    wating until it was close to the chain tip.
+        ///    waiting until it was close to the chain tip.
         async fn wait_task(
             mut status: SyncStatus,
             update_events: Arc<Semaphore>,
