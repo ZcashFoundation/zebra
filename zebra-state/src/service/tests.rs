@@ -17,10 +17,7 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     constants, init_test,
-    service::{
-        chain_tip::TipAction::{self, *},
-        StateService,
-    },
+    service::{chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
     BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
 };
@@ -316,8 +313,9 @@ proptest! {
             let expected_block = block.clone();
 
             let expected_action;
-            if expected_block.height == block::Height(0) {
-                // reset by both initialization and the genesis network upgrade
+            if expected_block.height <= block::Height(1) {
+                // 0: reset by both initialization and the Genesis network upgrade
+                // 1: reset by the BeforeOverwinter network upgrade
                 expected_action = TipAction::reset_with(expected_block.clone().into());
             } else {
                 expected_action = TipAction::grow_with(expected_block.clone().into());
@@ -339,6 +337,14 @@ proptest! {
         for block in non_finalized_blocks {
             let expected_block = block.clone();
 
+            let expected_action;
+            if expected_block.height == block::Height(1) {
+                // 1: reset by the BeforeOverwinter network upgrade
+                expected_action = TipAction::reset_with(expected_block.clone().into());
+            } else {
+                expected_action = TipAction::grow_with(expected_block.clone().into());
+            }
+
             state_service.queue_and_commit_non_finalized(block);
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
@@ -348,7 +354,7 @@ proptest! {
                     .now_or_never()
                     .transpose()
                     .expect("watch sender is not dropped"),
-                Some(Grow { block: expected_block.into() })
+                Some(expected_action)
             );
         }
     }

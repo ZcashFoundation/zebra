@@ -2,13 +2,17 @@ use std::iter;
 
 use futures::FutureExt;
 
-use zebra_chain::chain_tip::{ChainTip, NoChainTip};
+use zebra_chain::{
+    chain_tip::{ChainTip, NoChainTip},
+    parameters::Network::*,
+};
 
 use super::super::ChainTipSender;
 
 #[test]
 fn current_best_tip_is_initially_empty() {
-    let (_chain_tip_sender, latest_chain_tip, _chain_tip_change) = ChainTipSender::new(None);
+    let (_chain_tip_sender, latest_chain_tip, _chain_tip_change) =
+        ChainTipSender::new(None, Mainnet);
 
     assert_eq!(latest_chain_tip.best_tip_height(), None);
     assert_eq!(latest_chain_tip.best_tip_hash(), None);
@@ -32,7 +36,8 @@ fn empty_latest_chain_tip_is_empty() {
 
 #[test]
 fn chain_tip_change_is_initially_not_ready() {
-    let (_chain_tip_sender, _latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None);
+    let (_chain_tip_sender, _latest_chain_tip, mut chain_tip_change) =
+        ChainTipSender::new(None, Mainnet);
 
     let first = chain_tip_change
         .tip_change()

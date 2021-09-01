@@ -83,7 +83,7 @@ impl StateService {
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
-            ChainTipSender::new(initial_tip);
+            ChainTipSender::new(initial_tip, network);
 
         let mem = NonFinalizedState::new(network);
         let queued_blocks = QueuedBlocks::default();

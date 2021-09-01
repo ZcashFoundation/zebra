@@ -9,7 +9,12 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use zebra_chain::{block, chain_tip::ChainTip, transaction};
+use zebra_chain::{
+    block,
+    chain_tip::ChainTip,
+    parameters::{Network, NetworkUpgrade},
+    transaction,
+};
 
 use crate::{request::ContextuallyValidBlock, FinalizedBlock};
 
@@ -104,9 +109,10 @@ pub struct ChainTipSender {
 
 impl ChainTipSender {
     /// Create new linked instances of [`ChainTipSender`], [`LatestChainTip`], and [`ChainTipChange`],
-    /// using `initial_tip` as the tip.
+    /// using an `initial_tip` and a [`Network`].
     pub fn new(
         initial_tip: impl Into<Option<ChainTipBlock>>,
+        network: Network,
     ) -> (Self, LatestChainTip, ChainTipChange) {
         let (sender, receiver) = watch::channel(None);
 
@@ -117,7 +123,7 @@ impl ChainTipSender {
         };
 
         let current = LatestChainTip::new(receiver.clone());
-        let change = ChainTipChange::new(receiver);
+        let change = ChainTipChange::new(receiver, network);
 
         sender.update(initial_tip);
 
@@ -245,6 +251,9 @@ pub struct ChainTipChange {
     /// If the best chain fork has changed, or some blocks have been skipped,
     /// this hash will be different to the last returned `ChainTipBlock.hash`.
     last_change_hash: Option<block::Hash>,
+
+    /// The network for the chain tip.
+    network: Network,
 }
 
 /// Actions that we can take in response to a [`ChainTipChange`].
@@ -319,23 +328,49 @@ impl ChainTipChange {
             "ChainTipSender ignores unchanged tips"
         );
 
-        // check if we need a reset
-        if Some(block.previous_block_hash) != self.last_change_hash {
-            // we've either:
-            // - just initialized this instance,
-            // - changed the best chain to another fork (a rollback), or
-            // - skipped some blocks in the best chain
+        // If the previous block hash doesn't match, reset.
+        // We've either:
+        // - just initialized this instance,
+        // - changed the best chain to another fork (a rollback), or
+        // - skipped some blocks in the best chain.
+        //
+        // Consensus rules:
+        //
+        // > It is possible for a reorganization to occur
+        // > that rolls back from after the activation height, to before that height.
+        // > This can handled in the same way as any regular chain orphaning or reorganization,
+        // > as long as the new chain is valid.
+        //
+        // https://zips.z.cash/zip-0200#chain-reorganization
+
+        // If we're at a network upgrade activation block, reset.
+        //
+        // Consensus rules:
+        //
+        // > When the current chain tip height reaches ACTIVATION_HEIGHT,
+        // > the node's local transaction memory pool SHOULD be cleared of transactions
+        // > that will never be valid on the post-upgrade consensus branch.
+        //
+        // https://zips.z.cash/zip-0200#memory-pool
+        //
+        // Skipped blocks can include network upgrade activation blocks.
+        // Fork changes can activate or deactivate a network upgrade.
+        // So we must perform the same actions for network upgrades and skipped blocks.
+        if Some(block.previous_block_hash) != self.last_change_hash
+            || NetworkUpgrade::is_activation_height(self.network, block.height)
+        {
             TipAction::reset_with(block)
         } else {
             TipAction::grow_with(block)
         }
     }
 
-    /// Create a new [`ChainTipChange`] from a watch channel receiver.
-    fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
+    /// Create a new [`ChainTipChange`] from a watch channel receiver and [`Network`].
+    fn new(receiver: watch::Receiver<ChainTipData>, network: Network) -> Self {
         Self {
             receiver,
             last_change_hash: None,
+            network,
         }
     }
 
@@ -370,8 +405,11 @@ impl Clone for ChainTipChange {
     fn clone(&self) -> Self {
         Self {
             receiver: self.receiver.clone(),
+
             // clear the previous change hash, so the first action is a reset
             last_change_hash: None,
+
+            network: self.network,
         }
     }
 }
