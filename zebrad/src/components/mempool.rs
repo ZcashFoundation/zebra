@@ -53,7 +53,7 @@ pub struct Mempool {
     ///
     /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
     /// inject transactions into `storage`, as transactions must be verified beforehand.
-    pub storage: storage::Storage,
+    storage: storage::Storage,
 }
 
 impl Mempool {
@@ -62,6 +62,12 @@ impl Mempool {
         Mempool {
             storage: Default::default(),
         }
+    }
+
+    ///  Get the storage field of the mempool for testing purposes.
+    #[cfg(test)]
+    pub fn storage(&mut self) -> &mut storage::Storage {
+        &mut self.storage
     }
 }
 
