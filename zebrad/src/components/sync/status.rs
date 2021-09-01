@@ -50,6 +50,11 @@ impl SyncStatus {
     pub fn is_close_to_tip(&self) -> bool {
         let sync_lengths = self.latest_sync_length.borrow();
 
+        // Return early if sync_lengths is empty.
+        if sync_lengths.is_empty() {
+            return false;
+        }
+
         // Compute the sum of the `sync_lengths`.
         // The sum is computed by saturating addition in order to avoid overflowing.
         let sum = sync_lengths
