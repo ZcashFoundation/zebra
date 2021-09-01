@@ -309,6 +309,13 @@ where
     ) -> Result<(), TransactionError> {
         match network_upgrade {
             // Supports V4 transactions
+            //
+            // Consensus rules:
+            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, ...
+            // >
+            // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             NetworkUpgrade::Sapling
             | NetworkUpgrade::Blossom
             | NetworkUpgrade::Heartwood
