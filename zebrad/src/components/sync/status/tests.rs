@@ -17,7 +17,7 @@ const MAX_TEST_EXECUTION: Duration = Duration::from_secs(1);
 /// The maximum time to wait for an event to be received.
 ///
 /// If an event is not received in this time, it is considered that it will never be received.
-const EVENT_TIMEOUT: Duration = Duration::from_millis(5);
+const EVENT_TIMEOUT: Duration = Duration::from_millis(10);
 
 proptest! {
     #![proptest_config(
