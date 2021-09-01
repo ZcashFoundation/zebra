@@ -47,7 +47,9 @@ async fn mempool_requests_for_transaction_ids() {
         .await;
     match request {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        _ => panic!("in this test we are pretty sure there is always a correct response"),
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
     };
 }
 
