@@ -160,11 +160,19 @@ impl ChainTipSender {
 
 /// Efficient access to the state's current best chain tip.
 ///
-/// The latest changes are available from all cloned instances of this type.
+/// Each method returns data from the latest tip,
+/// regardless of how many times you call it.
+///
+/// Cloned instances provide identical tip data.
 ///
 /// The chain tip data is based on:
 /// * the best non-finalized chain tip, if available, or
 /// * the finalized tip.
+///
+/// ## Note
+///
+/// If a lot of blocks are committed at the same time,
+/// the latest tip will skip some blocks in the chain.
 #[derive(Clone, Debug)]
 pub struct LatestChainTip {
     /// The receiver for the current chain tip's data.
@@ -203,11 +211,13 @@ impl ChainTip for LatestChainTip {
 }
 
 /// A chain tip change monitor.
-/// Used to `await` changes and resets of the state's best chain tip.
 ///
-/// The latest changes are available from all cloned instances of this type,
-/// but each clone separately tracks the last change it provided,
-/// so it can provide a [`Reset`] if the best chain fork changes.
+/// Awaits changes and resets of the state's best chain tip,
+/// returning the latest [`TipAction`] once the state is updated.
+///
+/// Each cloned instance separately tracks the last block data it provided.
+/// If the best chain fork has changed since the last [`tip_change`] on that instance,
+/// it returns a [`Reset`].
 ///
 /// The chain tip data is based on:
 /// * the best non-finalized chain tip, if available, or
@@ -258,11 +268,25 @@ pub enum TipAction {
 }
 
 impl ChainTipChange {
-    /// Wait until the next chain tip change, then return the corresponding [`TipAction`].
+    /// Wait until the tip has changed, then return the corresponding [`TipAction`].
+    ///
+    /// The returned action describes how the tip has changed
+    /// since the last call to this method.
+    ///
+    /// If there have been no changes since the last time this method was called,
+    /// it waits for the next tip change before returning.
+    ///
+    /// If there have been multiple changes since the last time this method was called,
+    /// they are combined into a single [`TipAction::Reset`].
     ///
     /// Returns an error if communication with the state is lost.
-    pub async fn next(&mut self) -> Result<TipAction, watch::error::RecvError> {
-        let block = self.next_block().await?;
+    ///
+    /// ## Note
+    ///
+    /// If a lot of blocks are committed at the same time,
+    /// the change will skip some blocks, and return a [`Reset`].
+    pub async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
+        let block = self.tip_block_change().await?;
 
         // TODO: handle resets here
 
@@ -282,12 +306,17 @@ impl ChainTipChange {
     /// Wait until the next chain tip change, then return the corresponding [`ChainTipBlock`].
     ///
     /// Returns an error if communication with the state is lost.
-    async fn next_block(&mut self) -> Result<ChainTipBlock, watch::error::RecvError> {
+    async fn tip_block_change(&mut self) -> Result<ChainTipBlock, watch::error::RecvError> {
         loop {
+            // If there are multiple changes while this code is executing,
+            // we don't rely on getting the first block or the latest block
+            // after the change notification.
+            // Any block update after the change will do,
+            // we'll catch up with the tip after the next change.
             self.receiver.changed().await?;
 
-            // wait until there is actually Some block,
-            // so we don't have `Option`s inside `TipAction`s
+            // Wait until there is actually Some block,
+            // so we don't have `Option`s inside `TipAction`s.
             if let Some(block) = self.best_tip_block() {
                 assert!(
                     Some(block.hash) != self.previous_change_hash,

@@ -302,7 +302,7 @@ proptest! {
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(
             chain_tip_change
-                .next()
+                .tip_change()
                 .now_or_never()
                 .transpose()
                 .expect("watch sender is not dropped"),
@@ -317,7 +317,7 @@ proptest! {
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(
                 chain_tip_change
-                    .next()
+                    .tip_change()
                     .now_or_never()
                     .transpose()
                     .expect("watch sender is not dropped"),
@@ -333,7 +333,7 @@ proptest! {
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(
                 chain_tip_change
-                    .next()
+                    .tip_change()
                     .now_or_never()
                     .transpose()
                     .expect("watch sender is not dropped"),

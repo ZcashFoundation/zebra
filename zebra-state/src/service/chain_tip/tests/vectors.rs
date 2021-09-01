@@ -35,7 +35,7 @@ fn chain_tip_change_is_initially_not_ready() {
     let (_chain_tip_sender, _latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None);
 
     let first = chain_tip_change
-        .next()
+        .tip_change()
         .now_or_never()
         .transpose()
         .expect("watch sender is not dropped");
@@ -44,7 +44,7 @@ fn chain_tip_change_is_initially_not_ready() {
 
     // try again, just to be sure
     let first = chain_tip_change
-        .next()
+        .tip_change()
         .now_or_never()
         .transpose()
         .expect("watch sender is not dropped");
@@ -55,7 +55,7 @@ fn chain_tip_change_is_initially_not_ready() {
     #[allow(clippy::redundant_clone)]
     let first_clone = chain_tip_change
         .clone()
-        .next()
+        .tip_change()
         .now_or_never()
         .transpose()
         .expect("watch sender is not dropped");

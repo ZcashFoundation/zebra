@@ -97,7 +97,7 @@ proptest! {
 
         prop_assert_eq!(
             chain_tip_change
-                .next()
+                .tip_change()
                 .now_or_never()
                 .transpose()
                 .expect("watch sender is not dropped"),
