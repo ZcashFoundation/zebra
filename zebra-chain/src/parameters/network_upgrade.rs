@@ -208,6 +208,14 @@ impl NetworkUpgrade {
             .next()
     }
 
+    /// Returns `true` if `height` is the activation height of any network upgrade
+    /// on `network`.
+    ///
+    /// Use [`activation_height`] to get the specific network upgrade.
+    pub fn is_activation_height(network: Network, height: block::Height) -> bool {
+        NetworkUpgrade::activation_list(network).contains_key(&height)
+    }
+
     /// Returns a BTreeMap of NetworkUpgrades and their ConsensusBranchIds.
     ///
     /// Branch ids are the same for mainnet and testnet.

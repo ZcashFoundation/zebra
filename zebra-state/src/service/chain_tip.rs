@@ -9,7 +9,12 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use zebra_chain::{block, chain_tip::ChainTip, transaction};
+use zebra_chain::{
+    block,
+    chain_tip::ChainTip,
+    parameters::{Network, NetworkUpgrade},
+    transaction,
+};
 
 use crate::{request::ContextuallyValidBlock, FinalizedBlock};
 
@@ -37,12 +42,21 @@ pub struct ChainTipBlock {
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+
+    /// The hash of the previous block in the best chain.
+    /// This block is immediately behind the best chain tip.
+    ///
+    /// ## Note
+    ///
+    /// If the best chain fork has changed, or some blocks have been skipped,
+    /// this hash will be different to the last returned `ChainTipBlock.hash`.
+    pub(crate) previous_block_hash: block::Hash,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {
     fn from(contextually_valid: ContextuallyValidBlock) -> Self {
         let ContextuallyValidBlock {
-            block: _,
+            block,
             hash,
             height,
             new_outputs: _,
@@ -53,6 +67,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             hash,
             height,
             transaction_hashes,
+            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }
@@ -60,7 +75,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
 impl From<FinalizedBlock> for ChainTipBlock {
     fn from(finalized: FinalizedBlock) -> Self {
         let FinalizedBlock {
-            block: _,
+            block,
             hash,
             height,
             new_outputs: _,
@@ -70,6 +85,7 @@ impl From<FinalizedBlock> for ChainTipBlock {
             hash,
             height,
             transaction_hashes,
+            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }
@@ -93,9 +109,10 @@ pub struct ChainTipSender {
 
 impl ChainTipSender {
     /// Create new linked instances of [`ChainTipSender`], [`LatestChainTip`], and [`ChainTipChange`],
-    /// using `initial_tip` as the tip.
+    /// using an `initial_tip` and a [`Network`].
     pub fn new(
         initial_tip: impl Into<Option<ChainTipBlock>>,
+        network: Network,
     ) -> (Self, LatestChainTip, ChainTipChange) {
         let (sender, receiver) = watch::channel(None);
 
@@ -106,7 +123,7 @@ impl ChainTipSender {
         };
 
         let current = LatestChainTip::new(receiver.clone());
-        let change = ChainTipChange::new(receiver);
+        let change = ChainTipChange::new(receiver, network);
 
         sender.update(initial_tip);
 
@@ -227,8 +244,16 @@ pub struct ChainTipChange {
     /// The receiver for the current chain tip's data.
     receiver: watch::Receiver<ChainTipData>,
 
-    /// The most recent hash provided by this instance.
-    previous_change_hash: Option<block::Hash>,
+    /// The most recent [`block::Hash`] provided by this instance.
+    ///
+    /// ## Note
+    ///
+    /// If the best chain fork has changed, or some blocks have been skipped,
+    /// this hash will be different to the last returned `ChainTipBlock.hash`.
+    last_change_hash: Option<block::Hash>,
+
+    /// The network for the chain tip.
+    network: Network,
 }
 
 /// Actions that we can take in response to a [`ChainTipChange`].
@@ -288,18 +313,64 @@ impl ChainTipChange {
     pub async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
         let block = self.tip_block_change().await?;
 
-        // TODO: handle resets here
+        let action = self.action(block.clone());
 
-        self.previous_change_hash = Some(block.hash);
+        self.last_change_hash = Some(block.hash);
 
-        Ok(Grow { block })
+        Ok(action)
     }
 
-    /// Create a new [`ChainTipChange`] from a watch channel receiver.
-    fn new(receiver: watch::Receiver<ChainTipData>) -> Self {
+    /// Return an action based on `block` and the last change we returned.
+    fn action(&self, block: ChainTipBlock) -> TipAction {
+        // check for an edge case that's dealt with by other code
+        assert!(
+            Some(block.hash) != self.last_change_hash,
+            "ChainTipSender ignores unchanged tips"
+        );
+
+        // If the previous block hash doesn't match, reset.
+        // We've either:
+        // - just initialized this instance,
+        // - changed the best chain to another fork (a rollback), or
+        // - skipped some blocks in the best chain.
+        //
+        // Consensus rules:
+        //
+        // > It is possible for a reorganization to occur
+        // > that rolls back from after the activation height, to before that height.
+        // > This can handled in the same way as any regular chain orphaning or reorganization,
+        // > as long as the new chain is valid.
+        //
+        // https://zips.z.cash/zip-0200#chain-reorganization
+
+        // If we're at a network upgrade activation block, reset.
+        //
+        // Consensus rules:
+        //
+        // > When the current chain tip height reaches ACTIVATION_HEIGHT,
+        // > the node's local transaction memory pool SHOULD be cleared of transactions
+        // > that will never be valid on the post-upgrade consensus branch.
+        //
+        // https://zips.z.cash/zip-0200#memory-pool
+        //
+        // Skipped blocks can include network upgrade activation blocks.
+        // Fork changes can activate or deactivate a network upgrade.
+        // So we must perform the same actions for network upgrades and skipped blocks.
+        if Some(block.previous_block_hash) != self.last_change_hash
+            || NetworkUpgrade::is_activation_height(self.network, block.height)
+        {
+            TipAction::reset_with(block)
+        } else {
+            TipAction::grow_with(block)
+        }
+    }
+
+    /// Create a new [`ChainTipChange`] from a watch channel receiver and [`Network`].
+    fn new(receiver: watch::Receiver<ChainTipData>, network: Network) -> Self {
         Self {
             receiver,
-            previous_change_hash: None,
+            last_change_hash: None,
+            network,
         }
     }
 
@@ -318,11 +389,6 @@ impl ChainTipChange {
             // Wait until there is actually Some block,
             // so we don't have `Option`s inside `TipAction`s.
             if let Some(block) = self.best_tip_block() {
-                assert!(
-                    Some(block.hash) != self.previous_change_hash,
-                    "ChainTipSender must ignore unchanged tips"
-                );
-
                 return Ok(block);
             }
         }
@@ -339,8 +405,11 @@ impl Clone for ChainTipChange {
     fn clone(&self) -> Self {
         Self {
             receiver: self.receiver.clone(),
+
             // clear the previous change hash, so the first action is a reset
-            previous_change_hash: None,
+            last_change_hash: None,
+
+            network: self.network,
         }
     }
 }
@@ -357,6 +426,19 @@ impl TipAction {
         match self {
             Grow { block } => block.hash,
             Reset { hash, .. } => *hash,
+        }
+    }
+
+    /// Returns a [`Grow`] based on `block`.
+    pub(crate) fn grow_with(block: ChainTipBlock) -> Self {
+        Grow { block }
+    }
+
+    /// Returns a [`Reset`] based on `block`.
+    pub(crate) fn reset_with(block: ChainTipBlock) -> Self {
+        Reset {
+            height: block.height,
+            hash: block.hash,
         }
     }
 }
