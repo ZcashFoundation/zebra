@@ -57,7 +57,7 @@ pub struct Handshake<S, C = NoChainTip> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
-    chain_tip_receiver: C,
+    latest_chain_tip: C,
 }
 
 /// The peer address that we are handshaking with.
@@ -307,7 +307,7 @@ pub struct Builder<S, C = NoChainTip> {
     user_agent: Option<String>,
     relay: Option<bool>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
-    chain_tip_receiver: C,
+    latest_chain_tip: C,
 }
 
 impl<S, C> Builder<S, C>
@@ -374,9 +374,9 @@ where
     /// constant over network upgrade activations.
     ///
     /// Use [`NoChainTip`] to explicitly provide no chain tip.
-    pub fn with_chain_tip_receiver<NewC>(self, chain_tip_receiver: NewC) -> Builder<S, NewC> {
+    pub fn with_latest_chain_tip<NewC>(self, latest_chain_tip: NewC) -> Builder<S, NewC> {
         Builder {
-            chain_tip_receiver,
+            latest_chain_tip,
             // TODO: Until Rust RFC 2528 reaches stable, we can't do `..self`
             config: self.config,
             inbound_service: self.inbound_service,
@@ -429,7 +429,7 @@ where
             our_services,
             relay,
             parent_span: Span::current(),
-            chain_tip_receiver: self.chain_tip_receiver,
+            latest_chain_tip: self.latest_chain_tip,
         })
     }
 }
@@ -452,7 +452,7 @@ where
             our_services: None,
             relay: None,
             inv_collector: None,
-            chain_tip_receiver: NoChainTip,
+            latest_chain_tip: NoChainTip,
         }
     }
 }
@@ -471,7 +471,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-    chain_tip_receiver: impl ChainTip,
+    latest_chain_tip: impl ChainTip,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -585,7 +585,7 @@ pub async fn negotiate_version(
 
     // SECURITY: Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
-    let height = chain_tip_receiver.best_tip_height();
+    let height = latest_chain_tip.best_tip_height();
     let min_version = Version::min_remote_for_height(config.network, height);
     if remote_version < min_version {
         // Disconnect if peer is using an obsolete version.
@@ -643,7 +643,7 @@ where
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
-        let chain_tip_receiver = self.chain_tip_receiver.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         let fut = async move {
             debug!(
@@ -674,7 +674,7 @@ where
                     user_agent,
                     our_services,
                     relay,
-                    chain_tip_receiver,
+                    latest_chain_tip,
                 ),
             )
             .await??;

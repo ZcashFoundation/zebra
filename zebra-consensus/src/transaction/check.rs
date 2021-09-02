@@ -51,7 +51,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
-    if tx.is_coinbase() {
+    if tx.has_valid_coinbase_transaction_inputs() {
         if tx.contains_prevout_input() {
             return Err(TransactionError::CoinbaseHasPrevOutInput);
         } else if tx.joinsplit_count() > 0 {

@@ -539,13 +539,23 @@ where
             .entry(height)
             .or_insert_with(|| QueuedBlockList::with_capacity(1));
 
-        // Replace older requests by newer ones by swapping the oneshot.
+        // Replace older requests with newer ones.
+        // The newer block is ok, the older block is an error.
         for qb in qblocks.iter_mut() {
             if qb.block.hash == hash {
                 let e = VerifyCheckpointError::NewerRequest { height, hash };
                 tracing::trace!(?e, "failing older of duplicate requests");
-                let old_tx = std::mem::replace(&mut qb.tx, new_qblock.tx);
-                let _ = old_tx.send(Err(e));
+
+                // ## Security
+                //
+                // Replace the entire queued block.
+                //
+                // We don't check the authorizing data hash until checkpoint blocks reach the state.
+                // So signatures, proofs, or scripts could be different,
+                // even if the block hash is the same.
+
+                let old = std::mem::replace(qb, new_qblock);
+                let _ = old.tx.send(Err(e));
                 return Ok(req_block);
             }
         }

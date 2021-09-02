@@ -27,10 +27,10 @@ pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
         .get(0)
         .ok_or(BlockError::NoTransactions)?;
     let mut rest = block.transactions.iter().skip(1);
-    if !first.is_coinbase() {
+    if !first.has_valid_coinbase_transaction_inputs() {
         return Err(TransactionError::CoinbasePosition)?;
     }
-    if rest.any(|tx| tx.contains_coinbase_input()) {
+    if rest.any(|tx| tx.has_any_coinbase_inputs()) {
         return Err(TransactionError::CoinbaseAfterFirst)?;
     }
 

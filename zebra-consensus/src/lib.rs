@@ -47,7 +47,7 @@ mod config;
 mod parameters;
 mod primitives;
 mod script;
-mod transaction;
+pub mod transaction;
 
 pub mod chain;
 #[allow(missing_docs)]
