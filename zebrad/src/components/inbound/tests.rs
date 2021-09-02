@@ -1,4 +1,4 @@
-use tower::ServiceExt;
+use tower::{util::BoxService, ServiceExt};
 
 use super::mempool::{unmined_transactions_in_blocks, Mempool};
 
@@ -29,6 +29,9 @@ async fn mempool_requests_for_transaction_ids() {
             .map(|t| t.id)
             .collect();
 
+    let mempool_service = BoxService::new(mempool_service);
+    let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
+
     let (block_verifier, transaction_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
@@ -42,7 +45,7 @@ async fn mempool_requests_for_transaction_ids() {
             state_service,
             block_verifier.clone(),
             transaction_verifier.clone(),
-            mempool_service,
+            mempool,
         ));
 
     let request = inbound_service

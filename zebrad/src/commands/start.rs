@@ -67,11 +67,10 @@ impl StartCmd {
         .await;
 
         info!("initializing mempool");
-        let mempool = mempool::Mempool::new(config.network.network);
-
-        info!("initializing network");
         let mempool_service = BoxService::new(Mempool::new(config.network.network));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
+
+        info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
         // in response to excess load.
@@ -82,10 +81,9 @@ impl StartCmd {
             .service(Inbound::new(
                 setup_rx,
                 state.clone(),
-                mempool.clone(),
                 chain_verifier.clone(),
                 tx_verifier.clone(),
-                mempool,
+                mempool.clone(),
             ));
 
         let (peer_set, address_book) =
