@@ -143,7 +143,7 @@ impl Inbound {
         state: State,
         block_verifier: BlockVerifier,
         tx_verifier: TxVerifier,
-        mempool: mempool::Mempool
+        mempool: mempool::Mempool,
     ) -> Self {
         Self {
             network_setup: Setup::AwaitingNetwork {
