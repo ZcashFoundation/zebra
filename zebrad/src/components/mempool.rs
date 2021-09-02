@@ -35,7 +35,7 @@ pub use self::storage::tests::unmined_transactions_in_blocks;
 pub enum Request {
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
-    RejectedTransactionsById(HashSet<UnminedTxId>),
+    RejectedTransactionsIds(HashSet<UnminedTxId>),
 }
 
 #[derive(Debug)]
@@ -94,7 +94,7 @@ impl Service<Request> for Mempool {
                 let rsp = Ok(self.storage.clone().transactions(ids)).map(Response::Transactions);
                 async move { rsp }.boxed()
             }
-            Request::RejectedTransactionsById(ids) => {
+            Request::RejectedTransactionsIds(ids) => {
                 let rsp = Ok(self.storage.clone().rejected_transactions(ids))
                     .map(Response::TransactionIds);
                 async move { rsp }.boxed()

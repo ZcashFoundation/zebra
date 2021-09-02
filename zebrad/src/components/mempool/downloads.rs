@@ -333,7 +333,7 @@ where
 
         // Check if the transaction is in the mempool rejected list.
         match mempool
-            .oneshot(mp::Request::RejectedTransactionsById(
+            .oneshot(mp::Request::RejectedTransactionsIds(
                 [txid].iter().cloned().collect(),
             ))
             .await
