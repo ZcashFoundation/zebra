@@ -1,34 +1,4 @@
 {
-    "__inputs": [
-        {
-            "name": "DS_PROMETHEUS-ZEBRA",
-            "label": "Prometheus-Zebra",
-            "description": "",
-            "type": "datasource",
-            "pluginId": "prometheus",
-            "pluginName": "Prometheus"
-        }
-    ],
-    "__requires": [
-        {
-            "type": "grafana",
-            "id": "grafana",
-            "name": "Grafana",
-            "version": "8.1.2"
-        },
-        {
-            "type": "panel",
-            "id": "graph",
-            "name": "Graph (old)",
-            "version": ""
-        },
-        {
-            "type": "datasource",
-            "id": "prometheus",
-            "name": "Prometheus",
-            "version": "1.0.0"
-        }
-    ],
     "annotations": {
         "list": [
             {
@@ -51,8 +21,8 @@
     "editable": true,
     "gnetId": null,
     "graphTooltip": 0,
-    "id": null,
-    "iteration": 1630092146360,
+    "id": 5,
+    "iteration": 1630611911135,
     "links": [],
     "panels": [
         {
@@ -117,6 +87,14 @@
                     "interval": "",
                     "legendFormat": "gossip_queued_transaction_count",
                     "refId": "E"
+                },
+                {
+                    "exemplar": true,
+                    "expr": "rate(gossip_pushed_transaction_count{job=\"$job\"}[1m]) * 60",
+                    "hide": false,
+                    "interval": "",
+                    "legendFormat": "gossip_pushed_transaction_count per min",
+                    "refId": "A"
                 }
             ],
             "thresholds": [],
@@ -169,8 +147,16 @@
         "list": [
             {
                 "allValue": null,
-                "current": {},
-                "datasource": "${DS_PROMETHEUS-ZEBRA}",
+                "current": {
+                    "selected": true,
+                    "text": [
+                        "All"
+                    ],
+                    "value": [
+                        "$__all"
+                    ]
+                },
+                "datasource": "Prometheus-Zebra",
                 "definition": "label_values(zcash_chain_verified_block_height, job)",
                 "description": null,
                 "error": null,
@@ -203,5 +189,5 @@
     "timezone": "",
     "title": "transaction verification",
     "uid": "oBEHvS4nz",
-    "version": 2
+    "version": 4
 }

@@ -352,10 +352,16 @@ impl Service<zn::Request> for Inbound {
                     })
                 .boxed()
             }
-            zn::Request::PushTransaction(_transaction) => {
-                debug!("ignoring unimplemented request");
-                // TODO: send to Tx Download & Verify Stream
-                // https://github.com/ZcashFoundation/zebra/issues/2692
+            zn::Request::PushTransaction(transaction) => {
+                if let Setup::Initialized { tx_downloads, .. } = &mut self.network_setup {
+                    // TODO: check if we're close to the tip before proceeding?
+                    // what do we do if it's not?
+                    tx_downloads.verify(transaction);
+                } else {
+                    info!(
+                        "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
+                    );
+                }
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseTransactionIds(transactions) => {
