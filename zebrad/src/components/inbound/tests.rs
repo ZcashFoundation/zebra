@@ -59,9 +59,11 @@ async fn mempool_requests_for_transactions() {
         .iter()
         .copied()
         .collect::<HashSet<_>>();
+
     let request = inbound_service
         .oneshot(Request::TransactionsById(hash_set))
         .await;
+
     match request {
         Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions),
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),

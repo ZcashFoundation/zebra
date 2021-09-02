@@ -321,9 +321,10 @@ impl Service<zn::Request> for Inbound {
                     .boxed()
             }
             zn::Request::TransactionsById(transactions) => {
-                self.mempool.clone().oneshot(mempool::Request::TransactionsById(transactions)).map_ok(|resp| match resp {
+                let request = mempool::Request::TransactionsById(transactions);
+                self.mempool.clone().oneshot(request).map_ok(|resp| match resp {
                     mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
-                    _ => unreachable!("Mempool componenet should always respond to a `TransactionsById` request with a `Transactions` response"),
+                    _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
                 })
                 .boxed()
 
