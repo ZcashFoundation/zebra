@@ -157,7 +157,7 @@ pub(crate) fn new_transaction_ordered_outputs(
 ) -> HashMap<transparent::OutPoint, OrderedUtxo> {
     let mut new_ordered_outputs = HashMap::new();
 
-    let from_coinbase = transaction.is_coinbase();
+    let from_coinbase = transaction.has_valid_coinbase_transaction_inputs();
     for (output_index_in_transaction, output) in transaction.outputs().iter().cloned().enumerate() {
         let output_index_in_transaction = output_index_in_transaction
             .try_into()

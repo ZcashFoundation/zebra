@@ -12,7 +12,7 @@
 //! unmined transactions. They can be used to handle transactions regardless of version,
 //! and get the [`WtxId`] or [`Hash`] when required.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -90,6 +90,15 @@ impl From<WtxId> for UnminedTxId {
 impl From<&WtxId> for UnminedTxId {
     fn from(wtx_id: &WtxId) -> Self {
         (*wtx_id).into()
+    }
+}
+
+impl fmt::Display for UnminedTxId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Legacy(hash) => hash.fmt(f),
+            Witnessed(id) => id.fmt(f),
+        }
     }
 }
 
