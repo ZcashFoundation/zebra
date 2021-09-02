@@ -19,7 +19,7 @@ async fn mempool_requests_for_transaction_ids() {
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
 
-    let (state, _) = zebra_state::init(state_config, network);
+    let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
     let mut mempool_service = Mempool::new(network);
 
@@ -29,7 +29,7 @@ async fn mempool_requests_for_transaction_ids() {
             .map(|t| t.id)
             .collect();
 
-    let (chain_verifier, _transaction_verifier) =
+    let (block_verifier, transaction_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
     let (_setup_tx, setup_rx) = oneshot::channel();
@@ -40,7 +40,8 @@ async fn mempool_requests_for_transaction_ids() {
         .service(super::Inbound::new(
             setup_rx,
             state_service,
-            chain_verifier.clone(),
+            block_verifier.clone(),
+            transaction_verifier.clone(),
             mempool_service,
         ));
 
