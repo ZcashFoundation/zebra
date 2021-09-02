@@ -428,7 +428,7 @@ impl Transaction {
         &mut self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<Amount<NonNegative>, ValueBalanceError> {
-        if self.is_coinbase() {
+        if self.has_valid_coinbase_transaction_inputs() {
             // TODO: if needed, fixup coinbase:
             // - miner subsidy
             // - founders reward or funding streams (hopefully not?)

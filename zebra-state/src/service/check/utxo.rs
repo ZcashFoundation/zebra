@@ -227,7 +227,7 @@ pub fn remaining_transaction_value(
 ) -> Result<(), ValidateContextError> {
     for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
         // TODO: check coinbase transaction remaining value (#338, #1162)
-        if transaction.is_coinbase() {
+        if transaction.has_valid_coinbase_transaction_inputs() {
             continue;
         }
 

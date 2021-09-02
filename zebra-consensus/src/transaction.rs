@@ -1,3 +1,5 @@
+//! Asynchronous verification of transactions.
+//!
 use std::{
     collections::HashMap,
     future::Future,
@@ -50,6 +52,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
+    /// Create a new transaction verifier.
     pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
         Self {
             network,
@@ -165,11 +168,6 @@ where
 
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
-        if req.is_mempool() {
-            // XXX determine exactly which rules apply to mempool transactions
-            unimplemented!("Zebra does not yet have a mempool (#2309)");
-        }
-
         let script_verifier = self.script_verifier.clone();
         let network = self.network;
 
@@ -183,7 +181,10 @@ where
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
 
-            if tx.is_coinbase() {
+            if req.is_mempool() && tx.has_any_coinbase_inputs() {
+                return Err(TransactionError::CoinbaseInMempool);
+            }
+            if tx.has_valid_coinbase_transaction_inputs() {
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
             }
 
@@ -278,6 +279,9 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
+
+        Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
+
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
         Ok(
@@ -296,6 +300,36 @@ where
                 &shielded_sighash,
             )?),
         )
+    }
+
+    /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
+    fn verify_v4_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            // Supports V4 transactions
+            //
+            // Consensus rules:
+            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, ...
+            // >
+            // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5 => Ok(()),
+
+            // Does not support V4 transactions
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verify a V5 transaction.
@@ -327,9 +361,10 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
-        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
+
+        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
         let _async_checks = Self::verify_transparent_inputs_and_outputs(
             &request,
@@ -363,6 +398,11 @@ where
     ) -> Result<(), TransactionError> {
         match network_upgrade {
             // Supports V5 transactions
+            //
+            // Consensus rules:
+            // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             NetworkUpgrade::Nu5 => Ok(()),
 
             // Does not support V5 transactions
@@ -389,7 +429,7 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
-        if transaction.is_coinbase() {
+        if transaction.has_valid_coinbase_transaction_inputs() {
             // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
             // Coinbase transactions don't have any PrevOut inputs.
             Ok(AsyncChecks::new())

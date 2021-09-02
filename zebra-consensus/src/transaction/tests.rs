@@ -165,7 +165,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
-    .find(|transaction| transaction.is_coinbase())
+    .find(|transaction| transaction.has_valid_coinbase_transaction_inputs())
     .expect("At least one fake V5 coinbase transaction in the test vectors");
 
     insert_fake_orchard_shielded_data(&mut transaction);
@@ -180,7 +180,7 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
-    .find(|transaction| transaction.is_coinbase())
+    .find(|transaction| transaction.has_valid_coinbase_transaction_inputs())
     .expect("At least one fake V5 coinbase transaction in the test vectors");
 
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
@@ -702,7 +702,8 @@ fn v4_with_sapling_spends() {
         let (height, transaction) = test_transactions(network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase() && transaction.inputs().is_empty()
+                !transaction.has_valid_coinbase_transaction_inputs()
+                    && transaction.inputs().is_empty()
             })
             .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
             .expect("No transaction found with Sapling spends");
@@ -739,7 +740,8 @@ fn v4_with_sapling_outputs_and_no_spends() {
         let (height, transaction) = test_transactions(network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase() && transaction.inputs().is_empty()
+                !transaction.has_valid_coinbase_transaction_inputs()
+                    && transaction.inputs().is_empty()
             })
             .find(|(_, transaction)| {
                 transaction.sapling_spends_per_anchor().next().is_none()
@@ -781,7 +783,10 @@ fn v5_with_sapling_spends() {
         let transaction =
             fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
-                .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
+                .filter(|transaction| {
+                    !transaction.has_valid_coinbase_transaction_inputs()
+                        && transaction.inputs().is_empty()
+                })
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
                 .expect("No transaction found with Sapling spends");
 
