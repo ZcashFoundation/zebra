@@ -12,12 +12,12 @@ const DEFAULT_ASYNC_SYNCHRONIZED_TASKS_PROPTEST_CASES: u32 = 32;
 /// The maximum time one test instance should run.
 ///
 /// If the test exceeds this time it is considered to have failed.
-const MAX_TEST_EXECUTION: Duration = Duration::from_secs(1);
+const MAX_TEST_EXECUTION: Duration = Duration::from_secs(10);
 
 /// The maximum time to wait for an event to be received.
 ///
 /// If an event is not received in this time, it is considered that it will never be received.
-const EVENT_TIMEOUT: Duration = Duration::from_millis(10);
+const EVENT_TIMEOUT: Duration = Duration::from_millis(5);
 
 proptest! {
     #![proptest_config(
