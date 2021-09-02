@@ -1,6 +1,6 @@
 use std::{convert::TryInto, env, sync::Arc};
 
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, FutureExt};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
@@ -17,7 +17,7 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     constants, init_test,
-    service::StateService,
+    service::{chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
     BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
 };
@@ -91,7 +91,7 @@ async fn test_populated_state_responds_correctly(
                     Ok(Response::Transaction(Some(transaction.clone()))),
                 ));
 
-                let from_coinbase = transaction.is_coinbase();
+                let from_coinbase = transaction.has_valid_coinbase_transaction_inputs();
                 for (index, output) in transaction.outputs().iter().cloned().enumerate() {
                     let outpoint = transparent::OutPoint {
                         hash: transaction_hash,
@@ -297,24 +297,63 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, chain_tip_receiver) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
 
-        prop_assert_eq!(chain_tip_receiver.best_tip_height(), None);
+        prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
+        prop_assert_eq!(
+            chain_tip_change
+                .tip_change()
+                .now_or_never()
+                .transpose()
+                .expect("watch sender is not dropped"),
+            None
+        );
 
         for block in finalized_blocks {
-            let expected_height = block.height;
+            let expected_block = block.clone();
+
+            let expected_action = if expected_block.height <= block::Height(1) {
+                // 0: reset by both initialization and the Genesis network upgrade
+                // 1: reset by the BeforeOverwinter network upgrade
+                TipAction::reset_with(expected_block.clone().into())
+            } else {
+                TipAction::grow_with(expected_block.clone().into())
+            };
 
             state_service.queue_and_commit_finalized(block);
 
-            prop_assert_eq!(chain_tip_receiver.best_tip_height(), Some(expected_height));
+            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
+            prop_assert_eq!(
+                chain_tip_change
+                    .tip_change()
+                    .now_or_never()
+                    .transpose()
+                    .expect("watch sender is not dropped"),
+                Some(expected_action)
+            );
         }
 
         for block in non_finalized_blocks {
-            let expected_height = block.height;
+            let expected_block = block.clone();
+
+            let expected_action = if expected_block.height == block::Height(1) {
+                // 1: reset by the BeforeOverwinter network upgrade
+                TipAction::reset_with(expected_block.clone().into())
+            } else {
+                TipAction::grow_with(expected_block.clone().into())
+            };
 
             state_service.queue_and_commit_non_finalized(block);
 
-            prop_assert_eq!(chain_tip_receiver.best_tip_height(), Some(expected_height));
+            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
+            prop_assert_eq!(
+                chain_tip_change
+                    .tip_change()
+                    .now_or_never()
+                    .transpose()
+                    .expect("watch sender is not dropped"),
+                Some(expected_action)
+            );
         }
     }
 
@@ -332,7 +371,7 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, _) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, _, _) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
         prop_assert_eq!(

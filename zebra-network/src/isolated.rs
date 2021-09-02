@@ -58,7 +58,7 @@ pub fn connect_isolated(
             Ok::<Response, Box<dyn std::error::Error + Send + Sync + 'static>>(Response::Nil)
         }))
         .with_user_agent(user_agent)
-        .with_chain_tip_receiver(NoChainTip)
+        .with_latest_chain_tip(NoChainTip)
         .finish()
         .expect("provided mandatory builder parameters");
 

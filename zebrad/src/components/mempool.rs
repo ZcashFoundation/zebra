@@ -18,6 +18,7 @@ use zebra_chain::{
 use crate::BoxError;
 
 mod crawler;
+pub mod downloads;
 mod error;
 mod storage;
 
@@ -26,6 +27,8 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
+#[cfg(test)]
+pub use self::storage::tests::unmined_transactions_in_blocks;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -60,6 +63,12 @@ impl Mempool {
         Mempool {
             storage: Default::default(),
         }
+    }
+
+    ///  Get the storage field of the mempool for testing purposes.
+    #[cfg(test)]
+    pub fn storage(&mut self) -> &mut storage::Storage {
+        &mut self.storage
     }
 }
 

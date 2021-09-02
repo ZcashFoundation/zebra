@@ -50,18 +50,22 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let (state_service, chain_tip_receiver) =
+        // TODO: use ChainTipChange to get tip changes (#2374, #2710, #2711, #2712, #2713, #2714)
+        let (state_service, latest_chain_tip, _chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
         info!("initializing verifiers");
         // TODO: use the transaction verifier to verify mempool transactions (#2637, #2606)
-        let (chain_verifier, _tx_verifier) = zebra_consensus::chain::init(
+        let (chain_verifier, tx_verifier) = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
             state.clone(),
         )
         .await;
+
+        info!("initializing mempool");
+        let mempool = mempool::Mempool::new(config.network.network);
 
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
@@ -75,10 +79,12 @@ impl StartCmd {
                 setup_rx,
                 state.clone(),
                 chain_verifier.clone(),
+                tx_verifier.clone(),
+                mempool,
             ));
 
         let (peer_set, address_book) =
-            zebra_network::init(config.network.clone(), inbound, chain_tip_receiver).await;
+            zebra_network::init(config.network.clone(), inbound, latest_chain_tip).await;
         setup_tx
             .send((peer_set.clone(), address_book))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;

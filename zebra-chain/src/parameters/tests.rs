@@ -50,6 +50,11 @@ fn activation_extremes(network: Network) {
         Some(&Genesis)
     );
     assert_eq!(Genesis.activation_height(network), Some(block::Height(0)));
+    assert!(NetworkUpgrade::is_activation_height(
+        network,
+        block::Height(0)
+    ));
+
     assert_eq!(NetworkUpgrade::current(network, block::Height(0)), Genesis);
     assert_eq!(
         NetworkUpgrade::next(network, block::Height(0)),
@@ -64,6 +69,11 @@ fn activation_extremes(network: Network) {
         BeforeOverwinter.activation_height(network),
         Some(block::Height(1))
     );
+    assert!(NetworkUpgrade::is_activation_height(
+        network,
+        block::Height(1)
+    ));
+
     assert_eq!(
         NetworkUpgrade::current(network, block::Height(1)),
         BeforeOverwinter
@@ -73,12 +83,22 @@ fn activation_extremes(network: Network) {
         Some(Overwinter)
     );
 
+    assert!(!NetworkUpgrade::is_activation_height(
+        network,
+        block::Height(2)
+    ));
+
     // We assume that the last upgrade we know about continues forever
     // (even if we suspect that won't be true)
     assert_ne!(
         NetworkUpgrade::activation_list(network).get(&block::Height::MAX),
         Some(&Genesis)
     );
+    assert!(!NetworkUpgrade::is_activation_height(
+        network,
+        block::Height::MAX
+    ));
+
     assert_ne!(
         NetworkUpgrade::current(network, block::Height::MAX),
         Genesis
@@ -98,8 +118,8 @@ fn activation_consistent_testnet() {
     activation_consistent(Testnet)
 }
 
-/// Check that the activation_height, current, and next functions are consistent
-/// for `network`.
+/// Check that the `activation_height`, `is_activation_height`,
+/// `current`, and `next` functions are consistent for `network`.
 fn activation_consistent(network: Network) {
     let activation_list = NetworkUpgrade::activation_list(network);
     let network_upgrades: HashSet<&NetworkUpgrade> = activation_list.values().collect();
@@ -108,6 +128,17 @@ fn activation_consistent(network: Network) {
         let height = network_upgrade
             .activation_height(network)
             .expect("activations must have a height");
+        assert!(NetworkUpgrade::is_activation_height(network, height));
+
+        if height > block::Height(0) {
+            // Genesis is immediately followed by BeforeOverwinter,
+            // but the other network upgrades have multiple blocks between them
+            assert!(!NetworkUpgrade::is_activation_height(
+                network,
+                (height + 1).unwrap()
+            ));
+        }
+
         assert_eq!(NetworkUpgrade::current(network, height), network_upgrade);
         // Network upgrades don't repeat
         assert_ne!(NetworkUpgrade::next(network, height), Some(network_upgrade));

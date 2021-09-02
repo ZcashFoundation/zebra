@@ -1,13 +1,17 @@
 use std::{env, sync::Arc};
 
+use futures::FutureExt;
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
-use zebra_chain::{block::Block, chain_tip::ChainTip};
+use zebra_chain::{
+    block::Block,
+    chain_tip::ChainTip,
+    fmt::{DisplayToDebug, SummaryDebug},
+    parameters::Network,
+};
 
-use crate::{service::chain_tip::ChainTipBlock, FinalizedBlock};
-
-use super::super::ChainTipSender;
+use crate::service::chain_tip::{ChainTipBlock, ChainTipSender, TipAction};
 
 const DEFAULT_BLOCK_VEC_PROPTEST_CASES: u32 = 4;
 
@@ -23,9 +27,10 @@ proptest! {
     /// or otherwise the finalized tip.
     #[test]
     fn best_tip_is_latest_non_finalized_then_latest_finalized(
-        tip_updates in any::<Vec<BlockUpdate>>(),
+        tip_updates in any::<SummaryDebug<Vec<BlockUpdate>>>(),
+        network in any::<Network>(),
     ) {
-        let (mut chain_tip_sender, chain_tip_receiver) = ChainTipSender::new(None);
+        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, network);
 
         let mut latest_finalized_tip = None;
         let mut latest_non_finalized_tip = None;
@@ -34,14 +39,14 @@ proptest! {
         for update in tip_updates {
             match update {
                 BlockUpdate::Finalized(block) => {
-                    let chain_tip = block.clone().map(FinalizedBlock::from).map(ChainTipBlock::from);
+                    let chain_tip = block.clone().map(|block| ChainTipBlock::from(block.0));
                     chain_tip_sender.set_finalized_tip(chain_tip.clone());
                     if let Some(block) = block {
                         latest_finalized_tip = Some((chain_tip, block));
                     }
                 }
                 BlockUpdate::NonFinalized(block) => {
-                    let chain_tip = block.clone().map(FinalizedBlock::from).map(ChainTipBlock::from);
+                    let chain_tip = block.clone().map(|block| ChainTipBlock::from(block.0));
                     chain_tip_sender.set_best_non_finalized_tip(chain_tip.clone());
                     if let Some(block) = block {
                         latest_non_finalized_tip = Some((chain_tip, block));
@@ -62,16 +67,16 @@ proptest! {
             .and_then(|(chain_tip, _block)| chain_tip.as_ref())
             .map(|chain_tip| chain_tip.height);
         let expected_height = expected_tip.as_ref().and_then(|(_chain_tip, block)| block.coinbase_height());
-        prop_assert_eq!(chain_tip_receiver.best_tip_height(), chain_tip_height);
-        prop_assert_eq!(chain_tip_receiver.best_tip_height(), expected_height);
+        prop_assert_eq!(latest_chain_tip.best_tip_height(), chain_tip_height);
+        prop_assert_eq!(latest_chain_tip.best_tip_height(), expected_height);
 
         let chain_tip_hash = expected_tip
             .as_ref()
             .and_then(|(chain_tip, _block)| chain_tip.as_ref())
             .map(|chain_tip| chain_tip.hash);
         let expected_hash = expected_tip.as_ref().map(|(_chain_tip, block)| block.hash());
-        prop_assert_eq!(chain_tip_receiver.best_tip_hash(), chain_tip_hash);
-        prop_assert_eq!(chain_tip_receiver.best_tip_hash(), expected_hash);
+        prop_assert_eq!(latest_chain_tip.best_tip_hash(), chain_tip_hash);
+        prop_assert_eq!(latest_chain_tip.best_tip_hash(), expected_hash);
 
         let chain_tip_transaction_ids = expected_tip
             .as_ref()
@@ -85,18 +90,27 @@ proptest! {
             .map(|transaction| transaction.hash())
             .collect();
         prop_assert_eq!(
-            chain_tip_receiver.best_tip_mined_transaction_ids(),
+            latest_chain_tip.best_tip_mined_transaction_ids(),
             chain_tip_transaction_ids
         );
         prop_assert_eq!(
-            chain_tip_receiver.best_tip_mined_transaction_ids(),
+            latest_chain_tip.best_tip_mined_transaction_ids(),
             expected_transaction_ids
+        );
+
+        prop_assert_eq!(
+            chain_tip_change
+                .tip_change()
+                .now_or_never()
+                .transpose()
+                .expect("watch sender is not dropped"),
+            expected_tip.map(|(_chain_tip, block)| TipAction::reset_with(block.0.into()))
         );
     }
 }
 
 #[derive(Arbitrary, Clone, Debug)]
 enum BlockUpdate {
-    Finalized(Option<Arc<Block>>),
-    NonFinalized(Option<Arc<Block>>),
+    Finalized(Option<DisplayToDebug<Arc<Block>>>),
+    NonFinalized(Option<DisplayToDebug<Arc<Block>>>),
 }
