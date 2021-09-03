@@ -49,6 +49,9 @@ where
             // unlike the mempool, we don't care if the change is a reset
             let request = zn::Request::AdvertiseBlock(tip_action.best_tip_hash());
 
+            let height = tip_action.best_tip_height();
+            info!(?height, ?request, "sending verified block broadcast");
+
             // broadcast requests don't return errors, and we'd just want to ignore them anyway
             let _ = broadcast_network.ready_and().await?.call(request).await;
         }
