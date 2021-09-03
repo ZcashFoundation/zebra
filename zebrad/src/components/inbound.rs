@@ -356,7 +356,7 @@ impl Service<zn::Request> for Inbound {
                 if let Setup::Initialized { tx_downloads, .. } = &mut self.network_setup {
                     // TODO: check if we're close to the tip before proceeding?
                     // what do we do if it's not?
-                    tx_downloads.verify(transaction);
+                    tx_downloads.download_if_needed_and_verify(transaction.into());
                 } else {
                     info!(
                         "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
@@ -369,7 +369,7 @@ impl Service<zn::Request> for Inbound {
                     // TODO: check if we're close to the tip before proceeding?
                     // what do we do if it's not?
                     for txid in transactions {
-                        tx_downloads.download_and_verify(txid);
+                        tx_downloads.download_if_needed_and_verify(txid.into());
                     }
                 } else {
                     info!(
