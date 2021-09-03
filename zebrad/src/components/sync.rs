@@ -21,6 +21,7 @@ use zebra_state as zs;
 use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
+mod gossip;
 mod recent_sync_lengths;
 mod status;
 
@@ -29,6 +30,8 @@ mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
 use recent_sync_lengths::RecentSyncLengths;
+
+pub use gossip::gossip_best_tip_block_hashes;
 pub use status::SyncStatus;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
