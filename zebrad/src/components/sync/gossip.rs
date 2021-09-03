@@ -50,7 +50,6 @@ where
             let request = zn::Request::AdvertiseBlock(tip_action.best_tip_hash());
 
             let height = tip_action.best_tip_height();
-            // TODO: reduce the log level to debug
             info!(?height, ?request, "sending verified block broadcast");
 
             // broadcast requests don't return errors, and we'd just want to ignore them anyway
