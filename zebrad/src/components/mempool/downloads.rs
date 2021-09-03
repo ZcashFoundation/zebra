@@ -333,12 +333,12 @@ where
 
         // Check if the transaction is in the mempool rejected list.
         match mempool
-            .oneshot(mp::Request::RejectedTransactionsIds(
+            .oneshot(mp::Request::RejectedTransactionIds(
                 [txid].iter().cloned().collect(),
             ))
             .await
         {
-            Ok(mp::Response::TransactionIds(txs)) => {
+            Ok(mp::Response::RejectedTransactionIds(txs)) => {
                 if txs.is_empty() {
                     Ok(())
                 } else {
