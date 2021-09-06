@@ -144,7 +144,7 @@ proptest! {
 fn empty_sync_lengths() {
     let (status, _recent_sync_lengths) = SyncStatus::new();
 
-    assert!(status.is_close_to_tip() == false);
+    assert!(!status.is_close_to_tip());
 }
 
 /// Test if sync lengths array with all zeroes is near tip.
@@ -156,7 +156,7 @@ fn zero_sync_lengths() {
         recent_sync_lengths.push_extend_tips_length(0);
     }
 
-    assert!(status.is_close_to_tip() == true);
+    assert!(status.is_close_to_tip());
 }
 
 /// Test if sync lengths array with high values is not near tip.
@@ -164,9 +164,11 @@ fn zero_sync_lengths() {
 fn high_sync_lengths() {
     let (status, mut recent_sync_lengths) = SyncStatus::new();
 
+    /// The value 500 is based on the fact that sync lengths are around 500
+    /// blocks long when Zebra is syncing.
     for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
         recent_sync_lengths.push_extend_tips_length(500);
     }
 
-    assert!(status.is_close_to_tip() == false);
+    assert!(!status.is_close_to_tip());
 }
