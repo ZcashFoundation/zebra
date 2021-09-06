@@ -164,8 +164,8 @@ fn zero_sync_lengths() {
 fn high_sync_lengths() {
     let (status, mut recent_sync_lengths) = SyncStatus::new();
 
-    /// The value 500 is based on the fact that sync lengths are around 500
-    /// blocks long when Zebra is syncing.
+    // The value 500 is based on the fact that sync lengths are around 500
+    // blocks long when Zebra is syncing.
     for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
         recent_sync_lengths.push_extend_tips_length(500);
     }
