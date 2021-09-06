@@ -138,3 +138,35 @@ proptest! {
         }
     }
 }
+
+/// Test if totally empty sync lengths array is not near tip.
+#[test]
+fn empty_sync_lengths() {
+    let (status, _recent_sync_lengths) = SyncStatus::new();
+
+    assert!(status.is_close_to_tip() == false);
+}
+
+/// Test if sync lengths array with all zeroes is near tip.
+#[test]
+fn zero_sync_lengths() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(0);
+    }
+
+    assert!(status.is_close_to_tip() == true);
+}
+
+/// Test if sync lengths array with high values is not near tip.
+#[test]
+fn high_sync_lengths() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(500);
+    }
+
+    assert!(status.is_close_to_tip() == false);
+}
