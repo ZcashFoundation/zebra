@@ -12,7 +12,7 @@ const DEFAULT_ASYNC_SYNCHRONIZED_TASKS_PROPTEST_CASES: u32 = 32;
 /// The maximum time one test instance should run.
 ///
 /// If the test exceeds this time it is considered to have failed.
-const MAX_TEST_EXECUTION: Duration = Duration::from_secs(1);
+const MAX_TEST_EXECUTION: Duration = Duration::from_secs(10);
 
 /// The maximum time to wait for an event to be received.
 ///
@@ -120,7 +120,7 @@ proptest! {
         ///    looping repeatedly while [`SyncStatus`] reports that it is close to the chain tip.
         /// 2. Waits until [`SyncStatus`] reports that it is close to the chain tip.
         /// 3. Notifies the main task that it awoke, i.e., that the [`SyncStatus`] has finished
-        ///    wating until it was close to the chain tip.
+        ///    waiting until it was close to the chain tip.
         async fn wait_task(
             mut status: SyncStatus,
             update_events: Arc<Semaphore>,
@@ -137,4 +137,38 @@ proptest! {
             }
         }
     }
+}
+
+/// Test if totally empty sync lengths array is not near tip.
+#[test]
+fn empty_sync_lengths() {
+    let (status, _recent_sync_lengths) = SyncStatus::new();
+
+    assert!(!status.is_close_to_tip());
+}
+
+/// Test if sync lengths array with all zeroes is near tip.
+#[test]
+fn zero_sync_lengths() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(0);
+    }
+
+    assert!(status.is_close_to_tip());
+}
+
+/// Test if sync lengths array with high values is not near tip.
+#[test]
+fn high_sync_lengths() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    // The value 500 is based on the fact that sync lengths are around 500
+    // blocks long when Zebra is syncing.
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(500);
+    }
+
+    assert!(!status.is_close_to_tip());
 }
