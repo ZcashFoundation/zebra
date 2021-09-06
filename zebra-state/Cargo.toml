@@ -22,7 +22,7 @@ futures = "0.3.17"
 metrics = "0.13.0-alpha.8"
 tower = { version = "0.4", features = ["buffer", "util"] }
 tracing = "0.1"
-thiserror = "1.0.28"
+thiserror = "1.0.29"
 tokio = { version = "0.3.6", features = ["sync"] }
 displaydoc = "0.2.2"
 rocksdb = "0.16.0"
