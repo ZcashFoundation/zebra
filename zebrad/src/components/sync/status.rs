@@ -17,6 +17,13 @@ pub struct SyncStatus {
 }
 
 impl SyncStatus {
+    /// The threshold that determines if the synchronization is at the chain
+    /// tip.
+    ///
+    /// This is based on the fact that sync lengths are around 2-20 blocks long
+    /// once Zebra reaches the tip.
+    const MIN_DIST_FROM_TIP: usize = 20;
+
     /// Create an instance of [`SyncStatus`].
     ///
     /// The status is determined based on the latest counts of synchronized blocks, observed
@@ -41,9 +48,25 @@ impl SyncStatus {
 
     /// Check if the synchronization is likely close to the chain tip.
     pub fn is_close_to_tip(&self) -> bool {
-        let _sync_lengths = self.latest_sync_length.borrow();
+        let sync_lengths = self.latest_sync_length.borrow();
 
-        // TODO: Determine if the synchronization is actually close to the tip (#2592).
-        true
+        // Return early if sync_lengths is empty.
+        if sync_lengths.is_empty() {
+            return false;
+        }
+
+        // Compute the sum of the `sync_lengths`.
+        // The sum is computed by saturating addition in order to avoid overflowing.
+        let sum = sync_lengths
+            .iter()
+            .fold(0usize, |sum, rhs| sum.saturating_add(*rhs));
+
+        // Compute the average sync length.
+        // This value effectively represents a simple moving average.
+        let avg = sum / sync_lengths.len();
+
+        // The synchronization process is close to the chain tip once the
+        // average sync length falls below the threshold.
+        avg < Self::MIN_DIST_FROM_TIP
     }
 }

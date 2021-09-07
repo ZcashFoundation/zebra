@@ -1,9 +1,9 @@
-use tower::{util::BoxService, ServiceExt};
+use std::collections::HashSet;
 
 use super::mempool::{unmined_transactions_in_blocks, Mempool};
 
 use tokio::sync::oneshot;
-use tower::builder::ServiceBuilder;
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 
 use zebra_chain::{
     parameters::Network,
@@ -14,7 +14,7 @@ use zebra_network::{Request, Response};
 use zebra_state::Config as StateConfig;
 
 #[tokio::test]
-async fn mempool_requests_for_transaction_ids() {
+async fn mempool_requests_for_transactions() {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
@@ -23,11 +23,8 @@ async fn mempool_requests_for_transaction_ids() {
     let state_service = ServiceBuilder::new().buffer(1).service(state);
     let mut mempool_service = Mempool::new(network);
 
-    let added_transaction_ids: Vec<UnminedTxId> =
-        add_some_stuff_to_mempool(&mut mempool_service, network)
-            .iter()
-            .map(|t| t.id)
-            .collect();
+    let added_transactions = add_some_stuff_to_mempool(&mut mempool_service, network);
+    let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
     let mempool_service = BoxService::new(mempool_service);
     let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
@@ -48,7 +45,9 @@ async fn mempool_requests_for_transaction_ids() {
             mempool,
         ));
 
+    // Test `Request::MempoolTransactionIds`
     let request = inbound_service
+        .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
     match request {
@@ -56,6 +55,21 @@ async fn mempool_requests_for_transaction_ids() {
         _ => unreachable!(
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
         ),
+    };
+
+    // Test `Request::TransactionsById`
+    let hash_set = added_transaction_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+
+    let request = inbound_service
+        .oneshot(Request::TransactionsById(hash_set))
+        .await;
+
+    match request {
+        Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions),
+        _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
     };
 }
 
