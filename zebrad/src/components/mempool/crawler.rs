@@ -31,18 +31,18 @@ const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
 const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// The mempool transaction crawler.
-pub struct Crawler<S> {
-    peer_set: Timeout<S>,
+pub struct Crawler<PeerSet> {
+    peer_set: Timeout<PeerSet>,
     status: SyncStatus,
 }
 
-impl<S> Crawler<S>
+impl<PeerSet> Crawler<PeerSet>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
-    S::Future: Send,
+    PeerSet: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    PeerSet::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(peer_set: S, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(peer_set: PeerSet, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
             status,
