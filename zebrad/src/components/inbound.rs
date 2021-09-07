@@ -17,19 +17,12 @@ use zebra_network as zn;
 use zebra_state as zs;
 
 use zebra_chain::block::{self, Block};
-use zebra_consensus::transaction;
-use zebra_consensus::{chain::VerifyChainError, error::TransactionError};
+use zebra_consensus::chain::VerifyChainError;
 use zebra_network::AddressBook;
 
-use super::mempool::{
-    self as mp,
-    downloads::{
-        Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
-    },
-};
 // Re-use the syncer timeouts for consistency.
 use super::{
-    mempool,
+    mempool, mempool as mp,
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
@@ -43,14 +36,9 @@ type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mp::Request, mp::Response, mp::BoxError>, mp::Request>;
 type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
-type TxVerifier = Buffer<
-    BoxService<transaction::Request, transaction::Response, TransactionError>,
-    transaction::Request,
->;
 type InboundBlockDownloads = BlockDownloads<Timeout<Outbound>, Timeout<BlockVerifier>, State>;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State, Mempool>;
 
-pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>);
+pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>, Mempool);
 
 /// Tracks the internal state of the [`Inbound`] service during network setup.
 pub enum Setup {
@@ -66,10 +54,6 @@ pub enum Setup {
         /// A service that verifies downloaded blocks. Given to `block_downloads`
         /// after the network is set up.
         block_verifier: BlockVerifier,
-
-        /// A service that verifies downloaded transactions. Given to `tx_downloads`
-        /// after the network is set up.
-        tx_verifier: TxVerifier,
     },
 
     /// Network setup is complete.
@@ -82,7 +66,8 @@ pub enum Setup {
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
         block_downloads: Pin<Box<InboundBlockDownloads>>,
 
-        tx_downloads: Pin<Box<InboundTxDownloads>>,
+        /// A service that manages transactions in the memory pool.
+        mempool: Mempool,
     },
 
     /// Temporary state used in the service's internal network initialization
@@ -136,9 +121,6 @@ pub struct Inbound {
 
     /// A service that manages cached blockchain state.
     state: State,
-
-    /// A service that manages transactions in the memory pool.
-    mempool: Mempool,
 }
 
 impl Inbound {
@@ -146,17 +128,13 @@ impl Inbound {
         network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,
         block_verifier: BlockVerifier,
-        tx_verifier: TxVerifier,
-        mempool: Mempool,
     ) -> Self {
         Self {
             network_setup: Setup::AwaitingNetwork {
                 network_setup,
                 block_verifier,
-                tx_verifier,
             },
             state,
-            mempool,
         }
     }
 
@@ -187,25 +165,19 @@ impl Service<zn::Request> for Inbound {
             Setup::AwaitingNetwork {
                 mut network_setup,
                 block_verifier,
-                tx_verifier,
             } => match network_setup.try_recv() {
-                Ok((outbound, address_book)) => {
+                Ok((outbound, address_book, mempool)) => {
                     let block_downloads = Box::pin(BlockDownloads::new(
                         Timeout::new(outbound.clone(), BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         self.state.clone(),
                     ));
-                    let tx_downloads = Box::pin(TxDownloads::new(
-                        Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
-                        Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
-                        self.state.clone(),
-                        self.mempool.clone(),
-                    ));
+
                     result = Ok(());
                     Setup::Initialized {
                         address_book,
                         block_downloads,
-                        tx_downloads,
+                        mempool,
                     }
                 }
                 Err(TryRecvError::Empty) => {
@@ -214,7 +186,6 @@ impl Service<zn::Request> for Inbound {
                     Setup::AwaitingNetwork {
                         network_setup,
                         block_verifier,
-                        tx_verifier,
                     }
                 }
                 Err(error @ TryRecvError::Closed) => {
@@ -236,16 +207,15 @@ impl Service<zn::Request> for Inbound {
             Setup::Initialized {
                 address_book,
                 mut block_downloads,
-                mut tx_downloads,
+                mempool,
             } => {
                 while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
-                while let Poll::Ready(Some(_)) = tx_downloads.as_mut().poll_next(cx) {}
 
                 result = Ok(());
                 Setup::Initialized {
                     address_book,
                     block_downloads,
-                    tx_downloads,
+                    mempool,
                 }
             }
         };
@@ -326,13 +296,16 @@ impl Service<zn::Request> for Inbound {
                     .boxed()
             }
             zn::Request::TransactionsById(transactions) => {
-                let request = mempool::Request::TransactionsById(transactions);
-                self.mempool.clone().oneshot(request).map_ok(|resp| match resp {
-                    mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
-                    _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
-                })
-                .boxed()
-
+                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
+                    let request = mempool::Request::TransactionsById(transactions);
+                    mempool.clone().oneshot(request).map_ok(|resp| match resp {
+                        mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
+                        _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
+                    })
+                    .boxed()
+                } else {
+                    async { Ok(zn::Response::Transactions(Default::default())) }.boxed()
+                }
             }
             zn::Request::FindBlocks { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
@@ -353,26 +326,38 @@ impl Service<zn::Request> for Inbound {
                 .boxed()
             }
             zn::Request::PushTransaction(transaction) => {
-                if let Setup::Initialized { tx_downloads, .. } = &mut self.network_setup {
-                    tx_downloads.download_if_needed_and_verify(transaction.into());
+                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
+                    mempool
+                        .clone()
+                        .oneshot(mempool::Request::DownloadAndVerify(
+                            vec![transaction.into()],
+                        ))
+                        // The response just indicates if processing was queued or not; ignore it
+                        .map_ok(|_resp| zn::Response::Nil)
+                        .boxed()
                 } else {
                     info!(
-                        "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
+                        ?transaction.id,
+                        "ignoring `PushTransaction` request from remote peer during network setup"
                     );
+                    async { Ok(zn::Response::TransactionIds(Default::default())) }.boxed()
                 }
-                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseTransactionIds(transactions) => {
-                if let Setup::Initialized { tx_downloads, .. } = &mut self.network_setup {
-                    for txid in transactions {
-                        tx_downloads.download_if_needed_and_verify(txid.into());
-                    }
+                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
+                    let transactions = transactions.into_iter().map(Into::into).collect();
+                    mempool
+                        .clone()
+                        .oneshot(mempool::Request::DownloadAndVerify(transactions))
+                        // The response just indicates if processing was queued or not; ignore it
+                        .map_ok(|_resp| zn::Response::Nil)
+                        .boxed()
                 } else {
                     info!(
                         "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
                     );
+                    async { Ok(zn::Response::TransactionIds(Default::default())) }.boxed()
                 }
-                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
                 if let Setup::Initialized {
@@ -389,11 +374,15 @@ impl Service<zn::Request> for Inbound {
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::MempoolTransactionIds => {
-                self.mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
-                    mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids),
-                    _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
-                })
-                .boxed()
+                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
+                    mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
+                        mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids),
+                        _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
+                    })
+                    .boxed()
+                } else {
+                    async { Ok(zn::Response::TransactionIds(Default::default())) }.boxed()
+                }
             }
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");

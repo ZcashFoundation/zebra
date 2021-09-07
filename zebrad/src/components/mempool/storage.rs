@@ -104,6 +104,12 @@ impl Storage {
             .collect()
     }
 
+    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
+    /// the mempool rejected list.
+    pub fn contains_rejected(self, txid: &UnminedTxId) -> bool {
+        self.rejected.contains_key(txid)
+    }
+
     /// Returns the set of [`UnminedTxId`]s matching ids in the rejected list.
     pub fn rejected_transactions(self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTxId> {
         tx_ids
