@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use tokio::{sync::Mutex, task::JoinHandle, time::sleep};
+use tokio::{task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
 use zebra_network::{Request, Response};
@@ -32,7 +32,7 @@ const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// The mempool transaction crawler.
 pub struct Crawler<S> {
-    peer_set: Mutex<Timeout<S>>,
+    peer_set: Timeout<S>,
     status: SyncStatus,
 }
 
@@ -44,7 +44,7 @@ where
     /// Spawn an asynchronous task to run the mempool crawler.
     pub fn spawn(peer_set: S, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
-            peer_set: Mutex::new(Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT)),
+            peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
             status,
         };
 
@@ -67,8 +67,8 @@ where
     /// Crawl peers for transactions.
     ///
     /// Concurrently request [`FANOUT`] peers for transactions to include in the mempool.
-    async fn crawl_transactions(&self) -> Result<(), BoxError> {
-        let peer_set = self.peer_set.lock().await.clone();
+    async fn crawl_transactions(&mut self) -> Result<(), BoxError> {
+        let peer_set = self.peer_set.clone();
 
         trace!("Crawling for mempool transactions");
 
@@ -95,7 +95,7 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(&self, response: Response) {
+    async fn handle_response(&mut self, response: Response) {
         let transaction_ids = match response {
             Response::TransactionIds(ids) => ids,
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
