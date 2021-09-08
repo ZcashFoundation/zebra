@@ -33,11 +33,12 @@ proptest! {
 
         runtime.block_on(async move {
             let mut peer_set = MockService::build().for_prop_tests();
+            let mempool = MockService::build().for_prop_tests();
             let (sync_status, mut recent_sync_lengths) = SyncStatus::new();
 
             time::pause();
 
-            Crawler::spawn(peer_set.clone(), sync_status.clone());
+            Crawler::spawn(peer_set.clone(), mempool, sync_status.clone());
 
             for sync_length in sync_lengths {
                 let mempool_is_enabled = sync_status.is_close_to_tip();

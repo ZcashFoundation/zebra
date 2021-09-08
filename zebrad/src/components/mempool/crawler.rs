@@ -10,7 +10,7 @@ use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
 use zebra_network as zn;
 
-use super::super::sync::SyncStatus;
+use super::super::{mempool, sync::SyncStatus};
 
 #[cfg(test)]
 mod tests;
@@ -31,21 +31,29 @@ const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
 const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// The mempool transaction crawler.
-pub struct Crawler<PeerSet> {
+pub struct Crawler<PeerSet, Mempool> {
     peer_set: Timeout<PeerSet>,
+    mempool: Mempool,
     status: SyncStatus,
 }
 
-impl<PeerSet> Crawler<PeerSet>
+impl<PeerSet, Mempool> Crawler<PeerSet, Mempool>
 where
     PeerSet:
         Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone + Send + 'static,
     PeerSet::Future: Send,
+    Mempool:
+        Service<mempool::Request, Response = mempool::Response, Error = BoxError> + Send + 'static,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(peer_set: PeerSet, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(
+        peer_set: PeerSet,
+        mempool: Mempool,
+        status: SyncStatus,
+    ) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
+            mempool,
             status,
         };
 
