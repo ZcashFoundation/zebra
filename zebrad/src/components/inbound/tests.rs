@@ -27,7 +27,7 @@ async fn mempool_requests_for_transactions() {
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
     let mempool_service = BoxService::new(mempool_service);
-    let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
+    let mempool = ServiceBuilder::new().buffer(1).service(mempool_service);
 
     let (block_verifier, transaction_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
