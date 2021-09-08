@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use super::mempool::{unmined_transactions_in_blocks, Mempool};
 
 use tokio::sync::oneshot;
-use tower::{builder::ServiceBuilder, ServiceExt};
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 
 use zebra_chain::{
     parameters::Network,
@@ -26,6 +26,9 @@ async fn mempool_requests_for_transactions() {
     let added_transactions = add_some_stuff_to_mempool(&mut mempool_service, network);
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
+    let mempool_service = BoxService::new(mempool_service);
+    let mempool = ServiceBuilder::new().buffer(1).service(mempool_service);
+
     let (block_verifier, transaction_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
@@ -39,7 +42,7 @@ async fn mempool_requests_for_transactions() {
             state_service,
             block_verifier.clone(),
             transaction_verifier.clone(),
-            mempool_service,
+            mempool,
         ));
 
     // Test `Request::MempoolTransactionIds`

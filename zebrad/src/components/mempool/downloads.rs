@@ -21,6 +21,7 @@ use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
 
+use crate::components::mempool as mp;
 use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -85,7 +86,7 @@ pub enum DownloadAction {
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV, ZS>
+pub struct Downloads<ZN, ZV, ZS, ZM>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
     ZN::Future: Send,
@@ -93,6 +94,8 @@ where
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZM: Service<mp::Request, Response = mp::Response, Error = BoxError> + Send + Clone + 'static,
+    ZM::Future: Send,
 {
     // Services
     /// A service that forwards requests to connected peers, and returns their
@@ -105,6 +108,9 @@ where
     /// A service that manages cached blockchain state.
     state: ZS,
 
+    /// A service that manages the mempool.
+    mempool: ZM,
+
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
     #[pin]
@@ -115,7 +121,7 @@ where
     cancel_handles: HashMap<UnminedTxId, oneshot::Sender<()>>,
 }
 
-impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, ZS, ZM> Stream for Downloads<ZN, ZV, ZS, ZM>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -123,6 +129,8 @@ where
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZM: Service<mp::Request, Response = mp::Response, Error = BoxError> + Send + Clone + 'static,
+    ZM::Future: Send,
 {
     type Item = Result<UnminedTxId, BoxError>;
 
@@ -158,7 +166,7 @@ where
     }
 }
 
-impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, ZS, ZM> Downloads<ZN, ZV, ZS, ZM>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -166,6 +174,8 @@ where
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZM: Service<mp::Request, Response = mp::Response, Error = BoxError> + Send + Clone + 'static,
+    ZM::Future: Send,
 {
     /// Initialize a new download stream with the provided `network` and
     /// `verifier` services.
@@ -173,11 +183,12 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+    pub fn new(network: ZN, verifier: ZV, state: ZS, mempool: ZM) -> Self {
         Self {
             network,
             verifier,
             state,
+            mempool,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
         }
@@ -213,19 +224,11 @@ where
 
         let network = self.network.clone();
         let verifier = self.verifier.clone();
-        let state = self.state.clone();
+        let mut state = self.state.clone();
+        let mut mempool = self.mempool.clone();
 
         let fut = async move {
-            // TODO: adapt this for transaction / mempool
-            // // Check if the block is already in the state.
-            // // BUG: check if the hash is in any chain (#862).
-            // // Depth only checks the main chain.
-            // match state.oneshot(zs::Request::Depth(hash)).await {
-            //     Ok(zs::Response::Depth(None)) => Ok(()),
-            //     Ok(zs::Response::Depth(Some(_))) => Err("already present".into()),
-            //     Ok(_) => unreachable!("wrong response"),
-            //     Err(e) => Err(e),
-            // }?;
+            Self::should_download(&mut state, &mut mempool, txid).await?;
 
             let height = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Err("no block at the tip".into()),
@@ -297,5 +300,68 @@ where
         metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
 
         DownloadAction::AddedToQueue
+    }
+
+    /// Check if transaction should be downloaded and verified.
+    ///
+    /// If it is already in the mempool (or in its rejected list)
+    /// or in state, then it shouldn't be downloaded (and an error is returned).
+    async fn should_download(
+        state: &mut ZS,
+        mempool: &mut ZM,
+        txid: UnminedTxId,
+    ) -> Result<(), BoxError> {
+        // Check if the transaction is already in the mempool.
+        match mempool
+            .ready_and()
+            .await?
+            .call(mp::Request::TransactionsById(
+                [txid].iter().cloned().collect(),
+            ))
+            .await
+        {
+            Ok(mp::Response::Transactions(txs)) => {
+                if txs.is_empty() {
+                    Ok(())
+                } else {
+                    Err("already present in mempool".into())
+                }
+            }
+            Ok(_) => unreachable!("wrong response"),
+            Err(e) => Err(e),
+        }?;
+
+        // Check if the transaction is in the mempool rejected list.
+        match mempool
+            .oneshot(mp::Request::RejectedTransactionIds(
+                [txid].iter().cloned().collect(),
+            ))
+            .await
+        {
+            Ok(mp::Response::RejectedTransactionIds(txs)) => {
+                if txs.is_empty() {
+                    Ok(())
+                } else {
+                    Err("in mempool rejected list".into())
+                }
+            }
+            Ok(_) => unreachable!("wrong response"),
+            Err(e) => Err(e),
+        }?;
+
+        // Check if the transaction is already in the state.
+        match state
+            .ready_and()
+            .await?
+            .call(zs::Request::Transaction(txid.mined_id()))
+            .await
+        {
+            Ok(zs::Response::Transaction(None)) => Ok(()),
+            Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
+            Ok(_) => unreachable!("wrong response"),
+            Err(e) => Err(e),
+        }?;
+
+        Ok(())
     }
 }

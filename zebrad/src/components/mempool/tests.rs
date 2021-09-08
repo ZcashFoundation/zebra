@@ -22,15 +22,21 @@ async fn mempool_service_basic() -> Result<(), Report> {
         .oneshot(Request::TransactionIds)
         .await
         .unwrap();
-    let transaction_ids = match response {
+    let genesis_transaction_ids = match response {
         Response::TransactionIds(ids) => ids,
         _ => unreachable!("will never happen in this test"),
     };
 
     // Test `Request::TransactionsById`
-    let hash_set = transaction_ids.iter().copied().collect::<HashSet<_>>();
+    let genesis_transactions_hash_set = genesis_transaction_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
     let response = service
-        .oneshot(Request::TransactionsById(hash_set))
+        .clone()
+        .oneshot(Request::TransactionsById(
+            genesis_transactions_hash_set.clone(),
+        ))
         .await
         .unwrap();
     let transactions = match response {
@@ -41,6 +47,27 @@ async fn mempool_service_basic() -> Result<(), Report> {
     // Make sure the transaction from the blockchain test vector is the same as the
     // response of `Request::TransactionsById`
     assert_eq!(genesis_transactions.1[0], transactions[0]);
+
+    // Insert more transactions into the mempool storage.
+    // This will cause the genesis transaction to be moved into rejected.
+    let more_transactions = unmined_transactions_in_blocks(10, network);
+    for tx in more_transactions.1.iter().skip(1) {
+        service.storage.insert(tx.clone())?;
+    }
+
+    // Test `Request::RejectedTransactionIds`
+    let response = service
+        .oneshot(Request::RejectedTransactionIds(
+            genesis_transactions_hash_set,
+        ))
+        .await
+        .unwrap();
+    let rejected_ids = match response {
+        Response::RejectedTransactionIds(ids) => ids,
+        _ => unreachable!("will never happen in this test"),
+    };
+
+    assert_eq!(rejected_ids, genesis_transaction_ids);
 
     Ok(())
 }

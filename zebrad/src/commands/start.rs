@@ -28,11 +28,15 @@ use color_eyre::eyre::{eyre, Report};
 use futures::{select, FutureExt};
 use tokio::sync::oneshot;
 use tower::builder::ServiceBuilder;
+use tower::util::BoxService;
 
-use crate::components::{tokio::RuntimeRun, Inbound};
-use crate::config::ZebradConfig;
 use crate::{
-    components::{mempool, tokio::TokioComponent, ChainSync},
+    components::{
+        mempool::{self, Mempool},
+        tokio::{RuntimeRun, TokioComponent},
+        ChainSync, Inbound,
+    },
+    config::ZebradConfig,
     prelude::*,
 };
 
@@ -65,7 +69,8 @@ impl StartCmd {
         .await;
 
         info!("initializing mempool");
-        let mempool = mempool::Mempool::new(config.network.network);
+        let mempool_service = BoxService::new(Mempool::new(config.network.network));
+        let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
@@ -80,7 +85,7 @@ impl StartCmd {
                 state.clone(),
                 chain_verifier.clone(),
                 tx_verifier.clone(),
-                mempool,
+                mempool.clone(),
             ));
 
         let (peer_set, address_book) =

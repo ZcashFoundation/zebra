@@ -15,7 +15,7 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use crate::BoxError;
+pub use crate::BoxError;
 
 mod crawler;
 pub mod downloads;
@@ -35,12 +35,14 @@ pub use self::storage::tests::unmined_transactions_in_blocks;
 pub enum Request {
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
+    RejectedTransactionIds(HashSet<UnminedTxId>),
 }
 
 #[derive(Debug)]
 pub enum Response {
     Transactions(Vec<UnminedTx>),
     TransactionIds(Vec<UnminedTxId>),
+    RejectedTransactionIds(Vec<UnminedTxId>),
 }
 
 /// Mempool async management and query service.
@@ -91,6 +93,11 @@ impl Service<Request> for Mempool {
             }
             Request::TransactionsById(ids) => {
                 let rsp = Ok(self.storage.clone().transactions(ids)).map(Response::Transactions);
+                async move { rsp }.boxed()
+            }
+            Request::RejectedTransactionIds(ids) => {
+                let rsp = Ok(self.storage.clone().rejected_transactions(ids))
+                    .map(Response::RejectedTransactionIds);
                 async move { rsp }.boxed()
             }
         }
