@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
+};
 
 use zebra_chain::{
     block,
@@ -89,6 +92,27 @@ impl Storage {
     #[allow(dead_code)]
     pub fn contains(&self, txid: &UnminedTxId) -> bool {
         self.verified.iter().any(|tx| &tx.id == txid)
+    }
+
+    /// Remove a [`UnminedTx`] from the mempool via [`UnminedTxId`].  Returns
+    /// whether the transaction was present.
+    ///
+    /// Removes from the 'verified' set, does not remove from the 'rejected'
+    /// tracking set, if present. Maintains the order in which the other unmined
+    /// transactions have been inserted into the mempool.
+    #[allow(dead_code)]
+    pub fn remove(&mut self, txid: &UnminedTxId) -> Option<UnminedTx> {
+        // If the txid exists in the verified set and is then deleted,
+        // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
+        // present and nothing changes, returns `None`.
+
+        return match self.verified.binary_search_by_key(txid, |&tx| tx.id.hash()) {
+            Ok(tx) => {
+                self.verified.retain(|x| &x.id != txid);
+                Some(tx)
+            }
+            Err(e) => None,
+        };
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
