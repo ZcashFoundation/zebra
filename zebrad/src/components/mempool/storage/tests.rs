@@ -47,6 +47,19 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         assert!(!storage.clone().contains(&tx.id));
     }
 
+    // Query all the ids we have for rejected, get back `total - MEMPOOL_SIZE`
+    let all_ids: HashSet<UnminedTxId> = unmined_transactions.iter().map(|tx| tx.id).collect();
+    let rejected_ids: HashSet<UnminedTxId> = unmined_transactions
+        .iter()
+        .take(total_transactions - MEMPOOL_SIZE)
+        .map(|tx| tx.id)
+        .collect();
+    // Convert response to a `HashSet` as we need a fixed order to compare.
+    let rejected_response: HashSet<UnminedTxId> =
+        storage.rejected_transactions(all_ids).into_iter().collect();
+
+    assert_eq!(rejected_response, rejected_ids);
+
     Ok(())
 }
 
