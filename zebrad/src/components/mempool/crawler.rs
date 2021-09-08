@@ -10,7 +10,10 @@ use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
 use zebra_network as zn;
 
-use super::super::{mempool, sync::SyncStatus};
+use super::{
+    super::{mempool, sync::SyncStatus},
+    downloads::Gossip,
+};
 
 #[cfg(test)]
 mod tests;
@@ -44,6 +47,7 @@ where
     PeerSet::Future: Send,
     Mempool:
         Service<mempool::Request, Response = mempool::Response, Error = BoxError> + Send + 'static,
+    Mempool::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
     pub fn spawn(
@@ -94,7 +98,7 @@ where
         while let Some(result) = requests.next().await {
             // log individual response errors
             match result {
-                Ok(response) => self.handle_response(response).await,
+                Ok(response) => self.handle_response(response).await?,
                 // TODO: Reduce the log level of the errors (#2655).
                 Err(error) => info!("Failed to crawl peer for mempool transactions: {}", error),
             }
@@ -104,9 +108,9 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(&mut self, response: zn::Response) {
-        let transaction_ids = match response {
-            zn::Response::TransactionIds(ids) => ids,
+    async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
+        let transaction_ids: Vec<_> = match response {
+            zn::Response::TransactionIds(ids) => ids.into_iter().map(Gossip::Id).collect(),
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
         };
 
@@ -115,6 +119,12 @@ where
             transaction_ids.len()
         );
 
-        // TODO: Send transaction IDs to the download and verify stream (#2650)
+        self.mempool
+            .ready_and()
+            .await?
+            .call(mempool::Request::Queue(transaction_ids))
+            .await?;
+
+        Ok(())
     }
 }
