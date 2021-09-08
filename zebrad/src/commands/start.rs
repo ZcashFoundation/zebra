@@ -30,11 +30,13 @@ use tokio::sync::oneshot;
 use tower::builder::ServiceBuilder;
 use tower::util::BoxService;
 
-use crate::components::mempool::Mempool;
-use crate::components::{tokio::RuntimeRun, Inbound};
-use crate::config::ZebradConfig;
 use crate::{
-    components::{mempool, tokio::TokioComponent, ChainSync},
+    components::{
+        mempool::{self, Mempool},
+        tokio::{RuntimeRun, TokioComponent},
+        ChainSync, Inbound,
+    },
+    config::ZebradConfig,
     prelude::*,
 };
 

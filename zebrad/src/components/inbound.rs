@@ -21,9 +21,11 @@ use zebra_consensus::transaction;
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError};
 use zebra_network::AddressBook;
 
-use super::mempool as mp;
-use super::mempool::downloads::{
-    Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+use super::mempool::{
+    self as mp,
+    downloads::{
+        Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    },
 };
 // Re-use the syncer timeouts for consistency.
 use super::{
