@@ -270,20 +270,16 @@ where
 
             let tx = match gossiped_tx {
                 GossipedTx::Id(txid) => {
-                    let tx = if let zn::Response::Transactions(txs) = network
-                        .oneshot(zn::Request::TransactionsById(
-                            std::iter::once(txid).collect(),
-                        ))
-                        .await?
-                    {
-                        txs.into_iter()
-                            .next()
-                            .expect("successful response has the transaction in it")
-                    } else {
-                        unreachable!("wrong response to transaction request");
-                    };
-                    metrics::counter!("gossip.downloaded.transaction.count", 1);
+                    let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
+                    let tx = match network.oneshot(req).await? {
+                        zn::Response::Transactions(mut txs) => txs
+                            .pop()
+                            .expect("successful response has the transaction in it"),
+                        _ => unreachable!("wrong response to transaction request"),
+                    };
+
+                    metrics::counter!("gossip.downloaded.transaction.count", 1);
                     tx
                 }
                 GossipedTx::Tx(tx) => {
