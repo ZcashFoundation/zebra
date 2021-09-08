@@ -3,7 +3,7 @@ use std::time::Duration;
 use proptest::prelude::*;
 use tokio::time;
 
-use zebra_network::{Request, Response};
+use zebra_network as zn;
 use zebra_test::mock_service::MockService;
 
 use super::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY};
@@ -47,10 +47,10 @@ proptest! {
                         if mempool_is_enabled {
                             peer_set
                                 .expect_request_that(|request| {
-                                    matches!(request, Request::MempoolTransactionIds)
+                                    matches!(request, zn::Request::MempoolTransactionIds)
                                 })
                                 .await?
-                                .respond(Response::TransactionIds(vec![]));
+                                .respond(zn::Response::TransactionIds(vec![]));
                         } else {
                             peer_set.expect_no_requests().await?;
                         }

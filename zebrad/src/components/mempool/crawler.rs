@@ -8,7 +8,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use tokio::{task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
-use zebra_network::{Request, Response};
+use zebra_network as zn;
 
 use super::super::sync::SyncStatus;
 
@@ -38,7 +38,8 @@ pub struct Crawler<PeerSet> {
 
 impl<PeerSet> Crawler<PeerSet>
 where
-    PeerSet: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    PeerSet:
+        Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone + Send + 'static,
     PeerSet::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
@@ -79,7 +80,7 @@ where
             // end the task on permanent peer set errors
             let peer_set = peer_set.ready_and().await?;
 
-            requests.push(peer_set.call(Request::MempoolTransactionIds));
+            requests.push(peer_set.call(zn::Request::MempoolTransactionIds));
         }
 
         while let Some(result) = requests.next().await {
@@ -95,9 +96,9 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(&mut self, response: Response) {
+    async fn handle_response(&mut self, response: zn::Response) {
         let transaction_ids = match response {
-            Response::TransactionIds(ids) => ids,
+            zn::Response::TransactionIds(ids) => ids,
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
         };
 
