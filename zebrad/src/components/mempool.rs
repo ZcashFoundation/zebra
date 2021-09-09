@@ -109,10 +109,10 @@ impl Mempool {
     /// then it shouldn't be downloaded/verified.
     fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), MempoolError> {
         // Check if the transaction is already in the mempool.
-        if self.storage.clone().contains(&txid) {
+        if self.storage.contains(&txid) {
             return Err(MempoolError::InMempool);
         }
-        if self.storage.clone().contains_rejected(&txid) {
+        if self.storage.contains_rejected(&txid) {
             return Err(MempoolError::Rejected);
         }
         Ok(())
@@ -140,15 +140,15 @@ impl Service<Request> for Mempool {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::TransactionIds => {
-                let res = self.storage.clone().tx_ids();
+                let res = self.storage.tx_ids();
                 async move { Ok(Response::TransactionIds(res)) }.boxed()
             }
             Request::TransactionsById(ids) => {
-                let rsp = Ok(self.storage.clone().transactions(ids)).map(Response::Transactions);
+                let rsp = Ok(self.storage.transactions(ids)).map(Response::Transactions);
                 async move { rsp }.boxed()
             }
             Request::RejectedTransactionIds(ids) => {
-                let rsp = Ok(self.storage.clone().rejected_transactions(ids))
+                let rsp = Ok(self.storage.rejected_transactions(ids))
                     .map(Response::RejectedTransactionIds);
                 async move { rsp }.boxed()
             }

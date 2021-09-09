@@ -36,7 +36,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
 
     // Make sure the last MEMPOOL_SIZE transactions we sent are in the verified
     for tx in unmined_transactions.iter().rev().take(MEMPOOL_SIZE) {
-        assert!(storage.clone().contains(&tx.id));
+        assert!(storage.contains(&tx.id));
     }
 
     // Anything greater should not be in the verified
@@ -44,7 +44,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         .iter()
         .take(unmined_transactions.len() - MEMPOOL_SIZE)
     {
-        assert!(!storage.clone().contains(&tx.id));
+        assert!(!storage.contains(&tx.id));
     }
 
     // Query all the ids we have for rejected, get back `total - MEMPOOL_SIZE`
@@ -55,18 +55,13 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         .map(|tx| tx.id)
         .collect();
     // Convert response to a `HashSet` as we need a fixed order to compare.
-    let rejected_response: HashSet<UnminedTxId> = storage
-        .clone()
-        .rejected_transactions(all_ids)
-        .into_iter()
-        .collect();
+    let rejected_response: HashSet<UnminedTxId> =
+        storage.rejected_transactions(all_ids).into_iter().collect();
 
     assert_eq!(rejected_response, rejected_ids);
 
     // Use `contains_rejected` to make sure the first id stored is now rejected
-    assert!(storage
-        .clone()
-        .contains_rejected(&unmined_transactions[0].id));
+    assert!(storage.contains_rejected(&unmined_transactions[0].id));
     // Use `contains_rejected` to make sure the last id stored is not rejected
     assert!(!storage.contains_rejected(&unmined_transactions[unmined_transactions.len() - 1].id));
 
