@@ -16,7 +16,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::UnminedTxId;
+use zebra_chain::transaction::{UnminedTx, UnminedTxId};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
@@ -81,6 +81,34 @@ pub enum DownloadAction {
     ///
     /// The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
     FullQueue,
+}
+
+/// A gossiped transaction, which can be the transaction itself or just its ID.
+pub enum GossipedTx {
+    Id(UnminedTxId),
+    Tx(UnminedTx),
+}
+
+impl GossipedTx {
+    /// Return the [`UnminedTxId`] of a gossiped transaction.
+    fn id(&self) -> UnminedTxId {
+        match self {
+            GossipedTx::Id(txid) => *txid,
+            GossipedTx::Tx(tx) => tx.id,
+        }
+    }
+}
+
+impl From<UnminedTxId> for GossipedTx {
+    fn from(txid: UnminedTxId) -> Self {
+        GossipedTx::Id(txid)
+    }
+}
+
+impl From<UnminedTx> for GossipedTx {
+    fn from(tx: UnminedTx) -> Self {
+        GossipedTx::Tx(tx)
+    }
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
@@ -194,11 +222,13 @@ where
         }
     }
 
-    /// Queue a transaction for download and verification.
+    /// Queue a transaction for download (if needed) and verification.
     ///
     /// Returns the action taken in response to the queue request.
-    #[instrument(skip(self, txid), fields(txid = %txid))]
-    pub fn download_and_verify(&mut self, txid: UnminedTxId) -> DownloadAction {
+    #[instrument(skip(self, gossiped_tx), fields(txid = %gossiped_tx.id()))]
+    pub fn download_if_needed_and_verify(&mut self, gossiped_tx: GossipedTx) -> DownloadAction {
+        let txid = gossiped_tx.id();
+
         if self.cancel_handles.contains_key(&txid) {
             tracing::debug!(
                 ?txid,
@@ -228,7 +258,7 @@ where
         let mut mempool = self.mempool.clone();
 
         let fut = async move {
-            Self::should_download(&mut state, &mut mempool, txid).await?;
+            Self::should_download_or_verify(&mut state, &mut mempool, txid).await?;
 
             let height = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Err("no block at the tip".into()),
@@ -238,19 +268,25 @@ where
             }?;
             let height = (height + 1).ok_or_else(|| eyre!("no next height"))?;
 
-            let tx = if let zn::Response::Transactions(txs) = network
-                .oneshot(zn::Request::TransactionsById(
-                    std::iter::once(txid).collect(),
-                ))
-                .await?
-            {
-                txs.into_iter()
-                    .next()
-                    .expect("successful response has the transaction in it")
-            } else {
-                unreachable!("wrong response to transaction request");
+            let tx = match gossiped_tx {
+                GossipedTx::Id(txid) => {
+                    let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
+
+                    let tx = match network.oneshot(req).await? {
+                        zn::Response::Transactions(mut txs) => txs
+                            .pop()
+                            .expect("successful response has the transaction in it"),
+                        _ => unreachable!("wrong response to transaction request"),
+                    };
+
+                    metrics::counter!("gossip.downloaded.transaction.count", 1);
+                    tx
+                }
+                GossipedTx::Tx(tx) => {
+                    metrics::counter!("gossip.pushed.transaction.count", 1);
+                    tx
+                }
             };
-            metrics::counter!("gossip.downloaded.transaction.count", 1);
 
             let result = verifier
                 .oneshot(tx::Request::Mempool {
@@ -302,11 +338,12 @@ where
         DownloadAction::AddedToQueue
     }
 
-    /// Check if transaction should be downloaded and verified.
+    /// Check if transaction should be downloaded and/or verified.
     ///
     /// If it is already in the mempool (or in its rejected list)
-    /// or in state, then it shouldn't be downloaded (and an error is returned).
-    async fn should_download(
+    /// or in state, then it shouldn't be downloaded/verified
+    /// (and an error is returned).
+    async fn should_download_or_verify(
         state: &mut ZS,
         mempool: &mut ZM,
         txid: UnminedTxId,
