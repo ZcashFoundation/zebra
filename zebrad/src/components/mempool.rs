@@ -45,15 +45,6 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
-/// The result of attempting to queue a transaction for downloading/
-/// verifying.
-#[derive(Debug)]
-pub enum DownloadAction {
-    DownloadAction(self::downloads::DownloadAction),
-    InMempool,
-    Rejected,
-}
-
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum Request {
@@ -68,7 +59,7 @@ pub enum Response {
     Transactions(Vec<UnminedTx>),
     TransactionIds(Vec<UnminedTxId>),
     RejectedTransactionIds(Vec<UnminedTxId>),
-    DownloadActions(Vec<DownloadAction>),
+    Queued(Vec<Result<(), MempoolError>>),
 }
 
 /// Mempool async management and query service.
@@ -116,13 +107,13 @@ impl Mempool {
     ///
     /// If it is already in the mempool (or in its rejected list)
     /// then it shouldn't be downloaded/verified.
-    fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), DownloadAction> {
+    fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), MempoolError> {
         // Check if the transaction is already in the mempool.
         if self.storage.clone().contains(&txid) {
-            return Err(DownloadAction::InMempool);
+            return Err(MempoolError::InMempool);
         }
         if self.storage.clone().contains_rejected(&txid) {
-            return Err(DownloadAction::Rejected);
+            return Err(MempoolError::Rejected);
         }
         Ok(())
     }
@@ -162,19 +153,16 @@ impl Service<Request> for Mempool {
                 async move { rsp }.boxed()
             }
             Request::Queue(gossiped_txs) => {
-                let rsp = gossiped_txs
+                let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
                     .into_iter()
                     .map(|gossiped_tx| {
-                        let r = self.should_download_or_verify(gossiped_tx.id());
-                        if let Err(action) = r {
-                            return action;
-                        }
-                        DownloadAction::DownloadAction(
-                            self.tx_downloads.download_if_needed_and_verify(gossiped_tx),
-                        )
+                        self.should_download_or_verify(gossiped_tx.id())?;
+                        self.tx_downloads
+                            .download_if_needed_and_verify(gossiped_tx)?;
+                        Ok(())
                     })
                     .collect();
-                async move { Ok(Response::DownloadActions(rsp)) }.boxed()
+                async move { Ok(Response::Queued(rsp)) }.boxed()
             }
         }
     }

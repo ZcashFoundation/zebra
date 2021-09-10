@@ -23,6 +23,8 @@ use zebra_state as zs;
 
 use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
+use super::MempoolError;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Controls how long we wait for a transaction download request to complete.
@@ -61,27 +63,7 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious transactions
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-const MAX_INBOUND_CONCURRENCY: usize = 10;
-
-/// The action taken in response to a peer's gossiped transaction hash.
-#[derive(Debug)]
-pub enum DownloadAction {
-    /// The transaction hash was successfully queued for download and verification.
-    AddedToQueue,
-
-    /// The transaction hash is already queued, so this request was ignored.
-    ///
-    /// Another peer has already gossiped the same hash to us, or the mempool crawler has fetched it.
-    AlreadyQueued,
-
-    /// The queue is at capacity, so this request was ignored.
-    ///
-    /// The mempool crawler should discover this transaction later.
-    /// If it is mined into a block, it will be downloaded by the syncer, or the inbound block downloader.
-    ///
-    /// The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
-    FullQueue,
-}
+pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
 #[derive(Debug)]
@@ -217,7 +199,10 @@ where
     ///
     /// Returns the action taken in response to the queue request.
     #[instrument(skip(self, gossiped_tx), fields(txid = %gossiped_tx.id()))]
-    pub fn download_if_needed_and_verify(&mut self, gossiped_tx: Gossip) -> DownloadAction {
+    pub fn download_if_needed_and_verify(
+        &mut self,
+        gossiped_tx: Gossip,
+    ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
 
         if self.cancel_handles.contains_key(&txid) {
@@ -227,7 +212,7 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "transaction id already queued for inbound download: ignored transaction"
             );
-            return DownloadAction::AlreadyQueued;
+            return Err(MempoolError::AlreadyQueued);
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
@@ -237,7 +222,7 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many transactions queued for inbound download: ignored transaction"
             );
-            return DownloadAction::FullQueue;
+            return Err(MempoolError::FullQueue);
         }
 
         // This oneshot is used to signal cancellation to the download task.
@@ -327,7 +312,7 @@ where
         );
         metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
 
-        DownloadAction::AddedToQueue
+        Ok(())
     }
 
     /// Check if transaction is already in the state.
