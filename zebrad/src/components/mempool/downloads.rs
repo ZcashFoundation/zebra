@@ -85,30 +85,30 @@ pub enum DownloadAction {
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
 #[derive(Debug)]
-pub enum GossipedTx {
+pub enum Gossip {
     Id(UnminedTxId),
     Tx(UnminedTx),
 }
 
-impl GossipedTx {
+impl Gossip {
     /// Return the [`UnminedTxId`] of a gossiped transaction.
     pub fn id(&self) -> UnminedTxId {
         match self {
-            GossipedTx::Id(txid) => *txid,
-            GossipedTx::Tx(tx) => tx.id,
+            Gossip::Id(txid) => *txid,
+            Gossip::Tx(tx) => tx.id,
         }
     }
 }
 
-impl From<UnminedTxId> for GossipedTx {
+impl From<UnminedTxId> for Gossip {
     fn from(txid: UnminedTxId) -> Self {
-        GossipedTx::Id(txid)
+        Gossip::Id(txid)
     }
 }
 
-impl From<UnminedTx> for GossipedTx {
+impl From<UnminedTx> for Gossip {
     fn from(tx: UnminedTx) -> Self {
-        GossipedTx::Tx(tx)
+        Gossip::Tx(tx)
     }
 }
 
@@ -217,7 +217,7 @@ where
     ///
     /// Returns the action taken in response to the queue request.
     #[instrument(skip(self, gossiped_tx), fields(txid = %gossiped_tx.id()))]
-    pub fn download_if_needed_and_verify(&mut self, gossiped_tx: GossipedTx) -> DownloadAction {
+    pub fn download_if_needed_and_verify(&mut self, gossiped_tx: Gossip) -> DownloadAction {
         let txid = gossiped_tx.id();
 
         if self.cancel_handles.contains_key(&txid) {
@@ -260,7 +260,7 @@ where
             let height = (height + 1).ok_or_else(|| eyre!("no next height"))?;
 
             let tx = match gossiped_tx {
-                GossipedTx::Id(txid) => {
+                Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
                     let tx = match network.oneshot(req).await? {
@@ -273,7 +273,7 @@ where
                     metrics::counter!("gossip.downloaded.transaction.count", 1);
                     tx
                 }
-                GossipedTx::Tx(tx) => {
+                Gossip::Tx(tx) => {
                     metrics::counter!("gossip.pushed.transaction.count", 1);
                     tx
                 }

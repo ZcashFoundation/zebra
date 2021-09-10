@@ -34,7 +34,7 @@ pub use self::error::MempoolError;
 pub use self::storage::tests::unmined_transactions_in_blocks;
 
 use self::downloads::{
-    Downloads as TxDownloads, GossipedTx, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -60,7 +60,7 @@ pub enum Request {
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
     RejectedTransactionIds(HashSet<UnminedTxId>),
-    Queue(Vec<GossipedTx>),
+    Queue(Vec<Gossip>),
 }
 
 #[derive(Debug)]
