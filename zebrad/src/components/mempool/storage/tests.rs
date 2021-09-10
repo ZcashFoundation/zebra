@@ -16,16 +16,16 @@ fn mempool_storage_crud_mainnet() {
     let mut storage: Storage = Default::default();
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let (total_transactions, unmined_transactions) = unmined_transactions_in_blocks(10, network);
+    let (_, unmined_transactions) = unmined_transactions_in_blocks(10, network);
 
     // Get one (1) unmined transaction
-    let unmined_tx = unmined_transactions[0];
+    let unmined_tx = &unmined_transactions[0];
 
     // Insert unmined tx into the mempool.
-    storage.insert(unmined_tx);
+    let _ = storage.insert(unmined_tx.clone());
 
     // Check that it is in the mempool, and not rejected.
-    assert!(storage.contains(&unmined_tx.id));
+    assert!(storage.clone().contains(&unmined_tx.id));
 
     // Remove tx
     let _ = storage.remove(&unmined_tx.id);

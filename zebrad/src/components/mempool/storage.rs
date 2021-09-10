@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    hash::Hash,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use zebra_chain::{
     block,
@@ -106,12 +103,12 @@ impl Storage {
         // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
         // present and nothing changes, returns `None`.
 
-        return match self.verified.binary_search_by_key(txid, |&tx| tx.id.hash()) {
-            Ok(tx) => {
-                self.verified.retain(|x| &x.id != txid);
-                Some(tx)
+        return match self.verified.clone().iter().find(|tx| &tx.id == txid) {
+            Some(tx) => {
+                self.verified.retain(|tx| &tx.id != txid);
+                Some(tx.clone())
             }
-            Err(e) => None,
+            None => None,
         };
     }
 
