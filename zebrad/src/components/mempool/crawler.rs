@@ -119,11 +119,13 @@ where
             transaction_ids.len()
         );
 
-        self.mempool
-            .ready_and()
-            .await?
-            .call(mempool::Request::Queue(transaction_ids))
-            .await?;
+        if !transaction_ids.is_empty() {
+            self.mempool
+                .ready_and()
+                .await?
+                .call(mempool::Request::Queue(transaction_ids))
+                .await?;
+        }
 
         Ok(())
     }
