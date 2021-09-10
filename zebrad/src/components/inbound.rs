@@ -329,9 +329,7 @@ impl Service<zn::Request> for Inbound {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     mempool
                         .clone()
-                        .oneshot(mempool::Request::DownloadAndVerify(
-                            vec![transaction.into()],
-                        ))
+                        .oneshot(mempool::Request::Queue(vec![transaction.into()]))
                         // The response just indicates if processing was queued or not; ignore it
                         .map_ok(|_resp| zn::Response::Nil)
                         .boxed()
@@ -348,7 +346,7 @@ impl Service<zn::Request> for Inbound {
                     let transactions = transactions.into_iter().map(Into::into).collect();
                     mempool
                         .clone()
-                        .oneshot(mempool::Request::DownloadAndVerify(transactions))
+                        .oneshot(mempool::Request::Queue(transactions))
                         // The response just indicates if processing was queued or not; ignore it
                         .map_ok(|_resp| zn::Response::Nil)
                         .boxed()

@@ -60,7 +60,7 @@ pub enum Request {
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
     RejectedTransactionIds(HashSet<UnminedTxId>),
-    DownloadAndVerify(Vec<GossipedTx>),
+    Queue(Vec<GossipedTx>),
 }
 
 #[derive(Debug)]
@@ -111,6 +111,21 @@ impl Mempool {
     pub fn storage(&mut self) -> &mut storage::Storage {
         &mut self.storage
     }
+
+    /// Check if transaction should be downloaded and/or verified.
+    ///
+    /// If it is already in the mempool (or in its rejected list)
+    /// then it shouldn't be downloaded/verified.
+    fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), DownloadAction> {
+        // Check if the transaction is already in the mempool.
+        if self.storage.clone().contains(&txid) {
+            return Err(DownloadAction::InMempool);
+        }
+        if self.storage.clone().contains_rejected(&txid) {
+            return Err(DownloadAction::Rejected);
+        }
+        Ok(())
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -146,7 +161,7 @@ impl Service<Request> for Mempool {
                     .map(Response::RejectedTransactionIds);
                 async move { rsp }.boxed()
             }
-            Request::DownloadAndVerify(gossiped_txs) => {
+            Request::Queue(gossiped_txs) => {
                 let rsp = gossiped_txs
                     .into_iter()
                     .map(|gossiped_tx| {
@@ -162,22 +177,5 @@ impl Service<Request> for Mempool {
                 async move { Ok(Response::DownloadActions(rsp)) }.boxed()
             }
         }
-    }
-}
-
-impl Mempool {
-    /// Check if transaction should be downloaded and/or verified.
-    ///
-    /// If it is already in the mempool (or in its rejected list)
-    /// then it shouldn't be downloaded/verified.
-    fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), DownloadAction> {
-        // Check if the transaction is already in the mempool.
-        if self.storage.clone().contains(&txid) {
-            return Err(DownloadAction::InMempool);
-        }
-        if self.storage.clone().contains_rejected(&txid) {
-            return Err(DownloadAction::Rejected);
-        }
-        Ok(())
     }
 }
