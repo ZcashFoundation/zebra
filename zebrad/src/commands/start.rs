@@ -85,23 +85,23 @@ impl StartCmd {
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip).await;
 
+        info!("initializing syncer");
+        let (syncer, sync_status) =
+            ChainSync::new(&config, peer_set.clone(), state.clone(), chain_verifier);
+
         info!("initializing mempool");
         let mempool_service = BoxService::new(Mempool::new(
             config.network.network,
             peer_set.clone(),
-            state.clone(),
+            state,
             tx_verifier,
+            sync_status.clone(),
         ));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 
         setup_tx
             .send((peer_set.clone(), address_book, mempool))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
-
-        info!("initializing syncer");
-        // TODO: use sync_status to activate the mempool (#2592)
-        let (syncer, sync_status) =
-            ChainSync::new(&config, peer_set.clone(), state, chain_verifier);
 
         select! {
             result = syncer.sync().fuse() => result,

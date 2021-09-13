@@ -16,6 +16,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
     let (peer_set, _) = mock_peer_set();
+    let (sync_status, _recent_syncs) = SyncStatus::new();
 
     let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -26,7 +27,13 @@ async fn mempool_service_basic() -> Result<(), Report> {
     // get the genesis block transactions from the Zcash blockchain.
     let genesis_transactions = unmined_transactions_in_blocks(0, network);
     // Start the mempool service
-    let mut service = Mempool::new(network, peer_set, state_service.clone(), tx_verifier);
+    let mut service = Mempool::new(
+        network,
+        peer_set,
+        state_service.clone(),
+        tx_verifier,
+        sync_status,
+    );
     // Insert the genesis block coinbase transaction into the mempool storage.
     service.storage.insert(genesis_transactions.1[0].clone())?;
 
