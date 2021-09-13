@@ -4,24 +4,6 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-alpha.17](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-09-10
-
-Zebra's latest alpha continues work on the mempool.
-
-### Added
-
-- Monitor changes to the chain tip, decide if sync reached tip (#2695, #2685,
-  #2686, #2715, #2721, #2722)
-- Only enable the mempool crawler after synchronization reaches the chain tip (#2667)
-- Reply to requests for transactions IDs in the mempool (#2720)
-- Reply to requests for transactions in the mempool, given their IDs (#2725)
-- Download and verify gossiped transactions (#2679, #2727, #2718)
-
-### Security
-
-- Replace older duplicate queued checkpoint blocks with the latest block's data (#2697)
-
-
 ## [Zebra 1.0.0-alpha.16](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.16) - 2021-08-27
 
 Zebra's latest alpha finishes most of the state work needed for NU5 testnet activation and starts the mempool work.
