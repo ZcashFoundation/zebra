@@ -103,13 +103,13 @@ impl Storage {
         // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
         // present and nothing changes, returns `None`.
 
-        return match self.verified.clone().iter().find(|tx| &tx.id == txid) {
+        match self.verified.clone().iter().find(|tx| &tx.id == txid) {
             Some(tx) => {
                 self.verified.retain(|tx| &tx.id != txid);
                 Some(tx.clone())
             }
             None => None,
-        };
+        }
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
