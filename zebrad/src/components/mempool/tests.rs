@@ -2,24 +2,40 @@ use super::*;
 use color_eyre::Report;
 use std::collections::HashSet;
 use storage::tests::unmined_transactions_in_blocks;
-use tower::ServiceExt;
+use tower::{ServiceBuilder, ServiceExt};
+
+use zebra_consensus::Config as ConsensusConfig;
+use zebra_state::Config as StateConfig;
+
+use crate::components::tests::mock_peer_set;
 
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+    let (peer_set, _) = mock_peer_set();
+
+    let (state, _, _) = zebra_state::init(state_config, network);
+    let state_service = ServiceBuilder::new().buffer(1).service(state);
+    let (_chain_verifier, tx_verifier) =
+        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
+            .await;
 
     // get the genesis block transactions from the Zcash blockchain.
     let genesis_transactions = unmined_transactions_in_blocks(0, network);
     // Start the mempool service
-    let mut service = Mempool::new(network);
+    let mut service = Mempool::new(network, peer_set, state_service.clone(), tx_verifier);
     // Insert the genesis block coinbase transaction into the mempool storage.
     service.storage.insert(genesis_transactions.1[0].clone())?;
 
     // Test `Request::TransactionIds`
     let response = service
-        .clone()
-        .oneshot(Request::TransactionIds)
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::TransactionIds)
         .await
         .unwrap();
     let genesis_transaction_ids = match response {
@@ -33,7 +49,9 @@ async fn mempool_service_basic() -> Result<(), Report> {
         .copied()
         .collect::<HashSet<_>>();
     let response = service
-        .clone()
+        .ready_and()
+        .await
+        .unwrap()
         .oneshot(Request::TransactionsById(
             genesis_transactions_hash_set.clone(),
         ))
