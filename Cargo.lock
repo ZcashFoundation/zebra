@@ -4670,7 +4670,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-alpha.17"
+version = "1.0.0-alpha.14"
 dependencies = [
  "color-eyre",
  "futures 0.3.17",
