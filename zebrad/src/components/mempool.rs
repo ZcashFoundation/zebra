@@ -82,7 +82,7 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     sync_status: SyncStatus,
 
-    /// Indicates wether the mempool is enabled or not.
+    /// Indicates whether the mempool is enabled or not.
     enabled: bool,
 }
 
