@@ -10,12 +10,13 @@ Zebra's latest alpha continues work on the mempool.
 
 ### Added
 
-- Monitor changes to the chain tip, decide if sync reached tip (#2695, #2685,
-  #2686, #2715, #2721, #2722)
+- Monitor changes to the chain tip, decide if synchronization reached tip (#2695,
+  #2685, #2686, #2715, #2721, #2722)
 - Only enable the mempool crawler after synchronization reaches the chain tip (#2667)
 - Reply to requests for transactions IDs in the mempool (#2720)
 - Reply to requests for transactions in the mempool, given their IDs (#2725)
-- Download and verify gossiped transactions (#2679, #2727, #2718)
+- Download and verify gossiped transactions (#2679, #2727, #2718, #2741)
+- Internal additions and improvements to the mempool (#2742, #2747, #2749)
 
 #### Documentation
 
