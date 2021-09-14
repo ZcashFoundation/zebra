@@ -12,5 +12,8 @@ mod sync;
 pub mod tokio;
 pub mod tracing;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 pub use inbound::Inbound;
 pub use sync::ChainSync;

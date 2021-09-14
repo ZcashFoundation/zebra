@@ -1,13 +1,11 @@
 use std::time::Duration;
 
 use proptest::prelude::*;
-use tokio::{
-    sync::mpsc::{self, UnboundedReceiver},
-    time::{self, timeout},
-};
-use tower::{buffer::Buffer, util::BoxService, BoxError};
+use tokio::time::{self, timeout};
 
-use zebra_network::{Request, Response};
+use zebra_network::Request;
+
+use crate::components::tests::mock_peer_set;
 
 use super::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY};
 
@@ -77,30 +75,4 @@ proptest! {
             Ok(())
         })?;
     }
-}
-
-/// Create a mock service to represent a [`PeerSet`][zebra_network::PeerSet] and intercept the
-/// requests it receives.
-///
-/// The intercepted requests are sent through an unbounded channel to the receiver that's also
-/// returned from this function.
-fn mock_peer_set() -> (
-    Buffer<BoxService<Request, Response, BoxError>, Request>,
-    UnboundedReceiver<Request>,
-) {
-    let (sender, receiver) = mpsc::unbounded_channel();
-
-    let proxy_service = tower::service_fn(move |request| {
-        let sender = sender.clone();
-
-        async move {
-            let _ = sender.send(request);
-
-            Ok(Response::TransactionIds(vec![]))
-        }
-    });
-
-    let service = Buffer::new(BoxService::new(proxy_service), 10);
-
-    (service, receiver)
 }
