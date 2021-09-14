@@ -17,6 +17,15 @@ Zebra's latest alpha continues work on the mempool.
 - Reply to requests for transactions in the mempool, given their IDs (#2725)
 - Download and verify gossiped transactions (#2679, #2727, #2718)
 
+#### Documentation
+
+- Document consensus rules for version group IDs (#2719)
+- Specify Zebra Client will only support Unified Addresses (#2706) 
+
+### Fixed
+
+-  Stop calculating transaction hashes twice in the checkpoint verifier (#2696) 
+
 ### Security
 
 - Replace older duplicate queued checkpoint blocks with the latest block's data (#2697)
