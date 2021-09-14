@@ -7,6 +7,34 @@ use zebra_chain::{
 use color_eyre::eyre::Result;
 
 #[test]
+fn mempool_storage_crud_mainnet() {
+    zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // Create an empty storage instance
+    let mut storage: Storage = Default::default();
+
+    // Get transactions from the first 10 blocks of the Zcash blockchain
+    let (_, unmined_transactions) = unmined_transactions_in_blocks(10, network);
+
+    // Get one (1) unmined transaction
+    let unmined_tx = &unmined_transactions[0];
+
+    // Insert unmined tx into the mempool.
+    let _ = storage.insert(unmined_tx.clone());
+
+    // Check that it is in the mempool, and not rejected.
+    assert!(storage.contains(&unmined_tx.id));
+
+    // Remove tx
+    let _ = storage.remove(&unmined_tx.id);
+
+    // Check that it is /not/ in the mempool.
+    assert!(!storage.contains(&unmined_tx.id));
+}
+
+#[test]
 fn mempool_storage_basic() -> Result<()> {
     zebra_test::init();
 
@@ -36,7 +64,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
 
     // Make sure the last MEMPOOL_SIZE transactions we sent are in the verified
     for tx in unmined_transactions.iter().rev().take(MEMPOOL_SIZE) {
-        assert!(storage.clone().contains(&tx.id));
+        assert!(storage.contains(&tx.id));
     }
 
     // Anything greater should not be in the verified
@@ -44,7 +72,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         .iter()
         .take(unmined_transactions.len() - MEMPOOL_SIZE)
     {
-        assert!(!storage.clone().contains(&tx.id));
+        assert!(!storage.contains(&tx.id));
     }
 
     // Query all the ids we have for rejected, get back `total - MEMPOOL_SIZE`
@@ -59,6 +87,11 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         storage.rejected_transactions(all_ids).into_iter().collect();
 
     assert_eq!(rejected_response, rejected_ids);
+
+    // Use `contains_rejected` to make sure the first id stored is now rejected
+    assert!(storage.contains_rejected(&unmined_transactions[0].id));
+    // Use `contains_rejected` to make sure the last id stored is not rejected
+    assert!(!storage.contains_rejected(&unmined_transactions[unmined_transactions.len() - 1].id));
 
     Ok(())
 }

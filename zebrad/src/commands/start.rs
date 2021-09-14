@@ -68,10 +68,6 @@ impl StartCmd {
         )
         .await;
 
-        info!("initializing mempool");
-        let mempool_service = BoxService::new(Mempool::new(config.network.network));
-        let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
-
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
@@ -84,14 +80,22 @@ impl StartCmd {
                 setup_rx,
                 state.clone(),
                 chain_verifier.clone(),
-                tx_verifier.clone(),
-                mempool.clone(),
             ));
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip).await;
+
+        info!("initializing mempool");
+        let mempool_service = BoxService::new(Mempool::new(
+            config.network.network,
+            peer_set.clone(),
+            state.clone(),
+            tx_verifier,
+        ));
+        let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
+
         setup_tx
-            .send((peer_set.clone(), address_book))
+            .send((peer_set.clone(), address_book, mempool))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
         info!("initializing syncer");

@@ -25,4 +25,22 @@ pub enum MempoolError {
 
     #[error("transaction evicted from the mempool due to size restrictions")]
     Excess,
+
+    #[error("transaction is in the mempool rejected list")]
+    Rejected,
+
+    /// The transaction hash is already queued, so this request was ignored.
+    ///
+    /// Another peer has already gossiped the same hash to us, or the mempool crawler has fetched it.
+    #[error("transaction dropped because it is already queued for download")]
+    AlreadyQueued,
+
+    /// The queue is at capacity, so this request was ignored.
+    ///
+    /// The mempool crawler should discover this transaction later.
+    /// If it is mined into a block, it will be downloaded by the syncer, or the inbound block downloader.
+    ///
+    /// The queue's capacity is [`super::downloads::MAX_INBOUND_CONCURRENCY`].
+    #[error("transaction dropped because the queue is full")]
+    FullQueue,
 }

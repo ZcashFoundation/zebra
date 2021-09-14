@@ -31,7 +31,7 @@ pub enum State {
     Excess,
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
     /// cache of size [`MEMPOOL_SIZE`].
@@ -87,25 +87,53 @@ impl Storage {
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
     /// the mempool.
     #[allow(dead_code)]
-    pub fn contains(self, txid: &UnminedTxId) -> bool {
+    pub fn contains(&self, txid: &UnminedTxId) -> bool {
         self.verified.iter().any(|tx| &tx.id == txid)
     }
 
+    /// Remove a [`UnminedTx`] from the mempool via [`UnminedTxId`].  Returns
+    /// whether the transaction was present.
+    ///
+    /// Removes from the 'verified' set, does not remove from the 'rejected'
+    /// tracking set, if present. Maintains the order in which the other unmined
+    /// transactions have been inserted into the mempool.
+    #[allow(dead_code)]
+    pub fn remove(&mut self, txid: &UnminedTxId) -> Option<UnminedTx> {
+        // If the txid exists in the verified set and is then deleted,
+        // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
+        // present and nothing changes, returns `None`.
+
+        match self.verified.clone().iter().find(|tx| &tx.id == txid) {
+            Some(tx) => {
+                self.verified.retain(|tx| &tx.id != txid);
+                Some(tx.clone())
+            }
+            None => None,
+        }
+    }
+
     /// Returns the set of [`UnminedTxId`]s in the mempool.
-    pub fn tx_ids(self) -> Vec<UnminedTxId> {
+    pub fn tx_ids(&self) -> Vec<UnminedTxId> {
         self.verified.iter().map(|tx| tx.id).collect()
     }
 
     /// Returns the set of [`Transaction`]s matching ids in the mempool.
-    pub fn transactions(self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTx> {
+    pub fn transactions(&self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTx> {
         self.verified
-            .into_iter()
+            .iter()
             .filter(|tx| tx_ids.contains(&tx.id))
+            .cloned()
             .collect()
     }
 
+    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
+    /// the mempool rejected list.
+    pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
+        self.rejected.contains_key(txid)
+    }
+
     /// Returns the set of [`UnminedTxId`]s matching ids in the rejected list.
-    pub fn rejected_transactions(self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTxId> {
+    pub fn rejected_transactions(&self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTxId> {
         tx_ids
             .into_iter()
             .filter(|tx| self.rejected.contains_key(tx))
