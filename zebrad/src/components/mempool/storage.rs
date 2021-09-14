@@ -91,6 +91,27 @@ impl Storage {
         self.verified.iter().any(|tx| &tx.id == txid)
     }
 
+    /// Remove a [`UnminedTx`] from the mempool via [`UnminedTxId`].  Returns
+    /// whether the transaction was present.
+    ///
+    /// Removes from the 'verified' set, does not remove from the 'rejected'
+    /// tracking set, if present. Maintains the order in which the other unmined
+    /// transactions have been inserted into the mempool.
+    #[allow(dead_code)]
+    pub fn remove(&mut self, txid: &UnminedTxId) -> Option<UnminedTx> {
+        // If the txid exists in the verified set and is then deleted,
+        // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
+        // present and nothing changes, returns `None`.
+
+        match self.verified.clone().iter().find(|tx| &tx.id == txid) {
+            Some(tx) => {
+                self.verified.retain(|tx| &tx.id != txid);
+                Some(tx.clone())
+            }
+            None => None,
+        }
+    }
+
     /// Returns the set of [`UnminedTxId`]s in the mempool.
     pub fn tx_ids(&self) -> Vec<UnminedTxId> {
         self.verified.iter().map(|tx| tx.id).collect()

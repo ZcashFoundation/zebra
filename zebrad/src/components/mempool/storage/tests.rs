@@ -7,6 +7,34 @@ use zebra_chain::{
 use color_eyre::eyre::Result;
 
 #[test]
+fn mempool_storage_crud_mainnet() {
+    zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // Create an empty storage instance
+    let mut storage: Storage = Default::default();
+
+    // Get transactions from the first 10 blocks of the Zcash blockchain
+    let (_, unmined_transactions) = unmined_transactions_in_blocks(10, network);
+
+    // Get one (1) unmined transaction
+    let unmined_tx = &unmined_transactions[0];
+
+    // Insert unmined tx into the mempool.
+    let _ = storage.insert(unmined_tx.clone());
+
+    // Check that it is in the mempool, and not rejected.
+    assert!(storage.contains(&unmined_tx.id));
+
+    // Remove tx
+    let _ = storage.remove(&unmined_tx.id);
+
+    // Check that it is /not/ in the mempool.
+    assert!(!storage.contains(&unmined_tx.id));
+}
+
+#[test]
 fn mempool_storage_basic() -> Result<()> {
     zebra_test::init();
 
