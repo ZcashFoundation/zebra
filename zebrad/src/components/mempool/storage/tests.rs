@@ -25,7 +25,7 @@ fn mempool_storage_crud_mainnet() {
     let _ = storage.insert(unmined_tx.clone());
 
     // Check that it is in the mempool, and not rejected.
-    assert!(storage.clone().contains(&unmined_tx.id));
+    assert!(storage.contains(&unmined_tx.id));
 
     // Remove tx
     let _ = storage.remove(&unmined_tx.id);
