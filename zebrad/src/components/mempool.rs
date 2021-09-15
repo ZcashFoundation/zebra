@@ -82,6 +82,9 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     #[allow(dead_code)]
     sync_status: SyncStatus,
+
+    /// Indicates whether the mempool is enabled or not.
+    enabled: bool,
 }
 
 impl Mempool {
@@ -102,6 +105,7 @@ impl Mempool {
             storage: Default::default(),
             tx_downloads,
             sync_status,
+            enabled: false,
         }
     }
 
@@ -109,6 +113,12 @@ impl Mempool {
     #[cfg(test)]
     pub fn storage(&mut self) -> &mut storage::Storage {
         &mut self.storage
+    }
+
+    ///  Get the transaction downloader of the mempool for testing purposes.
+    #[cfg(test)]
+    pub fn tx_downloads(&self) -> &Pin<Box<InboundTxDownloads>> {
+        &self.tx_downloads
     }
 
     /// Check if transaction should be downloaded and/or verified.
@@ -134,6 +144,16 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let is_close_to_tip = self.sync_status.is_close_to_tip();
+        if self.enabled && !is_close_to_tip {
+            // Disable mempool
+            self.tx_downloads.cancel_all();
+            self.enabled = false;
+        } else if !self.enabled && is_close_to_tip {
+            // Enable mempool
+            self.enabled = true;
+        }
+
         // Clean up completed download tasks and add to mempool if successful
         while let Poll::Ready(Some(r)) = self.tx_downloads.as_mut().poll_next(cx) {
             if let Ok(tx) = r {
@@ -146,6 +166,9 @@ impl Service<Request> for Mempool {
 
     #[instrument(name = "mempool", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
+        if !self.enabled {
+            return async move { Err(MempoolError::Disabled.into()) }.boxed();
+        }
         match req {
             Request::TransactionIds => {
                 let res = self.storage.tx_ids();

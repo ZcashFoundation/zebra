@@ -43,4 +43,7 @@ pub enum MempoolError {
     /// The queue's capacity is [`super::downloads::MAX_INBOUND_CONCURRENCY`].
     #[error("transaction dropped because the queue is full")]
     FullQueue,
+
+    #[error("mempool is disabled since synchronization did not reach the tip")]
+    Disabled,
 }
