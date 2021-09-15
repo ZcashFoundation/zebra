@@ -80,10 +80,8 @@ pub struct Mempool {
     tx_downloads: Pin<Box<InboundTxDownloads>>,
 
     /// Allows checking if we are near the tip to enable/disable the mempool.
+    #[allow(dead_code)]
     sync_status: SyncStatus,
-
-    /// Indicates whether the mempool is enabled or not.
-    enabled: bool,
 }
 
 impl Mempool {
@@ -104,7 +102,6 @@ impl Mempool {
             storage: Default::default(),
             tx_downloads,
             sync_status,
-            enabled: false,
         }
     }
 
@@ -137,15 +134,6 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let is_close_to_tip = self.sync_status.is_close_to_tip();
-        if self.enabled && !is_close_to_tip {
-            // Disable mempool
-            self.enabled = false;
-        } else if !self.enabled && is_close_to_tip {
-            // Enable mempool
-            self.enabled = true;
-        }
-
         // Clean up completed download tasks and add to mempool if successful
         while let Poll::Ready(Some(r)) = self.tx_downloads.as_mut().poll_next(cx) {
             if let Ok(tx) = r {
