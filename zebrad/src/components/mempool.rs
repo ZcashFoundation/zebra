@@ -37,6 +37,8 @@ use self::downloads::{
     Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
+use super::sync::SyncStatus;
+
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type TxVerifier = Buffer<
@@ -76,6 +78,10 @@ pub struct Mempool {
 
     /// The transaction dowload and verify stream.
     tx_downloads: Pin<Box<InboundTxDownloads>>,
+
+    /// Allows checking if we are near the tip to enable/disable the mempool.
+    #[allow(dead_code)]
+    sync_status: SyncStatus,
 }
 
 impl Mempool {
@@ -85,6 +91,7 @@ impl Mempool {
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
+        sync_status: SyncStatus,
     ) -> Self {
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
@@ -94,6 +101,7 @@ impl Mempool {
         Mempool {
             storage: Default::default(),
             tx_downloads,
+            sync_status,
         }
     }
 
