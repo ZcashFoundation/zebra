@@ -58,42 +58,43 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         storage.insert(unmined_transaction)?;
     }
 
+    // Separate transactions into the ones expected to be in the mempool and those expected to be
+    // rejected.
+    let rejected_transaction_count = total_transactions - MEMPOOL_SIZE;
+    let expected_to_be_rejected = &unmined_transactions[..rejected_transaction_count];
+    let expected_in_mempool = &unmined_transactions[rejected_transaction_count..];
+
     // Only MEMPOOL_SIZE should land in verified
     assert_eq!(storage.verified.len(), MEMPOOL_SIZE);
 
     // The rest of the transactions will be in rejected
-    assert_eq!(storage.rejected.len(), total_transactions - MEMPOOL_SIZE);
+    assert_eq!(storage.rejected.len(), rejected_transaction_count);
 
     // Make sure the last MEMPOOL_SIZE transactions we sent are in the verified
-    for tx in unmined_transactions.iter().rev().take(MEMPOOL_SIZE) {
+    for tx in expected_in_mempool {
         assert!(storage.contains(&tx.id));
     }
 
     // Anything greater should not be in the verified
-    for tx in unmined_transactions
-        .iter()
-        .take(unmined_transactions.len() - MEMPOOL_SIZE)
-    {
+    for tx in expected_to_be_rejected {
         assert!(!storage.contains(&tx.id));
     }
 
     // Query all the ids we have for rejected, get back `total - MEMPOOL_SIZE`
     let all_ids: HashSet<UnminedTxId> = unmined_transactions.iter().map(|tx| tx.id).collect();
-    let rejected_ids: HashSet<UnminedTxId> = unmined_transactions
-        .iter()
-        .take(total_transactions - MEMPOOL_SIZE)
-        .map(|tx| tx.id)
-        .collect();
+
     // Convert response to a `HashSet` as we need a fixed order to compare.
     let rejected_response: HashSet<UnminedTxId> =
         storage.rejected_transactions(all_ids).into_iter().collect();
 
+    let rejected_ids = expected_to_be_rejected.iter().map(|tx| tx.id).collect();
+
     assert_eq!(rejected_response, rejected_ids);
 
     // Use `contains_rejected` to make sure the first id stored is now rejected
-    assert!(storage.contains_rejected(&unmined_transactions[0].id));
+    assert!(storage.contains_rejected(&expected_to_be_rejected[0].id));
     // Use `contains_rejected` to make sure the last id stored is not rejected
-    assert!(!storage.contains_rejected(&unmined_transactions[unmined_transactions.len() - 1].id));
+    assert!(!storage.contains_rejected(&expected_in_mempool[0].id));
 
     Ok(())
 }
