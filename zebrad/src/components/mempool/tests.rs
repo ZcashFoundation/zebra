@@ -64,7 +64,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .oneshot(Request::TransactionsById(
+        .call(Request::TransactionsById(
             genesis_transactions_hash_set.clone(),
         ))
         .await
