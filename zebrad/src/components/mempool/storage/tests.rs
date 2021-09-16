@@ -98,24 +98,23 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
 }
 
 pub fn unmined_transactions_in_blocks(last_block_height: u32, network: Network) -> Vec<UnminedTx> {
-    let mut transactions = vec![];
-
-    let block_iter = match network {
+    let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    for (&height, block) in block_iter {
-        if height <= last_block_height {
-            let block = block
+    // Deserialize the blocks that are selected based on the `last_block_height`.
+    let selected_blocks = blocks
+        .filter(|(&height, _)| height <= last_block_height)
+        .map(|(_, block)| {
+            block
                 .zcash_deserialize_into::<Block>()
-                .expect("block is structurally valid");
+                .expect("block test vector is structurally valid")
+        });
 
-            for transaction in block.transactions.iter() {
-                transactions.push(UnminedTx::from(transaction));
-            }
-        }
-    }
-
-    transactions
+    // Extract the transactions from the blocks and warp each one as an unmined transaction.
+    selected_blocks
+        .flat_map(|block| block.transactions)
+        .map(UnminedTx::from)
+        .collect()
 }
