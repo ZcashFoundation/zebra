@@ -4,20 +4,151 @@ use super::mempool::{unmined_transactions_in_blocks, Mempool};
 use crate::components::sync::SyncStatus;
 
 use tokio::sync::oneshot;
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tower::{builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt};
 
 use tracing::Span;
 use zebra_chain::{
+    block::Block,
     parameters::Network,
+    serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, UnminedTxId},
 };
-use zebra_consensus::Config as ConsensusConfig;
+
+use zebra_consensus::{transaction::SKIP_TRANSACTION_VERIFICATION, Config as ConsensusConfig};
 use zebra_network::{AddressBook, Request, Response};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::MockService;
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
+    let (inbound_service, added_transactions) = setup(true).await;
+
+    let added_transaction_ids: Vec<UnminedTxId> = added_transactions
+        .clone()
+        .unwrap()
+        .iter()
+        .map(|t| t.id)
+        .collect();
+
+    // Test `Request::MempoolTransactionIds`
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+    match request {
+        Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    // Test `Request::TransactionsById`
+    let hash_set = added_transaction_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+
+    let request = inbound_service
+        .oneshot(Request::TransactionsById(hash_set))
+        .await;
+
+    match request {
+        Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions.unwrap()),
+        _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
+    };
+}
+
+#[tokio::test]
+async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
+    // turn off transaction verification for this test
+    *SKIP_TRANSACTION_VERIFICATION.lock().unwrap() = true;
+
+    // get a block that has at least one non coinbase transaction
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+
+    // use the first transaction that is not coinbase
+    let tx = block.transactions[1].clone();
+
+    let (inbound_service, _) = setup(false).await;
+
+    // Test `Request::PushTransaction`
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(tx.clone().into()))
+        .await;
+
+    match request {
+        Ok(Response::Nil) => (),
+        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
+    };
+
+    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    match request {
+        Ok(Response::TransactionIds(response)) => assert_eq!(response, vec![tx.unmined_id()]),
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
+    // turn off transaction verification for this test
+    *SKIP_TRANSACTION_VERIFICATION.lock().unwrap() = true;
+
+    // get a block that has at least one non coinbase transaction
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+
+    // use the first transaction that is not coinbase
+    let mut txs = HashSet::new();
+    txs.insert(block.transactions[1].unmined_id());
+
+    let (inbound_service, _) = setup(false).await;
+
+    // Test `Request::AdvertiseTransactionIds`
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::AdvertiseTransactionIds(txs))
+        .await;
+
+    match request {
+        Ok(Response::Nil) => (),
+        _ => unreachable!("`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`"),
+    };
+
+    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![block.transactions[1].unmined_id()])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    Ok(())
+}
+
+async fn setup(
+    add_transactions: bool,
+) -> (
+    LoadShed<tower::buffer::Buffer<super::Inbound, zebra_network::Request>>,
+    Option<Vec<UnminedTx>>,
+) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
@@ -48,8 +179,10 @@ async fn mempool_requests_for_transactions() {
         chain_tip_change,
     );
 
-    let added_transactions = add_some_stuff_to_mempool(&mut mempool_service, network);
-    let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
+    let mut added_transactions = None;
+    if add_transactions {
+        added_transactions = Some(add_some_stuff_to_mempool(&mut mempool_service, network));
+    }
 
     let mempool_service = BoxService::new(mempool_service);
     let mempool = ServiceBuilder::new().buffer(1).service(mempool_service);
@@ -61,7 +194,7 @@ async fn mempool_requests_for_transactions() {
         .buffer(1)
         .service(super::Inbound::new(
             setup_rx,
-            state_service,
+            state_service.clone(),
             block_verifier.clone(),
         ));
 
@@ -69,32 +202,18 @@ async fn mempool_requests_for_transactions() {
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok());
 
-    // Test `Request::MempoolTransactionIds`
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::MempoolTransactionIds)
-        .await;
-    match request {
-        Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    // Push the genesis block to the state
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
 
-    // Test `Request::TransactionsById`
-    let hash_set = added_transaction_ids
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-
-    let request = inbound_service
-        .oneshot(Request::TransactionsById(hash_set))
-        .await;
-
-    match request {
-        Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions),
-        _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
-    };
+    (inbound_service, added_transactions)
 }
 
 fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
