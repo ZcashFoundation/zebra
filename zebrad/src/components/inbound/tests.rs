@@ -90,8 +90,11 @@ async fn mempool_requests_for_transactions() {
 }
 
 fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
-    // get the genesis block transactions from the Zcash blockchain.
-    let genesis_transactions = unmined_transactions_in_blocks(..=0, network);
+    // get the genesis block coinbase transaction from the Zcash blockchain.
+    let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, network)
+        .take(1)
+        .collect();
+
     // Insert the genesis block coinbase transaction into the mempool storage.
     mempool_service
         .storage()

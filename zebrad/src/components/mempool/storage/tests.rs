@@ -17,11 +17,10 @@ fn mempool_storage_crud_mainnet() {
     // Create an empty storage instance
     let mut storage: Storage = Default::default();
 
-    // Get transactions from the first 10 blocks of the Zcash blockchain
-    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
-
     // Get one (1) unmined transaction
-    let unmined_tx = &unmined_transactions[0];
+    let unmined_tx = unmined_transactions_in_blocks(.., network)
+        .next()
+        .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
     let _ = storage.insert(unmined_tx.clone());
@@ -51,7 +50,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let mut storage: Storage = Default::default();
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, network).collect();
     let total_transactions = unmined_transactions.len();
 
     // Insert them all to the storage
@@ -102,7 +101,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
 pub fn unmined_transactions_in_blocks(
     block_height_range: impl RangeBounds<u32>,
     network: Network,
-) -> Vec<UnminedTx> {
+) -> impl Iterator<Item = UnminedTx> {
     let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
@@ -110,7 +109,7 @@ pub fn unmined_transactions_in_blocks(
 
     // Deserialize the blocks that are selected based on the specified `block_height_range`.
     let selected_blocks = blocks
-        .filter(|(&height, _)| block_height_range.contains(&height))
+        .filter(move |(&height, _)| block_height_range.contains(&height))
         .map(|(_, block)| {
             block
                 .zcash_deserialize_into::<Block>()
@@ -121,5 +120,4 @@ pub fn unmined_transactions_in_blocks(
     selected_blocks
         .flat_map(|block| block.transactions)
         .map(UnminedTx::from)
-        .collect()
 }

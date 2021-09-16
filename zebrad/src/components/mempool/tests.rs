@@ -25,7 +25,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
             .await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network).into_iter();
+    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
     let genesis_transaction = unmined_transactions
         .next()
         .expect("Missing genesis transaction");
