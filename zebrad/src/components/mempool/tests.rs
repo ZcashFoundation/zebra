@@ -35,7 +35,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         sync_status,
     );
     // Insert the genesis block coinbase transaction into the mempool storage.
-    service.storage.insert(genesis_transactions.1[0].clone())?;
+    service.storage.insert(genesis_transactions[0].clone())?;
 
     // Test `Request::TransactionIds`
     let response = service
@@ -71,12 +71,12 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Make sure the transaction from the blockchain test vector is the same as the
     // response of `Request::TransactionsById`
-    assert_eq!(genesis_transactions.1[0], transactions[0]);
+    assert_eq!(genesis_transactions[0], transactions[0]);
 
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
     let more_transactions = unmined_transactions_in_blocks(10, network);
-    for tx in more_transactions.1.iter().skip(1) {
+    for tx in more_transactions.iter().skip(1) {
         service.storage.insert(tx.clone())?;
     }
 

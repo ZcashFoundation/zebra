@@ -16,7 +16,7 @@ fn mempool_storage_crud_mainnet() {
     let mut storage: Storage = Default::default();
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let (_, unmined_transactions) = unmined_transactions_in_blocks(10, network);
+    let unmined_transactions = unmined_transactions_in_blocks(10, network);
 
     // Get one (1) unmined transaction
     let unmined_tx = &unmined_transactions[0];
@@ -49,7 +49,8 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let mut storage: Storage = Default::default();
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let (total_transactions, unmined_transactions) = unmined_transactions_in_blocks(10, network);
+    let unmined_transactions = unmined_transactions_in_blocks(10, network);
+    let total_transactions = unmined_transactions.len();
 
     // Insert them all to the storage
     for unmined_transaction in unmined_transactions.clone() {
@@ -96,12 +97,8 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     Ok(())
 }
 
-pub fn unmined_transactions_in_blocks(
-    last_block_height: u32,
-    network: Network,
-) -> (usize, Vec<UnminedTx>) {
+pub fn unmined_transactions_in_blocks(last_block_height: u32, network: Network) -> Vec<UnminedTx> {
     let mut transactions = vec![];
-    let mut total = 0;
 
     let block_iter = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
@@ -116,10 +113,9 @@ pub fn unmined_transactions_in_blocks(
 
             for transaction in block.transactions.iter() {
                 transactions.push(UnminedTx::from(transaction));
-                total += 1;
             }
         }
     }
 
-    (total, transactions)
+    transactions
 }

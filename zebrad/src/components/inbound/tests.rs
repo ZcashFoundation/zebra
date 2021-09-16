@@ -95,8 +95,8 @@ fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) ->
     // Insert the genesis block coinbase transaction into the mempool storage.
     mempool_service
         .storage()
-        .insert(genesis_transactions.1[0].clone())
+        .insert(genesis_transactions[0].clone())
         .unwrap();
 
-    genesis_transactions.1
+    genesis_transactions
 }
