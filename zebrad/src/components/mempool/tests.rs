@@ -25,7 +25,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
             .await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let genesis_transactions = unmined_transactions_in_blocks(0, network);
+    let genesis_transactions = unmined_transactions_in_blocks(..=0, network);
     // Start the mempool service
     let mut service = Mempool::new(
         network,
@@ -75,7 +75,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
-    let more_transactions = unmined_transactions_in_blocks(10, network);
+    let more_transactions = unmined_transactions_in_blocks(..=10, network);
     for tx in more_transactions.iter().skip(1) {
         service.storage.insert(tx.clone())?;
     }

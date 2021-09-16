@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use super::*;
 
 use zebra_chain::{
@@ -16,7 +18,7 @@ fn mempool_storage_crud_mainnet() {
     let mut storage: Storage = Default::default();
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let unmined_transactions = unmined_transactions_in_blocks(10, network);
+    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
 
     // Get one (1) unmined transaction
     let unmined_tx = &unmined_transactions[0];
@@ -49,7 +51,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let mut storage: Storage = Default::default();
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let unmined_transactions = unmined_transactions_in_blocks(10, network);
+    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
     let total_transactions = unmined_transactions.len();
 
     // Insert them all to the storage
@@ -97,15 +99,18 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     Ok(())
 }
 
-pub fn unmined_transactions_in_blocks(last_block_height: u32, network: Network) -> Vec<UnminedTx> {
+pub fn unmined_transactions_in_blocks(
+    block_height_range: impl RangeBounds<u32>,
+    network: Network,
+) -> Vec<UnminedTx> {
     let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    // Deserialize the blocks that are selected based on the `last_block_height`.
+    // Deserialize the blocks that are selected based on the specified `block_height_range`.
     let selected_blocks = blocks
-        .filter(|(&height, _)| height <= last_block_height)
+        .filter(|(&height, _)| block_height_range.contains(&height))
         .map(|(_, block)| {
             block
                 .zcash_deserialize_into::<Block>()
