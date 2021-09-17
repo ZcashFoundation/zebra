@@ -3,8 +3,11 @@ use std::{collections::HashSet, net::SocketAddr, str::FromStr, sync::Arc};
 use super::mempool::{unmined_transactions_in_blocks, Mempool};
 use crate::components::sync::SyncStatus;
 
+use futures::FutureExt;
 use tokio::sync::oneshot;
-use tower::{builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt};
+use tower::{
+    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt,
+};
 
 use tracing::Span;
 use zebra_chain::{
@@ -14,14 +17,14 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use zebra_consensus::{transaction::SKIP_TRANSACTION_VERIFICATION, Config as ConsensusConfig};
+use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{AddressBook, Request, Response};
 use zebra_state::Config as StateConfig;
-use zebra_test::mock_service::MockService;
+use zebra_test::mock_service::{MockService, PanicAssertion};
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
-    let (inbound_service, added_transactions) = setup(true).await;
+    let (inbound_service, added_transactions, _) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions
         .clone()
@@ -60,9 +63,6 @@ async fn mempool_requests_for_transactions() {
 
 #[tokio::test]
 async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
-    // turn off transaction verification for this test
-    *SKIP_TRANSACTION_VERIFICATION.lock().unwrap() = true;
-
     // get a block that has at least one non coinbase transaction
     let block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -70,15 +70,19 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
 
-    let (inbound_service, _) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier) = setup(false).await;
 
     // Test `Request::PushTransaction`
     let request = inbound_service
         .clone()
-        .oneshot(Request::PushTransaction(tx.clone().into()))
-        .await;
-
-    match request {
+        .oneshot(Request::PushTransaction(tx.clone().into()));
+    // Simulate a successful transaction verification
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        let txid = responder.request().tx_id();
+        responder.respond(txid);
+    });
+    let (response, _) = futures::join!(request, verification);
+    match response {
         Ok(Response::Nil) => (),
         _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
     };
@@ -101,9 +105,6 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
 #[tokio::test]
 async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
-    // turn off transaction verification for this test
-    *SKIP_TRANSACTION_VERIFICATION.lock().unwrap() = true;
-
     // get a block that has at least one non coinbase transaction
     let block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -112,15 +113,20 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let mut txs = HashSet::new();
     txs.insert(block.transactions[1].unmined_id());
 
-    let (inbound_service, _) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier) = setup(false).await;
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
         .clone()
-        .oneshot(Request::AdvertiseTransactionIds(txs))
-        .await;
+        .oneshot(Request::AdvertiseTransactionIds(txs));
+    // Simulate a successful transaction verification
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        let txid = responder.request().tx_id();
+        responder.respond(txid);
+    });
+    let (response, _) = futures::join!(request, verification);
 
-    match request {
+    match response {
         Ok(Response::Nil) => (),
         _ => unreachable!("`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`"),
     };
@@ -148,6 +154,7 @@ async fn setup(
 ) -> (
     LoadShed<tower::buffer::Buffer<super::Inbound, zebra_network::Request>>,
     Option<Vec<UnminedTx>>,
+    MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
@@ -162,19 +169,18 @@ async fn setup(
     let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
-    let (block_verifier, transaction_verifier) =
+    let (block_verifier, _transaction_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
-    let peer_set_service = ServiceBuilder::new()
-        .buffer(1)
-        .service(BoxService::new(peer_set));
+    let mock_tx_verifier = MockService::build().for_unit_tests();
+    let buffered_tx_verifier = Buffer::new(BoxService::new(mock_tx_verifier.clone()), 10);
 
     let mut mempool_service = Mempool::new(
         network,
         peer_set_service.clone(),
         state_service.clone(),
-        transaction_verifier,
+        buffered_tx_verifier.clone(),
         sync_status,
         chain_tip_change,
     );
@@ -213,7 +219,7 @@ async fn setup(
         .await
         .unwrap();
 
-    (inbound_service, added_transactions)
+    (inbound_service, added_transactions, mock_tx_verifier)
 }
 
 fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
