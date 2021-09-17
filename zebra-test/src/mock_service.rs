@@ -126,6 +126,7 @@ pub struct MockServiceBuilder {
 ///
 /// If a response is not sent, the channel is closed and a [`BoxError`] is returned by the service
 /// to the caller that sent the request.
+#[must_use = "Tests may fail if a response is not sent back to the caller"]
 pub struct ResponseSender<Request, Response> {
     request: Request,
     response_sender: oneshot::Sender<Result<Response, BoxError>>,
@@ -153,7 +154,11 @@ where
 
         let _ = self.sender.send(proxy_item);
 
-        response_receiver.map(|result| result?).boxed()
+        response_receiver
+            .map(|response| {
+                response.expect("A response was not sent by the `MockService` for a request")
+            })
+            .boxed()
     }
 }
 
@@ -666,9 +671,7 @@ impl<Request, Response> ResponseSender<Request, Response> {
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
     ///
-    /// If this method is not called, an error is sent as a response. This happens implicitly,
-    /// because the internal [`oneshot::Sender`] is closed and the [`oneshot::Receiver`] detects
-    /// this and returns a [`BoxError`] to the caller of the service.
+    /// If this method is not called, the caller will panic.
     pub fn respond(self, response: impl ResponseResult<Response>) {
         let _ = self.response_sender.send(response.into_result());
     }
