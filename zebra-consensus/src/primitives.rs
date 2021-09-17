@@ -2,6 +2,7 @@
 
 pub mod ed25519;
 pub mod groth16;
+pub mod halo2;
 pub mod redjubjub;
 pub mod redpallas;
 
