@@ -31,7 +31,7 @@ pub enum State {
     Excess,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
     /// cache of size [`MEMPOOL_SIZE`].

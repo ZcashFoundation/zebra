@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
     parameters::Network,
@@ -82,6 +82,9 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     #[allow(dead_code)]
     sync_status: SyncStatus,
+
+    /// Access the state of the current blockchain.
+    state: State,
 }
 
 impl Mempool {
@@ -96,12 +99,14 @@ impl Mempool {
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
             Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
-            state,
+            state.clone(),
         ));
+
         Mempool {
             storage: Default::default(),
             tx_downloads,
             sync_status,
+            state,
         }
     }
 
@@ -141,6 +146,24 @@ impl Service<Request> for Mempool {
                 let _ = self.storage.insert(tx);
             }
         }
+
+        let mut storage = self.storage.clone();
+        let mut state = self.state.clone();
+
+        let _ = tokio::task::spawn(async move {
+            let tip_height = match state
+                .ready_and()
+                .await
+                .unwrap()
+                .call(zs::Request::Tip)
+                .await
+            {
+                Ok(zs::Response::Tip(Some((height, _hash)))) => height,
+                _ => panic!("A valid tip height is needed here"),
+            };
+            remove_expired_transactions(&mut storage, tip_height).await
+        });
+
         Poll::Ready(Ok(()))
     }
 
@@ -174,4 +197,23 @@ impl Service<Request> for Mempool {
             }
         }
     }
+}
+
+async fn remove_expired_transactions(
+    storage: &mut storage::Storage,
+    tip_height: zebra_chain::block::Height,
+) -> Result<(), Box<dyn std::error::Error + Send + 'static>> {
+    let ids = storage.tx_ids().iter().map(|&id| id).collect();
+    let transactions = storage.transactions(ids);
+
+    let _ = transactions
+        .iter()
+        .filter(|t| t.transaction.expiry_height().is_some())
+        .map(|t| {
+            if tip_height > t.transaction.expiry_height().unwrap() {
+                storage.remove(&t.id);
+            }
+        });
+
+    Ok(())
 }
