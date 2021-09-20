@@ -188,7 +188,7 @@ impl Service<Request> for Mempool {
     }
 }
 
-async fn remove_expired_transactions(
+fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
 ) {
