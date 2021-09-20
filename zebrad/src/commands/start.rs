@@ -83,7 +83,7 @@ impl StartCmd {
             ));
 
         let (peer_set, address_book) =
-            zebra_network::init(config.network.clone(), inbound, latest_chain_tip).await;
+            zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing syncer");
         let (syncer, sync_status) =
@@ -96,6 +96,7 @@ impl StartCmd {
             state,
             tx_verifier,
             sync_status.clone(),
+            latest_chain_tip,
         ));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 

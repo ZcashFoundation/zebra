@@ -11,6 +11,7 @@ use futures::{future::FutureExt, stream::Stream};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
+    chain_tip::ChainTip,
     parameters::Network,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -82,6 +83,9 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     #[allow(dead_code)]
     sync_status: SyncStatus,
+
+    /// Allow efficient access to the best tip of the blockchain.
+    latest_chain_tip: zs::LatestChainTip,
 }
 
 impl Mempool {
@@ -92,16 +96,19 @@ impl Mempool {
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
+        latest_chain_tip: zs::LatestChainTip,
     ) -> Self {
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
             Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
-            state,
+            state.clone(),
         ));
+
         Mempool {
             storage: Default::default(),
             tx_downloads,
             sync_status,
+            latest_chain_tip,
         }
     }
 
@@ -141,6 +148,11 @@ impl Service<Request> for Mempool {
                 let _ = self.storage.insert(tx);
             }
         }
+
+        if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+            let _ = remove_expired_transactions(&mut self.storage, tip_height);
+        }
+
         Poll::Ready(Ok(()))
     }
 
@@ -174,4 +186,21 @@ impl Service<Request> for Mempool {
             }
         }
     }
+}
+
+fn remove_expired_transactions(
+    storage: &mut storage::Storage,
+    tip_height: zebra_chain::block::Height,
+) {
+    let ids = storage.tx_ids().iter().copied().collect();
+    let transactions = storage.transactions(ids);
+
+    let _ = transactions
+        .iter()
+        .filter(|t| t.transaction.expiry_height().is_some())
+        .map(|t| {
+            if tip_height > t.transaction.expiry_height().unwrap() {
+                storage.remove(&t.id);
+            }
+        });
 }
