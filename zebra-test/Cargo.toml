@@ -24,7 +24,7 @@ owo-colors = "2.0.0"
 pretty_assertions = "0.7.2"
 spandoc = "0.2.0"
 thiserror = "1.0.29"
-tracing = "0.1.27"
+tracing = "0.1.28"
 tracing-subscriber = "0.2.22"
 tracing-error = "0.1.2"
 
