@@ -149,11 +149,8 @@ impl Service<Request> for Mempool {
             }
         }
 
-        let mut storage = self.storage.clone();
         if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-            let _ = tokio::task::spawn(async move {
-                remove_expired_transactions(&mut storage, tip_height).await
-            });
+            let _ = remove_expired_transactions(&mut self.storage, tip_height);
         }
 
         Poll::Ready(Ok(()))
@@ -194,7 +191,7 @@ impl Service<Request> for Mempool {
 async fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
-) -> Result<(), Box<dyn std::error::Error + Send + 'static>> {
+) {
     let ids = storage.tx_ids().iter().copied().collect();
     let transactions = storage.transactions(ids);
 
@@ -206,6 +203,4 @@ async fn remove_expired_transactions(
                 storage.remove(&t.id);
             }
         });
-
-    Ok(())
 }
