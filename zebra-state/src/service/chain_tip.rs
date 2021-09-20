@@ -322,8 +322,22 @@ impl ChainTipChange {
     }
 
     /// Returns:
-    /// - `Some(TipAction)` if there has been a change since the last time the method was called.
+    /// - `Some(`[`TipAction`]`)` if there has been a change since the last time the method was called.
     /// - [`None`] if there has been no change.
+    ///
+    /// The returned action describes how the tip has changed
+    /// since the last call to this method.
+    ///
+    /// If there have been no changes since the last time this method was called,
+    /// it waits for the next tip change before returning.
+    ///
+    /// If there have been multiple changes since the last time this method was called,
+    /// they are combined into a single [`TipAction::Reset`].
+    ///
+    /// ## Note
+    ///
+    /// If a lot of blocks are committed at the same time,
+    /// the change will skip some blocks, and return a [`Reset`].
     pub fn get_tip_change(&mut self) -> Option<TipAction> {
         match self.tip_change().now_or_never().transpose() {
             Ok(tip_action) => tip_action,
