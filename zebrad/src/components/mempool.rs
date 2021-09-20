@@ -195,7 +195,7 @@ async fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
 ) -> Result<(), Box<dyn std::error::Error + Send + 'static>> {
-    let ids = storage.tx_ids().iter().map(|&id| id).collect();
+    let ids = storage.tx_ids().iter().copied().collect();
     let transactions = storage.transactions(ids);
 
     let _ = transactions
