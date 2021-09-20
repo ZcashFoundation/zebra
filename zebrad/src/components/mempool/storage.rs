@@ -24,8 +24,8 @@ pub enum State {
     /// An otherwise valid mempool transaction was mined into a block, therefore
     /// no longer belongs in the mempool.
     Confirmed(block::Hash),
-    /// Rejected because it conflicted with another transaction already in the mempool.
-    Conflict,
+    /// Rejected because it has a spend conflict with another transaction already in the mempool.
+    SpendConflict,
     /// Stayed in mempool for too long without being mined.
     // TODO(2021-09-09): Implement ZIP-203: Validate Transaction Expiry Height.
     // TODO(2021-09-09): https://github.com/ZcashFoundation/zebra/issues/2387
@@ -63,7 +63,7 @@ impl Storage {
                 State::Confirmed(block_hash) => MempoolError::InBlock(*block_hash),
                 State::Excess => MempoolError::Excess,
                 State::LowFee => MempoolError::LowFee,
-                State::Conflict => MempoolError::Conflict,
+                State::SpendConflict => MempoolError::SpendConflict,
             });
         }
 
@@ -81,7 +81,7 @@ impl Storage {
         //
         // TODO: Consider replacing the transaction in the mempool if the fee is higher (#2781).
         if self.check_spend_conflicts(&tx) {
-            self.rejected.insert(tx.id, State::Conflict);
+            self.rejected.insert(tx.id, State::SpendConflict);
             return Err(MempoolError::Rejected);
         }
 
@@ -163,19 +163,20 @@ impl Storage {
         self.rejected.clear();
     }
 
-    /// Checks if the `tx` transaction conflicts with another transaction in the mempool.
+    /// Checks if the `tx` transaction has spend conflicts with another transaction in the mempool.
     ///
-    /// Two transactions conflict if they spent the same UTXO or if they reveal the same nullifier.
+    /// Two transactions have a spend conflict if they spent the same UTXO or if they reveal the
+    /// same nullifier.
     fn check_spend_conflicts(&self, tx: &UnminedTx) -> bool {
-        self.has_conflicts(tx, Transaction::spent_outpoints)
-            || self.has_conflicts(tx, Transaction::sprout_nullifiers)
-            || self.has_conflicts(tx, Transaction::sapling_nullifiers)
-            || self.has_conflicts(tx, Transaction::orchard_nullifiers)
+        self.has_spend_conflicts(tx, Transaction::spent_outpoints)
+            || self.has_spend_conflicts(tx, Transaction::sprout_nullifiers)
+            || self.has_spend_conflicts(tx, Transaction::sapling_nullifiers)
+            || self.has_spend_conflicts(tx, Transaction::orchard_nullifiers)
     }
 
-    /// Checks if the `tx` transaction has any conflicts with the transactions in the mempool for
-    /// the provided output type obtained through the `extractor`.
-    fn has_conflicts<'slf, 'tx, Extractor, Outputs>(
+    /// Checks if the `tx` transaction has any spend conflicts with the transactions in the mempool
+    /// for the provided output type obtained through the `extractor`.
+    fn has_spend_conflicts<'slf, 'tx, Extractor, Outputs>(
         &'slf self,
         tx: &'tx UnminedTx,
         extractor: Extractor,

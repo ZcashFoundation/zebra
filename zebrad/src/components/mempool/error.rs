@@ -44,7 +44,10 @@ pub enum MempoolError {
     #[error("transaction dropped because the queue is full")]
     FullQueue,
 
-    /// The transaction conflicts with another transaction already in the mempool.
-    #[error("transaction rejected because it conflicts with another transaction in the mempool")]
-    Conflict,
+    /// The transaction has a spend conflict with another transaction already in the mempool.
+    #[error(
+        "transaction rejected because another transaction in the mempool has already spent some of \
+        its inputs"
+    )]
+    SpendConflict,
 }
