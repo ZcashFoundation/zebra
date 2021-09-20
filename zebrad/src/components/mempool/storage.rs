@@ -174,7 +174,7 @@ impl Storage {
     }
 
     /// Checks if the `tx` transaction has any conflicts with the transactions in the mempool for
-    /// the provided output type obtrained through the `extractor`.
+    /// the provided output type obtained through the `extractor`.
     fn has_conflicts<'slf, 'tx, Extractor, Outputs>(
         &'slf self,
         tx: &'tx UnminedTx,
