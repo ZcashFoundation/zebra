@@ -18,7 +18,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let (peer_set, _) = mock_peer_set();
     let (sync_status, _recent_syncs) = SyncStatus::new();
 
-    let (state, _, _) = zebra_state::init(state_config, network);
+    let (state, latest_chain_tip, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
     let (_chain_verifier, tx_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
@@ -33,6 +33,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         state_service.clone(),
         tx_verifier,
         sync_status,
+        latest_chain_tip,
     );
     // Insert the genesis block coinbase transaction into the mempool storage.
     service.storage.insert(genesis_transactions.1[0].clone())?;

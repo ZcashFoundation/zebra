@@ -8,9 +8,10 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
+    chain_tip::ChainTip,
     parameters::Network,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -83,8 +84,8 @@ pub struct Mempool {
     #[allow(dead_code)]
     sync_status: SyncStatus,
 
-    /// Access the state of the current blockchain.
-    state: State,
+    /// Allow efficient access to the best tip of the blockchain.
+    latest_chain_tip: zs::LatestChainTip,
 }
 
 impl Mempool {
@@ -95,6 +96,7 @@ impl Mempool {
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
+        latest_chain_tip: zs::LatestChainTip,
     ) -> Self {
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
@@ -106,7 +108,7 @@ impl Mempool {
             storage: Default::default(),
             tx_downloads,
             sync_status,
-            state,
+            latest_chain_tip,
         }
     }
 
@@ -148,21 +150,11 @@ impl Service<Request> for Mempool {
         }
 
         let mut storage = self.storage.clone();
-        let mut state = self.state.clone();
-
-        let _ = tokio::task::spawn(async move {
-            let tip_height = match state
-                .ready_and()
-                .await
-                .unwrap()
-                .call(zs::Request::Tip)
-                .await
-            {
-                Ok(zs::Response::Tip(Some((height, _hash)))) => height,
-                _ => panic!("A valid tip height is needed here"),
-            };
-            remove_expired_transactions(&mut storage, tip_height).await
-        });
+        if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+            let _ = tokio::task::spawn(async move {
+                remove_expired_transactions(&mut storage, tip_height).await
+            });
+        }
 
         Poll::Ready(Ok(()))
     }
