@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use futures::FutureExt;
 use tokio::sync::watch;
 
 use zebra_chain::{
@@ -310,7 +311,7 @@ impl ChainTipChange {
     ///
     /// If a lot of blocks are committed at the same time,
     /// the change will skip some blocks, and return a [`Reset`].
-    pub async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
+    async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
         let block = self.tip_block_change().await?;
 
         let action = self.action(block.clone());
@@ -318,6 +319,16 @@ impl ChainTipChange {
         self.last_change_hash = Some(block.hash);
 
         Ok(action)
+    }
+
+    /// Returns:
+    /// - `Some(TipAction)` if there has been a change since the last time the method was called.
+    /// - [`None`] if there has been no change.
+    pub fn get_tip_change(&mut self) -> Option<TipAction> {
+        match self.tip_change().now_or_never().transpose() {
+            Ok(tip_action) => tip_action,
+            Err(_) => None,
+        }
     }
 
     /// Return an action based on `block` and the last change we returned.
