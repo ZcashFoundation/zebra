@@ -3173,7 +3173,7 @@ dependencies = [
  "serde_json",
  "strip-ansi-escapes",
  "tracing",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
 ]
 
 [[package]]
@@ -3862,7 +3862,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
 ]
 
 [[package]]
@@ -3873,7 +3873,7 @@ checksum = "bd520fe41c667b437952383f3a1ec14f1fa45d653f719a77eedd6e6a02d8fa54"
 dependencies = [
  "lazy_static",
  "tracing",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
 ]
 
 [[package]]
@@ -3893,7 +3893,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fe1f0ed2b7a5fcb6da2bc9e783587d9a0c8b9535e50224afe04e543eae8a2d6"
 dependencies = [
  "tracing-core",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
 ]
 
 [[package]]
@@ -3936,9 +3936,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.22"
+version = "0.2.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62af966210b88ad5776ee3ba12d5f35b8d6a2b2a12168f3080cf02b814d7376b"
+checksum = "fdd0568dbfe3baf7048b7908d2b32bca0d81cd56bec6d2a8f894b01d74f86be3"
 dependencies = [
  "ansi_term 0.12.1",
  "chrono",
@@ -4578,7 +4578,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
  "wagyu-zcash-parameters",
  "zebra-chain",
  "zebra-script",
@@ -4689,7 +4689,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
 ]
 
 [[package]]
@@ -4701,7 +4701,7 @@ dependencies = [
  "serde_json",
  "structopt",
  "tracing-error",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
  "zebra-chain",
  "zebra-consensus",
  "zebra-state",
@@ -4741,7 +4741,7 @@ dependencies = [
  "tracing-flame",
  "tracing-futures",
  "tracing-journald",
- "tracing-subscriber 0.2.22",
+ "tracing-subscriber 0.2.24",
  "vergen",
  "zebra-chain",
  "zebra-consensus",
