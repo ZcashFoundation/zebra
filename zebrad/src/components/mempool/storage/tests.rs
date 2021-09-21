@@ -102,7 +102,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
 pub fn unmined_transactions_in_blocks(
     block_height_range: impl RangeBounds<u32>,
     network: Network,
-) -> impl Iterator<Item = UnminedTx> {
+) -> impl DoubleEndedIterator<Item = UnminedTx> {
     let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
