@@ -113,7 +113,7 @@ impl Mempool {
         }
     }
 
-    ///  Get the storage field of the mempool for testing purposes.
+    /// Get the storage field of the mempool for testing purposes.
     #[cfg(test)]
     pub fn storage(&mut self) -> &mut storage::Storage {
         &mut self.storage
