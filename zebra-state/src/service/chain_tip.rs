@@ -311,7 +311,7 @@ impl ChainTipChange {
     ///
     /// If a lot of blocks are committed at the same time,
     /// the change will skip some blocks, and return a [`Reset`].
-    async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
+    pub async fn wait_for_tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
         let block = self.tip_block_change().await?;
 
         let action = self.action(block.clone());
@@ -338,8 +338,10 @@ impl ChainTipChange {
     ///
     /// If a lot of blocks are committed at the same time,
     /// the change will skip some blocks, and return a [`Reset`].
-    pub fn get_tip_change(&mut self) -> Option<TipAction> {
-        match self.tip_change().now_or_never().transpose() {
+    ///
+    /// See [`wait_for_tip_change`] for details.
+    pub fn last_tip_change(&mut self) -> Result<Option<TipAction>, watch::error::RecvError> {
+        match tokio::task::unconstrained(self.tip_change()).now_or_never().transpose() {
             Ok(tip_action) => tip_action,
             Err(_) => None,
         }
