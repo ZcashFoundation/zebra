@@ -296,9 +296,12 @@ impl Transaction {
         match self {
             Transaction::V1 { .. } => None,
             Transaction::V2 { .. } => None,
-            Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
-            Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
-            Transaction::V5 { expiry_height, .. } => Some(*expiry_height),
+            Transaction::V3 { expiry_height, .. }
+            | Transaction::V4 { expiry_height, .. }
+            | Transaction::V5 { expiry_height, .. } => match expiry_height {
+                block::Height(0) => None,
+                block::Height(expiry_height) => Some(block::Height(*expiry_height)),
+            },
         }
     }
 
