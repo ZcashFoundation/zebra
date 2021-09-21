@@ -16,7 +16,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
@@ -313,6 +313,27 @@ where
         metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
 
         Ok(())
+    }
+
+    /// Cancel download/verification tasks of transactions with the
+    /// given transaction hash (see [`UnminedTxId::mined_id`]).
+    pub fn cancel(&mut self, mined_id: &transaction::Hash) {
+        // TODO: this requires going through the entire list of running tasks.
+        // If this becomes an issue, another HashMap may be needed.
+        // TODO: this can be simplified with [`HashMap::drain_filter`] which
+        // is currently nightly-only experimental API.
+        let removed_txids: Vec<UnminedTxId> = self
+            .cancel_handles
+            .keys()
+            .filter(|txid| txid.mined_id() == *mined_id)
+            .cloned()
+            .collect();
+
+        for txid in removed_txids {
+            if let Some(handle) = self.cancel_handles.remove(&txid) {
+                let _ = handle.send(());
+            }
+        }
     }
 
     /// Check if transaction is already in the state.

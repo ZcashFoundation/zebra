@@ -17,7 +17,7 @@ use zebra_chain::{
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
 use zebra_state as zs;
-use zs::ChainTipChange;
+use zebra_state::{ChainTipChange, TipAction};
 
 pub use crate::BoxError;
 
@@ -142,6 +142,22 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if let Some(tip_action) = self.chain_tip_change.tip_change().now_or_never() {
+            match tip_action? {
+                // Clear the mempool if there has been a chain tip reset.
+                TipAction::Reset { height: _, hash: _ } => {
+                    // TODO: https://github.com/ZcashFoundation/zebra/pull/2777/
+                }
+                // Cancel downloads/verifications of transactions with the same
+                // IDs as recently mined transactions.
+                TipAction::Grow { block } => {
+                    for txid in block.transaction_hashes.iter() {
+                        self.tx_downloads.cancel(txid);
+                    }
+                }
+            }
+        }
+
         // Clean up completed download tasks and add to mempool if successful
         while let Poll::Ready(Some(r)) = self.tx_downloads.as_mut().poll_next(cx) {
             if let Ok(tx) = r {
