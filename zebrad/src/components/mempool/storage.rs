@@ -22,7 +22,8 @@ pub enum State {
     /// no longer belongs in the mempool.
     Confirmed(block::Hash),
     /// Stayed in mempool for too long without being mined.
-    // TODO(2021-08-20): set expiration at 2 weeks? This is what Bitcoin does.
+    // TODO(2021-09-09): Implement ZIP-203: Validate Transaction Expiry Height.
+    // TODO(2021-09-09): https://github.com/ZcashFoundation/zebra/issues/2387
     Expired,
     /// Transaction fee is too low for the current mempool state.
     LowFee,
