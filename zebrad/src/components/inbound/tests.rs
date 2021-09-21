@@ -24,6 +24,8 @@ async fn mempool_requests_for_transactions() {
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (_state_service, _latest_chain_tip, chain_tip_change) =
+        zebra_state::init(state_config.clone(), network);
 
     let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -38,6 +40,7 @@ async fn mempool_requests_for_transactions() {
         state_service.clone(),
         transaction_verifier,
         sync_status,
+        chain_tip_change,
     );
 
     let added_transactions = add_some_stuff_to_mempool(&mut mempool_service, network);
