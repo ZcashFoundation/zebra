@@ -159,7 +159,6 @@ async fn setup(
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
-    let peer_set = MockService::build().for_unit_tests();
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, _recent_syncs) = SyncStatus::new();
@@ -173,16 +172,15 @@ async fn setup(
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
-    let peer_set_service = ServiceBuilder::new()
-        .buffer(1)
-        .service(BoxService::new(peer_set));
+    let peer_set = MockService::build().for_unit_tests();
+    let buffered_peer_set = Buffer::new(BoxService::new(peer_set.clone()), 10);
 
     let mock_tx_verifier = MockService::build().for_unit_tests();
     let buffered_tx_verifier = Buffer::new(BoxService::new(mock_tx_verifier.clone()), 10);
 
     let mut mempool_service = Mempool::new(
         network,
-        peer_set_service.clone(),
+        buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
         sync_status,
@@ -208,7 +206,7 @@ async fn setup(
             block_verifier.clone(),
         ));
 
-    let r = setup_tx.send((peer_set_service, address_book, mempool));
+    let r = setup_tx.send((buffered_peer_set, address_book, mempool));
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok());
 
