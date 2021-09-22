@@ -1,7 +1,7 @@
 use std::{collections::HashSet, net::SocketAddr, str::FromStr, sync::Arc};
 
 use super::mempool::{unmined_transactions_in_blocks, Mempool};
-use crate::components::{sync::SyncStatus, tests::mock_peer_set};
+use crate::components::sync::SyncStatus;
 
 use tokio::sync::oneshot;
 use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
@@ -14,13 +14,14 @@ use zebra_chain::{
 use zebra_consensus::Config as ConsensusConfig;
 use zebra_network::{AddressBook, Request, Response};
 use zebra_state::Config as StateConfig;
+use zebra_test::mock_service::MockService;
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
-    let (peer_set, _) = mock_peer_set();
+    let peer_set = MockService::build().for_unit_tests();
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, _recent_syncs) = SyncStatus::new();
@@ -34,9 +35,13 @@ async fn mempool_requests_for_transactions() {
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
+    let peer_set_service = ServiceBuilder::new()
+        .buffer(1)
+        .service(BoxService::new(peer_set));
+
     let mut mempool_service = Mempool::new(
         network,
-        peer_set.clone(),
+        peer_set_service.clone(),
         state_service.clone(),
         transaction_verifier,
         sync_status,
@@ -60,7 +65,7 @@ async fn mempool_requests_for_transactions() {
             block_verifier.clone(),
         ));
 
-    let r = setup_tx.send((peer_set.clone(), address_book, mempool));
+    let r = setup_tx.send((peer_set_service, address_book, mempool));
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok());
 
