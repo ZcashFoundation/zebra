@@ -24,7 +24,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
-    let (inbound_service, added_transactions, _) = setup(true).await;
+    let (inbound_service, added_transactions, _, _) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions
         .clone()
@@ -70,7 +70,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
 
-    let (inbound_service, _, mut tx_verifier) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, _) = setup(false).await;
 
     // Test `Request::PushTransaction`
     let request = inbound_service
@@ -113,7 +113,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let mut txs = HashSet::new();
     txs.insert(block.transactions[1].unmined_id());
 
-    let (inbound_service, _, mut tx_verifier) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, _) = setup(false).await;
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
@@ -155,6 +155,7 @@ async fn setup(
     LoadShed<tower::buffer::Buffer<super::Inbound, zebra_network::Request>>,
     Option<Vec<UnminedTx>>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
+    MockService<Request, Response, PanicAssertion>,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
@@ -221,7 +222,12 @@ async fn setup(
         .await
         .unwrap();
 
-    (inbound_service, added_transactions, mock_tx_verifier)
+    (
+        inbound_service,
+        added_transactions,
+        mock_tx_verifier,
+        peer_set,
+    )
 }
 
 fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
