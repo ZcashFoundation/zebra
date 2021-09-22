@@ -255,6 +255,10 @@ impl Service<Request> for Mempool {
         Poll::Ready(Ok(()))
     }
 
+    /// Call the mempool service.
+    ///
+    /// Errors indicate that the peer has done something wrong or unexpected,
+    /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "mempool", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         match &mut self.state {
