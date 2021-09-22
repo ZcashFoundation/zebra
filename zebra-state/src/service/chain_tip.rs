@@ -327,22 +327,19 @@ impl ChainTipChange {
     /// See [`wait_for_tip_change`] for details.
     pub fn last_tip_change(&mut self) -> Option<TipAction> {
         // Obtain the tip block.
-        match self.receiver.borrow().as_ref() {
-            Some(block) => {
-                // Ignore an unchanged tip.
-                if Some(block.hash) == self.last_change_hash {
-                    return None;
-                }
-
-                let action = self.action(block.clone());
-
-                self.last_change_hash = Some(block.hash);
-
-                Some(action)
-            }
-
-            None => None,
+        let block_guard = self.receiver.borrow();
+        let block = block_guard.as_ref()?;
+        
+        // Ignore an unchanged tip.
+        if Some(block.hash) == self.last_change_hash {
+            return None;
         }
+
+        let action = self.action(block.clone());
+
+        self.last_change_hash = Some(block.hash);
+
+        Some(action)
     }
 
     /// Return an action based on `block` and the last change we returned.
