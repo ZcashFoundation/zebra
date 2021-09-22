@@ -39,6 +39,8 @@ use self::downloads::{
     Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
+#[cfg(test)]
+use super::sync::RecentSyncLengths;
 use super::sync::SyncStatus;
 
 type OutboundService = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -181,6 +183,26 @@ impl Mempool {
             State::Disabled => panic!("mempool must be enabled"),
             State::Enabled { tx_downloads, .. } => tx_downloads,
         }
+    }
+
+    /// Enable the mempool by pretending the synchronization is close to the tip.
+    #[cfg(test)]
+    pub async fn enable(&mut self, recent_syncs: &mut RecentSyncLengths) {
+        use tower::ServiceExt;
+        // Pretend we're close to tip
+        SyncStatus::sync_close_to_tip(recent_syncs);
+        // Wait for the mempool to make it enable itself
+        let _ = self.ready_and().await;
+    }
+
+    /// Disable the mempool by pretending the synchronization is far from the tip.
+    #[cfg(test)]
+    pub async fn disable(&mut self, recent_syncs: &mut RecentSyncLengths) {
+        use tower::ServiceExt;
+        // Pretend we're far from the tip
+        SyncStatus::sync_far_from_tip(recent_syncs);
+        // Wait for the mempool to make it enable itself
+        let _ = self.ready_and().await;
     }
 
     /// Check if transaction should be downloaded and/or verified.

@@ -35,10 +35,8 @@ async fn mempool_service_basic() -> Result<(), Report> {
         chain_tip_change,
     );
 
-    // Pretend we're close to tip to enable the mempool
-    SyncStatus::sync_close_to_tip(&mut recent_syncs);
-    // Wait for the mempool to make it enable itself
-    let _ = service.ready_and().await;
+    // Enable the mempool
+    let _ = service.enable(&mut recent_syncs).await;
 
     // Insert the genesis block coinbase transaction into the mempool storage.
     service
@@ -157,10 +155,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     // Test if mempool is disabled (it should start disabled)
     assert!(!service.enabled());
 
-    // Pretend we're close to tip to enable the mempool
-    SyncStatus::sync_close_to_tip(&mut recent_syncs);
-    // Wait for the mempool to make it enable itself
-    let _ = service.ready_and().await;
+    // Enable the mempool
+    let _ = service.enable(&mut recent_syncs).await;
 
     assert!(service.enabled());
 
@@ -202,10 +198,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     assert!(queued_responses[0].is_ok());
     assert_eq!(service.tx_downloads().in_flight(), 1);
 
-    // Pretend we're far from the tip to disable the mempool
-    SyncStatus::sync_far_from_tip(&mut recent_syncs);
-    // Wait for the mempool to make it disable itself
-    let _ = service.ready_and().await;
+    // Disable the mempool
+    let _ = service.disable(&mut recent_syncs).await;
 
     // Test if mempool is disabled again
     assert!(!service.enabled());

@@ -47,10 +47,8 @@ async fn mempool_requests_for_transactions() {
         chain_tip_change,
     );
 
-    // Pretend we're close to tip to enable the mempool
-    SyncStatus::sync_close_to_tip(&mut recent_syncs);
-    // Wait for the mempool to make it enable itself
-    let _ = mempool_service.ready_and().await;
+    // Enable the mempool
+    let _ = mempool_service.enable(&mut recent_syncs).await;
 
     let added_transactions = add_some_stuff_to_mempool(&mut mempool_service, network);
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
