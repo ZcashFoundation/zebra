@@ -1,6 +1,6 @@
 use std::{convert::TryInto, env, sync::Arc};
 
-use futures::{stream::FuturesUnordered, FutureExt};
+use futures::stream::FuturesUnordered;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
@@ -300,14 +300,7 @@ proptest! {
         let (mut state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
-        prop_assert_eq!(
-            chain_tip_change
-                .tip_change()
-                .now_or_never()
-                .transpose()
-                .expect("watch sender is not dropped"),
-            None
-        );
+        prop_assert_eq!(chain_tip_change.last_tip_change(), None);
 
         for block in finalized_blocks {
             let expected_block = block.clone();
@@ -323,14 +316,7 @@ proptest! {
             state_service.queue_and_commit_finalized(block);
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
-            prop_assert_eq!(
-                chain_tip_change
-                    .tip_change()
-                    .now_or_never()
-                    .transpose()
-                    .expect("watch sender is not dropped"),
-                Some(expected_action)
-            );
+            prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
         }
 
         for block in non_finalized_blocks {
@@ -346,14 +332,7 @@ proptest! {
             state_service.queue_and_commit_non_finalized(block);
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
-            prop_assert_eq!(
-                chain_tip_change
-                    .tip_change()
-                    .now_or_never()
-                    .transpose()
-                    .expect("watch sender is not dropped"),
-                Some(expected_action)
-            );
+            prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
         }
     }
 
