@@ -166,6 +166,8 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         ),
     };
 
+    peer_set.expect_no_requests().await;
+
     Ok(())
 }
 
