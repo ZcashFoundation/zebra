@@ -411,7 +411,8 @@ impl StateService {
     ///   * adding the `stop` hash to the list, if it is in the best chain, or
     ///   * adding `max_len` hashes to the list.
     ///
-    /// Returns an empty list if the state is empty.
+    /// Returns an empty list if the state is empty,
+    /// or the `intersection` is the best chain tip.
     pub fn collect_best_chain_hashes(
         &self,
         intersection: Option<block::Hash>,
@@ -424,6 +425,11 @@ impl StateService {
         let chain_tip_height = if let Some((height, _)) = self.best_tip() {
             height
         } else {
+            tracing::info!(
+                response_len = ?0,
+                "responding to peer GetBlocks or GetHeaders with empty state",
+            );
+
             return Vec::new();
         };
 
@@ -489,11 +495,13 @@ impl StateService {
                 .unwrap_or(true),
             "the list must not contain the intersection hash"
         );
-        assert!(
-            stop.map(|hash| !res[..(res.len() - 1)].contains(&hash))
-                .unwrap_or(true),
-            "if the stop hash is in the list, it must be the final hash"
-        );
+        if !res.is_empty() {
+            assert!(
+                stop.map(|hash| !res[..(res.len() - 1)].contains(&hash))
+                    .unwrap_or(true),
+                "if the stop hash is in the list, it must be the final hash"
+            );
+        }
 
         res
     }
