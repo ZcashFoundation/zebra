@@ -329,7 +329,7 @@ impl ChainTipChange {
         // Obtain the tip block.
         let block_guard = self.receiver.borrow();
         let block = block_guard.as_ref()?;
-        
+
         // Ignore an unchanged tip.
         if Some(block.hash) == self.last_change_hash {
             return None;

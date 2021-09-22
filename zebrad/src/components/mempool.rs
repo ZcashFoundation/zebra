@@ -142,7 +142,6 @@ impl Service<Request> for Mempool {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Clear the mempool if there has been a chain tip reset.
         if let Some(TipAction::Reset { .. }) = self.chain_tip_change.last_tip_change() {
-        {
             self.storage.clear();
         }
 
