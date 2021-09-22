@@ -43,4 +43,11 @@ pub enum MempoolError {
     /// The queue's capacity is [`super::downloads::MAX_INBOUND_CONCURRENCY`].
     #[error("transaction dropped because the queue is full")]
     FullQueue,
+
+    /// The transaction has a spend conflict with another transaction already in the mempool.
+    #[error(
+        "transaction rejected because another transaction in the mempool has already spent some of \
+        its inputs"
+    )]
+    SpendConflict,
 }
