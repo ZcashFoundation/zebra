@@ -24,7 +24,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
-    let (inbound_service, added_transactions, _, _) = setup(true).await;
+    let (inbound_service, added_transactions, _, mut peer_set) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions
         .clone()
@@ -59,6 +59,8 @@ async fn mempool_requests_for_transactions() {
         Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions.unwrap()),
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
     };
+
+    peer_set.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -70,7 +72,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
 
-    let (inbound_service, _, mut tx_verifier, _) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, mut peer_set) = setup(false).await;
 
     // Test `Request::PushTransaction`
     let request = inbound_service
@@ -99,6 +101,8 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
         ),
     };
+
+    peer_set.expect_no_requests().await;
 
     Ok(())
 }
