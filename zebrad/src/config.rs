@@ -134,6 +134,7 @@ pub struct MetricsSection {
 }
 
 // we like our default configs to be explicit
+#[allow(unknown_lints)]
 #[allow(clippy::derivable_impls)]
 impl Default for MetricsSection {
     fn default() -> Self {
