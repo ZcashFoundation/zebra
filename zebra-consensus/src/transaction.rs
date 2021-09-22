@@ -5,11 +5,9 @@ use std::{
     future::Future,
     iter::FromIterator,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
 };
-
-use lazy_static::lazy_static;
 
 use futures::{
     stream::{FuturesUnordered, StreamExt},
@@ -35,11 +33,6 @@ use crate::{error::TransactionError, primitives, script, BoxError};
 mod check;
 #[cfg(test)]
 mod tests;
-
-lazy_static! {
-    /// For testing purposes this will turn off the verifier if this is `true`.
-    pub static ref SKIP_TRANSACTION_VERIFICATION: Mutex<bool> = Mutex::new(false);
-}
 
 /// Asynchronous transaction verification.
 ///
@@ -286,11 +279,6 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
-
-        // For some tests we want to skip this verification
-        if *SKIP_TRANSACTION_VERIFICATION.lock().unwrap() {
-            return Ok(AsyncChecks::new());
-        }
 
         Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
 
