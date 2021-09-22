@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use futures::FutureExt;
 use tokio::sync::watch;
 
 use zebra_chain::{
@@ -323,27 +322,26 @@ impl ChainTipChange {
 
     /// Returns:
     /// - `Some(`[`TipAction`]`)` if there has been a change since the last time the method was called.
-    /// - [`None`] if there has been no change.
-    ///
-    /// The returned action describes how the tip has changed
-    /// since the last call to this method.
-    ///
-    /// If there have been no changes since the last time this method was called,
-    /// it waits for the next tip change before returning.
-    ///
-    /// If there have been multiple changes since the last time this method was called,
-    /// they are combined into a single [`TipAction::Reset`].
-    ///
-    /// ## Note
-    ///
-    /// If a lot of blocks are committed at the same time,
-    /// the change will skip some blocks, and return a [`Reset`].
+    /// - `None` if there has been no change.
     ///
     /// See [`wait_for_tip_change`] for details.
-    pub fn last_tip_change(&mut self) -> Result<Option<TipAction>, watch::error::RecvError> {
-        match tokio::task::unconstrained(self.tip_change()).now_or_never().transpose() {
-            Ok(tip_action) => tip_action,
-            Err(_) => None,
+    pub fn last_tip_change(&mut self) -> Option<TipAction> {
+        // Obtain the tip block.
+        match self.receiver.borrow().as_ref() {
+            Some(block) => {
+                // Ignore an unchanged tip.
+                if Some(block.hash) == self.last_change_hash {
+                    return None;
+                }
+
+                let action = self.action(block.clone());
+
+                self.last_change_hash = Some(block.hash);
+
+                Some(action)
+            }
+
+            None => None,
         }
     }
 
