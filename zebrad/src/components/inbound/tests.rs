@@ -117,18 +117,30 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let test_transaction_id = test_transaction.unmined_id();
     let txs = HashSet::from_iter([test_transaction_id]);
 
-    let (inbound_service, _, mut tx_verifier, _) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, mut peer_set) = setup(false).await;
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
         .clone()
         .oneshot(Request::AdvertiseTransactionIds(txs.clone()));
+    // Ensure the mocked peer set responds
+    let peer_set_responder =
+        peer_set
+            .expect_request(Request::TransactionsById(txs))
+            .map(|responder| {
+                let unmined_transaction = UnminedTx {
+                    id: test_transaction_id,
+                    transaction: test_transaction,
+                };
+
+                responder.respond(Response::Transactions(vec![unmined_transaction]))
+            });
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         let txid = responder.request().tx_id();
         responder.respond(txid);
     });
-    let (response, _) = futures::join!(request, verification);
+    let (response, _, _) = futures::join!(request, peer_set_responder, verification);
 
     match response {
         Ok(Response::Nil) => (),
