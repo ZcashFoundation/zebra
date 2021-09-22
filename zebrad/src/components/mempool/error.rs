@@ -44,6 +44,6 @@ pub enum MempoolError {
     #[error("transaction dropped because the queue is full")]
     FullQueue,
 
-    #[error("mempool is disabled since synchronization did not reach the tip")]
+    #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
 }

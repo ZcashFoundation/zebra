@@ -25,10 +25,9 @@ async fn mempool_requests_for_transactions() {
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (_state_service, _latest_chain_tip, chain_tip_change) =
+    let (state, _latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
-    let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
     let (block_verifier, transaction_verifier) =
@@ -48,6 +47,11 @@ async fn mempool_requests_for_transactions() {
         chain_tip_change,
     );
 
+    // Pretend we're close to tip to enable the mempool
+    SyncStatus::sync_close_to_tip(&mut recent_syncs);
+    // Wait for the mempool to make it enable itself
+    let _ = mempool_service.ready_and().await;
+
     let added_transactions = add_some_stuff_to_mempool(&mut mempool_service, network);
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
@@ -65,12 +69,9 @@ async fn mempool_requests_for_transactions() {
             block_verifier.clone(),
         ));
 
-    let r = setup_tx.send((peer_set_service, address_book, mempool));
+    let r = setup_tx.send((peer_set_service, address_book, mempool.clone()));
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok());
-
-    // Pretend we're close to tip to enable the mempool
-    SyncStatus::sync_close_to_tip(&mut recent_syncs);
 
     // Test `Request::MempoolTransactionIds`
     let request = inbound_service

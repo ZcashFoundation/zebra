@@ -315,21 +315,6 @@ where
         Ok(())
     }
 
-    /// Cancel all running tasks and reset the downloader state.
-    // Note: copied from zebrad/src/components/sync/downloads.rs
-    pub fn cancel_all(&mut self) {
-        // Replace the pending task list with an empty one and drop it.
-        let _ = std::mem::take(&mut self.pending);
-        // Signal cancellation to all running tasks.
-        // Since we already dropped the JoinHandles above, they should
-        // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
-            let _ = cancel.send(());
-        }
-        assert!(self.pending.is_empty());
-        assert!(self.cancel_handles.is_empty());
-    }
-
     /// Get the number of currently in-flight download tasks.
     // Note: copied from zebrad/src/components/sync/downloads.rs
     #[allow(dead_code)]
