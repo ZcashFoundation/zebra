@@ -125,6 +125,7 @@ impl ZebradApp {
 ///
 /// By default no configuration is loaded, and the framework state is
 /// initialized to a default, empty state (no components, threads, etc).
+#[allow(clippy::derivable_impls)]
 impl Default for ZebradApp {
     fn default() -> Self {
         Self {
