@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc};
 
 use super::mempool::{unmined_transactions_in_blocks, Mempool};
 use crate::components::sync::SyncStatus;
@@ -106,12 +106,16 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 #[tokio::test]
 async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     // get a block that has at least one non coinbase transaction
-    let block: Arc<Block> =
-        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
 
     // use the first transaction that is not coinbase
-    let mut txs = HashSet::new();
-    txs.insert(block.transactions[1].unmined_id());
+    let test_transaction = block
+        .transactions
+        .into_iter()
+        .find(|tx| !tx.has_any_coinbase_inputs())
+        .expect("at least one non-coinbase transaction");
+    let test_transaction_id = test_transaction.unmined_id();
+    let txs = HashSet::from_iter([test_transaction_id]);
 
     let (inbound_service, _, mut tx_verifier, _) = setup(false).await;
 
@@ -139,7 +143,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
 
     match request {
         Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![block.transactions[1].unmined_id()])
+            assert_eq!(response, vec![test_transaction_id])
         }
         _ => unreachable!(
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
