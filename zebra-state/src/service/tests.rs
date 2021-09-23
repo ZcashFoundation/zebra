@@ -139,45 +139,57 @@ async fn test_populated_state_responds_correctly(
             }
         }
 
-        let block_hashes = block_hashes.clone();
-        let (known_hashes, next_hashes) = block_hashes.split_at(ind);
+        let mut append_locator_transcript = |split_ind| {
+            let block_hashes = block_hashes.clone();
+            let (known_hashes, next_hashes) = block_hashes.split_at(split_ind);
 
-        let block_headers = block_headers.clone();
-        let (_, next_headers) = block_headers.split_at(ind);
+            let block_headers = block_headers.clone();
+            let (_, next_headers) = block_headers.split_at(split_ind);
 
-        // no stop
-        transcript.push((
-            Request::FindBlockHashes {
-                known_blocks: known_hashes.iter().rev().cloned().collect(),
-                stop: None,
-            },
-            Ok(Response::BlockHashes(next_hashes.to_vec())),
-        ));
+            // no stop
+            transcript.push((
+                Request::FindBlockHashes {
+                    known_blocks: known_hashes.iter().rev().cloned().collect(),
+                    stop: None,
+                },
+                Ok(Response::BlockHashes(next_hashes.to_vec())),
+            ));
 
-        transcript.push((
-            Request::FindBlockHeaders {
-                known_blocks: known_hashes.iter().rev().cloned().collect(),
-                stop: None,
-            },
-            Ok(Response::BlockHeaders(next_headers.to_vec())),
-        ));
+            transcript.push((
+                Request::FindBlockHeaders {
+                    known_blocks: known_hashes.iter().rev().cloned().collect(),
+                    stop: None,
+                },
+                Ok(Response::BlockHeaders(next_headers.to_vec())),
+            ));
 
-        // stop at next block
-        transcript.push((
-            Request::FindBlockHashes {
-                known_blocks: known_hashes.iter().rev().cloned().collect(),
-                stop: Some(next_hashes[0]),
-            },
-            Ok(Response::BlockHashes(vec![next_hashes[0]])),
-        ));
+            // stop at the next block
+            transcript.push((
+                Request::FindBlockHashes {
+                    known_blocks: known_hashes.iter().rev().cloned().collect(),
+                    stop: next_hashes.get(0).cloned(),
+                },
+                Ok(Response::BlockHashes(
+                    next_hashes.get(0).iter().cloned().cloned().collect(),
+                )),
+            ));
 
-        transcript.push((
-            Request::FindBlockHeaders {
-                known_blocks: known_hashes.iter().rev().cloned().collect(),
-                stop: Some(next_hashes[0]),
-            },
-            Ok(Response::BlockHeaders(vec![next_headers[0]])),
-        ));
+            transcript.push((
+                Request::FindBlockHeaders {
+                    known_blocks: known_hashes.iter().rev().cloned().collect(),
+                    stop: next_hashes.get(0).cloned(),
+                },
+                Ok(Response::BlockHeaders(
+                    next_headers.get(0).iter().cloned().cloned().collect(),
+                )),
+            ));
+        };
+
+        // split before the current block, and locate the current block
+        append_locator_transcript(ind);
+
+        // split after the current block, and locate the next block
+        append_locator_transcript(ind + 1);
 
         let transcript = Transcript::from(transcript);
         transcript.check(&mut state).await?;
