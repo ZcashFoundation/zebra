@@ -140,4 +140,10 @@ impl Storage {
             .filter(|tx| self.rejected.contains_key(tx))
             .collect()
     }
+
+    /// Clears the whole mempool storage.
+    pub fn clear(&mut self) {
+        self.verified.clear();
+        self.rejected.clear();
+    }
 }

@@ -17,7 +17,7 @@ use zebra_chain::{
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
 use zebra_state as zs;
-use zs::ChainTipChange;
+use zebra_state::{ChainTipChange, TipAction};
 
 pub use crate::BoxError;
 
@@ -142,6 +142,11 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Clear the mempool if there has been a chain tip reset.
+        if let Some(TipAction::Reset { .. }) = self.chain_tip_change.last_tip_change() {
+            self.storage.clear();
+        }
+
         // Clean up completed download tasks and add to mempool if successful
         while let Poll::Ready(Some(r)) = self.tx_downloads.as_mut().poll_next(cx) {
             if let Ok(tx) = r {
