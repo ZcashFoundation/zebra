@@ -150,7 +150,7 @@ impl Service<Request> for Mempool {
         }
 
         if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-            let _ = remove_expired_transactions(&mut self.storage, tip_height);
+            remove_expired_transactions(&mut self.storage, tip_height);
         }
 
         Poll::Ready(Ok(()))
