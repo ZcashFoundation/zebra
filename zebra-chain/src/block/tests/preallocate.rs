@@ -76,7 +76,7 @@ proptest! {
         let max_allocation: usize = CountedHeader::max_allocation().try_into().unwrap();
         let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
         for _ in 0..(CountedHeader::max_allocation()+1) {
-            smallest_disallowed_vec.push(header.clone());
+            smallest_disallowed_vec.push(header);
         }
         let smallest_disallowed_serialized = smallest_disallowed_vec.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
         // Check that our smallest_disallowed_vec is only one item larger than the limit
