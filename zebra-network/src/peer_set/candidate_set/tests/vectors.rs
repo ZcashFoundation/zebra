@@ -1,7 +1,5 @@
 use std::{
-    collections::VecDeque,
     convert::TryInto,
-    iter,
     net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::Arc,
@@ -9,16 +7,14 @@ use std::{
 };
 
 use chrono::{DateTime, Duration, Utc};
-use futures::future;
 use tokio::{
     runtime::Runtime,
-    sync::watch,
     time::{self, Instant},
 };
-use tower::Service;
 use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
+use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::super::{validate_addrs, CandidateSet};
 use crate::{
@@ -146,9 +142,11 @@ fn candidate_set_updates_are_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
-    let (peer_service, call_count) = mock_peer_service();
-    let mut candidate_set =
-        CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+    let mut peer_service = MockService::build().for_unit_tests();
+    let mut candidate_set = CandidateSet::new(
+        Arc::new(std::sync::Mutex::new(address_book)),
+        peer_service.clone(),
+    );
 
     runtime.block_on(async move {
         time::pause();
@@ -156,6 +154,7 @@ fn candidate_set_updates_are_rate_limited() {
         let time_limit = Instant::now()
             + INTERVALS_TO_RUN * MIN_PEER_GET_ADDR_INTERVAL
             + StdDuration::from_secs(1);
+        let mut next_allowed_request_time = Instant::now();
 
         while Instant::now() <= time_limit {
             candidate_set
@@ -163,13 +162,16 @@ fn candidate_set_updates_are_rate_limited() {
                 .await
                 .expect("Call to CandidateSet::update should not fail");
 
+            if Instant::now() >= next_allowed_request_time {
+                verify_fanned_out_requests(&mut peer_service).await;
+
+                next_allowed_request_time = Instant::now() + MIN_PEER_GET_ADDR_INTERVAL;
+            } else {
+                peer_service.expect_no_requests().await;
+            }
+
             time::advance(MIN_PEER_GET_ADDR_INTERVAL / POLL_FREQUENCY_FACTOR).await;
         }
-
-        assert_eq!(
-            *call_count.borrow(),
-            INTERVALS_TO_RUN as usize * GET_ADDR_FANOUT
-        );
     });
 }
 
@@ -181,9 +183,11 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
-    let (peer_service, call_count) = mock_peer_service();
-    let mut candidate_set =
-        CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+    let mut peer_service = MockService::build().for_unit_tests();
+    let mut candidate_set = CandidateSet::new(
+        Arc::new(std::sync::Mutex::new(address_book)),
+        peer_service.clone(),
+    );
 
     runtime.block_on(async move {
         time::pause();
@@ -194,7 +198,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
             .await
             .expect("Call to CandidateSet::update should not fail");
 
-        assert_eq!(*call_count.borrow(), GET_ADDR_FANOUT);
+        verify_fanned_out_requests(&mut peer_service).await;
 
         // The following two calls to `update` should be skipped
         candidate_set
@@ -207,7 +211,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
             .await
             .expect("Call to CandidateSet::update should not fail");
 
-        assert_eq!(*call_count.borrow(), GET_ADDR_FANOUT);
+        peer_service.expect_no_requests().await;
 
         // After waiting for at least the minimum interval the call to `update` should succeed
         time::advance(MIN_PEER_GET_ADDR_INTERVAL).await;
@@ -216,7 +220,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
             .await
             .expect("Call to CandidateSet::update should not fail");
 
-        assert_eq!(*call_count.borrow(), 2 * GET_ADDR_FANOUT);
+        verify_fanned_out_requests(&mut peer_service).await;
     });
 }
 
@@ -243,49 +247,21 @@ fn mock_gossiped_peers(last_seen_times: impl IntoIterator<Item = DateTime<Utc>>)
         .collect()
 }
 
-/// Create a mock `PeerSet` service that checks that requests to it are rate limited.
+/// Verify that a batch of fanned out requests are sent by the candidate set.
 ///
-/// The function also returns a call count watcher, that can be used for checking how many times the
-/// service was called.
-fn mock_peer_service<E>() -> (
-    impl Service<
-            Request,
-            Response = Response,
-            Future = future::Ready<Result<Response, E>>,
-            Error = E,
-        > + 'static,
-    watch::Receiver<usize>,
+/// # Panics
+///
+/// This will panic (causing the test to fail) if more or less requests are received than the
+/// expected [`GET_ADDR_FANOUT`] amount.
+async fn verify_fanned_out_requests(
+    peer_service: &mut MockService<Request, Response, PanicAssertion>,
 ) {
-    let rate_limit_interval = MIN_PEER_GET_ADDR_INTERVAL;
+    for _ in 0..GET_ADDR_FANOUT {
+        peer_service
+            .expect_request_that(|request| matches!(request, Request::Peers))
+            .await
+            .respond(Response::Peers(vec![]));
+    }
 
-    let mut call_counter = 0;
-    let (call_count_sender, call_count_receiver) = watch::channel(call_counter);
-
-    let mut peer_request_tracker: VecDeque<_> =
-        iter::repeat(Instant::now()).take(GET_ADDR_FANOUT).collect();
-
-    let service = tower::service_fn(move |request| {
-        match request {
-            Request::Peers => {
-                // Get time from queue that the request is authorized to be sent
-                let authorized_request_time = peer_request_tracker
-                    .pop_front()
-                    .expect("peer_request_tracker should always have GET_ADDR_FANOUT elements");
-                // Check that the request was rate limited
-                assert!(Instant::now() >= authorized_request_time);
-                // Push a new authorization, updated by the rate limit interval
-                peer_request_tracker.push_back(Instant::now() + rate_limit_interval);
-
-                // Increment count of calls
-                call_counter += 1;
-                let _ = call_count_sender.send(call_counter);
-
-                // Return an empty list of peer addresses
-                future::ok(Response::Peers(vec![]))
-            }
-            _ => unreachable!("Received an unexpected internal message: {:?}", request),
-        }
-    });
-
-    (service, call_count_receiver)
+    peer_service.expect_no_requests().await;
 }

@@ -391,7 +391,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
             inputs: transaction.inputs().to_vec(),
             outputs: vec![transaction.outputs()[0].clone()],
             lock_time: transaction.lock_time(),
-            expiry_height: transaction.expiry_height().unwrap(),
+            expiry_height: Height(0),
             joinsplit_data: None,
         })
         .unwrap();
