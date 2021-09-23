@@ -260,7 +260,13 @@ impl Service<zn::Request> for Inbound {
                     let mut peers = peers.sanitized();
                     const MAX_ADDR: usize = 1000; // bitcoin protocol constant
                     peers.truncate(MAX_ADDR);
-                    async { Ok(zn::Response::Peers(peers)) }.boxed()
+
+                    if !peers.is_empty() {
+                        async { Ok(zn::Response::Peers(peers)) }.boxed()
+                    } else {
+                        info!("ignoring `Peers` request from remote peer because our address book is empty");
+                        async { Ok(zn::Response::Nil) }.boxed()
+                    }
                 } else {
                     info!("ignoring `Peers` request from remote peer during network setup");
                     async { Ok(zn::Response::Nil) }.boxed()
@@ -292,19 +298,30 @@ impl Service<zn::Request> for Inbound {
                         })
                     })
                     .try_collect::<Vec<_>>()
-                    .map_ok(zn::Response::Blocks)
+                    .map_ok(|blocks| {
+                        if blocks.is_empty() {
+                            zn::Response::Nil
+                        } else {
+                            zn::Response::Blocks(blocks)
+                        }
+                    })
                     .boxed()
             }
             zn::Request::TransactionsById(transactions) => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     let request = mempool::Request::TransactionsById(transactions);
                     mempool.clone().oneshot(request).map_ok(|resp| match resp {
+                        mempool::Response::Transactions(transactions) if transactions.is_empty() => zn::Response::Nil,
                         mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
                         _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
                     })
                     .boxed()
                 } else {
-                    async { Ok(zn::Response::Transactions(Default::default())) }.boxed()
+                    info!(
+                        transaction_hash_count = ?transactions.len(),
+                        "ignoring `TransactionsById` request from remote peer during network setup"
+                    );
+                    async { Ok(zn::Response::Nil) }.boxed()
                 }
             }
             zn::Request::FindBlocks { known_blocks, stop } => {
@@ -327,35 +344,31 @@ impl Service<zn::Request> for Inbound {
             }
             zn::Request::PushTransaction(transaction) => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
-                    mempool
+                    // The response just indicates if processing was queued or not; ignore it
+                    let _ = mempool
                         .clone()
-                        .oneshot(mempool::Request::Queue(vec![transaction.into()]))
-                        // The response just indicates if processing was queued or not; ignore it
-                        .map_ok(|_resp| zn::Response::Nil)
-                        .boxed()
+                        .oneshot(mempool::Request::Queue(vec![transaction.into()]));
                 } else {
                     info!(
                         ?transaction.id,
                         "ignoring `PushTransaction` request from remote peer during network setup"
                     );
-                    async { Ok(zn::Response::TransactionIds(Default::default())) }.boxed()
                 }
+                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseTransactionIds(transactions) => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     let transactions = transactions.into_iter().map(Into::into).collect();
-                    mempool
+                    // The response just indicates if processing was queued or not; ignore it
+                    let _ = mempool
                         .clone()
-                        .oneshot(mempool::Request::Queue(transactions))
-                        // The response just indicates if processing was queued or not; ignore it
-                        .map_ok(|_resp| zn::Response::Nil)
-                        .boxed()
+                        .oneshot(mempool::Request::Queue(transactions));
                 } else {
                     info!(
                         "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
                     );
-                    async { Ok(zn::Response::TransactionIds(Default::default())) }.boxed()
                 }
+                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
                 if let Setup::Initialized {
@@ -374,12 +387,16 @@ impl Service<zn::Request> for Inbound {
             zn::Request::MempoolTransactionIds => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
+                        mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
                         mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids),
                         _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                     })
                     .boxed()
                 } else {
-                    async { Ok(zn::Response::TransactionIds(Default::default())) }.boxed()
+                    info!(
+                        "ignoring `MempoolTransactionIds` request from remote peer during network setup"
+                    );
+                    async { Ok(zn::Response::Nil) }.boxed()
                 }
             }
             zn::Request::Ping(_) => {
