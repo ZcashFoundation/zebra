@@ -361,7 +361,6 @@ impl Service<zn::Request> for Inbound {
             zn::Request::AdvertiseTransactionIds(transactions) => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     let transactions = transactions.into_iter().map(Into::into).collect();
-
                     mempool
                         .clone()
                         .oneshot(mempool::Request::Queue(transactions))
