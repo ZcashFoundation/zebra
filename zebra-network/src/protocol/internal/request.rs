@@ -29,7 +29,7 @@ use proptest_derive::Arbitrary;
 /// while waiting for a response, the peer connection resets its state and makes
 /// a best-effort attempt to ignore any messages responsive to the cancelled
 /// request, subject to limitations in the underlying Zcash protocol.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Request {
     /// Requests additional peers from the server.
