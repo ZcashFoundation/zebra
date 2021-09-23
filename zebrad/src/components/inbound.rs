@@ -344,31 +344,36 @@ impl Service<zn::Request> for Inbound {
             }
             zn::Request::PushTransaction(transaction) => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
-                    // The response just indicates if processing was queued or not; ignore it
-                    let _ = mempool
+                    mempool
                         .clone()
-                        .oneshot(mempool::Request::Queue(vec![transaction.into()]));
+                        .oneshot(mempool::Request::Queue(vec![transaction.into()]))
+                        // The response just indicates if processing was queued or not; ignore it
+                        .map_ok(|_resp| zn::Response::Nil)
+                        .boxed()
                 } else {
                     info!(
                         ?transaction.id,
                         "ignoring `PushTransaction` request from remote peer during network setup"
                     );
+                    async { Ok(zn::Response::Nil) }.boxed()
                 }
-                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseTransactionIds(transactions) => {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     let transactions = transactions.into_iter().map(Into::into).collect();
-                    // The response just indicates if processing was queued or not; ignore it
-                    let _ = mempool
+
+                    mempool
                         .clone()
-                        .oneshot(mempool::Request::Queue(transactions));
+                        .oneshot(mempool::Request::Queue(transactions))
+                        // The response just indicates if processing was queued or not; ignore it
+                        .map_ok(|_resp| zn::Response::Nil)
+                        .boxed()
                 } else {
                     info!(
                         "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
                     );
+                    async { Ok(zn::Response::Nil) }.boxed()
                 }
-                async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
                 if let Setup::Initialized {
