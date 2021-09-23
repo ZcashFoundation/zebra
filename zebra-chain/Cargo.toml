@@ -33,7 +33,7 @@ group = "0.10"
 halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
 hex = "0.4"
 incrementalmerkletree = "0.1.0"
-jubjub = "0.7.0"
+jubjub = "0.8.0"
 lazy_static = "1.4.0"
 rand_core = "0.6"
 ripemd160 = "0.9"
