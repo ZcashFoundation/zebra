@@ -160,12 +160,12 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     );
 
     // Test if mempool is disabled (it should start disabled)
-    assert!(!service.enabled());
+    assert!(!service.is_enabled());
 
     // Enable the mempool
     let _ = service.enable(&mut recent_syncs).await;
 
-    assert!(service.enabled());
+    assert!(service.is_enabled());
 
     // Insert the genesis block coinbase transaction into the mempool storage.
     service.storage().insert(genesis_transaction.clone())?;
@@ -205,7 +205,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let _ = service.disable(&mut recent_syncs).await;
 
     // Test if mempool is disabled again
-    assert!(!service.enabled());
+    assert!(!service.is_enabled());
 
     // Test if the mempool returns no transactions when disabled
     let response = service

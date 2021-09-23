@@ -43,14 +43,13 @@ use self::downloads::{
 use super::sync::RecentSyncLengths;
 use super::sync::SyncStatus;
 
-type OutboundService = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
-type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
-type TxVerifierService = Buffer<
+type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
+type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type TxVerifier = Buffer<
     BoxService<transaction::Request, transaction::Response, TransactionError>,
     transaction::Request,
 >;
-type InboundTxDownloads =
-    TxDownloads<Timeout<OutboundService>, Timeout<TxVerifierService>, StateService>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -73,7 +72,7 @@ pub enum Response {
 ///
 /// Indicates wether it is enabled or disabled and, if enabled, contains
 /// the necessary data to run it.
-enum State {
+enum ActiveState {
     /// The Mempool is disabled.
     Disabled,
     /// The Mempool is enabled.
@@ -95,7 +94,7 @@ enum State {
 /// confirmed when it has been included in a block ('mined').
 pub struct Mempool {
     /// The state of the mempool.
-    state: State,
+    active_state: ActiveState,
 
     /// Allows checking if we are near the tip to enable/disable the mempool.
     #[allow(dead_code)]
@@ -107,81 +106,86 @@ pub struct Mempool {
 
     /// Handle to the outbound service.
     /// Used to construct the transaction downloader.
-    outbound_service: OutboundService,
+    outbound: Outbound,
 
     /// Handle to the state service.
     /// Used to construct the transaction downloader.
-    state_service: StateService,
+    state: State,
 
     /// Handle to the transaction verifier service.
     /// Used to construct the transaction downloader.
-    tx_verifier_service: TxVerifierService,
+    tx_verifier: TxVerifier,
 }
 
 impl Mempool {
     #[allow(dead_code)]
     pub(crate) fn new(
         _network: Network,
-        outbound_service: OutboundService,
-        state_service: StateService,
-        tx_verifier_service: TxVerifierService,
+        outbound: Outbound,
+        state: State,
+        tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         chain_tip_change: ChainTipChange,
     ) -> Self {
         Mempool {
-            state: State::Disabled,
+            active_state: ActiveState::Disabled,
             sync_status,
             chain_tip_change,
-            outbound_service,
-            state_service,
-            tx_verifier_service,
+            outbound,
+            state,
+            tx_verifier,
         }
     }
 
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     fn update_state(&mut self) {
-        // Update enabled / disabled state
         let is_close_to_tip = self.sync_status.is_close_to_tip();
-        if is_close_to_tip && matches!(self.state, State::Disabled) {
+        if self.is_enabled() == is_close_to_tip {
+            // the active state is up to date
+            return;
+        }
+
+        // Update enabled / disabled state
+        if is_close_to_tip {
             let tx_downloads = Box::pin(TxDownloads::new(
-                Timeout::new(self.outbound_service.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-                Timeout::new(self.tx_verifier_service.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                self.state_service.clone(),
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.state.clone(),
             ));
-            self.state = State::Enabled {
+            self.active_state = ActiveState::Enabled {
                 storage: Default::default(),
                 tx_downloads,
             };
-        } else if !is_close_to_tip && matches!(self.state, State::Enabled { .. }) {
-            self.state = State::Disabled
+        } else {
+            self.active_state = ActiveState::Disabled
         }
     }
 
     /// Return wether the mempool is enabled or not.
     #[allow(dead_code)]
-    pub fn enabled(&self) -> bool {
-        match self.state {
-            State::Disabled => false,
-            State::Enabled { .. } => true,
+    pub fn is_enabled(&self) -> bool {
+        match self.active_state {
+            ActiveState::Disabled => false,
+            ActiveState::Enabled { .. } => true,
         }
     }
 
     /// Get the storage field of the mempool for testing purposes.
     #[cfg(test)]
     pub fn storage(&mut self) -> &mut storage::Storage {
-        match &mut self.state {
-            State::Disabled => panic!("mempool must be enabled"),
-            State::Enabled { storage, .. } => storage,
+        match &mut self.active_state {
+            ActiveState::Disabled => panic!("mempool must be enabled"),
+            ActiveState::Enabled { storage, .. } => storage,
         }
     }
 
     /// Get the transaction downloader of the mempool for testing purposes.
     #[cfg(test)]
     pub fn tx_downloads(&self) -> &Pin<Box<InboundTxDownloads>> {
-        match &self.state {
-            State::Disabled => panic!("mempool must be enabled"),
-            State::Enabled { tx_downloads, .. } => tx_downloads,
+        match &self.active_state {
+            ActiveState::Disabled => panic!("mempool must be enabled"),
+            ActiveState::Enabled { tx_downloads, .. } => tx_downloads,
         }
     }
 
@@ -192,7 +196,7 @@ impl Mempool {
         // Pretend we're close to tip
         SyncStatus::sync_close_to_tip(recent_syncs);
         // Wait for the mempool to make it enable itself
-        let _ = self.ready_and().await;
+        let _ = self.oneshot(Request::TransactionIds).await;
     }
 
     /// Disable the mempool by pretending the synchronization is far from the tip.
@@ -202,7 +206,7 @@ impl Mempool {
         // Pretend we're far from the tip
         SyncStatus::sync_far_from_tip(recent_syncs);
         // Wait for the mempool to make it enable itself
-        let _ = self.ready_and().await;
+        let _ = self.oneshot(Request::TransactionIds).await;
     }
 
     /// Check if transaction should be downloaded and/or verified.
@@ -233,8 +237,8 @@ impl Service<Request> for Mempool {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.update_state();
 
-        match &mut self.state {
-            State::Enabled {
+        match &mut self.active_state {
+            ActiveState::Enabled {
                 storage,
                 tx_downloads,
             } => {
@@ -251,7 +255,7 @@ impl Service<Request> for Mempool {
                     }
                 }
             }
-            State::Disabled => {
+            ActiveState::Disabled => {
                 // When the mempool is disabled we still return that the service is ready.
                 // Otherwise, callers could block waiting for the mempool to be enabled,
                 // which may not be the desired behaviour.
@@ -266,8 +270,8 @@ impl Service<Request> for Mempool {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "mempool", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
-        match &mut self.state {
-            State::Enabled {
+        match &mut self.active_state {
+            ActiveState::Enabled {
                 storage,
                 tx_downloads,
             } => match req {
@@ -296,7 +300,7 @@ impl Service<Request> for Mempool {
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
             },
-            State::Disabled => {
+            ActiveState::Disabled => {
                 // We can't return an error since that will cause a disconnection
                 // by the peer connection handler. Therefore, return successful
                 // empty responses.
