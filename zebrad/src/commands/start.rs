@@ -96,7 +96,7 @@ impl StartCmd {
             state,
             tx_verifier,
             sync_status.clone(),
-            chain_tip_change,
+            chain_tip_change.clone(),
         ));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 

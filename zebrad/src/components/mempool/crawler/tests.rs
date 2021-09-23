@@ -1,26 +1,20 @@
 use std::time::Duration;
 
 use proptest::prelude::*;
-use tokio::time::{self, timeout};
+use tokio::time;
 
-use zebra_network::Request;
-
-use crate::components::tests::mock_peer_set;
+use zebra_network::{Request, Response};
+use zebra_test::mock_service::MockService;
 
 use super::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY};
 
 /// The number of iterations to crawl while testing.
 ///
 /// Note that this affects the total run time of the [`crawler_requests_for_transaction_ids`] test.
-/// See more information in [`MAX_REQUEST_DELAY`].
-const CRAWL_ITERATIONS: usize = 4;
-
-/// The maximum time to wait for a request to arrive before considering it won't arrive.
-///
-/// Note that this affects the total run time of the [`crawler_requests_for_transaction_ids`] test.
 /// There are [`CRAWL_ITERATIONS`] requests that are expected to not be sent, so the test runs for
-/// at least `MAX_REQUEST_DELAY * CRAWL_ITERATIONS`.
-const MAX_REQUEST_DELAY: Duration = Duration::from_millis(25);
+/// at least `CRAWL_ITERATIONS` times the timeout for receiving a request (see more information in
+/// [`MockServiceBuilder::with_max_request_delay`]).
+const CRAWL_ITERATIONS: usize = 4;
 
 /// The amount of time to advance beyond the expected instant that the crawler wakes up.
 const ERROR_MARGIN: Duration = Duration::from_millis(100);
@@ -38,30 +32,31 @@ proptest! {
         sync_lengths.push(0);
 
         runtime.block_on(async move {
-            let (peer_set, mut requests) = mock_peer_set();
+            let mut peer_set = MockService::build().for_prop_tests();
             let (sync_status, mut recent_sync_lengths) = SyncStatus::new();
 
             time::pause();
 
-            Crawler::spawn(peer_set, sync_status.clone());
+            Crawler::spawn(peer_set.clone(), sync_status.clone());
 
             for sync_length in sync_lengths {
                 let mempool_is_enabled = sync_status.is_close_to_tip();
 
                 for _ in 0..CRAWL_ITERATIONS {
                     for _ in 0..FANOUT {
-                        let request = timeout(MAX_REQUEST_DELAY, requests.recv()).await;
-
                         if mempool_is_enabled {
-                            prop_assert!(matches!(request, Ok(Some(Request::MempoolTransactionIds))));
+                            peer_set
+                                .expect_request_that(|request| {
+                                    matches!(request, Request::MempoolTransactionIds)
+                                })
+                                .await?
+                                .respond(Response::TransactionIds(vec![]));
                         } else {
-                            prop_assert!(request.is_err());
+                            peer_set.expect_no_requests().await?;
                         }
                     }
 
-                    let extra_request = timeout(MAX_REQUEST_DELAY, requests.recv()).await;
-
-                    prop_assert!(extra_request.is_err());
+                    peer_set.expect_no_requests().await?;
 
                     time::sleep(RATE_LIMIT_DELAY + ERROR_MARGIN).await;
                 }
@@ -72,7 +67,7 @@ proptest! {
                 recent_sync_lengths.push_extend_tips_length(sync_length);
             }
 
-            Ok(())
+            Ok::<(), TestCaseError>(())
         })?;
     }
 }

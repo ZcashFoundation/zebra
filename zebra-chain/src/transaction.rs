@@ -296,9 +296,15 @@ impl Transaction {
         match self {
             Transaction::V1 { .. } => None,
             Transaction::V2 { .. } => None,
-            Transaction::V3 { expiry_height, .. } => Some(*expiry_height),
-            Transaction::V4 { expiry_height, .. } => Some(*expiry_height),
-            Transaction::V5 { expiry_height, .. } => Some(*expiry_height),
+            Transaction::V3 { expiry_height, .. }
+            | Transaction::V4 { expiry_height, .. }
+            | Transaction::V5 { expiry_height, .. } => match expiry_height {
+                // Consensus rule:
+                // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
+                // https://zips.z.cash/zip-0203#specification
+                block::Height(0) => None,
+                block::Height(expiry_height) => Some(block::Height(*expiry_height)),
+            },
         }
     }
 

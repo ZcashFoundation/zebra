@@ -84,6 +84,8 @@ pub struct Mempool {
     #[allow(dead_code)]
     sync_status: SyncStatus,
 
+    /// Allows the detection of chain tip resets.
+    #[allow(dead_code)]
     chain_tip_change: ChainTipChange,
 }
 
