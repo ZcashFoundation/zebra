@@ -14,6 +14,9 @@ pub struct Config {
     pub checkpoint_sync: bool,
 }
 
+// we like our default configs to be explicit
+#[allow(unknown_lints)]
+#[allow(clippy::derivable_impls)]
 impl Default for Config {
     fn default() -> Self {
         Self {

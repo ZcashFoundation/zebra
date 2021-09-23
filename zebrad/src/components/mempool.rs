@@ -17,6 +17,7 @@ use zebra_chain::{
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
 use zebra_state as zs;
+use zs::ChainTipChange;
 
 pub use crate::BoxError;
 
@@ -82,6 +83,10 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     #[allow(dead_code)]
     sync_status: SyncStatus,
+
+    /// Allows the detection of chain tip resets.
+    #[allow(dead_code)]
+    chain_tip_change: ChainTipChange,
 }
 
 impl Mempool {
@@ -92,20 +97,23 @@ impl Mempool {
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
+        chain_tip_change: ChainTipChange,
     ) -> Self {
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(outbound, TRANSACTION_DOWNLOAD_TIMEOUT),
             Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
             state,
         ));
+
         Mempool {
             storage: Default::default(),
             tx_downloads,
             sync_status,
+            chain_tip_change,
         }
     }
 
-    ///  Get the storage field of the mempool for testing purposes.
+    /// Get the storage field of the mempool for testing purposes.
     #[cfg(test)]
     pub fn storage(&mut self) -> &mut storage::Storage {
         &mut self.storage
