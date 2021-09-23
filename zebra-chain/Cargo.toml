@@ -27,7 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.2"
 fpe = "0.4"
 futures = "0.3"
-group = "0.10"
+group = "0.11"
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
 # Note: if updating this, also update the workspace Cargo.toml to match.
 halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
