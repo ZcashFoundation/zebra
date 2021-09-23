@@ -1,4 +1,5 @@
 use std::{
+    convert::TryInto,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -443,7 +444,12 @@ impl StateService {
                 .expect("the Find response height does not exceed Height::MAX")
         } else {
             // start at genesis, and return max_len hashes
-            block::Height((max_len - 1) as _)
+            let max_height = block::Height(
+                max_len
+                    .try_into()
+                    .expect("max_len does not exceed Height::MAX"),
+            );
+            (max_height - 1).expect("max_len is at least 1")
         };
 
         let stop_height = stop.map(|hash| self.best_height_by_hash(hash)).flatten();
@@ -495,10 +501,9 @@ impl StateService {
                 .unwrap_or(true),
             "the list must not contain the intersection hash"
         );
-        if !res.is_empty() {
+        if let (Some(stop), Some((_, res_except_last))) = (stop, res.split_last()) {
             assert!(
-                stop.map(|hash| !res[..(res.len() - 1)].contains(&hash))
-                    .unwrap_or(true),
+                !res_except_last.contains(&stop),
                 "if the stop hash is in the list, it must be the final hash"
             );
         }
