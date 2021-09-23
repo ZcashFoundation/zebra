@@ -310,7 +310,7 @@ impl ChainTipChange {
     ///
     /// If a lot of blocks are committed at the same time,
     /// the change will skip some blocks, and return a [`Reset`].
-    pub async fn tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
+    pub async fn wait_for_tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
         let block = self.tip_block_change().await?;
 
         let action = self.action(block.clone());
@@ -318,6 +318,27 @@ impl ChainTipChange {
         self.last_change_hash = Some(block.hash);
 
         Ok(action)
+    }
+
+    /// Returns:
+    /// - `Some(`[`TipAction`]`)` if there has been a change since the last time the method was called.
+    /// - `None` if there has been no change.
+    ///
+    /// See [`wait_for_tip_change`] for details.
+    pub fn last_tip_change(&mut self) -> Option<TipAction> {
+        // Obtain the tip block.
+        let block = self.best_tip_block()?;
+
+        // Ignore an unchanged tip.
+        if Some(block.hash) == self.last_change_hash {
+            return None;
+        }
+
+        let action = self.action(block.clone());
+
+        self.last_change_hash = Some(block.hash);
+
+        Some(action)
     }
 
     /// Return an action based on `block` and the last change we returned.
