@@ -26,7 +26,12 @@ async fn mempool_service_basic() -> Result<(), Report> {
             .await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let genesis_transactions = unmined_transactions_in_blocks(0, network);
+    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let genesis_transaction = unmined_transactions
+        .next()
+        .expect("Missing genesis transaction");
+    let more_transactions = unmined_transactions;
+
     // Start the mempool service
     let mut service = Mempool::new(
         network,
@@ -37,7 +42,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         chain_tip_change,
     );
     // Insert the genesis block coinbase transaction into the mempool storage.
-    service.storage.insert(genesis_transactions.1[0].clone())?;
+    service.storage.insert(genesis_transaction.clone())?;
 
     // Test `Request::TransactionIds`
     let response = service
@@ -61,7 +66,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .oneshot(Request::TransactionsById(
+        .call(Request::TransactionsById(
             genesis_transactions_hash_set.clone(),
         ))
         .await
@@ -73,12 +78,11 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Make sure the transaction from the blockchain test vector is the same as the
     // response of `Request::TransactionsById`
-    assert_eq!(genesis_transactions.1[0], transactions[0]);
+    assert_eq!(genesis_transaction, transactions[0]);
 
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
-    let more_transactions = unmined_transactions_in_blocks(10, network);
-    for tx in more_transactions.1.iter().skip(1) {
+    for tx in more_transactions {
         service.storage.insert(tx.clone())?;
     }
 
