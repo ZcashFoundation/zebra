@@ -24,7 +24,13 @@ async fn mempool_service_basic() -> Result<(), Report> {
             .await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let genesis_transactions = unmined_transactions_in_blocks(0, network);
+    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let genesis_transaction = unmined_transactions
+        .next()
+        .expect("Missing genesis transaction");
+    let txid = unmined_transactions.next_back().unwrap().id;
+    let more_transactions = unmined_transactions;
+
     // Start the mempool service
     let mut service = Mempool::new(
         network,
@@ -39,9 +45,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let _ = service.enable(&mut recent_syncs).await;
 
     // Insert the genesis block coinbase transaction into the mempool storage.
-    service
-        .storage()
-        .insert(genesis_transactions.1[0].clone())?;
+    service.storage().insert(genesis_transaction.clone())?;
 
     // Test `Request::TransactionIds`
     let response = service
@@ -65,7 +69,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .oneshot(Request::TransactionsById(
+        .call(Request::TransactionsById(
             genesis_transactions_hash_set.clone(),
         ))
         .await
@@ -77,13 +81,11 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Make sure the transaction from the blockchain test vector is the same as the
     // response of `Request::TransactionsById`
-    assert_eq!(genesis_transactions.1[0], transactions[0]);
+    assert_eq!(genesis_transaction, transactions[0]);
 
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
-    let (count, more_transactions) = unmined_transactions_in_blocks(10, network);
-    // Skip the first (used before) and the last (will be used later)
-    for tx in more_transactions.iter().skip(1).take(count - 2) {
+    for tx in more_transactions {
         service.storage().insert(tx.clone())?;
     }
 
@@ -106,7 +108,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Test `Request::Queue`
     // Use the ID of the last transaction in the list
-    let txid = more_transactions.last().unwrap().id;
+
     let response = service
         .ready_and()
         .await
@@ -141,7 +143,12 @@ async fn mempool_service_disabled() -> Result<(), Report> {
             .await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let genesis_transactions = unmined_transactions_in_blocks(0, network);
+    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let genesis_transaction = unmined_transactions
+        .next()
+        .expect("Missing genesis transaction");
+    let more_transactions = unmined_transactions;
+
     // Start the mempool service
     let mut service = Mempool::new(
         network,
@@ -161,9 +168,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     assert!(service.enabled());
 
     // Insert the genesis block coinbase transaction into the mempool storage.
-    service
-        .storage()
-        .insert(genesis_transactions.1[0].clone())?;
+    service.storage().insert(genesis_transaction.clone())?;
 
     // Test if the mempool answers correctly (i.e. is enabled)
     let response = service
@@ -177,8 +182,6 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         Response::TransactionIds(ids) => ids,
         _ => unreachable!("will never happen in this test"),
     };
-
-    let (_count, more_transactions) = unmined_transactions_in_blocks(1, network);
 
     // Queue a transaction for download
     // Use the ID of the last transaction in the list
@@ -224,7 +227,6 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     };
 
     // Test if the mempool returns to Queue requests correctly when disabled
-    let txid = more_transactions.last().unwrap().id;
     let response = service
         .ready_and()
         .await
