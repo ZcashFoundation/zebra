@@ -237,6 +237,10 @@ impl Service<zn::Request> for Inbound {
         Poll::Ready(result)
     }
 
+    /// Call the inbound service.
+    ///
+    /// Errors indicate that the peer has done something wrong or unexpected,
+    /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
         match req {

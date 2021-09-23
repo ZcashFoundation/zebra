@@ -69,4 +69,22 @@ impl SyncStatus {
         // average sync length falls below the threshold.
         avg < Self::MIN_DIST_FROM_TIP
     }
+
+    /// Feed the given [`RecentSyncLengths`] it order to make the matching
+    /// [`SyncStatus`] report that it's close to the tip.
+    #[cfg(test)]
+    pub(crate) fn sync_close_to_tip(recent_syncs: &mut RecentSyncLengths) {
+        for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+            recent_syncs.push_extend_tips_length(1);
+        }
+    }
+
+    /// Feed the given [`RecentSyncLengths`] it order to make the matching
+    /// [`SyncStatus`] report that it's not close to the tip.
+    #[cfg(test)]
+    pub(crate) fn sync_far_from_tip(recent_syncs: &mut RecentSyncLengths) {
+        for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+            recent_syncs.push_extend_tips_length(Self::MIN_DIST_FROM_TIP * 10);
+        }
+    }
 }

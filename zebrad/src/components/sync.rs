@@ -28,7 +28,7 @@ mod status;
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
-use recent_sync_lengths::RecentSyncLengths;
+pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
