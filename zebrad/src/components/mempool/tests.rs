@@ -16,10 +16,9 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let state_config = StateConfig::ephemeral();
     let peer_set = MockService::build().for_unit_tests();
     let (sync_status, _recent_syncs) = SyncStatus::new();
-    let (_state_service, _latest_chain_tip, chain_tip_change) =
+    let (state, _latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
-    let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
     let (_chain_verifier, tx_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
@@ -30,7 +29,8 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let genesis_transaction = unmined_transactions
         .next()
         .expect("Missing genesis transaction");
-    let more_transactions = unmined_transactions;
+    let mut more_transactions = unmined_transactions;
+    let last_transaction = more_transactions.next_back().unwrap();
 
     // Start the mempool service
     let mut service = Mempool::new(
@@ -83,7 +83,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
     // Skip the last (will be used later)
-    for tx in more_transactions.iter().take(count - 1) {
+    for tx in more_transactions {
         service.storage.insert(tx.clone())?;
     }
 
@@ -106,12 +106,11 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Test `Request::Queue`
     // Use the ID of the last transaction in the list
-    let txid = more_transactions.last().unwrap().id;
     let response = service
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
+        .call(Request::Queue(vec![last_transaction.id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -130,44 +129,48 @@ async fn mempool_queue() -> Result<(), Report> {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
-    let (peer_set, _) = mock_peer_set();
+    let peer_set = MockService::build().for_unit_tests();
     let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (state, _latest_chain_tip, chain_tip_change) =
+        zebra_state::init(state_config.clone(), network);
 
-    let (state, _, _) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
     let (_chain_verifier, tx_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
     // Get transactions to use in the test
-    let (transactions_len, mut transactions) = unmined_transactions_in_blocks(10, network);
-    // We need at least 3 transactions for the test
-    assert!(transactions_len > 3);
+    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let mut transactions = unmined_transactions;
+    // Split unmined_transactions into:
+    // [rejected_tx, transactions..., stored_tx, new_tx]
+    //
     // The first transaction to be added in the mempool which will be eventually
     // put in the rejected list
-    let rejected_tx = transactions.first().unwrap().clone();
+    let rejected_tx = transactions.next().unwrap().clone();
     // A transaction not in the mempool that will be Queued
-    let new_tx = transactions.pop().unwrap();
+    let new_tx = transactions.next_back().unwrap();
     // The last transaction that will be added in the mempool (and thus not rejected)
-    let stored_tx = transactions.last().unwrap().clone();
+    let stored_tx = transactions.next_back().unwrap().clone();
 
     // Start the mempool service
     let mut service = Mempool::new(
         network,
-        peer_set,
+        Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
+        chain_tip_change,
     );
+    // Insert [rejected_tx, transactions..., stored_tx] into the mempool storage.
     // Insert the genesis block coinbase transaction into the mempool storage.
     service.storage.insert(rejected_tx.clone())?;
-
     // Insert more transactions into the mempool storage.
-    // This will cause the genesis transaction to be moved into rejected.
-    // Skip the first (already inserted before)
-    for tx in transactions.iter().skip(1) {
+    // This will cause the `rejected_tx` to be moved into rejected.
+    for tx in transactions {
         service.storage.insert(tx.clone())?;
     }
+    service.storage.insert(stored_tx.clone())?;
 
     // Test `Request::Queue` for a new transaction
     let response = service
