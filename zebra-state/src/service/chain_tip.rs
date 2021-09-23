@@ -327,8 +327,7 @@ impl ChainTipChange {
     /// See [`wait_for_tip_change`] for details.
     pub fn last_tip_change(&mut self) -> Option<TipAction> {
         // Obtain the tip block.
-        let block_guard = self.receiver.borrow();
-        let block = block_guard.as_ref()?;
+        let block = self.best_tip_block()?;
 
         // Ignore an unchanged tip.
         if Some(block.hash) == self.last_change_hash {
