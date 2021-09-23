@@ -55,7 +55,7 @@ impl StartCmd {
 
         info!("initializing node state");
         // TODO: use ChainTipChange to get tip changes (#2374, #2710, #2711, #2712, #2713, #2714)
-        let (state_service, latest_chain_tip, _chain_tip_change) =
+        let (state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
@@ -97,6 +97,7 @@ impl StartCmd {
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip,
+            chain_tip_change.clone(),
         ));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 
