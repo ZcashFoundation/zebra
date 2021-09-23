@@ -183,6 +183,24 @@ async fn test_populated_state_responds_correctly(
                     next_headers.get(0).iter().cloned().cloned().collect(),
                 )),
             ));
+
+            // stop at a block that isn't actually in the chain
+            // tests bug #2789
+            transcript.push((
+                Request::FindBlockHashes {
+                    known_blocks: known_hashes.iter().rev().cloned().collect(),
+                    stop: Some(block::Hash([0xff; 32])),
+                },
+                Ok(Response::BlockHashes(next_hashes.to_vec())),
+            ));
+
+            transcript.push((
+                Request::FindBlockHeaders {
+                    known_blocks: known_hashes.iter().rev().cloned().collect(),
+                    stop: Some(block::Hash([0xff; 32])),
+                },
+                Ok(Response::BlockHeaders(next_headers.to_vec())),
+            ));
         };
 
         // split before the current block, and locate the current block
