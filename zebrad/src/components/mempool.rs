@@ -195,7 +195,7 @@ impl Mempool {
         use tower::ServiceExt;
         // Pretend we're close to tip
         SyncStatus::sync_close_to_tip(recent_syncs);
-        // Wait for the mempool to make it enable itself
+        // Make a dummy request to poll the mempool and make it enable itself
         let _ = self.oneshot(Request::TransactionIds).await;
     }
 
@@ -205,7 +205,7 @@ impl Mempool {
         use tower::ServiceExt;
         // Pretend we're far from the tip
         SyncStatus::sync_far_from_tip(recent_syncs);
-        // Wait for the mempool to make it enable itself
+        // Make a dummy request to poll the mempool and make it disable itself
         let _ = self.oneshot(Request::TransactionIds).await;
     }
 
