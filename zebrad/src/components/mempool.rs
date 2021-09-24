@@ -142,11 +142,11 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if let Some(tip_action) = self.chain_tip_change.tip_change().now_or_never() {
-            match tip_action? {
+        if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
+            match tip_action {
                 // Clear the mempool if there has been a chain tip reset.
-                TipAction::Reset { height: _, hash: _ } => {
-                    // TODO: https://github.com/ZcashFoundation/zebra/pull/2777/
+                TipAction::Reset { .. } => {
+                    self.storage.clear();
                 }
                 // Cancel downloads/verifications of transactions with the same
                 // IDs as recently mined transactions.
