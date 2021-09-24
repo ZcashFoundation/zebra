@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use tokio::sync::watch;
+use tracing::instrument;
 
 use zebra_chain::{
     block,
@@ -97,7 +98,7 @@ pub struct ChainTipSender {
     ///
     /// Once this flag is set, we ignore the finalized state.
     /// `None` tips don't set this flag.
-    non_finalized_tip: bool,
+    use_non_finalized_tip: bool,
 
     /// The sender channel for chain tip data.
     sender: watch::Sender<ChainTipData>,
@@ -117,7 +118,7 @@ impl ChainTipSender {
         let (sender, receiver) = watch::channel(None);
 
         let mut sender = ChainTipSender {
-            non_finalized_tip: false,
+            use_non_finalized_tip: false,
             sender,
             active_value: None,
         };
@@ -133,8 +134,17 @@ impl ChainTipSender {
     /// Update the latest finalized tip.
     ///
     /// May trigger an update to the best tip.
-    pub fn set_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
-        if !self.non_finalized_tip {
+    #[instrument(
+        skip(self, new_tip),
+        fields(
+            old_use_non_finalized_tip = ?self.use_non_finalized_tip,
+            old_height = ?self.active_value.as_ref().map(|block| block.height),
+            old_hash = ?self.active_value.as_ref().map(|block| block.hash),
+            new_height = ?new_tip.clone().into().map(|block| block.height),
+            new_hash = ?new_tip.clone().into().map(|block| block.hash),
+        ))]
+    pub fn set_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>> + Clone) {
+        if !self.use_non_finalized_tip {
             self.update(new_tip);
         }
     }
@@ -142,13 +152,25 @@ impl ChainTipSender {
     /// Update the latest non-finalized tip.
     ///
     /// May trigger an update to the best tip.
-    pub fn set_best_non_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
+    #[instrument(
+        skip(self, new_tip),
+        fields(
+            old_use_non_finalized_tip = ?self.use_non_finalized_tip,
+            old_height = ?self.active_value.as_ref().map(|block| block.height),
+            old_hash = ?self.active_value.as_ref().map(|block| block.hash),
+            new_height = ?new_tip.clone().into().map(|block| block.height),
+            new_hash = ?new_tip.clone().into().map(|block| block.hash),
+        ))]
+    pub fn set_best_non_finalized_tip(
+        &mut self,
+        new_tip: impl Into<Option<ChainTipBlock>> + Clone,
+    ) {
         let new_tip = new_tip.into();
 
         // once the non-finalized state becomes active, it is always populated
         // but ignoring `None`s makes the tests easier
         if new_tip.is_some() {
-            self.non_finalized_tip = true;
+            self.use_non_finalized_tip = true;
             self.update(new_tip)
         }
     }
@@ -205,11 +227,23 @@ impl LatestChainTip {
 
 impl ChainTip for LatestChainTip {
     /// Return the height of the best chain tip.
+    #[instrument(
+        skip(self),
+        fields(
+            height = ?self.receiver.borrow().as_ref().map(|block| block.height),
+            hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
+        ))]
     fn best_tip_height(&self) -> Option<block::Height> {
         self.receiver.borrow().as_ref().map(|block| block.height)
     }
 
     /// Return the block hash of the best chain tip.
+    #[instrument(
+        skip(self),
+        fields(
+            height = ?self.receiver.borrow().as_ref().map(|block| block.height),
+            hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
+        ))]
     fn best_tip_hash(&self) -> Option<block::Hash> {
         self.receiver.borrow().as_ref().map(|block| block.hash)
     }
@@ -218,6 +252,13 @@ impl ChainTip for LatestChainTip {
     ///
     /// All transactions with these mined IDs should be rejected from the mempool,
     /// even if their authorizing data is different.
+    #[instrument(
+        skip(self),
+        fields(
+            height = ?self.receiver.borrow().as_ref().map(|block| block.height),
+            hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
+            transaction_count = ?self.receiver.borrow().as_ref().map(|block| block.transaction_hashes.len()),
+        ))]
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.receiver
             .borrow()
@@ -310,6 +351,14 @@ impl ChainTipChange {
     ///
     /// If a lot of blocks are committed at the same time,
     /// the change will skip some blocks, and return a [`Reset`].
+    #[instrument(
+        skip(self),
+        fields(
+            current_height = ?self.receiver.borrow().as_ref().map(|block| block.height),
+            current_hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
+            last_change_hash = ?self.last_change_hash,
+            network = ?self.network,
+        ))]
     pub async fn wait_for_tip_change(&mut self) -> Result<TipAction, watch::error::RecvError> {
         let block = self.tip_block_change().await?;
 
@@ -325,6 +374,14 @@ impl ChainTipChange {
     /// - `None` if there has been no change.
     ///
     /// See [`wait_for_tip_change`] for details.
+    #[instrument(
+        skip(self),
+        fields(
+            current_height = ?self.receiver.borrow().as_ref().map(|block| block.height),
+            current_hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
+            last_change_hash = ?self.last_change_hash,
+            network = ?self.network,
+        ))]
     pub fn last_tip_change(&mut self) -> Option<TipAction> {
         // Obtain the tip block.
         let block = self.best_tip_block()?;
