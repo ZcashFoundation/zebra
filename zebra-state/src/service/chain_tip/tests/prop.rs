@@ -15,7 +15,11 @@ use crate::service::chain_tip::{ChainTipBlock, ChainTipSender, TipAction};
 
 use TipChangeCheck::*;
 
-const DEFAULT_BLOCK_VEC_PROPTEST_CASES: u32 = 4;
+/// The default number of proptest cases for these tests.
+///
+/// Currently, there are 24 different test case combinations,
+/// and each test `Vec` has an average of 50 blocks.
+const DEFAULT_BLOCK_VEC_PROPTEST_CASES: u32 = 8;
 
 proptest! {
     #![proptest_config(
@@ -29,7 +33,7 @@ proptest! {
     /// or otherwise the finalized tip.
     #[test]
     fn best_tip_is_latest_non_finalized_then_latest_finalized(
-        tip_updates in any::<SummaryDebug<Vec<(BlockUpdate, TipChangeCheck)>>>(),
+        tip_updates in any::<SummaryDebug<Vec<(BlockUpdate, BlockConnection, TipChangeCheck)>>>(),
         network in any::<Network>(),
     ) {
         let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, network);
@@ -39,45 +43,41 @@ proptest! {
         let mut seen_non_finalized_tip = false;
 
         let mut pending_action = None;
+        let mut last_block_hash = None;
         let mut chain_hashes = HashSet::new();
 
-        for (update, tip_change_check) in tip_updates {
-            // do the update
-            match update {
-                BlockUpdate::Finalized(block) => {
-                    let chain_tip = block.clone().map(|block| ChainTipBlock::from(block.0));
-
-                    if let Some(chain_tip) = chain_tip.clone() {
-                        if chain_hashes.contains(&chain_tip.hash) {
-                            // skip duplicate blocks - they are rejected by zebra-state
-                            continue;
-                        }
-                        chain_hashes.insert(chain_tip.hash);
-                    }
-
-                    chain_tip_sender.set_finalized_tip(chain_tip.clone());
-
-                    if let Some(block) = block {
-                        latest_finalized_tip = Some((chain_tip.unwrap(), block));
-                    }
+        for (mut update, connection, tip_change_check) in tip_updates {
+            // prepare the update
+            if connection.is_grow() {
+                if let (Some(mut block), Some(last_block_hash)) = (update.block(), last_block_hash) {
+                    Arc::make_mut(&mut block).header.previous_block_hash = last_block_hash;
+                    *update.block_mut() = Some(block);
                 }
-                BlockUpdate::NonFinalized(block) => {
-                    let chain_tip = block.clone().map(|block| ChainTipBlock::from(block.0));
+            }
 
-                    if let Some(chain_tip) = chain_tip.clone() {
-                        if chain_hashes.contains(&chain_tip.hash) {
-                            // skip duplicate blocks - they are rejected by zebra-state
-                            continue;
-                        }
-                        chain_hashes.insert(chain_tip.hash);
-                    }
+            let block = update.block();
+            let chain_tip = block.clone().map(|block| ChainTipBlock::from(block.0));
 
-                    chain_tip_sender.set_best_non_finalized_tip(chain_tip.clone());
+            if let Some(chain_tip) = chain_tip.clone() {
+                if chain_hashes.contains(&chain_tip.hash) {
+                    // skip duplicate blocks - they are rejected by zebra-state
+                    continue;
+                }
+                last_block_hash = Some(chain_tip.hash);
+                chain_hashes.insert(chain_tip.hash);
+            }
 
-                    if let Some(block) = block {
-                        latest_non_finalized_tip = Some((chain_tip.unwrap(), block));
-                        seen_non_finalized_tip = true;
-                    }
+            // do the update
+            if update.is_finalized() {
+                chain_tip_sender.set_finalized_tip(chain_tip.clone());
+                if let Some(block) = block {
+                    latest_finalized_tip = Some((chain_tip.unwrap(), block));
+                }
+            } else {
+                chain_tip_sender.set_best_non_finalized_tip(chain_tip.clone());
+                if let Some(block) = block {
+                    latest_non_finalized_tip = Some((chain_tip.unwrap(), block));
+                    seen_non_finalized_tip = true;
                 }
             }
 
@@ -137,6 +137,7 @@ proptest! {
                 });
 
             let expected_action = match (pending_action.clone(), new_action.clone()) {
+                (Some(pending_action), Some(new_action)) if pending_action == new_action => Some(new_action),
                 (Some(_pending_action), Some(new_action)) => Some(new_action.into_reset()),
                 (None, new_action) => new_action,
                 (pending_action, None) => pending_action,
@@ -204,8 +205,45 @@ enum BlockUpdate {
     NonFinalized(Option<DisplayToDebug<Arc<Block>>>),
 }
 
+impl BlockUpdate {
+    /// Returns the inner block, regardless of variant.
+    pub fn block(&self) -> Option<DisplayToDebug<Arc<Block>>> {
+        match self {
+            BlockUpdate::Finalized(block) => block.clone(),
+            BlockUpdate::NonFinalized(block) => block.clone(),
+        }
+    }
+
+    /// Returns a mutable reference to the inner block, regardless of variant.
+    pub fn block_mut(&mut self) -> &mut Option<DisplayToDebug<Arc<Block>>> {
+        match self {
+            BlockUpdate::Finalized(block) => block,
+            BlockUpdate::NonFinalized(block) => block,
+        }
+    }
+
+    /// Is it finalized?
+    pub fn is_finalized(&self) -> bool {
+        matches!(self, BlockUpdate::Finalized(_))
+    }
+}
+
+/// Block update test case variants for [`ChainTipChange`]
+#[derive(Arbitrary, Copy, Clone, Debug, Eq, PartialEq)]
+enum BlockConnection {
+    Reset,
+    Grow,
+}
+
+impl BlockConnection {
+    /// Is this a grow?
+    pub fn is_grow(&self) -> bool {
+        *self == BlockConnection::Grow
+    }
+}
+
 /// Block update checks for [`ChainTipChange`]
-#[derive(Arbitrary, Copy, Clone, Debug)]
+#[derive(Arbitrary, Copy, Clone, Debug, Eq, PartialEq)]
 enum TipChangeCheck {
     /// Check that `wait_for_tip_change` returns the correct result
     WaitFor,
