@@ -307,11 +307,17 @@ impl Transaction {
         }
     }
 
-    /// Modify the expiry height of this transaction, regardless of version.
+    /// Modify the expiry height of this transaction.
+    ///
+    /// # Panics
+    ///
+    /// - if called on a v1 or v2 transaction
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn expiry_height_mut(&mut self) -> &mut block::Height {
         match self {
-            Transaction::V1 { .. } | Transaction::V2 { .. } => panic!("whatever ever"),
+            Transaction::V1 { .. } | Transaction::V2 { .. } => {
+                panic!("v1 and v2 transactions are not supported")
+            }
             Transaction::V3 {
                 ref mut expiry_height,
                 ..
