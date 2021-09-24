@@ -24,7 +24,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
-    let (inbound_service, added_transactions, _, mut peer_set) = setup(true).await;
+    let (inbound_service, added_transactions, _, mut peer_set, _) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions
         .clone()
@@ -72,7 +72,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
 
-    let (inbound_service, _, mut tx_verifier, mut peer_set) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, mut peer_set, _) = setup(false).await;
 
     // Test `Request::PushTransaction`
     let request = inbound_service
@@ -121,7 +121,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let test_transaction_id = test_transaction.unmined_id();
     let txs = HashSet::from_iter([test_transaction_id]);
 
-    let (inbound_service, _, mut tx_verifier, mut peer_set) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, mut peer_set, _) = setup(false).await;
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
@@ -171,6 +171,114 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+#[tokio::test]
+async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
+    // Get a block that has at least one non coinbase transaction
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+
+    // Use the first transaction that is not coinbase to test expiration
+    let tx1 = &*(block.transactions[1]).clone();
+    let mut tx1_id = tx1.unmined_id();
+
+    // Change the expiration height to blok one
+    let mut tx1 = tx1.clone();
+    *tx1.expiry_height_mut() = zebra_chain::block::Height(1);
+
+    // Use the second transaction that is not coinbase just to trigger `remove_expired_transactions()`
+    let tx2 = block.transactions[2].clone();
+    let mut tx2_id = tx2.unmined_id();
+
+    // Get services
+    let (inbound_service, _, mut tx_verifier, _peer_set, state_service) = setup(false).await;
+
+    // Push test transaction
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(tx1.clone().into()));
+    // Simulate a successful transaction verification
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        tx1_id = responder.request().tx_id();
+        responder.respond(tx1_id);
+    });
+    let (response, _) = futures::join!(request, verification);
+    match response {
+        Ok(Response::Nil) => (),
+        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
+    };
+
+    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![tx1_id])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    // Add a new block to the state (aka: make the chain tip advance)
+    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            block_one.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // As our test transaction will expire at a block height greater than 1 we need to push block two.
+    let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            block_two.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Push a second transaction to trigger removal
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(tx2.clone().into()));
+    // Simulate a successful transaction verification
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        tx2_id = responder.request().tx_id();
+        responder.respond(tx2_id);
+    });
+    let (response, _) = futures::join!(request, verification);
+    match response {
+        Ok(Response::Nil) => (),
+        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
+    };
+
+    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    // Only tx2 will be in the mempool while tx1 was expired
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![tx2_id])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    Ok(())
+}
+
 async fn setup(
     add_transactions: bool,
 ) -> (
@@ -178,6 +286,14 @@ async fn setup(
     Option<Vec<UnminedTx>>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     MockService<Request, Response, PanicAssertion>,
+    Buffer<
+        BoxService<
+            zebra_state::Request,
+            zebra_state::Response,
+            Box<dyn std::error::Error + Send + Sync>,
+        >,
+        zebra_state::Request,
+    >,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
@@ -239,6 +355,7 @@ async fn setup(
         .zcash_deserialize_into()
         .unwrap();
     state_service
+        .clone()
         .oneshot(zebra_state::Request::CommitFinalizedBlock(
             genesis_block.clone().into(),
         ))
@@ -250,6 +367,7 @@ async fn setup(
         added_transactions,
         mock_tx_verifier,
         peer_set,
+        state_service,
     )
 }
 
