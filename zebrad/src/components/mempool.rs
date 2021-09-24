@@ -201,12 +201,11 @@ fn remove_expired_transactions(
     let ids = storage.tx_ids().iter().copied().collect();
     let transactions = storage.transactions(ids);
 
-    let _ = transactions
-        .iter()
-        .filter(|t| t.transaction.expiry_height().is_some())
-        .map(|t| {
-            if tip_height > t.transaction.expiry_height().unwrap() {
+    for t in transactions {
+        if let Some(expiry_height) = t.transaction.expiry_height() {
+            if tip_height > expiry_height {
                 storage.remove(&t.id);
             }
-        });
+        }
+    }
 }
