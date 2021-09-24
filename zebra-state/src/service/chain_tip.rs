@@ -403,7 +403,7 @@ impl ChainTipChange {
         // check for an edge case that's dealt with by other code
         assert!(
             Some(block.hash) != self.last_change_hash,
-            "ChainTipSender ignores unchanged tips"
+            "ChainTipSender and ChainTipChange ignore unchanged tips"
         );
 
         // If the previous block hash doesn't match, reset.
@@ -467,7 +467,13 @@ impl ChainTipChange {
             // Wait until there is actually Some block,
             // so we don't have `Option`s inside `TipAction`s.
             if let Some(block) = self.best_tip_block() {
-                return Ok(block);
+                // Wait until we have a new block
+                //
+                // last_tip_change() updates last_change_hash, but it doesn't call receiver.changed().
+                // So code that uses both sync and async methods can have spurious pending changes.
+                if Some(block.hash) != self.last_change_hash {
+                    return Ok(block);
+                }
             }
         }
     }
