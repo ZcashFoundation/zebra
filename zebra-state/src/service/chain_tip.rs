@@ -519,4 +519,18 @@ impl TipAction {
             hash: block.hash,
         }
     }
+
+    /// Converts this [`TipAction`] into a [`Reset`].
+    ///
+    /// Designed for use in tests.
+    #[cfg(test)]
+    pub(crate) fn into_reset(self) -> Self {
+        match self {
+            Grow { block } => Reset {
+                height: block.height,
+                hash: block.hash,
+            },
+            reset @ Reset { .. } => reset,
+        }
+    }
 }
