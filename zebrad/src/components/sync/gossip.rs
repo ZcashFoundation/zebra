@@ -41,19 +41,17 @@ where
     // - wrap returned errors in a newtype, so we can distinguish sync and tip watch errors
     // - refactor to avoid checking SyncStatus twice, maybe by passing a closure?
     loop {
+        chain_state.wait_for_tip_change().await?;
         sync_status.wait_until_close_to_tip().await?;
 
-        let tip_action = chain_state.wait_for_tip_change().await?;
-        // check sync status again, because it might be a long time between blocks
-        if sync_status.is_close_to_tip() {
-            // unlike the mempool, we don't care if the change is a reset
-            let request = zn::Request::AdvertiseBlock(tip_action.best_tip_hash());
+        let tip_action = chain_state.last_tip_change();
+        // unlike the mempool, we don't care if the change is a reset
+        let request = zn::Request::AdvertiseBlock(tip_action.best_tip_hash());
 
-            let height = tip_action.best_tip_height();
-            info!(?height, ?request, "sending verified block broadcast");
+        let height = tip_action.best_tip_height();
+        info!(?height, ?request, "sending verified block broadcast");
 
-            // broadcast requests don't return errors, and we'd just want to ignore them anyway
-            let _ = broadcast_network.ready_and().await?.call(request).await;
-        }
+        // broadcast requests don't return errors, and we'd just want to ignore them anyway
+        let _ = broadcast_network.ready_and().await?.call(request).await;
     }
 }
