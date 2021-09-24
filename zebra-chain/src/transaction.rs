@@ -294,8 +294,7 @@ impl Transaction {
     /// Get this transaction's expiry height, if any.
     pub fn expiry_height(&self) -> Option<block::Height> {
         match self {
-            Transaction::V1 { .. } => None,
-            Transaction::V2 { .. } => None,
+            Transaction::V1 { .. } | Transaction::V2 { .. } => None,
             Transaction::V3 { expiry_height, .. }
             | Transaction::V4 { expiry_height, .. }
             | Transaction::V5 { expiry_height, .. } => match expiry_height {
