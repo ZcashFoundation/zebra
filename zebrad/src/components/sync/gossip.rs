@@ -35,21 +35,23 @@ where
     // so broadcasts don't delay the syncer too long
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
 
-    // TODO:
-    //
-    // Optional Cleanup
-    // - wrap returned errors in a newtype, so we can distinguish sync and tip watch errors
-    // - refactor to avoid checking SyncStatus twice, maybe by passing a closure?
     loop {
-        chain_state.wait_for_tip_change().await?;
+        // wait for at least one tip change, to make sure we have a new block hash to broadcast
+        let tip_action = chain_state.wait_for_tip_change().await?;
+        // wait until we're close to the tip, because broadcasts are only useful for nodes near the tip
+        // (if they're a long way from the tip, they use the syncer and block locators)
         sync_status.wait_until_close_to_tip().await?;
 
-        let tip_action = chain_state.last_tip_change();
-        // unlike the mempool, we don't care if the change is a reset
+        // get the latest tip change - it might be different to the change we awaited,
+        // because the syncer might take a long time to reach the tip
+        let tip_action = chain_state.last_tip_change().unwrap_or(tip_action);
+
+        // block broadcasts inform other nodes about new blocks,
+        // so our internal Grow or Reset state doesn't matter to them
         let request = zn::Request::AdvertiseBlock(tip_action.best_tip_hash());
 
         let height = tip_action.best_tip_height();
-        info!(?height, ?request, "sending verified block broadcast");
+        info!(?height, ?request, "sending committed block broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready_and().await?.call(request).await;
