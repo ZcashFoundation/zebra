@@ -192,6 +192,11 @@ impl<T> AtLeastOne<T> {
         &mut self.inner[0]
     }
 
+    /// Appends an element to the back of the collection.
+    pub fn push(&mut self, element: T) {
+        self.inner.push(element);
+    }
+
     /// Returns the first and all the rest of the elements of the vector.
     ///
     /// Unlike `Vec` or slice, `AtLeastOne` always has a first element.
