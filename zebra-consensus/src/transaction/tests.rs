@@ -234,40 +234,47 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 }
 
 #[tokio::test]
-// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
+// TODO: Remove `should_panic` once the NU5 activation height for mainnet has been
 // defined.
 #[should_panic]
-async fn v5_transaction_is_accepted_after_nu5_activation() {
+async fn v5_transaction_is_accepted_after_nu5_activation_mainnet() {
+    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Mainnet).await
+}
+
+#[tokio::test]
+async fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
+    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Testnet).await
+}
+
+async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
     let nu5 = NetworkUpgrade::Nu5;
-    let networks = vec![
-        (Network::Mainnet, zebra_test::vectors::MAINNET_BLOCKS.iter()),
-        (Network::Testnet, zebra_test::vectors::TESTNET_BLOCKS.iter()),
-    ];
+    let blocks = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
 
-    for (network, blocks) in networks {
-        let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+    let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
 
-        let transaction = fake_v5_transactions_for_network(network, blocks)
-            .rev()
-            .next()
-            .expect("At least one fake V5 transaction in the test vectors");
+    let transaction = fake_v5_transactions_for_network(network, blocks)
+        .rev()
+        .next()
+        .expect("At least one fake V5 transaction in the test vectors");
 
-        let expected_hash = transaction.unmined_id();
+    let expected_hash = transaction.unmined_id();
 
-        let result = verifier
-            .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                height: nu5
-                    .activation_height(network)
-                    .expect("NU5 activation height is specified"),
-            })
-            .await;
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(HashMap::new()),
+            height: nu5
+                .activation_height(network)
+                .expect("NU5 activation height is specified"),
+        })
+        .await;
 
-        assert_eq!(result, Ok(expected_hash));
-    }
+    assert_eq!(result, Ok(expected_hash));
 }
 
 /// Test if V4 transaction with transparent funds is accepted.
@@ -414,9 +421,6 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
 /// Test if V5 transaction with transparent funds is accepted.
 #[tokio::test]
-// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
-// defined.
-#[should_panic]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
     let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
@@ -465,9 +469,6 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
 /// Test if V5 coinbase transaction is accepted.
 #[tokio::test]
-// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
-// defined.
-#[should_panic]
 async fn v5_coinbase_transaction_is_accepted() {
     let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
@@ -517,9 +518,6 @@ async fn v5_coinbase_transaction_is_accepted() {
 /// This test simulates the case where the script verifier rejects the transaction because the
 /// script prevents spending the source UTXO.
 #[tokio::test]
-// TODO: Remove `should_panic` once the NU5 activation heights for testnet and mainnet have been
-// defined.
-#[should_panic]
 async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     let network = Network::Testnet;
     let network_upgrade = NetworkUpgrade::Nu5;
