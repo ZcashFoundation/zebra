@@ -132,7 +132,7 @@ async fn mempool_queue() -> Result<(), Report> {
     let state_config = StateConfig::ephemeral();
     let peer_set = MockService::build().for_unit_tests();
     let (sync_status, _recent_syncs) = SyncStatus::new();
-    let (state, _latest_chain_tip, chain_tip_change) =
+    let (state, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
     let state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -161,6 +161,7 @@ async fn mempool_queue() -> Result<(), Report> {
         state_service.clone(),
         tx_verifier,
         sync_status,
+        latest_chain_tip,
         chain_tip_change,
     );
     // Insert [rejected_tx, transactions..., stored_tx] into the mempool storage.
