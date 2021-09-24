@@ -4,6 +4,7 @@ use zebra_chain::{
     block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction::UnminedTx,
 };
 
+mod prop;
 mod vectors;
 
 pub fn unmined_transactions_in_blocks(
