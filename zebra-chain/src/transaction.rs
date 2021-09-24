@@ -308,6 +308,26 @@ impl Transaction {
         }
     }
 
+    /// Modify the expiry height of this transaction, regardless of version.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn expiry_height_mut(&mut self) -> &mut block::Height {
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } => panic!("whatever ever"),
+            Transaction::V3 {
+                ref mut expiry_height,
+                ..
+            }
+            | Transaction::V4 {
+                ref mut expiry_height,
+                ..
+            }
+            | Transaction::V5 {
+                ref mut expiry_height,
+                ..
+            } => expiry_height,
+        }
+    }
+
     /// Get this transaction's network upgrade field, if any.
     /// This field is serialized as `nConsensusBranchId` ([7.1]).
     ///
