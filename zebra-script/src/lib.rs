@@ -80,6 +80,12 @@ impl CachedFfiTransaction {
         let precomputed = unsafe {
             zcash_script::zcash_script_new_precomputed_tx(tx_to_ptr, tx_to_len, &mut err)
         };
+        assert!(
+            !precomputed.is_null(),
+            "zcash_script_new_precomputed_tx returned {} ({})",
+            err,
+            Error::from(err)
+        );
 
         Self {
             transaction,
