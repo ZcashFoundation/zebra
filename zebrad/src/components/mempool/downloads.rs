@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -317,15 +317,13 @@ where
 
     /// Cancel download/verification tasks of transactions with the
     /// given transaction hash (see [`UnminedTxId::mined_id`]).
-    pub fn cancel(&mut self, mined_id: &transaction::Hash) {
-        // TODO: this requires going through the entire list of running tasks.
-        // If this becomes an issue, another HashMap may be needed.
+    pub fn cancel(&mut self, mined_ids: HashSet<&transaction::Hash>) {
         // TODO: this can be simplified with [`HashMap::drain_filter`] which
         // is currently nightly-only experimental API.
         let removed_txids: Vec<UnminedTxId> = self
             .cancel_handles
             .keys()
-            .filter(|txid| txid.mined_id() == *mined_id)
+            .filter(|txid| mined_ids.contains(&txid.mined_id()))
             .cloned()
             .collect();
 

@@ -151,9 +151,8 @@ impl Service<Request> for Mempool {
                 // Cancel downloads/verifications of transactions with the same
                 // IDs as recently mined transactions.
                 TipAction::Grow { block } => {
-                    for txid in block.transaction_hashes.iter() {
-                        self.tx_downloads.cancel(txid);
-                    }
+                    let txid_set = block.transaction_hashes.iter().collect();
+                    self.tx_downloads.cancel(txid_set);
                 }
             }
         }
