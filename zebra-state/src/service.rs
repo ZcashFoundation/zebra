@@ -413,7 +413,7 @@ impl StateService {
     ///   * adding `max_len` hashes to the list.
     ///
     /// Returns an empty list if the state is empty,
-    /// or the `intersection` is the best chain tip.
+    /// or if the `intersection` is the best chain tip.
     pub fn collect_best_chain_hashes(
         &self,
         intersection: Option<block::Hash>,
