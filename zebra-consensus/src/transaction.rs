@@ -366,28 +366,28 @@ where
 
         let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
-        let async_checks = Self::verify_transparent_inputs_and_outputs(
-            &request,
-            network,
-            inputs,
-            script_verifier,
-        )?
-        .and(Self::verify_sapling_shielded_data(
-            sapling_shielded_data,
-            &shielded_sighash,
-        )?)
-        .and(Self::verify_orchard_shielded_data(
-            orchard_shielded_data,
-            &shielded_sighash,
-        )?);
+        Ok(
+            Self::verify_transparent_inputs_and_outputs(
+                &request,
+                network,
+                inputs,
+                script_verifier,
+            )?
+            .and(Self::verify_sapling_shielded_data(
+                sapling_shielded_data,
+                &shielded_sighash,
+            )?)
+            .and(Self::verify_orchard_shielded_data(
+                orchard_shielded_data,
+                &shielded_sighash,
+            )?),
+        )
 
         // TODO:
         // - verify orchard shielded pool (ZIP-224) (#2105)
         // - ZIP-244 (#1874)
         // - remaining consensus rules (#2379)
         // - remove `should_panic` from tests
-
-        Ok(async_checks)
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
