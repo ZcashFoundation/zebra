@@ -111,10 +111,14 @@ pub struct ChainTipSender {
 impl ChainTipSender {
     /// Create new linked instances of [`ChainTipSender`], [`LatestChainTip`], and [`ChainTipChange`],
     /// using an `initial_tip` and a [`Network`].
+    #[instrument(skip(initial_tip), fields(new_height, new_hash))]
     pub fn new(
         initial_tip: impl Into<Option<ChainTipBlock>>,
         network: Network,
     ) -> (Self, LatestChainTip, ChainTipChange) {
+        let initial_tip = initial_tip.into();
+        ChainTipSender::record_new_tip(&initial_tip);
+
         let (sender, receiver) = watch::channel(None);
 
         let mut sender = ChainTipSender {
@@ -140,10 +144,13 @@ impl ChainTipSender {
             old_use_non_finalized_tip = ?self.use_non_finalized_tip,
             old_height = ?self.active_value.as_ref().map(|block| block.height),
             old_hash = ?self.active_value.as_ref().map(|block| block.hash),
-            new_height = ?new_tip.clone().into().map(|block| block.height),
-            new_hash = ?new_tip.clone().into().map(|block| block.hash),
+            new_height,
+            new_hash,
         ))]
     pub fn set_finalized_tip(&mut self, new_tip: impl Into<Option<ChainTipBlock>> + Clone) {
+        let new_tip = new_tip.into();
+        ChainTipSender::record_new_tip(&new_tip);
+
         if !self.use_non_finalized_tip {
             self.update(new_tip);
         }
@@ -158,14 +165,15 @@ impl ChainTipSender {
             old_use_non_finalized_tip = ?self.use_non_finalized_tip,
             old_height = ?self.active_value.as_ref().map(|block| block.height),
             old_hash = ?self.active_value.as_ref().map(|block| block.hash),
-            new_height = ?new_tip.clone().into().map(|block| block.height),
-            new_hash = ?new_tip.clone().into().map(|block| block.hash),
+            new_height,
+            new_hash,
         ))]
     pub fn set_best_non_finalized_tip(
         &mut self,
         new_tip: impl Into<Option<ChainTipBlock>> + Clone,
     ) {
         let new_tip = new_tip.into();
+        ChainTipSender::record_new_tip(&new_tip);
 
         // once the non-finalized state becomes active, it is always populated
         // but ignoring `None`s makes the tests easier
@@ -179,9 +187,7 @@ impl ChainTipSender {
     ///
     /// An update is only sent if the current best tip is different from the last best tip
     /// that was sent.
-    fn update(&mut self, new_tip: impl Into<Option<ChainTipBlock>>) {
-        let new_tip = new_tip.into();
-
+    fn update(&mut self, new_tip: Option<ChainTipBlock>) {
         let needs_update = match (new_tip.as_ref(), self.active_value.as_ref()) {
             // since the blocks have been contextually validated,
             // we know their hashes cover all the block data
@@ -194,6 +200,19 @@ impl ChainTipSender {
             let _ = self.sender.send(new_tip.clone());
             self.active_value = new_tip;
         }
+    }
+
+    /// Record `new_tip` in the current span.
+    ///
+    /// Callers should create a new span with empty `new_height` and `new_hash` fields.
+    fn record_new_tip(new_tip: &Option<ChainTipBlock>) {
+        let span = tracing::Span::current();
+
+        let new_height = new_tip.as_ref().map(|block| block.height);
+        let new_hash = new_tip.as_ref().map(|block| block.hash);
+
+        span.record("new_height", &tracing::field::debug(new_height));
+        span.record("new_hash", &tracing::field::debug(new_hash));
     }
 }
 
