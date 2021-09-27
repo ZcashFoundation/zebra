@@ -471,6 +471,10 @@ impl ChainTipChange {
                 //
                 // last_tip_change() updates last_change_hash, but it doesn't call receiver.changed().
                 // So code that uses both sync and async methods can have spurious pending changes.
+                //
+                // TODO: use `receiver.borrow_and_update()` in `best_tip_block()`,
+                //       once we upgrade to tokio 1.0
+                //       and remove this extra check
                 if Some(block.hash) != self.last_change_hash {
                     return Ok(block);
                 }
