@@ -39,7 +39,7 @@ fn chain_tip_change_is_initially_not_ready() {
     let (_chain_tip_sender, _latest_chain_tip, mut chain_tip_change) =
         ChainTipSender::new(None, Mainnet);
 
-    // TODO: use `unconstrained` to avoid spurious waits from tokio's cooperative multitasking
+    // TODO: use `tokio::task::unconstrained` to avoid spurious waits from tokio's cooperative multitasking
     //       (needs a recent tokio version)
     // See:
     // https://github.com/ZcashFoundation/zebra/pull/2777#discussion_r712488817
