@@ -334,6 +334,11 @@ where
         }
     }
 
+    /// Get the number of currently in-flight download tasks.
+    pub fn in_flight(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Check if transaction is already in the state.
     async fn transaction_in_state(state: &mut ZS, txid: UnminedTxId) -> Result<(), BoxError> {
         // Check if the transaction is already in the state.
