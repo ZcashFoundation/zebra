@@ -123,18 +123,18 @@ proptest! {
 
             let old_last_change_hash = chain_tip_change.last_change_hash;
 
-            let new_action =
-                expected_tip.and_then(|(chain_tip, block)| {
-                    if Some(chain_tip.hash) == old_last_change_hash {
-                        // some updates don't do anything, so there's no new action
-                        None
-                    } else if Some(chain_tip.previous_block_hash) != old_last_change_hash ||
-                        NetworkUpgrade::is_activation_height(network, chain_tip.height) {
-                            Some(TipAction::reset_with(block.0.into()))
-                    } else {
-                            Some(TipAction::grow_with(block.0.into()))
-                    }
-                });
+            let new_action = expected_tip.and_then(|(chain_tip, block)| {
+                if Some(chain_tip.hash) == old_last_change_hash {
+                    // some updates don't do anything, so there's no new action
+                    None
+                } else if Some(chain_tip.previous_block_hash) != old_last_change_hash
+                    || NetworkUpgrade::is_activation_height(network, chain_tip.height)
+                {
+                    Some(TipAction::reset_with(block.0.into()))
+                } else {
+                    Some(TipAction::grow_with(block.0.into()))
+                }
+            });
 
             let expected_action = match (pending_action.clone(), new_action.clone()) {
                 (Some(pending_action), Some(new_action)) if pending_action == new_action => Some(new_action),
