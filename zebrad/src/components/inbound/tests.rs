@@ -292,48 +292,32 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     };
 
     // Add all the rest of the continous blocks we have to test tx2 will never expire.
-    let mut more_blocks: Vec<Arc<Block>> = vec![];
-    more_blocks.push(
+    let more_blocks: Vec<Arc<Block>> = vec![
         zebra_test::vectors::BLOCK_MAINNET_3_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_4_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_5_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_6_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_7_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_8_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_9_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-    more_blocks.push(
         zebra_test::vectors::BLOCK_MAINNET_10_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-    );
-
+    ];
     for block in more_blocks {
         state_service
             .clone()
