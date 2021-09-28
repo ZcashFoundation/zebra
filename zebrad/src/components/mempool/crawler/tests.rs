@@ -5,10 +5,13 @@ use tokio::time;
 
 use zebra_chain::transaction::UnminedTxId;
 use zebra_network as zn;
-use zebra_test::mock_service::MockService;
+use zebra_test::mock_service::{MockService, PropTestAssertion};
 
 use super::{
-    super::{super::mempool, downloads::Gossip},
+    super::{
+        super::{mempool, sync::RecentSyncLengths},
+        downloads::Gossip,
+    },
     Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY,
 };
 
@@ -25,6 +28,12 @@ const MAX_CRAWLED_TX: usize = 10;
 
 /// The amount of time to advance beyond the expected instant that the crawler wakes up.
 const ERROR_MARGIN: Duration = Duration::from_millis(100);
+
+/// A [`MockService`] representing the network service.
+type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
+
+/// A [`MockService`] representing the mempool service.
+type MockMempool = MockService<mempool::Request, mempool::Response, PropTestAssertion>;
 
 proptest! {
     /// Test if crawler periodically crawls for transaction IDs.
@@ -44,13 +53,9 @@ proptest! {
         sync_lengths.push(0);
 
         runtime.block_on(async move {
-            let mut peer_set = MockService::build().for_prop_tests();
-            let mempool = MockService::build().for_prop_tests();
-            let (sync_status, mut recent_sync_lengths) = SyncStatus::new();
+            let (mut peer_set, _mempool, sync_status, mut recent_sync_lengths) = setup_crawler();
 
             time::pause();
-
-            Crawler::spawn(peer_set.clone(), mempool, sync_status.clone());
 
             for sync_length in sync_lengths {
                 let mempool_is_enabled = sync_status.is_close_to_tip();
@@ -100,16 +105,13 @@ proptest! {
         let _guard = runtime.enter();
 
         runtime.block_on(async move {
-            let mut peer_set = MockService::build().for_prop_tests();
-            let mut mempool = MockService::build().for_prop_tests();
-            let (sync_status, mut recent_sync_lengths) = SyncStatus::new();
+            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths) =
+                setup_crawler();
 
             time::pause();
 
             // Mock end of chain sync to enable the mempool crawler.
             SyncStatus::sync_close_to_tip(&mut recent_sync_lengths);
-
-            Crawler::spawn(peer_set.clone(), mempool.clone(), sync_status);
 
             peer_set
                 .expect_request_that(|request| {
@@ -142,4 +144,15 @@ proptest! {
             Ok::<(), TestCaseError>(())
         })?;
     }
+}
+
+/// Spawn a crawler instance using mock services.
+fn setup_crawler() -> (MockPeerSet, MockMempool, SyncStatus, RecentSyncLengths) {
+    let peer_set = MockService::build().for_prop_tests();
+    let mempool = MockService::build().for_prop_tests();
+    let (sync_status, recent_sync_lengths) = SyncStatus::new();
+
+    Crawler::spawn(peer_set.clone(), mempool.clone(), sync_status.clone());
+
+    (peer_set, mempool, sync_status, recent_sync_lengths)
 }
