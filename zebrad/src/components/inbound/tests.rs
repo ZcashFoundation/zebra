@@ -233,6 +233,21 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
+    // Make sure tx1 is still in the mempool as it is not expired yet.
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![tx1_id])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
     // As our test transaction will expire at a block height greater than 1 we need to push block two.
     let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into()
@@ -275,6 +290,74 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
         ),
     };
+
+    // Add all the rest of the continous blocks we have to test tx2 will never expire.
+    let mut more_blocks: Vec<Arc<Block>> = vec![];
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_3_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_4_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_5_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_6_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_7_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_8_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_9_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+    more_blocks.push(
+        zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    );
+
+    for block in more_blocks {
+        state_service
+            .clone()
+            .oneshot(zebra_state::Request::CommitFinalizedBlock(
+                block.clone().into(),
+            ))
+            .await
+            .unwrap();
+
+        let request = inbound_service
+            .clone()
+            .oneshot(Request::MempoolTransactionIds)
+            .await;
+
+        // tx2 is still in the mempool as the blockchain progress because the zero expiration height
+        match request {
+            Ok(Response::TransactionIds(response)) => {
+                assert_eq!(response, vec![tx2_id])
+            }
+            _ => unreachable!(
+                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+            ),
+        };
+    }
 
     Ok(())
 }
