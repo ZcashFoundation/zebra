@@ -64,9 +64,7 @@ proptest! {
                     for _ in 0..FANOUT {
                         if mempool_is_enabled {
                             peer_set
-                                .expect_request_that(|request| {
-                                    matches!(request, zn::Request::MempoolTransactionIds)
-                                })
+                                .expect_request(zn::Request::MempoolTransactionIds)
                                 .await?
                                 .respond(zn::Response::TransactionIds(vec![]));
                         } else {
@@ -114,17 +112,13 @@ proptest! {
             SyncStatus::sync_close_to_tip(&mut recent_sync_lengths);
 
             peer_set
-                .expect_request_that(|request| {
-                    matches!(request, zn::Request::MempoolTransactionIds)
-                })
+                .expect_request(zn::Request::MempoolTransactionIds)
                 .await?
                 .respond(zn::Response::TransactionIds(transaction_ids.clone()));
 
             for _ in 1..FANOUT {
                 peer_set
-                    .expect_request_that(|request| {
-                        matches!(request, zn::Request::MempoolTransactionIds)
-                    })
+                    .expect_request(zn::Request::MempoolTransactionIds)
                     .await?
                     .respond(zn::Response::TransactionIds(vec![]));
             }
