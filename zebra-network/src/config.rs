@@ -144,13 +144,35 @@ impl Config {
         let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
-            Ok(Ok(ips)) => Ok(ips.map(canonical_socket_addr).collect()),
+            Ok(Ok(ip_addrs)) => {
+                let ip_addrs: Vec<SocketAddr> = ip_addrs.map(canonical_socket_addr).collect();
+
+                // if we're logging at debug level,
+                // the full list of IP addresses will be shown in the log message
+                let debug_span = debug_span!("", ?ip_addrs);
+                let _span_guard = debug_span.enter();
+                info!(?host, ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
+
+                for ip in &ip_addrs {
+                    // Count each initial peer, recording the seed config and resolved IP address.
+                    // If an IP is returned by multiple seeds, records the number of duplicates.
+                    // (But we only make one initial connection attempt to each IP.)
+                    metrics::counter!(
+                        "zcash.net.peers.initial",
+                        1,
+                        "seed" => host.to_string(),
+                        "resolved" => ip.to_string()
+                    );
+                }
+
+                Ok(ip_addrs.into_iter().collect())
+            }
             Ok(Err(e)) => {
-                tracing::info!(?host, ?e, "DNS error resolving peer IP address");
+                tracing::info!(?host, ?e, "DNS error resolving peer IP addresses");
                 Err(e.into())
             }
             Err(e) => {
-                tracing::info!(?host, ?e, "DNS timeout resolving peer IP address");
+                tracing::info!(?host, ?e, "DNS timeout resolving peer IP addresses");
                 Err(e.into())
             }
         }
