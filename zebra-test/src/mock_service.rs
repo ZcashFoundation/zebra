@@ -694,6 +694,42 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     /// sent.
     ///
     /// If this method is not called, the caller will panic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use zebra_test::mock_service::MockService;
+    /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # let reactor = tokio::runtime::Builder::new_current_thread()
+    /// #     .enable_all()
+    /// #     .build()
+    /// #     .expect("Failed to build Tokio runtime");
+    /// #
+    /// # reactor.block_on(async {
+    /// // Mock a service with a `String` as the service `Error` type.
+    /// let mut mock_service: MockService<_, _, _, String> =
+    ///     MockService::build().for_unit_tests();
+    ///
+    /// # let mut service = mock_service.clone();
+    /// # let task = tokio::spawn(async move {
+    /// #     let first_call_result = (&mut service).oneshot(1).await;
+    /// #     let second_call_result = service.oneshot(1).await;
+    /// #
+    /// #     (first_call_result, second_call_result)
+    /// # });
+    /// #
+    /// mock_service
+    ///     .expect_request(1)
+    ///     .await
+    ///     .respond("Received one".to_owned());
+    ///
+    /// mock_service
+    ///     .expect_request(1)
+    ///     .await
+    ///     .respond(Err("Duplicate request"));
+    /// # });
+    /// ```
     pub fn respond(self, response: impl ResponseResult<Response, Error>) {
         let _ = self.response_sender.send(response.into_result());
     }
