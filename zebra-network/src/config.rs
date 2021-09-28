@@ -149,13 +149,15 @@ impl Config {
 
                 // if we're logging at debug level,
                 // the full list of IP addresses will be shown in the log message
-                let debug_span = debug_span!("", ?ip_addrs);
+                let debug_span = debug_span!("", resolved = ?ip_addrs);
                 let _span_guard = debug_span.enter();
-                info!(?host, ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
+                info!(seed = ?host, resolved_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
 
                 for ip in &ip_addrs {
                     // Count each initial peer, recording the seed config and resolved IP address.
-                    // If an IP is returned by multiple seeds, records the number of duplicates.
+                    //
+                    // If an IP is returned by multiple seeds,
+                    // each duplicate adds 1 to the initial peer count.
                     // (But we only make one initial connection attempt to each IP.)
                     metrics::counter!(
                         "zcash.net.peers.initial",
