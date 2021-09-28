@@ -733,11 +733,12 @@ impl<Response, Error> ResponseResult<Response, Error> for Response {
     }
 }
 
-impl<Response, Error> ResponseResult<Response, Error> for Result<Response, Error>
+impl<Response, SourceError, TargetError> ResponseResult<Response, TargetError>
+    for Result<Response, SourceError>
 where
-    Error: Send + Sync + 'static,
+    SourceError: Into<TargetError>,
 {
-    fn into_result(self) -> Result<Response, Error> {
-        self
+    fn into_result(self) -> Result<Response, TargetError> {
+        self.map_err(|source_error| source_error.into())
     }
 }
