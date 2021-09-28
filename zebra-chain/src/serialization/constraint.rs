@@ -185,6 +185,18 @@ impl<T> AtLeastOne<T> {
         &self.inner[0]
     }
 
+    /// Returns a mutable reference to the first element.
+    ///
+    /// Unlike `Vec` or slice, `AtLeastOne` always has a first element.
+    pub fn first_mut(&mut self) -> &mut T {
+        &mut self.inner[0]
+    }
+
+    /// Appends an element to the back of the collection.
+    pub fn push(&mut self, element: T) {
+        self.inner.push(element);
+    }
+
     /// Returns the first and all the rest of the elements of the vector.
     ///
     /// Unlike `Vec` or slice, `AtLeastOne` always has a first element.

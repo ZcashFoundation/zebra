@@ -124,7 +124,7 @@ impl Header {
 /// A header with a count of the number of transactions in its block.
 ///
 /// This structure is used in the Bitcoin network protocol.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CountedHeader {
     /// The header for a block

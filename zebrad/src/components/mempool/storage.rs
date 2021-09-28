@@ -1,8 +1,11 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
+};
 
 use zebra_chain::{
     block,
-    transaction::{UnminedTx, UnminedTxId},
+    transaction::{Transaction, UnminedTx, UnminedTxId},
 };
 use zebra_consensus::error::TransactionError;
 
@@ -21,6 +24,8 @@ pub enum State {
     /// An otherwise valid mempool transaction was mined into a block, therefore
     /// no longer belongs in the mempool.
     Confirmed(block::Hash),
+    /// Rejected because it has a spend conflict with another transaction already in the mempool.
+    SpendConflict,
     /// Stayed in mempool for too long without being mined.
     // TODO(2021-09-09): Implement ZIP-203: Validate Transaction Expiry Height.
     // TODO(2021-09-09): https://github.com/ZcashFoundation/zebra/issues/2387
@@ -58,6 +63,7 @@ impl Storage {
                 State::Confirmed(block_hash) => MempoolError::InBlock(*block_hash),
                 State::Excess => MempoolError::Excess,
                 State::LowFee => MempoolError::LowFee,
+                State::SpendConflict => MempoolError::SpendConflict,
             });
         }
 
@@ -67,6 +73,14 @@ impl Storage {
         // because that allows malicious peers to keep transactions live forever.
         if self.verified.contains(&tx) {
             return Err(MempoolError::InMempool);
+        }
+
+        // If `tx` spends an UTXO already spent by another transaction in the mempool or reveals a
+        // nullifier already revealed by another transaction in the mempool, reject that
+        // transaction.
+        if self.check_spend_conflicts(&tx) {
+            self.rejected.insert(tx.id, State::SpendConflict);
+            return Err(MempoolError::Rejected);
         }
 
         // Then, we insert into the pool.
@@ -145,5 +159,39 @@ impl Storage {
     pub fn clear(&mut self) {
         self.verified.clear();
         self.rejected.clear();
+    }
+
+    /// Checks if the `tx` transaction has spend conflicts with another transaction in the mempool.
+    ///
+    /// Two transactions have a spend conflict if they spent the same UTXO or if they reveal the
+    /// same nullifier.
+    fn check_spend_conflicts(&self, tx: &UnminedTx) -> bool {
+        self.has_spend_conflicts(tx, Transaction::spent_outpoints)
+            || self.has_spend_conflicts(tx, Transaction::sprout_nullifiers)
+            || self.has_spend_conflicts(tx, Transaction::sapling_nullifiers)
+            || self.has_spend_conflicts(tx, Transaction::orchard_nullifiers)
+    }
+
+    /// Checks if the `tx` transaction has any spend conflicts with the transactions in the mempool
+    /// for the provided output type obtained through the `extractor`.
+    fn has_spend_conflicts<'slf, 'tx, Extractor, Outputs>(
+        &'slf self,
+        tx: &'tx UnminedTx,
+        extractor: Extractor,
+    ) -> bool
+    where
+        'slf: 'tx,
+        Extractor: Fn(&'tx Transaction) -> Outputs,
+        Outputs: IntoIterator,
+        Outputs::Item: Eq + Hash + 'tx,
+    {
+        // TODO: This algorithm should be improved to avoid a performance impact when the mempool
+        // size is increased (#2784).
+        let new_outputs: HashSet<_> = extractor(&tx.transaction).into_iter().collect();
+
+        self.verified
+            .iter()
+            .flat_map(|tx| extractor(&tx.transaction))
+            .any(|output| new_outputs.contains(&output))
     }
 }

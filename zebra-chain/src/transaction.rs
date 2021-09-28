@@ -374,6 +374,13 @@ impl Transaction {
         }
     }
 
+    /// Access the [`transparent::OutPoint`]s spent by this transaction's [`transparent::Input`]s.
+    pub fn spent_outpoints(&self) -> impl Iterator<Item = transparent::OutPoint> + '_ {
+        self.inputs()
+            .iter()
+            .filter_map(transparent::Input::outpoint)
+    }
+
     /// Access the transparent outputs of this transaction, regardless of version.
     pub fn outputs(&self) -> &[transparent::Output] {
         match self {
