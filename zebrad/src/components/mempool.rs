@@ -162,8 +162,7 @@ impl Mempool {
         }
     }
 
-    /// Return wether the mempool is enabled or not.
-    #[allow(dead_code)]
+    /// Return whether the mempool is enabled or not.
     pub fn is_enabled(&self) -> bool {
         match self.active_state {
             ActiveState::Disabled => false,
@@ -250,7 +249,8 @@ impl Service<Request> for Mempool {
                 // Clean up completed download tasks and add to mempool if successful
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     if let Ok(tx) = r {
-                        // TODO: should we do something with the result?
+                        // Storage handles conflicting transactions or a full mempool internally,
+                        // so just ignore the storage result here
                         let _ = storage.insert(tx);
                     }
                 }
