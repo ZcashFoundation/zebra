@@ -98,7 +98,7 @@ where
         while let Some(result) = requests.next().await {
             // log individual response errors
             match result {
-                Ok(response) => self.handle_response(response).await?,
+                Ok(response) => self.handle_response(response).await,
                 // TODO: Reduce the log level of the errors (#2655).
                 Err(error) => info!("Failed to crawl peer for mempool transactions: {}", error),
             }
@@ -108,7 +108,7 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
+    async fn handle_response(&mut self, response: zn::Response) {
         let transaction_ids: Vec<_> = match response {
             zn::Response::TransactionIds(ids) => ids.into_iter().map(Gossip::Id).collect(),
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
@@ -120,11 +120,33 @@ where
         );
 
         if !transaction_ids.is_empty() {
-            self.mempool
-                .ready_and()
-                .await?
-                .call(mempool::Request::Queue(transaction_ids))
-                .await?;
+            if let Err(error) = self.queue_transactions(transaction_ids).await {
+                error!(
+                    "Failed to forward crawled transactions to mempool transaction downloader: {}",
+                    error
+                );
+            }
+        }
+    }
+
+    /// Forward the crawled transactions IDs to the mempool transaction downloader.
+    async fn queue_transactions(&mut self, transaction_ids: Vec<Gossip>) -> Result<(), BoxError> {
+        let response = self
+            .mempool
+            .ready_and()
+            .await?
+            .call(mempool::Request::Queue(transaction_ids))
+            .await?;
+
+        let queue_errors = match response {
+            mempool::Response::Queued(queue_results) => {
+                queue_results.into_iter().filter_map(Result::err)
+            }
+            _ => unreachable!("Mempool did not respond with queue results to mempool crawler"),
+        };
+
+        for error in queue_errors {
+            warn!("Failed to download a crawled transaction: {}", error);
         }
 
         Ok(())
