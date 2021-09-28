@@ -735,7 +735,7 @@ impl<Response, Error> ResponseResult<Response, Error> for Response {
 
 impl<Response, Error> ResponseResult<Response, Error> for Result<Response, Error>
 where
-    Error: std::error::Error + Send + Sync + 'static,
+    Error: Send + Sync + 'static,
 {
     fn into_result(self) -> Result<Response, Error> {
         self
