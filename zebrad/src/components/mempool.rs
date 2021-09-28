@@ -199,6 +199,9 @@ impl Service<Request> for Mempool {
     }
 }
 
+/// Remove transactions from the mempool if they have not been mined after a specified height.
+///
+/// https://zips.z.cash/zip-0203#specification
 fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
