@@ -83,7 +83,7 @@ enum ActiveState {
         /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
         storage: storage::Storage,
-        /// The transaction dowload and verify stream.
+        /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
 }
@@ -278,7 +278,7 @@ impl Service<Request> for Mempool {
             ActiveState::Disabled => {
                 // When the mempool is disabled we still return that the service is ready.
                 // Otherwise, callers could block waiting for the mempool to be enabled,
-                // which may not be the desired behaviour.
+                // which may not be the desired behavior.
             }
         }
 
