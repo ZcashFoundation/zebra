@@ -4,6 +4,8 @@
 //! The `value_balance` change is handled using the default zero value.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
@@ -35,6 +37,7 @@ pub struct SharedAnchor {}
 
 /// This field is not present in this transaction version.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct FieldNotPresent;
 
 impl AnchorVariant for PerSpendAnchor {

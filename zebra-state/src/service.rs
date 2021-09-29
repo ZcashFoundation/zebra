@@ -1,4 +1,5 @@
 use std::{
+    convert::TryInto,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -411,7 +412,8 @@ impl StateService {
     ///   * adding the `stop` hash to the list, if it is in the best chain, or
     ///   * adding `max_len` hashes to the list.
     ///
-    /// Returns an empty list if the state is empty.
+    /// Returns an empty list if the state is empty,
+    /// or if the `intersection` is the best chain tip.
     pub fn collect_best_chain_hashes(
         &self,
         intersection: Option<block::Hash>,
@@ -424,6 +426,11 @@ impl StateService {
         let chain_tip_height = if let Some((height, _)) = self.best_tip() {
             height
         } else {
+            tracing::info!(
+                response_len = ?0,
+                "responding to peer GetBlocks or GetHeaders with empty state",
+            );
+
             return Vec::new();
         };
 
@@ -437,7 +444,12 @@ impl StateService {
                 .expect("the Find response height does not exceed Height::MAX")
         } else {
             // start at genesis, and return max_len hashes
-            block::Height((max_len - 1) as _)
+            let max_height = block::Height(
+                max_len
+                    .try_into()
+                    .expect("max_len does not exceed Height::MAX"),
+            );
+            (max_height - 1).expect("max_len is at least 1")
         };
 
         let stop_height = stop.map(|hash| self.best_height_by_hash(hash)).flatten();
@@ -489,11 +501,12 @@ impl StateService {
                 .unwrap_or(true),
             "the list must not contain the intersection hash"
         );
-        assert!(
-            stop.map(|hash| !res[..(res.len() - 1)].contains(&hash))
-                .unwrap_or(true),
-            "if the stop hash is in the list, it must be the final hash"
-        );
+        if let (Some(stop), Some((_, res_except_last))) = (stop, res.split_last()) {
+            assert!(
+                !res_except_last.contains(&stop),
+                "if the stop hash is in the list, it must be the final hash"
+            );
+        }
 
         res
     }

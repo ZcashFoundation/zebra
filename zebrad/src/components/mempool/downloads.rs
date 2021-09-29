@@ -315,6 +315,13 @@ where
         Ok(())
     }
 
+    /// Get the number of currently in-flight download tasks.
+    // Note: copied from zebrad/src/components/sync/downloads.rs
+    #[allow(dead_code)]
+    pub fn in_flight(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Check if transaction is already in the state.
     async fn transaction_in_state(state: &mut ZS, txid: UnminedTxId) -> Result<(), BoxError> {
         // Check if the transaction is already in the state.
