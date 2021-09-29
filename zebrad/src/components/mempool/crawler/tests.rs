@@ -124,6 +124,97 @@ proptest! {
             Ok::<(), TestCaseError>(())
         })?;
     }
+
+    /// Test if errors while forwarding transaction IDs do not stop the crawler.
+    ///
+    /// The crawler should continue operating normally if some transactions fail to download or
+    /// even if the mempool service fails to enqueue the transactions to be downloaded.
+    #[test]
+    fn transaction_id_forwarding_errors_dont_stop_the_crawler(
+        service_call_error in any::<MempoolError>(),
+        transaction_ids_for_call_failure in vec(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
+        transaction_ids_and_responses in
+            vec(any::<(UnminedTxId, Result<(), MempoolError>)>(), 1..MAX_CRAWLED_TX),
+        transaction_ids_for_return_to_normal in vec(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
+        let _guard = runtime.enter();
+
+        runtime.block_on(async move {
+            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths) =
+                setup_crawler();
+
+            time::pause();
+
+            // Mock end of chain sync to enable the mempool crawler.
+            SyncStatus::sync_close_to_tip(&mut recent_sync_lengths);
+
+            // Prepare to simulate download errors.
+            let download_result_count = transaction_ids_and_responses.len();
+            let mut transaction_ids_for_download_errors = Vec::with_capacity(download_result_count);
+            let mut download_result_list = Vec::with_capacity(download_result_count);
+
+            for (transaction_id, result) in transaction_ids_and_responses {
+                transaction_ids_for_download_errors.push(transaction_id);
+                download_result_list.push(result);
+            }
+
+            // First crawl iteration:
+            // 1. Fails with a mempool call error
+            // 2. Some downloads fail
+            // Rest: no crawled transactions
+            crawler_iteration(
+                &mut peer_set,
+                vec![
+                    transaction_ids_for_call_failure.clone(),
+                    transaction_ids_for_download_errors.clone(),
+                ],
+            )
+            .await?;
+
+            // First test with an error returned from the Mempool service.
+            respond_to_queue_request_with_error(
+                &mut mempool,
+                transaction_ids_for_call_failure,
+                service_call_error,
+            ).await?;
+
+            // Then test a failure to download transactions.
+            respond_to_queue_request(
+                &mut mempool,
+                transaction_ids_for_download_errors,
+                download_result_list,
+            ).await?;
+
+            mempool.expect_no_requests().await?;
+
+            // Wait until next crawl iteration.
+            time::sleep(RATE_LIMIT_DELAY).await;
+
+            // Second crawl iteration:
+            // The mempool should continue crawling normally.
+            crawler_iteration(
+                &mut peer_set,
+                vec![transaction_ids_for_return_to_normal.clone()],
+            )
+            .await?;
+
+            let response_list = vec![Ok(()); transaction_ids_for_return_to_normal.len()];
+
+            respond_to_queue_request(
+                &mut mempool,
+                transaction_ids_for_return_to_normal,
+                response_list,
+            ).await?;
+
+            mempool.expect_no_requests().await?;
+
+            Ok::<(), TestCaseError>(())
+        })?;
+    }
 }
 
 /// Spawn a crawler instance using mock services.
