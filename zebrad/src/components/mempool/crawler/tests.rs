@@ -63,10 +63,7 @@ proptest! {
                 for _ in 0..CRAWL_ITERATIONS {
                     for _ in 0..FANOUT {
                         if mempool_is_enabled {
-                            peer_set
-                                .expect_request(zn::Request::MempoolTransactionIds)
-                                .await?
-                                .respond(zn::Response::TransactionIds(vec![]));
+                            respond_with_transaction_ids(&mut peer_set, vec![]).await?;
                         } else {
                             peer_set.expect_no_requests().await?;
                         }
@@ -111,16 +108,10 @@ proptest! {
             // Mock end of chain sync to enable the mempool crawler.
             SyncStatus::sync_close_to_tip(&mut recent_sync_lengths);
 
-            peer_set
-                .expect_request(zn::Request::MempoolTransactionIds)
-                .await?
-                .respond(zn::Response::TransactionIds(transaction_ids.clone()));
+            respond_with_transaction_ids(&mut peer_set, transaction_ids.clone()).await;
 
             for _ in 1..FANOUT {
-                peer_set
-                    .expect_request(zn::Request::MempoolTransactionIds)
-                    .await?
-                    .respond(zn::Response::TransactionIds(vec![]));
+                respond_with_transaction_ids(&mut peer_set, vec![]).await?;
             }
 
             peer_set.expect_no_requests().await?;
@@ -149,4 +140,17 @@ fn setup_crawler() -> (MockPeerSet, MockMempool, SyncStatus, RecentSyncLengths) 
     Crawler::spawn(peer_set.clone(), mempool.clone(), sync_status.clone());
 
     (peer_set, mempool, sync_status, recent_sync_lengths)
+}
+
+/// Intercept a request for mempool transaction IDs and respond with the `transaction_ids` list.
+async fn respond_with_transaction_ids(
+    peer_set: &mut MockPeerSet,
+    transaction_ids: Vec<UnminedTxId>,
+) -> Result<(), TestCaseError> {
+    peer_set
+        .expect_request(zn::Request::MempoolTransactionIds)
+        .await?
+        .respond(zn::Response::TransactionIds(transaction_ids));
+
+    Ok(())
 }
