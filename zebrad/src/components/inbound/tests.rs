@@ -25,7 +25,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
-    let (inbound_service, added_transactions, _, mut peer_set) = setup(true).await;
+    let (inbound_service, added_transactions, _, mut peer_set, _) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions
         .clone()
@@ -74,7 +74,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
 
-    let (inbound_service, _, mut tx_verifier, mut peer_set) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, mut peer_set, _) = setup(false).await;
 
     // Test `Request::PushTransaction`
     let request = inbound_service
@@ -123,7 +123,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let test_transaction_id = test_transaction.unmined_id();
     let txs = HashSet::from_iter([test_transaction_id]);
 
-    let (inbound_service, _, mut tx_verifier, mut peer_set) = setup(false).await;
+    let (inbound_service, _, mut tx_verifier, mut peer_set, _) = setup(false).await;
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
@@ -173,6 +173,178 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+#[tokio::test]
+async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
+    // Get a block that has at least one non coinbase transaction
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+
+    // Use the first transaction that is not coinbase to test expiration
+    let tx1 = &*(block.transactions[1]).clone();
+    let mut tx1_id = tx1.unmined_id();
+
+    // Change the expiration height of the transaction to block 3
+    let mut tx1 = tx1.clone();
+    *tx1.expiry_height_mut() = zebra_chain::block::Height(3);
+
+    // Use the second transaction that is not coinbase to trigger `remove_expired_transactions()`
+    let tx2 = block.transactions[2].clone();
+    let mut tx2_id = tx2.unmined_id();
+
+    // Get services
+    let (inbound_service, _, mut tx_verifier, _peer_set, state_service) = setup(false).await;
+
+    // Push test transaction
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(tx1.clone().into()));
+    // Simulate a successful transaction verification
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        tx1_id = responder.request().tx_id();
+        responder.respond(tx1_id);
+    });
+    let (response, _) = futures::join!(request, verification);
+    match response {
+        Ok(Response::Nil) => (),
+        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
+    };
+
+    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![tx1_id])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    // Add a new block to the state (make the chain tip advance)
+    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            block_one.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Make sure tx1 is still in the mempool as it is not expired yet.
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![tx1_id])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    // As our test transaction will expire at a block height greater or equal to 3 we need to push block 3.
+    let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            block_two.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Push a second transaction to trigger `remove_expired_transactions()`
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(tx2.clone().into()));
+    // Simulate a successful transaction verification
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        tx2_id = responder.request().tx_id();
+        responder.respond(tx2_id);
+    });
+    let (response, _) = futures::join!(request, verification);
+    match response {
+        Ok(Response::Nil) => (),
+        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
+    };
+
+    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::MempoolTransactionIds)
+        .await;
+
+    // Only tx2 will be in the mempool while tx1 was expired
+    match request {
+        Ok(Response::TransactionIds(response)) => {
+            assert_eq!(response, vec![tx2_id])
+        }
+        _ => unreachable!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+        ),
+    };
+
+    // Add all the rest of the continous blocks we have to test tx2 will never expire.
+    let more_blocks: Vec<Arc<Block>> = vec![
+        zebra_test::vectors::BLOCK_MAINNET_4_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+        zebra_test::vectors::BLOCK_MAINNET_5_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+        zebra_test::vectors::BLOCK_MAINNET_6_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+        zebra_test::vectors::BLOCK_MAINNET_7_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+        zebra_test::vectors::BLOCK_MAINNET_8_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+        zebra_test::vectors::BLOCK_MAINNET_9_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+        zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+            .zcash_deserialize_into()
+            .unwrap(),
+    ];
+    for block in more_blocks {
+        state_service
+            .clone()
+            .oneshot(zebra_state::Request::CommitFinalizedBlock(
+                block.clone().into(),
+            ))
+            .await
+            .unwrap();
+
+        let request = inbound_service
+            .clone()
+            .oneshot(Request::MempoolTransactionIds)
+            .await;
+
+        // tx2 is still in the mempool as the blockchain progress because the zero expiration height
+        match request {
+            Ok(Response::TransactionIds(response)) => {
+                assert_eq!(response, vec![tx2_id])
+            }
+            _ => unreachable!(
+                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+            ),
+        };
+    }
+
+    Ok(())
+}
+
 async fn setup(
     add_transactions: bool,
 ) -> (
@@ -180,6 +352,14 @@ async fn setup(
     Option<Vec<UnminedTx>>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     MockService<Request, Response, PanicAssertion>,
+    Buffer<
+        BoxService<
+            zebra_state::Request,
+            zebra_state::Response,
+            Box<dyn std::error::Error + Send + Sync>,
+        >,
+        zebra_state::Request,
+    >,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
@@ -187,7 +367,7 @@ async fn setup(
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, _latest_chain_tip, chain_tip_change) =
+    let (state, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -218,12 +398,27 @@ async fn setup(
         .await
         .unwrap();
 
+    // Also push block 1.
+    // Block one is a network upgrade and the mempool will be cleared at it,
+    // let all our tests start after this event.
+    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            block_one.clone().into(),
+        ))
+        .await
+        .unwrap();
+
     let mut mempool_service = Mempool::new(
         network,
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
         sync_status,
+        latest_chain_tip,
         chain_tip_change,
     );
 
@@ -258,6 +453,7 @@ async fn setup(
         added_transactions,
         mock_tx_verifier,
         peer_set,
+        state_service,
     )
 }
 
