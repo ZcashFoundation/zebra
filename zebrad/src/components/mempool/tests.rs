@@ -2,6 +2,7 @@ use super::*;
 use color_eyre::Report;
 use std::{collections::HashSet, sync::Arc};
 use storage::tests::unmined_transactions_in_blocks;
+use tokio::time;
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::block::Block;
@@ -245,6 +246,8 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
+    time::pause();
+
     // Start the mempool service
     let mut mempool = Mempool::new(
         network,
@@ -287,18 +290,15 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     assert_eq!(mempool.tx_downloads.in_flight(), 1);
 
     // Query the mempool to make it poll chain_tip_change
-    for _ in 0..10 {
-        let _response = mempool
-            .ready_and()
-            .await
-            .unwrap()
-            .call(Request::TransactionIds)
-            .await
-            .unwrap();
-    }
+    let _response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::TransactionIds)
+        .await
+        .unwrap();
 
     // Push block 1 to the state
-    println!("Comitting block 1...");
     state_service
         .ready_and()
         .await
@@ -319,7 +319,6 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .unwrap();
 
     // Push block 2 to the state
-    println!("Comitting block 2...");
     state_service
         .oneshot(zebra_state::Request::CommitFinalizedBlock(
             block2.clone().into(),
@@ -327,7 +326,10 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .await
         .unwrap();
 
-    for _ in 0..10 {
+    // This is done twice because after the first query the cancellation
+    // is picked up by select!, and after the second the mempool gets the
+    // result and the download future is removed.
+    for _ in 0..2 {
         // Query the mempool just to poll it and make it cancel the download.
         let _response = mempool
             .ready_and()
@@ -336,6 +338,8 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
             .call(Request::TransactionIds)
             .await
             .unwrap();
+        // Sleep to avoid starvation and make sure the cancellation is picked up.
+        time::sleep(time::Duration::from_millis(100)).await;
     }
 
     // Check if download was cancelled.
