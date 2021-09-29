@@ -240,7 +240,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let peer_set = MockService::build().for_unit_tests();
     let (sync_status, mut recent_syncs) = SyncStatus::new();
 
-    let (state, _latest_chain_tip, chain_tip_change) = zebra_state::init(state_config, network);
+    let (state, latest_chain_tip, chain_tip_change) = zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
     let (_chain_verifier, tx_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
@@ -260,6 +260,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         state_service.clone(),
         tx_verifier,
         sync_status,
+        latest_chain_tip,
         chain_tip_change,
     );
 

@@ -175,7 +175,8 @@ impl Mempool {
         }
     }
 
-    /// Get the storage field of the mempool.
+    /// Get the storage field of the mempool for testing purposes.
+    #[cfg(test)]
     pub fn storage(&mut self) -> &mut storage::Storage {
         match &mut self.active_state {
             ActiveState::Disabled => panic!("mempool must be enabled"),
@@ -250,7 +251,7 @@ impl Service<Request> for Mempool {
                     storage.clear();
                 }
 
-                // Clean up completed download tasks and add to mempool if successful
+                // Clean up completed download tasks and add to mempool if successful.
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     if let Ok(tx) = r {
                         // Storage handles conflicting transactions or a full mempool internally,
@@ -258,16 +259,17 @@ impl Service<Request> for Mempool {
                         let _ = storage.insert(tx);
                     }
                 }
+
+                // Remove expired transactions from the mempool.
+                if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+                    remove_expired_transactions(storage, tip_height);
+                }
             }
             ActiveState::Disabled => {
                 // When the mempool is disabled we still return that the service is ready.
                 // Otherwise, callers could block waiting for the mempool to be enabled,
                 // which may not be the desired behaviour.
             }
-        }
-
-        if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-            remove_expired_transactions(self.storage(), tip_height);
         }
 
         Poll::Ready(Ok(()))
