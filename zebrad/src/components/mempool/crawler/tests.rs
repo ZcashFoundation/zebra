@@ -208,3 +208,26 @@ async fn respond_to_queue_request(
 
     Ok(())
 }
+
+/// Intercept request for mempool to download and verify transactions, and answer with an error.
+///
+/// The intercepted request will be verified to check if it has the `expected_transaction_ids`, and
+/// it will be answered with `error`, as if the service had an internal failure that prevented it
+/// from queuing the transactions for downloading.
+async fn respond_to_queue_request_with_error(
+    mempool: &mut MockMempool,
+    expected_transaction_ids: Vec<UnminedTxId>,
+    error: MempoolError,
+) -> Result<(), TestCaseError> {
+    let request_parameter = expected_transaction_ids
+        .into_iter()
+        .map(Gossip::Id)
+        .collect();
+
+    mempool
+        .expect_request(mempool::Request::Queue(request_parameter))
+        .await?
+        .respond(Err(error));
+
+    Ok(())
+}
