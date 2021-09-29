@@ -16,7 +16,7 @@ rand = "0.8"
 regex = "1.4.6"
 
 tower = { version = "0.4", features = ["util"] }
-tokio = { version = "0.3", features = ["rt-multi-thread"] }
+tokio = { version = "0.3", features = ["full"] }
 futures = "0.3.17"
 
 color-eyre = "0.5.11"
@@ -30,4 +30,3 @@ tracing-error = "0.1.2"
 
 [dev-dependencies]
 tempdir = "0.3.7"
-tokio = { version = "0.3.6", features = ["full"] }
