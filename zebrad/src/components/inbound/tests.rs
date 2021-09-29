@@ -182,9 +182,9 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let tx1 = &*(block.transactions[1]).clone();
     let mut tx1_id = tx1.unmined_id();
 
-    // Change the expiration height of the transaction to block one
+    // Change the expiration height of the transaction to block 2
     let mut tx1 = tx1.clone();
-    *tx1.expiry_height_mut() = zebra_chain::block::Height(1);
+    *tx1.expiry_height_mut() = zebra_chain::block::Height(2);
 
     // Use the second transaction that is not coinbase to trigger `remove_expired_transactions()`
     let tx2 = block.transactions[2].clone();
@@ -224,7 +224,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     };
 
     // Add a new block to the state (make the chain tip advance)
-    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into()
         .unwrap();
     state_service
@@ -250,8 +250,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         ),
     };
 
-    // As our test transaction will expire at a block height greater than 1 we need to push block two.
-    let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+    // As our test transaction will expire at a block height greater than 2 we need to push block 3.
+    let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
         .zcash_deserialize_into()
         .unwrap();
     state_service
@@ -295,9 +295,6 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     // Add all the rest of the continous blocks we have to test tx2 will never expire.
     let more_blocks: Vec<Arc<Block>> = vec![
-        zebra_test::vectors::BLOCK_MAINNET_3_BYTES
-            .zcash_deserialize_into()
-            .unwrap(),
         zebra_test::vectors::BLOCK_MAINNET_4_BYTES
             .zcash_deserialize_into()
             .unwrap(),
@@ -397,6 +394,20 @@ async fn setup(
         .unwrap()
         .call(zebra_state::Request::CommitFinalizedBlock(
             genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Also push block 1.
+    // Block one is a network upgrade and the mempool will be cleared at it,
+    // let all our tests start after this event.
+    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            block_one.clone().into(),
         ))
         .await
         .unwrap();
