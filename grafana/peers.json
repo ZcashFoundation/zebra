@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 7,
-  "iteration": 1632878057247,
+  "iteration": 1632879075996,
   "links": [],
   "panels": [
     {
@@ -74,7 +74,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_connected{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_connected{job=\"$job\"})",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -85,7 +85,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Compatible Initial Peers - $job",
+      "title": "Compatible Seed Peers - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -164,7 +164,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632878057247,
+      "repeatIteration": 1632879075996,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -180,7 +180,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_connected{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_connected{job=\"$job\"})",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -191,7 +191,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Compatible Initial Peers - $job",
+      "title": "Compatible Seed Peers - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -285,7 +285,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_obsolete{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_obsolete{job=\"$job\"})",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -296,7 +296,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Obsolete Initial Peers - $job",
+      "title": "Obsolete Seed Peers - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -375,7 +375,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632878057247,
+      "repeatIteration": 1632879075996,
       "repeatPanelId": 11,
       "scopedVars": {
         "job": {
@@ -391,7 +391,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_obsolete{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_obsolete{job=\"$job\"})",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -402,7 +402,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Obsolete Initial Peers - $job",
+      "title": "Obsolete Seed Peers - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -585,7 +585,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632878057247,
+      "repeatIteration": 1632879075996,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -794,7 +794,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632878057247,
+      "repeatIteration": 1632879075996,
       "repeatPanelId": 7,
       "scopedVars": {
         "job": {
@@ -900,6 +900,54 @@
         "tagsQuery": "",
         "type": "query",
         "useTags": false
+      },
+      {
+        "allValue": ".+",
+        "current": {
+          "selected": true,
+          "tags": [],
+          "text": [
+            "dnsseed.str4d.xyz:8233",
+            "dnsseed.testnet.z.cash:18233",
+            "dnsseed.z.cash:8233",
+            "mainnet.is.yolo.money:8233",
+            "mainnet.seeder.zfnd.org:8233",
+            "testnet.is.yolo.money:18233",
+            "testnet.seeder.zfnd.org:18233"
+          ],
+          "value": [
+            "dnsseed.str4d.xyz:8233",
+            "dnsseed.testnet.z.cash:18233",
+            "dnsseed.z.cash:8233",
+            "mainnet.is.yolo.money:8233",
+            "mainnet.seeder.zfnd.org:8233",
+            "testnet.is.yolo.money:18233",
+            "testnet.seeder.zfnd.org:18233"
+          ]
+        },
+        "datasource": null,
+        "definition": "label_values(zcash_net_peers_initial, seed)",
+        "description": null,
+        "error": null,
+        "hide": 0,
+        "includeAll": true,
+        "label": null,
+        "multi": true,
+        "name": "seed",
+        "options": [],
+        "query": {
+          "query": "label_values(zcash_net_peers_initial, seed)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
       }
     ]
   },
@@ -911,5 +959,5 @@
   "timezone": "",
   "title": "peers",
   "uid": "S29TgUH7k",
-  "version": 17
+  "version": 22
 }
