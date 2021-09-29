@@ -27,6 +27,11 @@ const MAX_CRAWLED_TX: usize = 10;
 const ERROR_MARGIN: Duration = Duration::from_millis(100);
 
 proptest! {
+    /// Test if crawler periodically crawls for transaction IDs.
+    ///
+    /// The crawler should periodically perform a fanned-out series of requests to obtain
+    /// transaction IDs from other peers. These requests should only be sent if the mempool is
+    /// enabled, i.e., if the block synchronizer is likely close to the chain tip.
     #[test]
     fn crawler_requests_for_transaction_ids(mut sync_lengths in any::<Vec<usize>>()) {
         let runtime = tokio::runtime::Builder::new_current_thread()
