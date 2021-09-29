@@ -108,13 +108,7 @@ proptest! {
             // Mock end of chain sync to enable the mempool crawler.
             SyncStatus::sync_close_to_tip(&mut recent_sync_lengths);
 
-            respond_with_transaction_ids(&mut peer_set, transaction_ids.clone()).await;
-
-            for _ in 1..FANOUT {
-                respond_with_transaction_ids(&mut peer_set, vec![]).await?;
-            }
-
-            peer_set.expect_no_requests().await?;
+            crawler_iteration(&mut peer_set, vec![transaction_ids.clone()]).await?;
 
             let response_list = vec![Ok(()); transaction_ids.len()];
             let request_param = transaction_ids.into_iter().map(Gossip::Id).collect();
@@ -151,6 +145,38 @@ async fn respond_with_transaction_ids(
         .expect_request(zn::Request::MempoolTransactionIds)
         .await?
         .respond(zn::Response::TransactionIds(transaction_ids));
+
+    Ok(())
+}
+
+/// Intercept fanned-out requests for mempool transaction IDs and answer with the `responses`.
+///
+/// Each item in `responses` is a list of transaction IDs to send back to a single request.
+/// Therefore, each item represents the response sent by a peer in the network.
+///
+/// If there are less items in `responses` the [`FANOUT`] number, then the remaining requests are
+/// answered with an empty list of transaction IDs.
+///
+/// # Panics
+///
+/// If `responses` contains more items than the [`FANOUT`] number.
+async fn crawler_iteration(
+    peer_set: &mut MockPeerSet,
+    responses: Vec<Vec<UnminedTxId>>,
+) -> Result<(), TestCaseError> {
+    let empty_responses = FANOUT
+        .checked_sub(responses.len())
+        .expect("Too many responses to be sent in a single crawl iteration");
+
+    for response in responses {
+        respond_with_transaction_ids(peer_set, response).await?;
+    }
+
+    for _ in 0..empty_responses {
+        respond_with_transaction_ids(peer_set, vec![]).await?;
+    }
+
+    peer_set.expect_no_requests().await?;
 
     Ok(())
 }
