@@ -182,9 +182,9 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let tx1 = &*(block.transactions[1]).clone();
     let mut tx1_id = tx1.unmined_id();
 
-    // Change the expiration height of the transaction to block 2
+    // Change the expiration height of the transaction to block 3
     let mut tx1 = tx1.clone();
-    *tx1.expiry_height_mut() = zebra_chain::block::Height(2);
+    *tx1.expiry_height_mut() = zebra_chain::block::Height(3);
 
     // Use the second transaction that is not coinbase to trigger `remove_expired_transactions()`
     let tx2 = block.transactions[2].clone();
@@ -250,7 +250,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         ),
     };
 
-    // As our test transaction will expire at a block height greater than 2 we need to push block 3.
+    // As our test transaction will expire at a block height greater or equal to 3 we need to push block 3.
     let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
         .zcash_deserialize_into()
         .unwrap();

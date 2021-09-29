@@ -346,7 +346,7 @@ fn remove_expired_transactions(
 
     for t in transactions {
         if let Some(expiry_height) = t.transaction.expiry_height() {
-            if tip_height > expiry_height {
+            if tip_height >= expiry_height {
                 storage.remove(&t.id);
             }
         }
