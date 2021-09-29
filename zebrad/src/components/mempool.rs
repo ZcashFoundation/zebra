@@ -12,6 +12,7 @@ use futures::{future::FutureExt, stream::Stream};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
+    chain_tip::ChainTip,
     parameters::Network,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -100,6 +101,8 @@ pub struct Mempool {
     #[allow(dead_code)]
     sync_status: SyncStatus,
 
+    /// Allow efficient access to the best tip of the blockchain.
+    latest_chain_tip: zs::LatestChainTip,
     /// Allows the detection of chain tip resets.
     #[allow(dead_code)]
     chain_tip_change: ChainTipChange,
@@ -125,11 +128,13 @@ impl Mempool {
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
+        latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
     ) -> Self {
         Mempool {
             active_state: ActiveState::Disabled,
             sync_status,
+            latest_chain_tip,
             chain_tip_change,
             outbound,
             state,
@@ -246,13 +251,18 @@ impl Service<Request> for Mempool {
                     storage.clear();
                 }
 
-                // Clean up completed download tasks and add to mempool if successful
+                // Clean up completed download tasks and add to mempool if successful.
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     if let Ok(tx) = r {
                         // Storage handles conflicting transactions or a full mempool internally,
                         // so just ignore the storage result here
                         let _ = storage.insert(tx);
                     }
+                }
+
+                // Remove expired transactions from the mempool.
+                if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+                    remove_expired_transactions(storage, tip_height);
                 }
             }
             ActiveState::Disabled => {
@@ -261,6 +271,7 @@ impl Service<Request> for Mempool {
                 // which may not be the desired behaviour.
             }
         }
+
         Poll::Ready(Ok(()))
     }
 
@@ -318,6 +329,25 @@ impl Service<Request> for Mempool {
                     ),
                 };
                 async move { Ok(resp) }.boxed()
+            }
+        }
+    }
+}
+
+/// Remove transactions from the mempool if they have not been mined after a specified height.
+///
+/// https://zips.z.cash/zip-0203#specification
+fn remove_expired_transactions(
+    storage: &mut storage::Storage,
+    tip_height: zebra_chain::block::Height,
+) {
+    let ids = storage.tx_ids().iter().copied().collect();
+    let transactions = storage.transactions(ids);
+
+    for t in transactions {
+        if let Some(expiry_height) = t.transaction.expiry_height() {
+            if tip_height >= expiry_height {
+                storage.remove(&t.id);
             }
         }
     }
