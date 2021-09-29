@@ -11,6 +11,7 @@ use super::{
     super::{
         super::{mempool, sync::RecentSyncLengths},
         downloads::Gossip,
+        error::MempoolError,
     },
     Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY,
 };
@@ -99,6 +100,8 @@ proptest! {
             .expect("Failed to create Tokio runtime");
         let _guard = runtime.enter();
 
+        let transaction_id_count = transaction_ids.len();
+
         runtime.block_on(async move {
             let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths) =
                 setup_crawler();
@@ -110,13 +113,11 @@ proptest! {
 
             crawler_iteration(&mut peer_set, vec![transaction_ids.clone()]).await?;
 
-            let response_list = vec![Ok(()); transaction_ids.len()];
-            let request_param = transaction_ids.into_iter().map(Gossip::Id).collect();
-
-            mempool
-                .expect_request(mempool::Request::Queue(request_param))
-                .await?
-                .respond(mempool::Response::Queued(response_list));
+            respond_to_queue_request(
+                &mut mempool,
+                transaction_ids,
+                vec![Ok(()); transaction_id_count],
+            ).await?;
 
             mempool.expect_no_requests().await?;
 
@@ -177,6 +178,33 @@ async fn crawler_iteration(
     }
 
     peer_set.expect_no_requests().await?;
+
+    Ok(())
+}
+
+/// Intercept request for mempool to download and verify transactions.
+///
+/// The intercepted request will be verified to check if it has the `expected_transaction_ids`, and
+/// it will be answered with a list of results, one for each transaction requested to be
+/// downloaded.
+///
+/// # Panics
+///
+/// If `response` and `expected_transaction_ids` have different sizes.
+async fn respond_to_queue_request(
+    mempool: &mut MockMempool,
+    expected_transaction_ids: Vec<UnminedTxId>,
+    response: Vec<Result<(), MempoolError>>,
+) -> Result<(), TestCaseError> {
+    let request_parameter = expected_transaction_ids
+        .into_iter()
+        .map(Gossip::Id)
+        .collect();
+
+    mempool
+        .expect_request(mempool::Request::Queue(request_parameter))
+        .await?
+        .respond(mempool::Response::Queued(response));
 
     Ok(())
 }
