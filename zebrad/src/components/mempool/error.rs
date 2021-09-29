@@ -50,4 +50,7 @@ pub enum MempoolError {
         its inputs"
     )]
     SpendConflict,
+
+    #[error("mempool is disabled since synchronization is behind the chain tip")]
+    Disabled,
 }
