@@ -335,6 +335,8 @@ where
     }
 
     /// Get the number of currently in-flight download tasks.
+    // Note: copied from zebrad/src/components/sync/downloads.rs
+    #[allow(dead_code)]
     pub fn in_flight(&self) -> usize {
         self.pending.len()
     }
