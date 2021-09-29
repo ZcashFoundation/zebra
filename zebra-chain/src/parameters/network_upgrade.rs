@@ -85,7 +85,7 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(584_000), Blossom),
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
-    (block::Height(1_590_000), Nu5),
+    (block::Height(1_599_200), Nu5),
 ];
 
 #[cfg(test_fake_activation_heights)]
