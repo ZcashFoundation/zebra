@@ -149,9 +149,9 @@ impl Config {
 
                 // if we're logging at debug level,
                 // the full list of IP addresses will be shown in the log message
-                let debug_span = debug_span!("", resolved = ?ip_addrs);
+                let debug_span = debug_span!("", remote_ip_addrs = ?ip_addrs);
                 let _span_guard = debug_span.enter();
-                info!(seed = ?host, resolved_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
+                info!(seed = ?host, remote_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
 
                 for ip in &ip_addrs {
                     // Count each initial peer, recording the seed config and resolved IP address.
@@ -163,7 +163,7 @@ impl Config {
                         "zcash.net.peers.initial",
                         1,
                         "seed" => host.to_string(),
-                        "resolved" => ip.to_string()
+                        "remote_ip" => ip.to_string()
                     );
                 }
 

@@ -41,6 +41,12 @@ impl From<Network> for Magic {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Version(pub u32);
 
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.to_string())
+    }
+}
+
 impl Version {
     /// Returns the minimum remote node network protocol version for `network` and
     /// `height`. Zebra disconnects from peers with lower versions.
