@@ -6,7 +6,8 @@ use crate::components::sync::SyncStatus;
 use futures::FutureExt;
 use tokio::sync::oneshot;
 use tower::{
-    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt,
+    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, Service,
+    ServiceExt,
 };
 
 use tracing::Span;
@@ -34,15 +35,16 @@ async fn mempool_requests_for_transactions() {
         .collect();
 
     // Test `Request::MempoolTransactionIds`
-    let request = inbound_service
+    let response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
-    match request {
+    match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
+        _ => unreachable!(format!(
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`, got {:?}",
+            response
+        )),
     };
 
     // Test `Request::TransactionsById`
@@ -51,11 +53,11 @@ async fn mempool_requests_for_transactions() {
         .copied()
         .collect::<HashSet<_>>();
 
-    let request = inbound_service
+    let response = inbound_service
         .oneshot(Request::TransactionsById(hash_set))
         .await;
 
-    match request {
+    match response {
         Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions.unwrap()),
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
     };
@@ -367,12 +369,11 @@ async fn setup(
     let state_config = StateConfig::ephemeral();
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
-    let (sync_status, _recent_syncs) = SyncStatus::new();
-    let (_state_service, _latest_chain_tip, chain_tip_change) =
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (state, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
-    let (state, latest_chain_tip, _) = zebra_state::init(state_config, network);
-    let state_service = ServiceBuilder::new().buffer(1).service(state);
+    let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     let (block_verifier, _transaction_verifier) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
@@ -384,6 +385,22 @@ async fn setup(
     let mock_tx_verifier = MockService::build().for_unit_tests();
     let buffered_tx_verifier = Buffer::new(BoxService::new(mock_tx_verifier.clone()), 10);
 
+    // Push the genesis block to the state.
+    // This must be done before creating the mempool to avoid `chain_tip_change`
+    // returning "reset" which would clear the mempool.
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .ready_and()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+
     let mut mempool_service = Mempool::new(
         network,
         buffered_peer_set.clone(),
@@ -393,6 +410,9 @@ async fn setup(
         latest_chain_tip,
         chain_tip_change,
     );
+
+    // Enable the mempool
+    let _ = mempool_service.enable(&mut recent_syncs).await;
 
     let mut added_transactions = None;
     if add_transactions {
@@ -416,18 +436,6 @@ async fn setup(
     let r = setup_tx.send((buffered_peer_set, address_book, mempool));
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok());
-
-    // Push the genesis block to the state
-    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    state_service
-        .clone()
-        .oneshot(zebra_state::Request::CommitFinalizedBlock(
-            genesis_block.clone().into(),
-        ))
-        .await
-        .unwrap();
 
     (
         inbound_service,
