@@ -83,7 +83,7 @@ enum ActiveState {
         /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
         storage: storage::Storage,
-        /// The transaction dowload and verify stream.
+        /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
 }
@@ -246,9 +246,19 @@ impl Service<Request> for Mempool {
                 storage,
                 tx_downloads,
             } => {
-                // Clear the mempool if there has been a chain tip reset.
-                if let Some(TipAction::Reset { .. }) = self.chain_tip_change.last_tip_change() {
-                    storage.clear();
+                if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
+                    match tip_action {
+                        // Clear the mempool if there has been a chain tip reset.
+                        TipAction::Reset { .. } => {
+                            storage.clear();
+                        }
+                        // Cancel downloads/verifications of transactions with the same
+                        // IDs as recently mined transactions.
+                        TipAction::Grow { block } => {
+                            let txid_set = block.transaction_hashes.iter().collect();
+                            tx_downloads.cancel(txid_set);
+                        }
+                    }
                 }
 
                 // Clean up completed download tasks and add to mempool if successful.
@@ -268,7 +278,7 @@ impl Service<Request> for Mempool {
             ActiveState::Disabled => {
                 // When the mempool is disabled we still return that the service is ready.
                 // Otherwise, callers could block waiting for the mempool to be enabled,
-                // which may not be the desired behaviour.
+                // which may not be the desired behavior.
             }
         }
 
