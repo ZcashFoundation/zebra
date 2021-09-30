@@ -29,7 +29,7 @@ impl Mempool {
         // Pretend we're close to tip
         SyncStatus::sync_close_to_tip(recent_syncs);
         // Make a dummy request to poll the mempool and make it enable itself
-        let _ = self.oneshot(Request::TransactionIds).await;
+        self.dummy_call().await;
     }
 
     /// Disable the mempool by pretending the synchronization is far from the tip.
@@ -37,6 +37,13 @@ impl Mempool {
         // Pretend we're far from the tip
         SyncStatus::sync_far_from_tip(recent_syncs);
         // Make a dummy request to poll the mempool and make it disable itself
-        let _ = self.oneshot(Request::TransactionIds).await;
+        self.dummy_call().await;
+    }
+
+    /// Perform a dummy service call so that `poll_ready` is called.
+    pub async fn dummy_call(&mut self) {
+        self.oneshot(Request::Queue(vec![]))
+            .await
+            .expect("Queuing no transactions shouldn't fail");
     }
 }
