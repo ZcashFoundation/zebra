@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [features]
-proptest-impl = ["proptest", "zebra-test"]
+proptest-impl = ["proptest", "proptest-derive", "zebra-test"]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
@@ -34,6 +34,7 @@ rlimit = "0.5.4"
 multiset = "0.0.5"
 
 proptest = { version = "0.10.1", optional = true }
+proptest-derive = { version = "0.3", optional = true }
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
