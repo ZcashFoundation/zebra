@@ -248,9 +248,10 @@ impl Service<Request> for Mempool {
             } => {
                 if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
                     match tip_action {
-                        // Clear the mempool if there has been a chain tip reset.
+                        // Clear the mempool and cancel downloads if there has been a chain tip reset.
                         TipAction::Reset { .. } => {
                             storage.clear();
+                            tx_downloads.cancel_all();
                         }
                         // Cancel downloads/verifications of transactions with the same
                         // IDs as recently mined transactions.
