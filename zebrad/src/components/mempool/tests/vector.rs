@@ -407,13 +407,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .unwrap();
 
     // Query the mempool to make it poll chain_tip_change
-    let _response = mempool
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
+    mempool.dummy_call().await;
 
     // Push block 1 to the state
     state_service
@@ -427,13 +421,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .unwrap();
 
     // Query the mempool to make it poll chain_tip_change
-    let _response = mempool
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
+    mempool.dummy_call().await;
 
     // Queue transaction from block 2 for download.
     // It can't be queued before because block 1 triggers a network upgrade,
@@ -467,13 +455,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     // result and the download future is removed.
     for _ in 0..2 {
         // Query the mempool just to poll it and make it cancel the download.
-        let _response = mempool
-            .ready_and()
-            .await
-            .unwrap()
-            .call(Request::TransactionIds)
-            .await
-            .unwrap();
+        mempool.dummy_call().await;
         // Sleep to avoid starvation and make sure the cancellation is picked up.
         time::sleep(time::Duration::from_millis(100)).await;
     }
@@ -554,13 +536,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
     // Query the mempool to make it poll chain_tip_change
-    let _response = mempool
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
+    mempool.dummy_call().await;
 
     // Push block 1 to the state. This is considered a network upgrade,
     // and thus must cancel all pending transaction downloads.
@@ -575,13 +551,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         .unwrap();
 
     // Query the mempool to make it poll chain_tip_change
-    let _response = mempool
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
+    mempool.dummy_call().await;
 
     // Check if download was cancelled.
     assert_eq!(mempool.tx_downloads().in_flight(), 0);
