@@ -74,6 +74,62 @@ proptest! {
             Ok(())
         })?;
     }
+
+    /// Test if the mempool storage is cleared if the syncer falls behind and starts to catch up.
+    #[test]
+    fn storage_is_cleared_if_syncer_falls_behind(
+        network in any::<Network>(),
+        transaction in any::<UnminedTx>(),
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
+        let _guard = runtime.enter();
+
+        runtime.block_on(async move {
+            let (
+                mut mempool,
+                mut peer_set,
+                mut state_service,
+                mut tx_verifier,
+                mut recent_syncs,
+                _chain_tip_sender,
+            ) = setup(network);
+
+            time::pause();
+
+            mempool.enable(&mut recent_syncs).await;
+
+            // Insert a dummy transaction.
+            mempool
+                .storage()
+                .insert(transaction)
+                .expect("Inserting a transaction should succeed");
+
+            // The first call to `poll_ready` shouldn't clear the storage yet.
+            mempool.dummy_call().await;
+
+            prop_assert_eq!(mempool.storage().tx_ids().len(), 1);
+
+            // Simulate the synchronizer catching up to the network chain tip.
+            mempool.disable(&mut recent_syncs).await;
+
+            // This time a call to `poll_ready` should clear the storage.
+            mempool.dummy_call().await;
+
+            // Enable the mempool again so the storage can be accessed.
+            mempool.enable(&mut recent_syncs).await;
+
+            prop_assert!(mempool.storage().tx_ids().is_empty());
+
+            peer_set.expect_no_requests().await?;
+            state_service.expect_no_requests().await?;
+            tx_verifier.expect_no_requests().await?;
+
+            Ok(())
+        })?;
+    }
 }
 
 /// Create a new [`Mempool`] instance using mocked services.
