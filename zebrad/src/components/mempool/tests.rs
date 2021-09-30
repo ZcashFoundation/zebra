@@ -5,6 +5,7 @@ use tower::ServiceExt;
 use super::{storage::Storage, ActiveState, InboundTxDownloads, Mempool, Request};
 use crate::components::sync::{RecentSyncLengths, SyncStatus};
 
+mod prop;
 mod vector;
 
 impl Mempool {
