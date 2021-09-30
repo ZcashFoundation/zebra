@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 7,
-  "iteration": 1632879075996,
+  "iteration": 1632962541240,
   "links": [],
   "panels": [
     {
@@ -74,7 +74,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_connected{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) (count_values by (remote_ip) (\"remote_version\", zcash_net_peers_version_connected{job=\"$job\"})))",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -164,7 +164,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632879075996,
+      "repeatIteration": 1632962541240,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -180,7 +180,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_connected{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) (count_values by (remote_ip) (\"remote_version\", zcash_net_peers_version_connected{job=\"$job\"})))",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -285,7 +285,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_obsolete{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) (count_values by (remote_ip) (\"remote_version\", zcash_net_peers_version_obsolete{job=\"$job\"})))",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -375,7 +375,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632879075996,
+      "repeatIteration": 1632962541240,
       "repeatPanelId": 11,
       "scopedVars": {
         "job": {
@@ -391,7 +391,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) zcash_net_peers_obsolete{job=\"$job\"})",
+          "expr": "sum by (remote_version, seed) (zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"} * on(remote_ip) group_left(remote_version) (count_values by (remote_ip) (\"remote_version\", zcash_net_peers_version_obsolete{job=\"$job\"})))",
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
@@ -585,7 +585,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632879075996,
+      "repeatIteration": 1632962541240,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -794,7 +794,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1632879075996,
+      "repeatIteration": 1632962541240,
       "repeatPanelId": 7,
       "scopedVars": {
         "job": {
@@ -904,8 +904,7 @@
       {
         "allValue": ".+",
         "current": {
-          "selected": true,
-          "tags": [],
+          "selected": false,
           "text": [
             "dnsseed.str4d.xyz:8233",
             "dnsseed.testnet.z.cash:18233",
@@ -959,5 +958,5 @@
   "timezone": "",
   "title": "peers",
   "uid": "S29TgUH7k",
-  "version": 22
+  "version": 26
 }
