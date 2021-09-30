@@ -406,23 +406,6 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .await
         .unwrap();
 
-    // Queue transaction from block 2 for download
-    let txid = block2.transactions[0].unmined_id();
-    let response = mempool
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-    assert_eq!(mempool.tx_downloads().in_flight(), 1);
-
     // Query the mempool to make it poll chain_tip_change
     let _response = mempool
         .ready_and()
@@ -452,6 +435,25 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .await
         .unwrap();
 
+    // Queue transaction from block 2 for download.
+    // It can't be queued before because block 1 triggers a network upgrade,
+    // which cancels all downloads.
+    let txid = block2.transactions[0].unmined_id();
+    let response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![txid.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+
     // Push block 2 to the state
     state_service
         .oneshot(zebra_state::Request::CommitFinalizedBlock(
@@ -475,6 +477,111 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         // Sleep to avoid starvation and make sure the cancellation is picked up.
         time::sleep(time::Duration::from_millis(100)).await;
     }
+
+    // Check if download was cancelled.
+    assert_eq!(mempool.tx_downloads().in_flight(), 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> {
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    // Using the mainnet for now
+    let network = Network::Mainnet;
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+    let peer_set = MockService::build().for_unit_tests();
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (state, latest_chain_tip, chain_tip_change) =
+        zebra_state::init(state_config.clone(), network);
+
+    let mut state_service = ServiceBuilder::new().buffer(1).service(state);
+    let (_chain_verifier, tx_verifier) =
+        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
+            .await;
+
+    // Start the mempool service
+    let mut mempool = Mempool::new(
+        network,
+        Buffer::new(BoxService::new(peer_set), 1),
+        state_service.clone(),
+        tx_verifier,
+        sync_status,
+        latest_chain_tip,
+        chain_tip_change,
+    );
+
+    // Enable the mempool
+    let _ = mempool.enable(&mut recent_syncs).await;
+    assert!(mempool.is_enabled());
+
+    // Push the genesis block to the state
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .ready_and()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Queue transaction from block 2 for download
+    let txid = block2.transactions[0].unmined_id();
+    let response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![txid.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+
+    // Query the mempool to make it poll chain_tip_change
+    let _response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::TransactionIds)
+        .await
+        .unwrap();
+
+    // Push block 1 to the state. This is considered a network upgrade,
+    // and thus must cancel all pending transaction downloads.
+    state_service
+        .ready_and()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            block1.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Query the mempool to make it poll chain_tip_change
+    let _response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::TransactionIds)
+        .await
+        .unwrap();
 
     // Check if download was cancelled.
     assert_eq!(mempool.tx_downloads().in_flight(), 0);
