@@ -83,6 +83,10 @@ impl NonFinalizedState {
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizedBlock {
+        // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
+        // Neither of these fields has interior mutability.
+        // (And when the tip block is dropped for a chain, the chain is also dropped.)
+        #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
         let mut chains = chains.into_iter();
 
@@ -240,6 +244,9 @@ impl NonFinalizedState {
     where
         F: Fn(&Chain) -> bool,
     {
+        // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
+        // Neither of these fields has interior mutability.
+        #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
         let mut best_chain_iter = chains.into_iter().rev();
 

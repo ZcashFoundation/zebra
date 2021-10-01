@@ -60,13 +60,14 @@ impl SaplingParams {
         io::copy(&mut spend_fs, &mut sink)?;
         io::copy(&mut output_fs, &mut sink)?;
 
-        if spend_fs.into_hash() != SAPLING_SPEND_HASH {
-            panic!("Sapling spend parameter is not correct.");
-        }
-
-        if output_fs.into_hash() != SAPLING_OUTPUT_HASH {
-            panic!("Sapling output parameter is not correct.");
-        }
+        assert!(
+            spend_fs.into_hash() == SAPLING_SPEND_HASH,
+            "Sapling spend parameter is not correct."
+        );
+        assert!(
+            output_fs.into_hash() == SAPLING_OUTPUT_HASH,
+            "Sapling output parameter is not correct."
+        );
 
         // Prepare verifying keys
         let spend_prepared_verifying_key = groth16::prepare_verifying_key(&spend.vk);

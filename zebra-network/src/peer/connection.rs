@@ -550,20 +550,21 @@ where
         // Error slots use a threaded `std::sync::Mutex`, so accessing the slot
         // can block the async task's current thread. We only perform a single
         // slot update per `Client`, and panic to enforce this constraint.
-        if self.error_slot.try_update_error(e).is_err() {
-            // This panic typically happens due to these bugs:
-            // * we mark a connection as failed without using fail_with
-            // * we call fail_with without checking for a failed connection
-            //   state
-            // * we continue processing messages after calling fail_with
-            //
-            // See the original bug #1510 and PR #1531, and the later bug #1599
-            // and PR #1600.
-            panic!("calling fail_with on already-failed connection state: failed connections must stop processing pending requests and responses, then close the connection. state: {:?} client receiver: {:?}",
-                self.state,
-                self.client_rx
-            );
-        }
+        //
+        // This assertion typically fails due to these bugs:
+        // * we mark a connection as failed without using fail_with
+        // * we call fail_with without checking for a failed connection
+        //   state
+        // * we continue processing messages after calling fail_with
+        //
+        // See the original bug #1510 and PR #1531, and the later bug #1599
+        // and PR #1600.
+        assert!(
+            self.error_slot.try_update_error(e).is_ok(),
+            "calling fail_with on already-failed connection state: failed connections must stop processing pending requests and responses, then close the connection. state: {:?} client receiver: {:?}",
+            self.state,
+            self.client_rx
+        );
 
         // We want to close the client channel and set State::Failed so
         // that we can flush any pending client requests. However, we may have
