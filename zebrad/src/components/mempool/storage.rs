@@ -138,6 +138,11 @@ impl Storage {
             .collect()
     }
 
+    /// Add a transaction to the rejected list for the given reason.
+    pub fn reject(&mut self, txid: UnminedTxId, reason: State) {
+        self.rejected.insert(txid, reason);
+    }
+
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
     /// the mempool rejected list.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {

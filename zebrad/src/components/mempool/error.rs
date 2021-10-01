@@ -53,4 +53,7 @@ pub enum MempoolError {
 
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
+
+    #[error("error calling a service")]
+    ServiceError,
 }
