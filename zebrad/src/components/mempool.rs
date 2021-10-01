@@ -96,13 +96,11 @@ pub struct Mempool {
     active_state: ActiveState,
 
     /// Allows checking if we are near the tip to enable/disable the mempool.
-    #[allow(dead_code)]
     sync_status: SyncStatus,
 
     /// Allow efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
     /// Allows the detection of chain tip resets.
-    #[allow(dead_code)]
     chain_tip_change: ChainTipChange,
 
     /// Handle to the outbound service.
@@ -119,7 +117,6 @@ pub struct Mempool {
 }
 
 impl Mempool {
-    #[allow(dead_code)]
     pub(crate) fn new(
         _network: Network,
         outbound: Outbound,
