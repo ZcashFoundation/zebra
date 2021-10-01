@@ -10,6 +10,9 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::instrument;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 use zebra_chain::{
     block,
     chain_tip::ChainTip,
@@ -33,6 +36,7 @@ type ChainTipData = Option<ChainTipBlock>;
 /// Used to efficiently update [`ChainTipSender`], [`LatestChainTip`],
 /// and [`ChainTipChange`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct ChainTipBlock {
     /// The hash of the best chain tip block.
     pub hash: block::Hash,
