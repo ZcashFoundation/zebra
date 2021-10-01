@@ -51,7 +51,6 @@ impl Storage {
     ///
     /// If its insertion results in evicting other transactions, they will be tracked
     /// as [`State::Excess`].
-    #[allow(dead_code)]
     pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
         let tx_id = tx.id;
 
@@ -101,7 +100,6 @@ impl Storage {
 
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
     /// the mempool.
-    #[allow(dead_code)]
     pub fn contains(&self, txid: &UnminedTxId) -> bool {
         self.verified.iter().any(|tx| &tx.id == txid)
     }
@@ -112,7 +110,6 @@ impl Storage {
     /// Removes from the 'verified' set, does not remove from the 'rejected'
     /// tracking set, if present. Maintains the order in which the other unmined
     /// transactions have been inserted into the mempool.
-    #[allow(dead_code)]
     pub fn remove(&mut self, txid: &UnminedTxId) -> Option<UnminedTx> {
         // If the txid exists in the verified set and is then deleted,
         // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
