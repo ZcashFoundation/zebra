@@ -874,6 +874,11 @@ impl Ord for Chain {
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#blockchain
     ///
+    /// # Correctness
+    ///
+    /// `Chain::cmp` is used in a `BTreeSet`, so the fields accessed by `cmp` must not have
+    /// interior mutability.
+    ///
     /// # Panics
     ///
     /// If two chains compare equal.
