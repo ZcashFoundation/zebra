@@ -146,7 +146,7 @@ where
         };
 
         for error in queue_errors {
-            warn!("Failed to download a crawled transaction: {}", error);
+            debug!("Failed to download a crawled transaction: {}", error);
         }
 
         Ok(())
