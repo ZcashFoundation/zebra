@@ -9,6 +9,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
+use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -26,6 +27,7 @@ pub use crate::BoxError;
 mod crawler;
 pub mod downloads;
 mod error;
+pub mod gossip;
 mod storage;
 
 #[cfg(test)]
@@ -35,6 +37,7 @@ pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;
+pub use gossip::gossip_mempool_transaction_id;
 
 use self::downloads::{
     Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
@@ -116,10 +119,15 @@ pub struct Mempool {
     /// Handle to the transaction verifier service.
     /// Used to construct the transaction downloader.
     tx_verifier: TxVerifier,
+
+    /// Sender part of a gossip transactions channel.
+    /// Used to broadcast transaction ids to peers.
+    transaction_sender: watch::Sender<Option<UnminedTxId>>,
 }
 
 impl Mempool {
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         _network: Network,
         outbound: Outbound,
@@ -128,6 +136,7 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
+        transaction_sender: watch::Sender<Option<UnminedTxId>>,
     ) -> Self {
         Mempool {
             active_state: ActiveState::Disabled,
@@ -137,6 +146,7 @@ impl Mempool {
             outbound,
             state,
             tx_verifier,
+            transaction_sender,
         }
     }
 
@@ -227,7 +237,9 @@ impl Service<Request> for Mempool {
                     if let Ok(tx) = r {
                         // Storage handles conflicting transactions or a full mempool internally,
                         // so just ignore the storage result here
-                        let _ = storage.insert(tx);
+                        let _ = storage.insert(tx.clone());
+                        // Send the transaction to peers
+                        let _ = self.transaction_sender.send(Some(tx.id))?;
                     }
                 }
 

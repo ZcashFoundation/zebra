@@ -150,6 +150,8 @@ fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
 
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mempool = Mempool::new(
         network,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -158,6 +160,7 @@ fn setup(
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     (

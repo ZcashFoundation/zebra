@@ -36,6 +36,8 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let more_transactions = unmined_transactions;
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mut service = Mempool::new(
         network,
         Buffer::new(BoxService::new(peer_set), 1),
@@ -44,6 +46,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -163,6 +166,8 @@ async fn mempool_queue() -> Result<(), Report> {
     let stored_tx = transactions.next_back().unwrap().clone();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mut service = Mempool::new(
         network,
         Buffer::new(BoxService::new(peer_set), 1),
@@ -171,6 +176,7 @@ async fn mempool_queue() -> Result<(), Report> {
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -257,6 +263,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let more_transactions = unmined_transactions;
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mut service = Mempool::new(
         network,
         Buffer::new(BoxService::new(peer_set), 1),
@@ -265,6 +273,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Test if mempool is disabled (it should start disabled)
@@ -378,6 +387,8 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     time::pause();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mut mempool = Mempool::new(
         network,
         Buffer::new(BoxService::new(peer_set), 1),
@@ -386,6 +397,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -490,6 +502,8 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
             .await;
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mut mempool = Mempool::new(
         network,
         Buffer::new(BoxService::new(peer_set), 1),
@@ -498,6 +512,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool

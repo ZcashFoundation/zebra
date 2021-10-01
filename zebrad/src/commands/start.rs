@@ -90,6 +90,9 @@ impl StartCmd {
             ChainSync::new(&config, peer_set.clone(), state.clone(), chain_verifier);
 
         info!("initializing mempool");
+
+        let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(None);
+
         let mempool_service = BoxService::new(Mempool::new(
             config.network.network,
             peer_set.clone(),
@@ -98,6 +101,7 @@ impl StartCmd {
             sync_status.clone(),
             latest_chain_tip,
             chain_tip_change.clone(),
+            transaction_sender,
         ));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 
@@ -105,11 +109,23 @@ impl StartCmd {
             .send((peer_set.clone(), address_book, mempool))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
+        let sync_gossip_transactions = tokio::spawn(mempool::gossip_mempool_transaction_id(
+            transaction_receiver,
+            peer_set.clone(),
+        ));
+
+        let mempool_crawl = mempool::Crawler::spawn(peer_set, sync_status);
+
         select! {
-            result = syncer.sync().fuse() => result,
-            _ = mempool::Crawler::spawn(peer_set, sync_status).fuse() => {
-                unreachable!("The mempool crawler only stops if it panics");
-            }
+            sync_result = syncer.sync().fuse() => sync_result,
+
+            transaction_gossip_result = sync_gossip_transactions.fuse() => transaction_gossip_result
+                .expect("unexpected panic in the transaction gossip")
+                .map_err(|e| eyre!(e)),
+
+            mempool_crawl_result = mempool_crawl.fuse() => mempool_crawl_result
+                .expect("unexpected panic in the mempool crawler")
+                .map_err(|e| eyre!(e)),
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc};
 
-use super::mempool::{unmined_transactions_in_blocks, Mempool};
+use super::mempool::{gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool};
 use crate::components::sync::SyncStatus;
 
 use futures::FutureExt;
@@ -104,7 +104,14 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         ),
     };
 
-    peer_set.expect_no_requests().await;
+    // Make sure there is an additional request broadcasting the
+    // inserted transaction to peers.
+    let mut hs = HashSet::new();
+    hs.insert(tx.unmined_id());
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .await
+        .respond(Response::Nil);
 
     Ok(())
 }
@@ -136,7 +143,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             .map(|responder| {
                 let unmined_transaction = UnminedTx {
                     id: test_transaction_id,
-                    transaction: test_transaction,
+                    transaction: test_transaction.clone(),
                 };
 
                 responder.respond(Response::Transactions(vec![unmined_transaction]))
@@ -168,7 +175,14 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         ),
     };
 
-    peer_set.expect_no_requests().await;
+    // Make sure there is an additional request broadcasting the
+    // inserted transaction to peers.
+    let mut hs = HashSet::new();
+    hs.insert(test_transaction.unmined_id());
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .await
+        .respond(Response::Nil);
 
     Ok(())
 }
@@ -412,6 +426,8 @@ async fn setup(
         .await
         .unwrap();
 
+    let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(None);
+
     let mut mempool_service = Mempool::new(
         network,
         buffered_peer_set.clone(),
@@ -420,10 +436,16 @@ async fn setup(
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
     let _ = mempool_service.enable(&mut recent_syncs).await;
+
+    let _ = tokio::spawn(gossip_mempool_transaction_id(
+        transaction_receiver,
+        peer_set.clone(),
+    ));
 
     let mut added_transactions = None;
     if add_transactions {
