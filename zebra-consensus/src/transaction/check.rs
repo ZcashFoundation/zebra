@@ -2,6 +2,8 @@
 //!
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
+use std::convert::TryFrom;
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::Height,
@@ -12,8 +14,6 @@ use zebra_chain::{
 };
 
 use crate::error::TransactionError;
-
-use std::convert::TryFrom;
 
 /// Checks that the transaction has inputs and outputs.
 ///
