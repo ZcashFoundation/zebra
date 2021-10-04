@@ -27,6 +27,12 @@ pub trait ZcashSerialize: Sized {
         self.zcash_serialize(&mut data)?;
         Ok(data)
     }
+
+    /// Get the size of `self` by using the `zcash_serialize_to_vec()` helper
+    /// to get a vector of bytes, then just apply `len()` on it.
+    fn zcash_serialized_size(&self) -> Result<usize, io::Error> {
+        Ok(self.zcash_serialize_to_vec()?.len())
+    }
 }
 
 /// Serialize a `Vec` as a compactsize number of items, then the items. This is

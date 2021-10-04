@@ -4,7 +4,7 @@ use proptest::prelude::*;
 
 use std::io::Cursor;
 
-use crate::serialization::{ReadZcashExt, WriteZcashExt};
+use crate::serialization::{ReadZcashExt, WriteZcashExt, ZcashSerialize};
 
 proptest! {
     #[test]
@@ -34,5 +34,13 @@ proptest! {
             Cursor::new(&mut expect_bytes[..]).write_compactsize(s).unwrap();
             prop_assert_eq!(bytes, expect_bytes);
         }
+    }
+
+    #[test]
+    fn transaction_serialized_size(transaction in any::<crate::transaction::UnminedTx>()) {
+        zebra_test::init();
+
+        // just make sure all transactions are bigger than zero
+        assert!(transaction.transaction.zcash_serialized_size().unwrap() > 0);
     }
 }
