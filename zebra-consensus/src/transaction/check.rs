@@ -2,7 +2,7 @@
 //!
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
-use std::convert::TryFrom;
+use std::{borrow::Cow, collections::HashSet, convert::TryFrom, hash::Hash};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -130,6 +130,58 @@ pub fn disabled_add_to_sprout_pool(
             if *vpub_old != zero {
                 return Err(TransactionError::DisabledAddToSproutPool);
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if a transaction has any internal spend conflicts.
+///
+/// An internal spend conflict happens if the transaction spends a UTXO more than once or if it
+/// reveals a nullifier more than once.
+///
+/// Consensus rule:
+///
+/// A _nullifier_ *MUST NOT* repeat either within a _transaction_, or across _transactions_ in a
+/// _valid blockchain_ . *Sprout* and *Sapling* and *Orchard* _nulliers_ are considered disjoint,
+/// even if they have the same bit pattern.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
+    use crate::error::TransactionError::*;
+
+    let transparent_outpoints = transaction.spent_outpoints().map(Cow::Owned);
+    let sprout_nullifiers = transaction.sprout_nullifiers().map(Cow::Borrowed);
+    let sapling_nullifiers = transaction.sapling_nullifiers().map(Cow::Borrowed);
+    let orchard_nullifiers = transaction.orchard_nullifiers().map(Cow::Borrowed);
+
+    check_for_duplicates(transparent_outpoints, DuplicateTransparentSpend)?;
+    check_for_duplicates(sprout_nullifiers, DuplicateSproutNullifier)?;
+    check_for_duplicates(sapling_nullifiers, DuplicateSaplingNullifier)?;
+    check_for_duplicates(orchard_nullifiers, DuplicateOrchardNullifier)?;
+
+    Ok(())
+}
+
+/// Check for duplicate items in a collection.
+///
+/// Each item should be wrapped by a [`Cow`] instance so that this helper function can properly
+/// handle borrowed items and owned items.
+///
+/// If a duplicate is found, an error created by the `error_wrapper` is returned.
+fn check_for_duplicates<'t, T>(
+    items: impl IntoIterator<Item = Cow<'t, T>>,
+    error_wrapper: impl FnOnce(T) -> TransactionError,
+) -> Result<(), TransactionError>
+where
+    T: Clone + Eq + Hash + 't,
+{
+    let mut hash_set = HashSet::new();
+
+    for item in items {
+        if let Some(duplicate) = hash_set.replace(item) {
+            return Err(error_wrapper(duplicate.into_owned()));
         }
     }
 
