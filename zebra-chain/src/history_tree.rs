@@ -200,7 +200,7 @@ impl NonEmptyHistoryTree {
             .expect("block must have coinbase height during contextual verification");
 
         assert!(
-            height - self.current_height == 1,
+            Some(height) == self.current_height + 1,
             "added block with height {:?} but it must be {:?}+1",
             height,
             self.current_height
