@@ -1,3 +1,5 @@
+use std::iter;
+
 use super::{super::*, unmined_transactions_in_blocks};
 
 use zebra_chain::parameters::Network;
@@ -5,7 +7,7 @@ use zebra_chain::parameters::Network;
 use color_eyre::eyre::Result;
 
 #[test]
-fn mempool_storage_crud_mainnet() {
+fn mempool_storage_crud_exact_mainnet() {
     zebra_test::init();
 
     let network = Network::Mainnet;
@@ -25,9 +27,39 @@ fn mempool_storage_crud_mainnet() {
     assert!(storage.contains(&unmined_tx.id));
 
     // Remove tx
-    let _ = storage.remove(&unmined_tx.id);
+    let removal_count = storage.remove_exact(&iter::once(unmined_tx.id).collect());
 
     // Check that it is /not/ in the mempool.
+    assert_eq!(removal_count, 1);
+    assert!(!storage.contains(&unmined_tx.id));
+}
+
+#[test]
+fn mempool_storage_crud_same_effects_mainnet() {
+    zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // Create an empty storage instance
+    let mut storage: Storage = Default::default();
+
+    // Get one (1) unmined transaction
+    let unmined_tx = unmined_transactions_in_blocks(.., network)
+        .next()
+        .expect("at least one unmined transaction");
+
+    // Insert unmined tx into the mempool.
+    let _ = storage.insert(unmined_tx.clone());
+
+    // Check that it is in the mempool, and not rejected.
+    assert!(storage.contains(&unmined_tx.id));
+
+    // Remove tx
+    let removal_count =
+        storage.remove_same_effects(&iter::once(unmined_tx.id.mined_id()).collect());
+
+    // Check that it is /not/ in the mempool.
+    assert_eq!(removal_count, 1);
     assert!(!storage.contains(&unmined_tx.id));
 }
 
