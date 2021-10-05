@@ -10,11 +10,15 @@ use std::ops::Bound::*;
 
 use chrono::{DateTime, Duration, Utc};
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// A Zcash network upgrade.
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
 /// incompatible ways.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
     ///

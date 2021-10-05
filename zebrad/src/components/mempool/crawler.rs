@@ -8,9 +8,12 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use tokio::{task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
-use zebra_network::{Request, Response};
+use zebra_network as zn;
 
-use super::super::sync::SyncStatus;
+use super::{
+    super::{mempool, sync::SyncStatus},
+    downloads::Gossip,
+};
 
 #[cfg(test)]
 mod tests;
@@ -31,20 +34,30 @@ const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
 const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// The mempool transaction crawler.
-pub struct Crawler<S> {
-    peer_set: Timeout<S>,
+pub struct Crawler<PeerSet, Mempool> {
+    peer_set: Timeout<PeerSet>,
+    mempool: Mempool,
     status: SyncStatus,
 }
 
-impl<S> Crawler<S>
+impl<PeerSet, Mempool> Crawler<PeerSet, Mempool>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
-    S::Future: Send,
+    PeerSet:
+        Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone + Send + 'static,
+    PeerSet::Future: Send,
+    Mempool:
+        Service<mempool::Request, Response = mempool::Response, Error = BoxError> + Send + 'static,
+    Mempool::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(peer_set: S, status: SyncStatus) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(
+        peer_set: PeerSet,
+        mempool: Mempool,
+        status: SyncStatus,
+    ) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
+            mempool,
             status,
         };
 
@@ -79,13 +92,13 @@ where
             // end the task on permanent peer set errors
             let peer_set = peer_set.ready_and().await?;
 
-            requests.push(peer_set.call(Request::MempoolTransactionIds));
+            requests.push(peer_set.call(zn::Request::MempoolTransactionIds));
         }
 
         while let Some(result) = requests.next().await {
             // log individual response errors
             match result {
-                Ok(response) => self.handle_response(response).await,
+                Ok(response) => self.handle_response(response).await?,
                 // TODO: Reduce the log level of the errors (#2655).
                 Err(error) => info!("Failed to crawl peer for mempool transactions: {}", error),
             }
@@ -95,9 +108,9 @@ where
     }
 
     /// Handle a peer's response to the crawler's request for transactions.
-    async fn handle_response(&mut self, response: Response) {
-        let transaction_ids = match response {
-            Response::TransactionIds(ids) => ids,
+    async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
+        let transaction_ids: Vec<_> = match response {
+            zn::Response::TransactionIds(ids) => ids.into_iter().map(Gossip::Id).collect(),
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
         };
 
@@ -106,6 +119,37 @@ where
             transaction_ids.len()
         );
 
-        // TODO: Send transaction IDs to the download and verify stream (#2650)
+        if !transaction_ids.is_empty() {
+            self.queue_transactions(transaction_ids).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Forward the crawled transactions IDs to the mempool transaction downloader.
+    async fn queue_transactions(&mut self, transaction_ids: Vec<Gossip>) -> Result<(), BoxError> {
+        let call_result = self
+            .mempool
+            .ready_and()
+            .await?
+            .call(mempool::Request::Queue(transaction_ids))
+            .await;
+
+        let queue_errors = match call_result {
+            Ok(mempool::Response::Queued(queue_results)) => {
+                queue_results.into_iter().filter_map(Result::err)
+            }
+            Ok(_) => unreachable!("Mempool did not respond with queue results to mempool crawler"),
+            Err(call_error) => {
+                debug!("Ignoring unexpected peer behavior: {}", call_error);
+                return Ok(());
+            }
+        };
+
+        for error in queue_errors {
+            debug!("Failed to download a crawled transaction: {}", error);
+        }
+
+        Ok(())
     }
 }
