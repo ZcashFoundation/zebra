@@ -55,6 +55,7 @@ where
     loop {
         // wait for at least one tip change, to make sure we have a new block hash to broadcast
         let tip_action = chain_state.wait_for_tip_change().await.map_err(TipChange)?;
+
         // wait until we're close to the tip, because broadcasts are only useful for nodes near the tip
         // (if they're a long way from the tip, they use the syncer and block locators)
         sync_status
