@@ -1,38 +1,53 @@
 use std::{collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc};
 
-use super::mempool::{unmined_transactions_in_blocks, Mempool};
-use crate::components::sync::SyncStatus;
-
 use futures::FutureExt;
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{
     buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, Service,
     ServiceExt,
 };
-
 use tracing::Span;
+
 use zebra_chain::{
     block::Block,
     parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, UnminedTxId},
 };
-
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{AddressBook, Request, Response};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
+use crate::components::{
+    mempool::{unmined_transactions_in_blocks, Mempool},
+    sync::{self, BlockGossipError, SyncStatus},
+};
+
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
-    let (inbound_service, added_transactions, _, mut peer_set, _) = setup(true).await;
+    let (
+        inbound_service,
+        committed_blocks,
+        added_transactions,
+        _,
+        mut peer_set,
+        _state_guard,
+        sync_gossip_task_handle,
+    ) = setup(true).await;
 
-    let added_transaction_ids: Vec<UnminedTxId> = added_transactions
-        .clone()
-        .unwrap()
-        .iter()
-        .map(|t| t.id)
-        .collect();
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
+
+    let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
     // Test `Request::MempoolTransactionIds`
     let response = inbound_service
@@ -58,11 +73,20 @@ async fn mempool_requests_for_transactions() {
         .await;
 
     match response {
-        Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions.unwrap()),
+        Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions),
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
     };
 
+    // check that nothing unexpected happened
+
     peer_set.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(sync_gossip_result, None),
+        "unexpected error or panic in sync gossip task: {:?}",
+        sync_gossip_result,
+    );
 }
 
 #[tokio::test]
@@ -74,7 +98,26 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
 
-    let (inbound_service, _, mut tx_verifier, mut peer_set, _) = setup(false).await;
+    let (
+        inbound_service,
+        committed_blocks,
+        _,
+        mut tx_verifier,
+        mut peer_set,
+        _state_guard,
+        sync_gossip_task_handle,
+    ) = setup(false).await;
+
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
 
     // Test `Request::PushTransaction`
     let request = inbound_service
@@ -104,7 +147,16 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         ),
     };
 
+    // check that nothing unexpected happened
+
     peer_set.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(sync_gossip_result, None),
+        "unexpected error or panic in sync gossip task: {:?}",
+        sync_gossip_result,
+    );
 
     Ok(())
 }
@@ -123,7 +175,26 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let test_transaction_id = test_transaction.unmined_id();
     let txs = HashSet::from_iter([test_transaction_id]);
 
-    let (inbound_service, _, mut tx_verifier, mut peer_set, _) = setup(false).await;
+    let (
+        inbound_service,
+        committed_blocks,
+        _,
+        mut tx_verifier,
+        mut peer_set,
+        _state_guard,
+        sync_gossip_task_handle,
+    ) = setup(false).await;
+
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
@@ -164,7 +235,16 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         ),
     };
 
+    // check that nothing unexpected happened
+
     peer_set.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(sync_gossip_result, None),
+        "unexpected error or panic in sync gossip task: {:?}",
+        sync_gossip_result,
+    );
 
     Ok(())
 }
@@ -187,7 +267,26 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let mut tx2_id = tx2.unmined_id();
 
     // Get services
-    let (inbound_service, _, mut tx_verifier, _peer_set, state_service) = setup(false).await;
+    let (
+        inbound_service,
+        committed_blocks,
+        _,
+        mut tx_verifier,
+        mut peer_set,
+        state_service,
+        sync_gossip_task_handle,
+    ) = setup(false).await;
+
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
 
     // Push test transaction
     let request = inbound_service
@@ -220,16 +319,21 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     };
 
     // Add a new block to the state (make the chain tip advance)
-    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+    let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into()
         .unwrap();
     state_service
         .clone()
         .oneshot(zebra_state::Request::CommitFinalizedBlock(
-            block_one.clone().into(),
+            block_two.clone().into(),
         ))
         .await
         .unwrap();
+
+    peer_set
+        .expect_request(Request::AdvertiseBlock(block_two.hash()))
+        .await
+        .respond(Response::Nil);
 
     // Make sure tx1 is still in the mempool as it is not expired yet.
     let request = inbound_service
@@ -247,16 +351,21 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     };
 
     // As our test transaction will expire at a block height greater or equal to 3 we need to push block 3.
-    let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
+    let block_three: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
         .zcash_deserialize_into()
         .unwrap();
     state_service
         .clone()
         .oneshot(zebra_state::Request::CommitFinalizedBlock(
-            block_two.clone().into(),
+            block_three.clone().into(),
         ))
         .await
         .unwrap();
+
+    peer_set
+        .expect_request(Request::AdvertiseBlock(block_three.hash()))
+        .await
+        .respond(Response::Nil);
 
     // Push a second transaction to trigger `remove_expired_transactions()`
     let request = inbound_service
@@ -322,6 +431,11 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+
         let request = inbound_service
             .clone()
             .oneshot(Request::MempoolTransactionIds)
@@ -338,6 +452,17 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         };
     }
 
+    // check that nothing unexpected happened
+
+    peer_set.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(sync_gossip_result, None),
+        "unexpected error or panic in sync gossip task: {:?}",
+        sync_gossip_result,
+    );
+
     Ok(())
 }
 
@@ -345,7 +470,8 @@ async fn setup(
     add_transactions: bool,
 ) -> (
     LoadShed<tower::buffer::Buffer<super::Inbound, zebra_network::Request>>,
-    Option<Vec<UnminedTx>>,
+    Vec<Arc<Block>>,
+    Vec<UnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     MockService<Request, Response, PanicAssertion>,
     Buffer<
@@ -356,6 +482,7 @@ async fn setup(
         >,
         zebra_state::Request,
     >,
+    JoinHandle<Result<(), BlockGossipError>>,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
@@ -378,6 +505,8 @@ async fn setup(
     let mock_tx_verifier = MockService::build().for_unit_tests();
     let buffered_tx_verifier = Buffer::new(BoxService::new(mock_tx_verifier.clone()), 10);
 
+    let mut committed_blocks = Vec::new();
+
     // Push the genesis block to the state.
     // This must be done before creating the mempool to avoid `chain_tip_change`
     // returning "reset" which would clear the mempool.
@@ -393,6 +522,7 @@ async fn setup(
         ))
         .await
         .unwrap();
+    committed_blocks.push(genesis_block);
 
     // Also push block 1.
     // Block one is a network upgrade and the mempool will be cleared at it,
@@ -407,23 +537,24 @@ async fn setup(
         ))
         .await
         .unwrap();
+    committed_blocks.push(block_one);
 
     let mut mempool_service = Mempool::new(
         network,
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
-        sync_status,
+        sync_status.clone(),
         latest_chain_tip,
-        chain_tip_change,
+        chain_tip_change.clone(),
     );
 
     // Enable the mempool
     let _ = mempool_service.enable(&mut recent_syncs).await;
 
-    let mut added_transactions = None;
+    let mut added_transactions = Vec::new();
     if add_transactions {
-        added_transactions = Some(add_some_stuff_to_mempool(&mut mempool_service, network));
+        added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
     }
 
     let mempool_service = BoxService::new(mempool_service);
@@ -444,12 +575,20 @@ async fn setup(
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
+    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
+        sync_status.clone(),
+        chain_tip_change,
+        peer_set.clone(),
+    ));
+
     (
         inbound_service,
+        committed_blocks,
         added_transactions,
         mock_tx_verifier,
         peer_set,
         state_service,
+        sync_gossip_task_handle,
     )
 }
 
