@@ -8,33 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+#### Mempool
+
 - Send crawled transaction IDs to downloader (#2801)
-- Test if the mempool storage is cleared (#2815)
 - Cancel mempool download tasks when a network upgrade activates (#2816)
 - Send mined transaction IDs to the download/verify task for cancellation (#2786)
-- Add metrics for initial peer network protocol versions (#2804)
 - Mempool support for transaction expiration (#2774)
 - Cancel download and verify tasks when the mempool is deactivated (#2764, #2754)
 - Reject conflicting mempool transactions (#2765)
-- Add tests for mempool Request::Queue (#2770)
 - Clear mempool at a network upgrade (#2773, #2785)
-- Add missing tests for mempool inbound requests (#2769)
-- Create a helper MockService type to help with writing tests that use mock tower::Services (#2810, #2748)
 
 #### Network Upgrade 5
 
 - Change current network protocol version for NU5 testnet (#2803)
 
+#### Testing and CI
+
+- Add missing tests for mempool inbound requests (#2769)
+- Add tests for mempool Request::Queue (#2770)
+- Create and use a helper MockService type to help with writing tests that use mock tower::Services (#2810, #2748, #2790)
+- Test if the mempool storage is cleared (#2815)
+
+#### Metrics
+
+- Add metrics for initial peer network protocol versions (#2804, #2811)
+
 ### Changed
 
-- Enable 'full' feature in tokio for zebra-test (#2809)
 - Send Response::Nil instead of sending empty Messages (#2791)
-- Replace mock_peer_set function with MockService (#2790)
 - Handle zero transaction expirations (#2782)
 
 ### Fixed
 
-- Fix join errors in initial seed peer versions dashboard (#2811)
 - Stop panicking when using sync and async methods on the same ChainTipChange (#2800)
 - Fix an incorrect assertion when the block locator is at the tip (#2789)
 
