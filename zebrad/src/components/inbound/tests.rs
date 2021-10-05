@@ -439,7 +439,7 @@ async fn setup(
     );
 
     // Enable the mempool
-    let _ = mempool_service.enable(&mut recent_syncs).await;
+    mempool_service.enable(&mut recent_syncs).await;
 
     let _ = tokio::spawn(gossip_mempool_transaction_id(
         transaction_receiver,
