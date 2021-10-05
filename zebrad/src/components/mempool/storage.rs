@@ -171,11 +171,15 @@ impl Storage {
         //
         // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
         if self.verified.len() > MEMPOOL_SIZE {
-            for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
+            let newly_evicted: Vec<_> = self.verified.drain(MEMPOOL_SIZE..).collect();
+
+            for evicted_tx in newly_evicted {
                 let _ = self.chain_rejected_same_effects.insert(
                     evicted_tx.id.mined_id(),
                     SameEffectsChainRejectionError::RandomlyEvicted,
                 );
+
+                self.remove_outputs(&evicted_tx);
             }
 
             assert_eq!(self.verified.len(), MEMPOOL_SIZE);
