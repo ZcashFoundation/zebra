@@ -562,7 +562,8 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     assert_eq!(
         result,
         Err(TransactionError::InternalDowncastError(
-            "downcast to redjubjub::Error failed, original error: ScriptInvalid".to_string()
+            "downcast to known transaction error type failed, original error: ScriptInvalid"
+                .to_string()
         ))
     );
 }

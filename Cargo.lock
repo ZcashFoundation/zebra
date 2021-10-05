@@ -4734,13 +4734,20 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.1.6-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4de0927bc365facf53a295c74b6f3df0a3f428dbac800446e7ca54a152d0c52"
+source = "git+https://github.com/jvff/zcash_script.git?rev=d2680fa30#d2680fa305c7db89b3bfd6544d47eab77717b578"
 dependencies = [
  "bindgen 0.58.1",
  "blake2b_simd",
  "cc",
+ "halo2",
+ "incrementalmerkletree",
  "libc",
+ "memuse",
+ "orchard",
+ "rand_core 0.6.3",
+ "tracing",
+ "zcash_note_encryption",
+ "zcash_primitives",
 ]
 
 [[package]]
