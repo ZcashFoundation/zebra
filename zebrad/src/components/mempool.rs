@@ -14,7 +14,6 @@ use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
     chain_tip::ChainTip,
-    parameters::Network,
     transaction::{UnminedTx, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
@@ -124,9 +123,7 @@ pub struct Mempool {
 }
 
 impl Mempool {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        _network: Network,
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,

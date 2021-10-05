@@ -4,7 +4,7 @@ use color_eyre::Report;
 use tokio::time;
 use tower::{ServiceBuilder, ServiceExt};
 
-use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 use zebra_consensus::Config as ConsensusConfig;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::MockService;
@@ -39,7 +39,6 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
 
     let mut service = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -169,7 +168,6 @@ async fn mempool_queue() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
 
     let mut service = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -266,7 +264,6 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
 
     let mut service = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -390,7 +387,6 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
 
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -505,7 +501,6 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
 
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,

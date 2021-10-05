@@ -94,7 +94,6 @@ impl StartCmd {
         let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(None);
 
         let mempool_service = BoxService::new(Mempool::new(
-            config.network.network,
             peer_set.clone(),
             state,
             tx_verifier,

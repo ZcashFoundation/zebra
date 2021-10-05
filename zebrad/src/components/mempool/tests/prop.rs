@@ -153,7 +153,6 @@ fn setup(
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
 
     let mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         Buffer::new(BoxService::new(state_service.clone()), 1),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
