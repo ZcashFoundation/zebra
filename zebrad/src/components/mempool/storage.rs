@@ -204,7 +204,24 @@ impl Storage {
     pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
         let original_size = self.verified.len();
 
-        self.verified.retain(|tx| !exact_wtxids.contains(&tx.id));
+        // Clippy is unable to detect that there will be a borrow conflict without the `collect`.
+        #[allow(clippy::needless_collect)]
+        let indices_to_remove: Vec<_> = self
+            .verified
+            .iter()
+            .enumerate()
+            .filter(|(_, tx)| exact_wtxids.contains(&tx.id))
+            .map(|(index, _)| index)
+            .collect();
+
+        for index_to_remove in indices_to_remove.into_iter().rev() {
+            let removed_tx = self
+                .verified
+                .remove(index_to_remove)
+                .expect("Index was obtained from the VecDeque");
+
+            self.remove_outputs(&removed_tx);
+        }
 
         original_size - self.verified.len()
     }
@@ -225,8 +242,24 @@ impl Storage {
     pub fn remove_same_effects(&mut self, mined_ids: &HashSet<transaction::Hash>) -> usize {
         let original_size = self.verified.len();
 
-        self.verified
-            .retain(|tx| !mined_ids.contains(&tx.id.mined_id()));
+        // Clippy is unable to detect that there will be a borrow conflict without the `collect`.
+        #[allow(clippy::needless_collect)]
+        let indices_to_remove: Vec<_> = self
+            .verified
+            .iter()
+            .enumerate()
+            .filter(|(_, tx)| mined_ids.contains(&tx.id.mined_id()))
+            .map(|(index, _)| index)
+            .collect();
+
+        for index_to_remove in indices_to_remove.into_iter().rev() {
+            let removed_tx = self
+                .verified
+                .remove(index_to_remove)
+                .expect("Index was obtained from the VecDeque");
+
+            self.remove_outputs(&removed_tx);
+        }
 
         original_size - self.verified.len()
     }
@@ -373,6 +406,21 @@ impl Storage {
             || self
                 .chain_rejected_same_effects
                 .contains_key(&txid.mined_id())
+    }
+
+    /// Removes the tracked transaction outputs from the mempool.
+    fn remove_outputs(&mut self, unmined_tx: &UnminedTx) {
+        let tx = &unmined_tx.transaction;
+
+        let spent_outpoints = tx.spent_outpoints().map(Cow::Owned);
+        let sprout_nullifiers = tx.sprout_nullifiers().map(Cow::Borrowed);
+        let sapling_nullifiers = tx.sapling_nullifiers().map(Cow::Borrowed);
+        let orchard_nullifiers = tx.orchard_nullifiers().map(Cow::Borrowed);
+
+        Self::remove_from_set(&mut self.spent_outpoints, spent_outpoints);
+        Self::remove_from_set(&mut self.sprout_nullifiers, sprout_nullifiers);
+        Self::remove_from_set(&mut self.sapling_nullifiers, sapling_nullifiers);
+        Self::remove_from_set(&mut self.orchard_nullifiers, orchard_nullifiers);
     }
 
     /// Checks if the `unmined_tx` transaction has spend conflicts with another transaction in the
