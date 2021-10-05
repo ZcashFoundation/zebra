@@ -234,6 +234,10 @@ impl Storage {
     /// Clears the whole mempool storage.
     pub fn clear(&mut self) {
         self.verified.clear();
+        self.spent_outpoints.clear();
+        self.sprout_nullifiers.clear();
+        self.sapling_nullifiers.clear();
+        self.orchard_nullifiers.clear();
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
         self.chain_rejected_same_effects.clear();
