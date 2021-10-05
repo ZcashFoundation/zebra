@@ -79,6 +79,7 @@ pub enum Response {
 ///
 /// Indicates wether it is enabled or disabled and, if enabled, contains
 /// the necessary data to run it.
+#[allow(clippy::large_enum_variant)]
 enum ActiveState {
     /// The Mempool is disabled.
     Disabled,

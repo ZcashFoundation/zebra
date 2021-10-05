@@ -5,7 +5,12 @@ use std::{
 
 use thiserror::Error;
 
-use zebra_chain::transaction::{self, Transaction, UnminedTx, UnminedTxId};
+use zebra_chain::{
+    orchard, sapling, sprout,
+    transaction::{self, Transaction, UnminedTx, UnminedTxId},
+    transparent,
+};
+use zebra_consensus::error::TransactionError;
 
 use super::MempoolError;
 
@@ -111,6 +116,18 @@ pub struct Storage {
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
     chain_rejected_same_effects: HashMap<transaction::Hash, SameEffectsChainRejectionError>,
+
+    /// The set of spent out points by the verified transactions.
+    spent_outpoints: HashSet<transparent::OutPoint>,
+
+    /// The set of revealed Sprout nullifiers.
+    sprout_nullifiers: HashSet<sprout::Nullifier>,
+
+    /// The set of revealed Sapling nullifiers.
+    sapling_nullifiers: HashSet<sapling::Nullifier>,
+
+    /// The set of revealed Orchard nullifiers.
+    orchard_nullifiers: HashSet<orchard::Nullifier>,
 }
 
 impl Storage {
