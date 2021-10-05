@@ -406,12 +406,30 @@ impl Storage {
     where
         Output: Clone + Eq + Hash + 'tx,
     {
+        let mut inserted_outputs = Vec::with_capacity(new_outputs.size_hint().1.unwrap_or(0));
+
         for new_output in new_outputs {
-            if !existing_outputs.insert(new_output.into_owned()) {
+            if existing_outputs.insert(new_output.clone().into_owned()) {
+                inserted_outputs.push(new_output);
+            } else {
+                Self::remove_from_set(existing_outputs, inserted_outputs);
                 return true;
             }
         }
 
         false
+    }
+
+    /// Removes some items from a [`HashSet`].
+    ///
+    /// Each item in the list of `items` should be wrapped in a [`Cow`]. This allows this generic
+    /// method to support both borrowed and owned items.
+    fn remove_from_set<'t, T>(set: &mut HashSet<T>, items: impl IntoIterator<Item = Cow<'t, T>>)
+    where
+        T: Clone + Eq + Hash + 't,
+    {
+        for item in items {
+            set.remove(&item);
+        }
     }
 }
