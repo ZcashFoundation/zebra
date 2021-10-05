@@ -3,10 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use zebra_chain::{
-    block,
-    transaction::{self, Transaction, UnminedTx, UnminedTxId},
-};
+use zebra_chain::transaction::{self, Transaction, UnminedTx, UnminedTxId};
 use zebra_consensus::error::TransactionError;
 
 use super::MempoolError;
@@ -21,17 +18,10 @@ const MEMPOOL_SIZE: usize = 2;
 pub enum State {
     /// Rejected because verification failed.
     Invalid(TransactionError),
-    /// An otherwise valid mempool transaction was mined into a block, therefore
-    /// no longer belongs in the mempool.
-    Confirmed(block::Hash),
     /// Rejected because it has a spend conflict with another transaction already in the mempool.
     SpendConflict,
     /// Stayed in mempool for too long without being mined.
-    // TODO(2021-09-09): Implement ZIP-203: Validate Transaction Expiry Height.
-    // TODO(2021-09-09): https://github.com/ZcashFoundation/zebra/issues/2387
     Expired,
-    /// Transaction fee is too low for the current mempool state.
-    LowFee,
     /// Otherwise valid transaction removed from mempool, say because of FIFO
     /// (first in, first out) policy.
     Excess,
@@ -59,9 +49,7 @@ impl Storage {
             return Err(match self.rejected.get(&tx.id).unwrap() {
                 State::Invalid(e) => MempoolError::Invalid(e.clone()),
                 State::Expired => MempoolError::Expired,
-                State::Confirmed(block_hash) => MempoolError::InBlock(*block_hash),
                 State::Excess => MempoolError::Excess,
-                State::LowFee => MempoolError::LowFee,
                 State::SpendConflict => MempoolError::SpendConflict,
             });
         }
