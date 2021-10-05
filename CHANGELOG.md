@@ -6,35 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-alpha.18](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-10-05
 
-    Send crawled transaction IDs to downloader (#2801)
-    Tweak some assertions to better match their error messages (#2822)
-    Remove some dead code attributes from the mempool (#2820)
-    Fix or disable recent nightly clippy lints (#2817)
-    Test if the mempool storage is cleared (#2815)
-    Fix join errors in initial seed peer versions dashboard (#2811)
-    Enable 'full' feature in tokio for zebra-test (#2809)
-    Cancel mempool download tasks when a network upgrade activates (#2816)
-    Improve MockService ergonomics for sending error responses (#2810)
-    Send mined transaction IDs to the download/verify task for cancellation (#2786)
-    Add metrics for initial peer network protocol versions (#2804)
-    Use complete addition instead of incomplete addition inside sinsemilla_commit (#2807)
-    Mempool support for transaction expiration (#2774)
-    Cancel download and verify tasks when the mempool is deactivated (#2764)
-    Stop panicking when using sync and async methods on the same ChainTipChange (#2800)
-    Reject conflicting mempool transactions (#2765)
-    Fix an incorrect assertion when the block locator is at the tip (#2789)
-    Change current network protocol version for NU5 testnet (#2803)
-    Add tests for mempool Request::Queue (#2770)
-    Send Response::Nil instead of sending empty Messages (#2791)
-    Clear mempool at a network upgrade (#2773)
-    Refactor mempool tests (#2771)
-    Add missing tests for mempool inbound requests (#2769)
-    Replace mock_peer_set function with MockService (#2790)
-    Allow deliberate instances of the clippy::derivable_impls lint (#2788)
-    Handle zero transaction expirations (#2782)
-    Create a helper MockService type to help with writing tests that use mock tower::Services (#2748)
-    Sneak chain_tip_change into mempool (#2785)
-    Pass sync_status to mempool (#2754)
+### Added
+
+- Send crawled transaction IDs to downloader (#2801)
+- Test if the mempool storage is cleared (#2815)
+- Cancel mempool download tasks when a network upgrade activates (#2816)
+- Send mined transaction IDs to the download/verify task for cancellation (#2786)
+- Add metrics for initial peer network protocol versions (#2804)
+- Mempool support for transaction expiration (#2774)
+- Cancel download and verify tasks when the mempool is deactivated (#2764, #2754)
+- Reject conflicting mempool transactions (#2765)
+- Add tests for mempool Request::Queue (#2770)
+- Clear mempool at a network upgrade (#2773, #2785)
+- Add missing tests for mempool inbound requests (#2769)
+- Create a helper MockService type to help with writing tests that use mock tower::Services (#2810, #2748)
+
+#### Network Upgrade 5
+
+- Change current network protocol version for NU5 testnet (#2803)
+
+### Changed
+
+- Enable 'full' feature in tokio for zebra-test (#2809)
+- Send Response::Nil instead of sending empty Messages (#2791)
+- Replace mock_peer_set function with MockService (#2790)
+- Handle zero transaction expirations (#2782)
+
+### Fixed
+
+- Fix join errors in initial seed peer versions dashboard (#2811)
+- Stop panicking when using sync and async methods on the same ChainTipChange (#2800)
+- Fix an incorrect assertion when the block locator is at the tip (#2789)
+
+### Security
+
+#### Network Upgrade 5
+
+- Use complete addition instead of incomplete addition inside sinsemilla_commit (#2807)
 
 ## [Zebra 1.0.0-alpha.17](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-09-14
 
