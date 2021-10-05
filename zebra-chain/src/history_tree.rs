@@ -198,12 +198,14 @@ impl NonEmptyHistoryTree {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        if height - self.current_height != 1 {
-            panic!(
-                "added block with height {:?} but it must be {:?}+1",
-                height, self.current_height
-            );
-        }
+
+        assert!(
+            Some(height) == self.current_height + 1,
+            "added block with height {:?} but it must be {:?}+1",
+            height,
+            self.current_height
+        );
+
         let network_upgrade = NetworkUpgrade::current(self.network, height);
         if network_upgrade != self.network_upgrade {
             // This is the activation block of a network upgrade.

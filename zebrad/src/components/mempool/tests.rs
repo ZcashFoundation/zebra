@@ -1,350 +1,50 @@
-use super::*;
-use color_eyre::Report;
-use std::collections::HashSet;
-use storage::tests::unmined_transactions_in_blocks;
-use tower::{ServiceBuilder, ServiceExt};
+use std::pin::Pin;
 
-use zebra_consensus::Config as ConsensusConfig;
-use zebra_state::Config as StateConfig;
-use zebra_test::mock_service::MockService;
+use tower::ServiceExt;
 
-#[tokio::test]
-async fn mempool_service_basic() -> Result<(), Report> {
-    // Using the mainnet for now
-    let network = Network::Mainnet;
-    let consensus_config = ConsensusConfig::default();
-    let state_config = StateConfig::ephemeral();
-    let peer_set = MockService::build().for_unit_tests();
-    let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, latest_chain_tip, chain_tip_change) =
-        zebra_state::init(state_config.clone(), network);
+use super::{storage::Storage, ActiveState, InboundTxDownloads, Mempool, Request};
+use crate::components::sync::{RecentSyncLengths, SyncStatus};
 
-    let state_service = ServiceBuilder::new().buffer(1).service(state);
-    let (_chain_verifier, tx_verifier) =
-        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
-            .await;
+mod prop;
+mod vector;
 
-    // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
-    let genesis_transaction = unmined_transactions
-        .next()
-        .expect("Missing genesis transaction");
-    let txid = unmined_transactions.next_back().unwrap().id;
-    let more_transactions = unmined_transactions;
-
-    // Start the mempool service
-    let mut service = Mempool::new(
-        network,
-        Buffer::new(BoxService::new(peer_set), 1),
-        state_service.clone(),
-        tx_verifier,
-        sync_status,
-        latest_chain_tip,
-        chain_tip_change,
-    );
-
-    // Enable the mempool
-    let _ = service.enable(&mut recent_syncs).await;
-
-    // Insert the genesis block coinbase transaction into the mempool storage.
-    service.storage().insert(genesis_transaction.clone())?;
-
-    // Test `Request::TransactionIds`
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
-    let genesis_transaction_ids = match response {
-        Response::TransactionIds(ids) => ids,
-        _ => unreachable!("will never happen in this test"),
-    };
-
-    // Test `Request::TransactionsById`
-    let genesis_transactions_hash_set = genesis_transaction_ids
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionsById(
-            genesis_transactions_hash_set.clone(),
-        ))
-        .await
-        .unwrap();
-    let transactions = match response {
-        Response::Transactions(transactions) => transactions,
-        _ => unreachable!("will never happen in this test"),
-    };
-
-    // Make sure the transaction from the blockchain test vector is the same as the
-    // response of `Request::TransactionsById`
-    assert_eq!(genesis_transaction, transactions[0]);
-
-    // Insert more transactions into the mempool storage.
-    // This will cause the genesis transaction to be moved into rejected.
-    // Skip the last (will be used later)
-    for tx in more_transactions {
-        service.storage().insert(tx.clone())?;
-    }
-
-    // Test `Request::RejectedTransactionIds`
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::RejectedTransactionIds(
-            genesis_transactions_hash_set,
-        ))
-        .await
-        .unwrap();
-    let rejected_ids = match response {
-        Response::RejectedTransactionIds(ids) => ids,
-        _ => unreachable!("will never happen in this test"),
-    };
-
-    assert_eq!(rejected_ids, genesis_transaction_ids);
-
-    // Test `Request::Queue`
-    // Use the ID of the last transaction in the list
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-    assert_eq!(service.tx_downloads().in_flight(), 1);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn mempool_queue() -> Result<(), Report> {
-    // Using the mainnet for now
-    let network = Network::Mainnet;
-    let consensus_config = ConsensusConfig::default();
-    let state_config = StateConfig::ephemeral();
-    let peer_set = MockService::build().for_unit_tests();
-    let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, latest_chain_tip, chain_tip_change) =
-        zebra_state::init(state_config.clone(), network);
-
-    let state_service = ServiceBuilder::new().buffer(1).service(state);
-    let (_chain_verifier, tx_verifier) =
-        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
-            .await;
-
-    // Get transactions to use in the test
-    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
-    let mut transactions = unmined_transactions;
-    // Split unmined_transactions into:
-    // [rejected_tx, transactions..., stored_tx, new_tx]
-    //
-    // The first transaction to be added in the mempool which will be eventually
-    // put in the rejected list
-    let rejected_tx = transactions.next().unwrap().clone();
-    // A transaction not in the mempool that will be Queued
-    let new_tx = transactions.next_back().unwrap();
-    // The last transaction that will be added in the mempool (and thus not rejected)
-    let stored_tx = transactions.next_back().unwrap().clone();
-
-    // Start the mempool service
-    let mut service = Mempool::new(
-        network,
-        Buffer::new(BoxService::new(peer_set), 1),
-        state_service.clone(),
-        tx_verifier,
-        sync_status,
-        latest_chain_tip,
-        chain_tip_change,
-    );
-
-    // Enable the mempool
-    let _ = service.enable(&mut recent_syncs).await;
-
-    // Insert [rejected_tx, transactions..., stored_tx] into the mempool storage.
-    // Insert the genesis block coinbase transaction into the mempool storage.
-    service.storage().insert(rejected_tx.clone())?;
-    // Insert more transactions into the mempool storage.
-    // This will cause the `rejected_tx` to be moved into rejected.
-    for tx in transactions {
-        service.storage().insert(tx.clone())?;
-    }
-    service.storage().insert(stored_tx.clone())?;
-
-    // Test `Request::Queue` for a new transaction
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![new_tx.id.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-
-    // Test `Request::Queue` for a transaction already in the mempool
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![stored_tx.id.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert_eq!(queued_responses[0], Err(MempoolError::InMempool));
-
-    // Test `Request::Queue` for a transaction rejected by the mempool
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![rejected_tx.id.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert_eq!(queued_responses[0], Err(MempoolError::Rejected));
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn mempool_service_disabled() -> Result<(), Report> {
-    // Using the mainnet for now
-    let network = Network::Mainnet;
-    let consensus_config = ConsensusConfig::default();
-    let state_config = StateConfig::ephemeral();
-    let peer_set = MockService::build().for_unit_tests();
-    let (sync_status, mut recent_syncs) = SyncStatus::new();
-
-    let (state, latest_chain_tip, chain_tip_change) = zebra_state::init(state_config, network);
-    let state_service = ServiceBuilder::new().buffer(1).service(state);
-    let (_chain_verifier, tx_verifier) =
-        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
-            .await;
-
-    // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
-    let genesis_transaction = unmined_transactions
-        .next()
-        .expect("Missing genesis transaction");
-    let more_transactions = unmined_transactions;
-
-    // Start the mempool service
-    let mut service = Mempool::new(
-        network,
-        Buffer::new(BoxService::new(peer_set), 1),
-        state_service.clone(),
-        tx_verifier,
-        sync_status,
-        latest_chain_tip,
-        chain_tip_change,
-    );
-
-    // Test if mempool is disabled (it should start disabled)
-    assert!(!service.is_enabled());
-
-    // Enable the mempool
-    let _ = service.enable(&mut recent_syncs).await;
-
-    assert!(service.is_enabled());
-
-    // Insert the genesis block coinbase transaction into the mempool storage.
-    service.storage().insert(genesis_transaction.clone())?;
-
-    // Test if the mempool answers correctly (i.e. is enabled)
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
-    let _genesis_transaction_ids = match response {
-        Response::TransactionIds(ids) => ids,
-        _ => unreachable!("will never happen in this test"),
-    };
-
-    // Queue a transaction for download
-    // Use the ID of the last transaction in the list
-    let txid = more_transactions.last().unwrap().id;
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-    assert_eq!(service.tx_downloads().in_flight(), 1);
-
-    // Disable the mempool
-    let _ = service.disable(&mut recent_syncs).await;
-
-    // Test if mempool is disabled again
-    assert!(!service.is_enabled());
-
-    // Test if the mempool returns no transactions when disabled
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::TransactionIds)
-        .await
-        .unwrap();
-    match response {
-        Response::TransactionIds(ids) => {
-            assert_eq!(
-                ids.len(),
-                0,
-                "mempool should return no transactions when disabled"
-            )
+impl Mempool {
+    /// Get the storage field of the mempool for testing purposes.
+    pub fn storage(&mut self) -> &mut Storage {
+        match &mut self.active_state {
+            ActiveState::Disabled => panic!("mempool must be enabled"),
+            ActiveState::Enabled { storage, .. } => storage,
         }
-        _ => unreachable!("will never happen in this test"),
-    };
+    }
 
-    // Test if the mempool returns to Queue requests correctly when disabled
-    let response = service
-        .ready_and()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert_eq!(queued_responses[0], Err(MempoolError::Disabled));
+    /// Get the transaction downloader of the mempool for testing purposes.
+    pub fn tx_downloads(&self) -> &Pin<Box<InboundTxDownloads>> {
+        match &self.active_state {
+            ActiveState::Disabled => panic!("mempool must be enabled"),
+            ActiveState::Enabled { tx_downloads, .. } => tx_downloads,
+        }
+    }
 
-    Ok(())
+    /// Enable the mempool by pretending the synchronization is close to the tip.
+    pub async fn enable(&mut self, recent_syncs: &mut RecentSyncLengths) {
+        // Pretend we're close to tip
+        SyncStatus::sync_close_to_tip(recent_syncs);
+        // Make a dummy request to poll the mempool and make it enable itself
+        self.dummy_call().await;
+    }
+
+    /// Disable the mempool by pretending the synchronization is far from the tip.
+    pub async fn disable(&mut self, recent_syncs: &mut RecentSyncLengths) {
+        // Pretend we're far from the tip
+        SyncStatus::sync_far_from_tip(recent_syncs);
+        // Make a dummy request to poll the mempool and make it disable itself
+        self.dummy_call().await;
+    }
+
+    /// Perform a dummy service call so that `poll_ready` is called.
+    pub async fn dummy_call(&mut self) {
+        self.oneshot(Request::Queue(vec![]))
+            .await
+            .expect("Queuing no transactions shouldn't fail");
+    }
 }

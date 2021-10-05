@@ -40,8 +40,6 @@ use self::downloads::{
     Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
-#[cfg(test)]
-use super::sync::RecentSyncLengths;
 use super::sync::SyncStatus;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -52,7 +50,7 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum Request {
     TransactionIds,
@@ -83,7 +81,7 @@ enum ActiveState {
         /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
         storage: storage::Storage,
-        /// The transaction dowload and verify stream.
+        /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
 }
@@ -98,13 +96,11 @@ pub struct Mempool {
     active_state: ActiveState,
 
     /// Allows checking if we are near the tip to enable/disable the mempool.
-    #[allow(dead_code)]
     sync_status: SyncStatus,
 
     /// Allow efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
     /// Allows the detection of chain tip resets.
-    #[allow(dead_code)]
     chain_tip_change: ChainTipChange,
 
     /// Handle to the outbound service.
@@ -121,7 +117,6 @@ pub struct Mempool {
 }
 
 impl Mempool {
-    #[allow(dead_code)]
     pub(crate) fn new(
         _network: Network,
         outbound: Outbound,
@@ -175,44 +170,6 @@ impl Mempool {
         }
     }
 
-    /// Get the storage field of the mempool for testing purposes.
-    #[cfg(test)]
-    pub fn storage(&mut self) -> &mut storage::Storage {
-        match &mut self.active_state {
-            ActiveState::Disabled => panic!("mempool must be enabled"),
-            ActiveState::Enabled { storage, .. } => storage,
-        }
-    }
-
-    /// Get the transaction downloader of the mempool for testing purposes.
-    #[cfg(test)]
-    pub fn tx_downloads(&self) -> &Pin<Box<InboundTxDownloads>> {
-        match &self.active_state {
-            ActiveState::Disabled => panic!("mempool must be enabled"),
-            ActiveState::Enabled { tx_downloads, .. } => tx_downloads,
-        }
-    }
-
-    /// Enable the mempool by pretending the synchronization is close to the tip.
-    #[cfg(test)]
-    pub async fn enable(&mut self, recent_syncs: &mut RecentSyncLengths) {
-        use tower::ServiceExt;
-        // Pretend we're close to tip
-        SyncStatus::sync_close_to_tip(recent_syncs);
-        // Make a dummy request to poll the mempool and make it enable itself
-        let _ = self.oneshot(Request::TransactionIds).await;
-    }
-
-    /// Disable the mempool by pretending the synchronization is far from the tip.
-    #[cfg(test)]
-    pub async fn disable(&mut self, recent_syncs: &mut RecentSyncLengths) {
-        use tower::ServiceExt;
-        // Pretend we're far from the tip
-        SyncStatus::sync_far_from_tip(recent_syncs);
-        // Make a dummy request to poll the mempool and make it disable itself
-        let _ = self.oneshot(Request::TransactionIds).await;
-    }
-
     /// Check if transaction should be downloaded and/or verified.
     ///
     /// If it is already in the mempool (or in its rejected list)
@@ -246,9 +203,20 @@ impl Service<Request> for Mempool {
                 storage,
                 tx_downloads,
             } => {
-                // Clear the mempool if there has been a chain tip reset.
-                if let Some(TipAction::Reset { .. }) = self.chain_tip_change.last_tip_change() {
-                    storage.clear();
+                if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
+                    match tip_action {
+                        // Clear the mempool and cancel downloads if there has been a chain tip reset.
+                        TipAction::Reset { .. } => {
+                            storage.clear();
+                            tx_downloads.cancel_all();
+                        }
+                        // Cancel downloads/verifications of transactions with the same
+                        // IDs as recently mined transactions.
+                        TipAction::Grow { block } => {
+                            let txid_set = block.transaction_hashes.iter().collect();
+                            tx_downloads.cancel(txid_set);
+                        }
+                    }
                 }
 
                 // Clean up completed download tasks and add to mempool if successful.
@@ -268,7 +236,7 @@ impl Service<Request> for Mempool {
             ActiveState::Disabled => {
                 // When the mempool is disabled we still return that the service is ready.
                 // Otherwise, callers could block waiting for the mempool to be enabled,
-                // which may not be the desired behaviour.
+                // which may not be the desired behavior.
             }
         }
 

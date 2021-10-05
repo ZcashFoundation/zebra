@@ -1,4 +1,5 @@
 use std::{
+    cmp::min,
     collections::HashSet,
     fmt,
     future::Future,
@@ -588,8 +589,58 @@ pub async fn negotiate_version(
     let height = latest_chain_tip.best_tip_height();
     let min_version = Version::min_remote_for_height(config.network, height);
     if remote_version < min_version {
+        debug!(
+            remote_ip = ?their_addr,
+            ?remote_version,
+            ?min_version,
+            "disconnecting from peer with obsolete network protocol version"
+        );
+
+        // the value is the number of rejected handshakes, by peer IP and protocol version
+        metrics::counter!(
+            "zcash.net.peers.obsolete",
+            1,
+            "remote_ip" => their_addr.to_string(),
+            "remote_version" => remote_version.to_string(),
+            "min_version" => min_version.to_string(),
+        );
+
+        // the value is the remote version of the most recent rejected handshake from each peer
+        metrics::gauge!(
+            "zcash.net.peers.version.obsolete",
+            remote_version.0.into(),
+            "remote_ip" => their_addr.to_string(),
+        );
+
         // Disconnect if peer is using an obsolete version.
         Err(HandshakeError::ObsoleteVersion(remote_version))?;
+    } else {
+        let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote_version);
+
+        debug!(
+            remote_ip = ?their_addr,
+            ?remote_version,
+            ?negotiated_version,
+            ?min_version,
+            "negotiated network protocol version with peer"
+        );
+
+        // the value is the number of connected handshakes, by peer IP and protocol version
+        metrics::counter!(
+            "zcash.net.peers.connected",
+            1,
+            "remote_ip" => their_addr.to_string(),
+            "remote_version" => remote_version.to_string(),
+            "negotiated_version" => negotiated_version.to_string(),
+            "min_version" => min_version.to_string(),
+        );
+
+        // the value is the remote version of the most recent connected handshake from each peer
+        metrics::gauge!(
+            "zcash.net.peers.version.connected",
+            remote_version.0.into(),
+            "remote_ip" => their_addr.to_string(),
+        );
     }
 
     peer_conn.send(Message::Verack).await?;

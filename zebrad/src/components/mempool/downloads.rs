@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -16,7 +16,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
@@ -66,7 +66,7 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Gossip {
     Id(UnminedTxId),
     Tx(UnminedTx),
@@ -313,6 +313,40 @@ where
         metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
 
         Ok(())
+    }
+
+    /// Cancel download/verification tasks of transactions with the
+    /// given transaction hash (see [`UnminedTxId::mined_id`]).
+    pub fn cancel(&mut self, mined_ids: HashSet<&transaction::Hash>) {
+        // TODO: this can be simplified with [`HashMap::drain_filter`] which
+        // is currently nightly-only experimental API.
+        let removed_txids: Vec<UnminedTxId> = self
+            .cancel_handles
+            .keys()
+            .filter(|txid| mined_ids.contains(&txid.mined_id()))
+            .cloned()
+            .collect();
+
+        for txid in removed_txids {
+            if let Some(handle) = self.cancel_handles.remove(&txid) {
+                let _ = handle.send(());
+            }
+        }
+    }
+
+    /// Cancel all running tasks and reset the downloader state.
+    // Note: copied from zebrad/src/components/sync/downloads.rs
+    pub fn cancel_all(&mut self) {
+        // Replace the pending task list with an empty one and drop it.
+        let _ = std::mem::take(&mut self.pending);
+        // Signal cancellation to all running tasks.
+        // Since we already dropped the JoinHandles above, they should
+        // fail silently.
+        for (_hash, cancel) in self.cancel_handles.drain() {
+            let _ = cancel.send(());
+        }
+        assert!(self.pending.is_empty());
+        assert!(self.cancel_handles.is_empty());
     }
 
     /// Get the number of currently in-flight download tasks.

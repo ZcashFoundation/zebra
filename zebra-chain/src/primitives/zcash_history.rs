@@ -182,12 +182,13 @@ impl<V: Version> Tree<V> {
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(self.network, height);
-        if self.network_upgrade != network_upgrade {
-            panic!(
-                "added block from network upgrade {:?} but history tree is restricted to {:?}",
-                network_upgrade, self.network_upgrade
-            );
-        }
+
+        assert!(
+            network_upgrade == self.network_upgrade,
+            "added block from network upgrade {:?} but history tree is restricted to {:?}",
+            network_upgrade,
+            self.network_upgrade
+        );
 
         let node_data = V::block_to_history_node(block, self.network, sapling_root, orchard_root);
         let appended = self.inner.append_leaf(node_data)?;
