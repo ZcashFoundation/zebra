@@ -66,7 +66,7 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Gossip {
     Id(UnminedTxId),
     Tx(UnminedTx),

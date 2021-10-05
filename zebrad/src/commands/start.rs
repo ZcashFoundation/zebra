@@ -105,7 +105,7 @@ impl StartCmd {
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 
         setup_tx
-            .send((peer_set.clone(), address_book, mempool))
+            .send((peer_set.clone(), address_book, mempool.clone()))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
         let sync_gossip_transactions = tokio::spawn(mempool::gossip_mempool_transaction_id(
@@ -113,7 +113,7 @@ impl StartCmd {
             peer_set.clone(),
         ));
 
-        let mempool_crawl = mempool::Crawler::spawn(peer_set, sync_status);
+        let mempool_crawl = mempool::Crawler::spawn(peer_set, mempool, sync_status);
 
         select! {
             sync_result = syncer.sync().fuse() => sync_result,

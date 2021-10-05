@@ -184,7 +184,7 @@ impl<V: Version> Tree<V> {
         let network_upgrade = NetworkUpgrade::current(self.network, height);
 
         assert!(
-            self.network_upgrade == network_upgrade,
+            network_upgrade == self.network_upgrade,
             "added block from network upgrade {:?} but history tree is restricted to {:?}",
             network_upgrade,
             self.network_upgrade

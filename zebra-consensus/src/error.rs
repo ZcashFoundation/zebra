@@ -9,6 +9,9 @@ use thiserror::Error;
 
 use crate::BoxError;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 #[derive(Error, Copy, Clone, Debug, PartialEq)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
@@ -19,6 +22,7 @@ pub enum SubsidyError {
 }
 
 #[derive(Error, Clone, Debug, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
     CoinbasePosition,
@@ -45,6 +49,7 @@ pub enum TransactionError {
     CoinbaseInMempool,
 
     #[error("coinbase transaction failed subsidy validation")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Subsidy(#[from] SubsidyError),
 
     #[error("transaction version number MUST be >= 4")]
@@ -63,6 +68,7 @@ pub enum TransactionError {
     BadBalance,
 
     #[error("could not verify a transparent script")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Script(#[from] zebra_script::Error),
 
     #[error("spend description cv and rk MUST NOT be of small order")]
@@ -76,12 +82,15 @@ pub enum TransactionError {
     #[error(
         "Sprout joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
     )]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Ed25519(#[from] zebra_chain::primitives::ed25519::Error),
 
     #[error("Sapling bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedJubjub(zebra_chain::primitives::redjubjub::Error),
 
     #[error("Orchard bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedPallas(zebra_chain::primitives::redpallas::Error),
 
     // temporary error type until #1186 is fixed
