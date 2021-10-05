@@ -24,30 +24,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 #### Testing and CI
 
-- Add missing tests for mempool inbound requests (#2769)
-- Add tests for mempool Request::Queue (#2770)
-- Create and use a helper MockService type to help with writing tests that use mock tower::Services (#2810, #2748, #2790)
-- Test if the mempool storage is cleared (#2815)
+- Add tests to ensure mempool is working correctly (#2769, #2770, #2815)
+- Create and use a helper MockService type to help with writing tests (#2810, #2748, #2790)
 
 #### Metrics
 
-- Add metrics for initial peer network protocol versions (#2804, #2811)
+- Add Grafana dashboard to view metrics on connected peers and their network protocol versions (#2804, #2811)
 
 ### Changed
 
-- Send Response::Nil instead of sending empty Messages (#2791)
-- Handle zero transaction expirations (#2782)
+- Stop sending empty responses to peers (#2791)
+- Handle transaction expiration in the Genesis block (#2782)
 
 ### Fixed
 
-- Stop panicking when using sync and async methods on the same ChainTipChange (#2800)
+- Stop panicking when using sync and async methods on the same chain tip (#2800)
 - Fix an incorrect assertion when the block locator is at the tip (#2789)
 
 ### Security
 
 #### Network Upgrade 5
 
-- Use complete addition instead of incomplete addition inside sinsemilla_commit (#2807)
+- Circuit bugfix to match orchard crate fix (#2807)
 
 ## [Zebra 1.0.0-alpha.17](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-09-14
 
