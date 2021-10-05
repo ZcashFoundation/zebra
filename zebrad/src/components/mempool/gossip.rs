@@ -40,8 +40,6 @@ where
 
         let request = zn::Request::AdvertiseTransactionIds(hs);
 
-        dbg!(&request);
-
         info!(?request, "sending mempool transaction broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
