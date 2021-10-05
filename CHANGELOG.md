@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-alpha.18](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.18) - 2021-10-05
 
+Zebra's latest alpha updates dependencies, consensus parameters, and Orchard for NU5 testnet activation. It continues our work on the mempool, including some mempool features that are used during network upgrade activation.
 ### Added
 
 #### Mempool
