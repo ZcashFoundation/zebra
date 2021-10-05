@@ -442,7 +442,7 @@ async fn setup(
 
     let r = setup_tx.send((buffered_peer_set, address_book, mempool));
     // We can't expect or unwrap because the returned Result does not implement Debug
-    assert!(r.is_ok());
+    assert!(r.is_ok(), "unexpected setup channel send failure");
 
     (
         inbound_service,
