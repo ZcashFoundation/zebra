@@ -13,17 +13,17 @@ It continues our work on the mempool, including some mempool features that are u
 
 #### Mempool
 
-- Send crawled transaction IDs to downloader (#2801)
+- Send crawled transaction IDs to the mempool downloader (#2801)
 - Cancel mempool download tasks when a network upgrade activates (#2816)
-- Send mined transaction IDs to the download/verify task for cancellation (#2786)
-- Mempool support for transaction expiration (#2774)
+- Send mined transaction IDs to the mempool download/verify task for cancellation (#2786)
+- Remove expired transactions from the mempool (#2774)
 - Cancel download and verify tasks when the mempool is deactivated (#2764, #2754)
 - Reject conflicting mempool transactions (#2765)
 - Clear mempool at a network upgrade (#2773, #2785)
 
 #### Network Upgrade 5
 
-- Change current network protocol version for NU5 testnet (#2803)
+- Update Zebra's advertised network protocol version to the latest NU5 testnet version (#2803)
 
 #### Testing and CI
 
@@ -32,12 +32,12 @@ It continues our work on the mempool, including some mempool features that are u
 
 #### Metrics
 
-- Add Grafana dashboard to view metrics on connected peers and their network protocol versions (#2804, #2811)
+- Add Zebra metrics and a Grafana dashboard for connected peers and their network protocol versions (#2804, #2811)
 
 ### Changed
 
-- Stop sending empty responses to peers (#2791)
-- Handle transaction expiration in the Genesis block (#2782)
+- Stop sending empty network messages to peers (#2791)
+- Correctly validate transactions which never expire (#2782)
 
 ### Fixed
 
@@ -48,7 +48,7 @@ It continues our work on the mempool, including some mempool features that are u
 
 #### Network Upgrade 5
 
-- Circuit bugfix to match orchard crate fix (#2807)
+- Update Zebra's orchard commitment calculations based on the latest orchard circuit (#2807)
 
 ## [Zebra 1.0.0-alpha.17](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-09-14
 
