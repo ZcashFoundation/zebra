@@ -27,10 +27,10 @@ chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.2"
 fpe = "0.4"
 futures = "0.3"
-group = "0.10"
+group = "0.11"
 halo2 = "=0.1.0-beta.1"
 hex = "0.4"
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
+incrementalmerkletree = "0.1.0"
 jubjub = "0.7.0"
 lazy_static = "1.4.0"
 rand_core = "0.6"

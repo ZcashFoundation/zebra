@@ -1869,16 +1869,7 @@ dependencies = [
 [[package]]
 name = "incrementalmerkletree"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16d75fb342984cc8cea665a9ef5607b4956569839ca098172082fa1b19bdaf02"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "incrementalmerkletree"
-version = "0.1.0"
-source = "git+https://github.com/zcash/incrementalmerkletree.git?rev=b7bd6246122a6e9ace8edb51553fbf5228906cbb#b7bd6246122a6e9ace8edb51553fbf5228906cbb"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=b7bd6246122a6e9ace8edb51553fbf5228906cbb#b7bd6246122a6e9ace8edb51553fbf5228906cbb"
 dependencies = [
  "serde",
 ]
@@ -2475,7 +2466,7 @@ dependencies = [
  "fpe 0.5.0",
  "group 0.11.0",
  "halo2",
- "incrementalmerkletree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "incrementalmerkletree",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -4724,7 +4715,7 @@ dependencies = [
  "fpe 0.5.0",
  "group 0.11.0",
  "hex",
- "incrementalmerkletree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "incrementalmerkletree",
  "jubjub 0.8.0",
  "lazy_static",
  "log",
@@ -4774,10 +4765,10 @@ dependencies = [
  "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "fpe 0.4.0",
  "futures 0.3.17",
- "group 0.10.0",
+ "group 0.11.0",
  "halo2",
  "hex",
- "incrementalmerkletree 0.1.0 (git+https://github.com/zcash/incrementalmerkletree.git?rev=b7bd6246122a6e9ace8edb51553fbf5228906cbb)",
+ "incrementalmerkletree",
  "itertools 0.10.1",
  "jubjub 0.7.0",
  "lazy_static",
