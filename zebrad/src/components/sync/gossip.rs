@@ -1,5 +1,7 @@
 //! A task that gossips newly verified [`block::Hash`]es to peers.
 
+use thiserror::Error;
+use tokio::sync::watch;
 use tower::{timeout::Timeout, Service, ServiceExt};
 
 use zebra_network as zn;
@@ -8,6 +10,21 @@ use zebra_state::ChainTipChange;
 use crate::BoxError;
 
 use super::{SyncStatus, TIPS_RESPONSE_TIMEOUT};
+
+use BlockGossipError::*;
+
+/// Errors that can occur when gossiping committed blocks
+#[derive(Error, Debug)]
+pub enum BlockGossipError {
+    #[error("chain tip sender was dropped")]
+    TipChange(watch::error::RecvError),
+
+    #[error("sync status sender was dropped")]
+    SyncStatus(watch::error::RecvError),
+
+    #[error("permanent peer set failure")]
+    PeerSetReadiness(zn::BoxError),
+}
 
 /// Run continuously, gossiping newly verified [`block::Hash`]es to peers.
 ///
@@ -24,7 +41,7 @@ pub async fn gossip_best_tip_block_hashes<ZN>(
     mut sync_status: SyncStatus,
     mut chain_state: ChainTipChange,
     broadcast_network: ZN,
-) -> Result<(), BoxError>
+) -> Result<(), BlockGossipError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -37,10 +54,13 @@ where
 
     loop {
         // wait for at least one tip change, to make sure we have a new block hash to broadcast
-        let tip_action = chain_state.wait_for_tip_change().await?;
+        let tip_action = chain_state.wait_for_tip_change().await.map_err(TipChange)?;
         // wait until we're close to the tip, because broadcasts are only useful for nodes near the tip
         // (if they're a long way from the tip, they use the syncer and block locators)
-        sync_status.wait_until_close_to_tip().await?;
+        sync_status
+            .wait_until_close_to_tip()
+            .await
+            .map_err(SyncStatus)?;
 
         // get the latest tip change - it might be different to the change we awaited,
         // because the syncer might take a long time to reach the tip
@@ -54,6 +74,11 @@ where
         info!(?height, ?request, "sending committed block broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
-        let _ = broadcast_network.ready_and().await?.call(request).await;
+        let _ = broadcast_network
+            .ready_and()
+            .await
+            .map_err(PeerSetReadiness)?
+            .call(request)
+            .await;
     }
 }

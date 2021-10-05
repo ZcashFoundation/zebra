@@ -30,7 +30,7 @@ mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
 
-pub use gossip::gossip_best_tip_block_hashes;
+pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
