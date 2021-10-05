@@ -22,7 +22,7 @@ use crate::{
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     LedgerState,
@@ -30,7 +30,7 @@ use crate::{
 
 use itertools::Itertools;
 
-use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
+use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx};
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
 ///
@@ -763,6 +763,24 @@ impl Arbitrary for Transaction {
             ]
             .boxed(),
         }
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for UnminedTx {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<super::UnminedTxId>(), any::<Transaction>())
+            .prop_map(|(id, transaction)| Self {
+                id,
+                transaction: Arc::new(transaction.clone()),
+                size: transaction
+                    .zcash_serialized_size()
+                    .expect("all transactions have a size"),
+            })
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
