@@ -210,11 +210,12 @@ impl Service<Request> for Mempool {
                             storage.clear();
                             tx_downloads.cancel_all();
                         }
-                        // Cancel downloads/verifications of transactions with the same
-                        // IDs as recently mined transactions.
+                        // Cancel downloads/verifications/storage of transactions
+                        // with the same mined IDs as recently mined transactions.
                         TipAction::Grow { block } => {
-                            let txid_set = block.transaction_hashes.iter().collect();
-                            tx_downloads.cancel(txid_set);
+                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                            tx_downloads.cancel(&mined_ids);
+                            storage.remove_same_effects(&mined_ids);
                         }
                     }
                 }
