@@ -4,6 +4,47 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.18](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-10-05
+
+    Send crawled transaction IDs to downloader (#2801)
+    Tweak some assertions to better match their error messages (#2822)
+    Remove some dead code attributes from the mempool (#2820)
+    Fix or disable recent nightly clippy lints (#2817)
+    Test if the mempool storage is cleared (#2815)
+    Fix join errors in initial seed peer versions dashboard (#2811)
+    Enable 'full' feature in tokio for zebra-test (#2809)
+    Cancel mempool download tasks when a network upgrade activates (#2816)
+    Bump pretty_assertions from 0.7.2 to 1.0.0 (#2805)
+    Improve MockService ergonomics for sending error responses (#2810)
+    Send mined transaction IDs to the download/verify task for cancellation (#2786)
+    Add metrics for initial peer network protocol versions (#2804)
+    Use complete addition instead of incomplete addition inside sinsemilla_commit (#2807)
+    Mempool support for transaction expiration (#2774)
+    Cancel download and verify tasks when the mempool is deactivated (#2764)
+    Stop panicking when using sync and async methods on the same ChainTipChange (#2800)
+    Reject conflicting mempool transactions (#2765)
+    Fix an incorrect assertion when the block locator is at the tip (#2789)
+    Change current network protocol version for NU5 testnet (#2803)
+    Add tests for mempool Request::Queue (#2770)
+    Send Response::Nil instead of sending empty Messages (#2791)
+    Clear mempool at a network upgrade (#2773)
+    Bump owo-colors from 2.0.0 to 2.1.0 (#2792)
+    Refactor mempool tests (#2771)
+    Add missing tests for mempool inbound requests (#2769)
+    Bump dirs from 3.0.2 to 4.0.0 (#2766)
+    Replace mock_peer_set function with MockService (#2790)
+    Allow deliberate instances of the clippy::derivable_impls lint (#2788)
+    Handle zero transaction expirations (#2782)
+    Create a helper MockService type to help with writing tests that use mock tower::Services (#2748)
+    Sneak chain_tip_change into mempool (#2785)
+    Bump tracing-subscriber from 0.2.22 to 0.2.24 (#2776)
+    Bump tracing from 0.1.27 to 0.1.28 (#2775)
+    Pass sync_status to mempool (#2754)
+    Bump serde_json from 1.0.67 to 1.0.68 (#2763)
+    Bump tracing-subscriber from 0.2.21 to 0.2.22 (#2755)
+    Bump tracing from 0.1.26 to 0.1.27 (#2756)
+    Bump sha2 from 0.9.6 to 0.9.8 (#2746)
+
 ## [Zebra 1.0.0-alpha.17](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-09-14
 
 Zebra's latest alpha continues work on the mempool.
