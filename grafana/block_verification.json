@@ -129,7 +129,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:84",
-          "format": "short",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
