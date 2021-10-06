@@ -46,3 +46,11 @@ If you want a specific reviewer for this PR, tag them here.
 <!--
 Is there anything missing from the solution?
 -->
+
+## Changelog Entry
+
+<!--
+Does this PR need a changelog entry?
+What would be a reasonable suggestion for the wording of the entry?
+Is there any extra information that might be relevant or help with the changelog entry?
+-->
