@@ -181,7 +181,7 @@ impl Mempool {
         txid: UnminedTxId,
     ) -> Result<(), MempoolError> {
         // Check if the transaction is already in the mempool.
-        if storage.contains(&txid) {
+        if storage.contains_transaction_exact(&txid) {
             return Err(MempoolError::InMempool);
         }
         if let Some(error) = storage.rejection_error(&txid) {
@@ -258,12 +258,12 @@ impl Service<Request> for Mempool {
                 tx_downloads,
             } => match req {
                 Request::TransactionIds => {
-                    let res = storage.tx_ids();
+                    let res = storage.tx_ids().collect();
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
                 Request::TransactionsById(ids) => {
-                    let rsp = Ok(storage.transactions(ids)).map(Response::Transactions);
-                    async move { rsp }.boxed()
+                    let res = storage.transactions_exact(ids).cloned().collect();
+                    async move { Ok(Response::Transactions(res)) }.boxed()
                 }
                 Request::RejectedTransactionIds(ids) => {
                     let rsp = Ok(storage.rejected_transactions(ids))
@@ -314,7 +314,7 @@ fn remove_expired_transactions(
 ) {
     let mut txid_set = HashSet::new();
 
-    for t in storage.transactions_all() {
+    for t in storage.transactions() {
         if let Some(expiry_height) = t.transaction.expiry_height() {
             if tip_height >= expiry_height {
                 txid_set.insert(t.id.mined_id());

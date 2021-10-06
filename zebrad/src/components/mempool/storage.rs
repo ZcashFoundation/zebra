@@ -120,12 +120,6 @@ impl Storage {
         Ok(tx_id)
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
-    /// the mempool.
-    pub fn contains(&self, txid: &UnminedTxId) -> bool {
-        self.verified.iter().any(|tx| &tx.id == txid)
-    }
-
     /// Remove [`UnminedTx`]es from the mempool via exact [`UnminedTxId`].
     ///
     /// For v5 transactions, transactions are matched by WTXID, using both the:
@@ -172,22 +166,39 @@ impl Storage {
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
-    pub fn tx_ids(&self) -> Vec<UnminedTxId> {
-        self.verified.iter().map(|tx| tx.id).collect()
-    }
-
-    /// Returns the set of [`Transaction`]s matching `tx_ids` in the mempool.
-    pub fn transactions(&self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTx> {
-        self.verified
-            .iter()
-            .filter(|tx| tx_ids.contains(&tx.id))
-            .cloned()
-            .collect()
+    pub fn tx_ids(&self) -> impl Iterator<Item = UnminedTxId> + '_ {
+        self.verified.iter().map(|tx| tx.id)
     }
 
     /// Returns the set of [`Transaction`]s in the mempool.
-    pub fn transactions_all(&self) -> Vec<UnminedTx> {
-        self.verified.iter().cloned().collect()
+    pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
+        self.verified.iter()
+    }
+
+    /// Returns the number of transactions in the mempool.
+    #[allow(dead_code)]
+    pub fn transaction_count(&self) -> usize {
+        self.verified.len()
+    }
+
+    /// Returns the set of [`Transaction`]s with exactly matching `tx_ids` in the mempool.
+    ///
+    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    pub fn transactions_exact(
+        &self,
+        tx_ids: HashSet<UnminedTxId>,
+    ) -> impl Iterator<Item = &UnminedTx> {
+        self.verified
+            .iter()
+            .filter(move |tx| tx_ids.contains(&tx.id))
+    }
+
+    /// Returns `true` if a [`UnminedTx`] exactly matching an [`UnminedTxId`] is in
+    /// the mempool.
+    ///
+    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    pub fn contains_transaction_exact(&self, txid: &UnminedTxId) -> bool {
+        self.verified.iter().any(|tx| &tx.id == txid)
     }
 
     /// Returns `true` if a [`UnminedTx`] matching the supplied [`UnminedTxId`] is in
