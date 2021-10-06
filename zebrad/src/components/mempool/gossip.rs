@@ -34,7 +34,9 @@ where
         // once we get new data in the channel, broadcast to peers
         receiver.changed().await?;
 
-        let tx = receiver.borrow().unwrap();
+        let tx = receiver
+            .borrow()
+            .expect("After the first notification the channel will never contain `None`");
         let mut hs = HashSet::new();
         hs.insert(tx);
 
