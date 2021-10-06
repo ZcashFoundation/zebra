@@ -119,7 +119,7 @@ pub struct Mempool {
 
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
-    transaction_sender: watch::Sender<Option<UnminedTxId>>,
+    transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
 }
 
 impl Mempool {
@@ -130,7 +130,7 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-        transaction_sender: watch::Sender<Option<UnminedTxId>>,
+        transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
     ) -> Self {
         Mempool {
             active_state: ActiveState::Disabled,
@@ -227,14 +227,20 @@ impl Service<Request> for Mempool {
                 }
 
                 // Clean up completed download tasks and add to mempool if successful.
+                // Also, send succesful transactions to peers.
+                let mut inserted_txids = HashSet::new();
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     if let Ok(tx) = r {
                         // Storage handles conflicting transactions or a full mempool internally,
                         // so just ignore the storage result here
                         let _ = storage.insert(tx.clone());
-                        // Send the transaction to peers
-                        let _ = self.transaction_sender.send(Some(tx.id))?;
+                        // Save transaction ids that we will send to peers
+                        inserted_txids.insert(tx.id);
                     }
+                }
+                // Send any newly inserted transactions to peers
+                if !inserted_txids.is_empty() {
+                    let _ = self.transaction_sender.send(inserted_txids)?;
                 }
 
                 // Remove expired transactions from the mempool.

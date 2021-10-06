@@ -426,7 +426,7 @@ async fn setup(
         .await
         .unwrap();
 
-    let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(None);
+    let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut mempool_service = Mempool::new(
         buffered_peer_set.clone(),

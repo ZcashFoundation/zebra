@@ -26,6 +26,7 @@
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::{select, FutureExt};
+use std::collections::HashSet;
 use tokio::sync::oneshot;
 use tower::builder::ServiceBuilder;
 use tower::util::BoxService;
@@ -92,7 +93,7 @@ impl StartCmd {
         info!("initializing mempool");
 
         let (mempool_transaction_sender, mempool_transaction_receiver) =
-            tokio::sync::watch::channel(None);
+            tokio::sync::watch::channel(HashSet::new());
 
         let mempool_service = BoxService::new(Mempool::new(
             peer_set.clone(),

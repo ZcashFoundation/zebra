@@ -1,4 +1,5 @@
 use proptest::prelude::*;
+use std::collections::HashSet;
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
@@ -150,7 +151,7 @@ fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
 
-    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(None);
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mempool = Mempool::new(
         Buffer::new(BoxService::new(peer_set.clone()), 1),

@@ -17,7 +17,7 @@ use crate::components::sync::TIPS_RESPONSE_TIMEOUT;
 ///
 /// Broadcast any [`transaction::UnminedTxId`] that gets stored in the mempool to all ready peers.
 pub async fn gossip_mempool_transaction_id<ZN>(
-    mut receiver: watch::Receiver<Option<UnminedTxId>>,
+    mut receiver: watch::Receiver<HashSet<UnminedTxId>>,
     broadcast_network: ZN,
 ) -> Result<(), BoxError>
 where
@@ -34,13 +34,8 @@ where
         // once we get new data in the channel, broadcast to peers
         receiver.changed().await?;
 
-        let tx = receiver
-            .borrow()
-            .expect("After the first notification the channel will never contain `None`");
-        let mut hs = HashSet::new();
-        hs.insert(tx);
-
-        let request = zn::Request::AdvertiseTransactionIds(hs);
+        let txs = receiver.borrow().clone();
+        let request = zn::Request::AdvertiseTransactionIds(txs);
 
         info!(?request, "sending mempool transaction broadcast");
 
