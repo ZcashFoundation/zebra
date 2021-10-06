@@ -116,7 +116,7 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.18/";
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_014);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_015);
 
 /// The minimum network protocol version accepted by this crate for each network,
 /// represented as a network upgrade.

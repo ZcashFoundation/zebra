@@ -108,8 +108,8 @@ impl Version {
             (Mainnet, Heartwood) => 170_011,
             (Testnet, Canopy) => 170_012,
             (Mainnet, Canopy) => 170_013,
-            (Testnet, Nu5) => 170_014,
-            (Mainnet, Nu5) => 170_015,
+            (Testnet, Nu5) => 170_015,
+            (Mainnet, Nu5) => unreachable!("Nu5 Mainnet protocol version not yet defined"),
         })
     }
 }
