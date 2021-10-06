@@ -78,7 +78,6 @@ async fn mempool_requests_for_transactions() {
     };
 
     // check that nothing unexpected happened
-
     peer_set.expect_no_requests().await;
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
@@ -148,7 +147,6 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     };
 
     // check that nothing unexpected happened
-
     peer_set.expect_no_requests().await;
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
@@ -236,7 +234,6 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     };
 
     // check that nothing unexpected happened
-
     peer_set.expect_no_requests().await;
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
@@ -453,7 +450,6 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     }
 
     // check that nothing unexpected happened
-
     peer_set.expect_no_requests().await;
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
