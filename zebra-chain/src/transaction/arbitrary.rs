@@ -22,7 +22,7 @@ use crate::{
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
     sprout, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     LedgerState,
