@@ -134,11 +134,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         peer_set
             .expect_request(Request::TransactionsById(txs))
             .map(|responder| {
-                let unmined_transaction = UnminedTx {
-                    id: test_transaction_id,
-                    transaction: test_transaction,
-                };
-
+                let unmined_transaction = UnminedTx::from(test_transaction);
                 responder.respond(Response::Transactions(vec![unmined_transaction]))
             });
     // Simulate a successful transaction verification

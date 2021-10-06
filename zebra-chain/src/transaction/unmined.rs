@@ -17,6 +17,8 @@ use std::{fmt, sync::Arc};
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+use crate::serialization::ZcashSerialize;
+
 use super::{
     AuthDigest, Hash,
     Transaction::{self, *},
@@ -144,13 +146,15 @@ impl UnminedTxId {
 
 /// An unmined transaction, and its pre-calculated unique identifying ID.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct UnminedTx {
     /// A unique identifier for this unmined transaction.
     pub id: UnminedTxId,
 
     /// The unmined transaction itself.
     pub transaction: Arc<Transaction>,
+
+    /// The size in bytes of the serialized transaction data
+    pub size: usize,
 }
 
 // Each of these conversions is implemented slightly differently,
@@ -160,6 +164,9 @@ impl From<Transaction> for UnminedTx {
     fn from(transaction: Transaction) -> Self {
         Self {
             id: (&transaction).into(),
+            size: transaction
+                .zcash_serialized_size()
+                .expect("all transactions have a size"),
             transaction: Arc::new(transaction),
         }
     }
@@ -170,6 +177,9 @@ impl From<&Transaction> for UnminedTx {
         Self {
             id: transaction.into(),
             transaction: Arc::new(transaction.clone()),
+            size: transaction
+                .zcash_serialized_size()
+                .expect("all transactions have a size"),
         }
     }
 }
@@ -178,6 +188,9 @@ impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
         Self {
             id: transaction.as_ref().into(),
+            size: transaction
+                .zcash_serialized_size()
+                .expect("all transactions have a size"),
             transaction,
         }
     }
@@ -188,6 +201,9 @@ impl From<&Arc<Transaction>> for UnminedTx {
         Self {
             id: transaction.as_ref().into(),
             transaction: transaction.clone(),
+            size: transaction
+                .zcash_serialized_size()
+                .expect("all transactions have a size"),
         }
     }
 }
