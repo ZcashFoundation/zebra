@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-alpha.17"
+version = "1.0.0-alpha.18"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -49,7 +49,7 @@ tempdir = "0.3.7"
 tokio = { version = "0.3.6", features = ["full"] }
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
 # Note: if updating this, also update the workspace Cargo.toml to match.
-halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
+halo2 = "=0.1.0-beta.1"
 jubjub = "0.7.0"
 
 proptest = "0.10.1"

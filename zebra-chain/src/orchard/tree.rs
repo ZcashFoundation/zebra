@@ -294,16 +294,14 @@ impl NoteCommitmentTree {
     ///
     /// For Orchard, the tree is capped at 2^32.
     pub fn count(&self) -> u64 {
-        self.inner
-            .position()
-            .map_or(0, |pos| usize::from(pos) as u64 + 1)
+        self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
     }
 }
 
 impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
-            inner: bridgetree::Frontier::new(),
+            inner: bridgetree::Frontier::empty(),
             cached_root: Default::default(),
         }
     }

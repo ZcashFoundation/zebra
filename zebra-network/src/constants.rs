@@ -106,7 +106,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 //
 // TODO: generate this from crate metadata (#2375)
-pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.17/";
+pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.18/";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.
@@ -116,7 +116,7 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.17/";
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_014);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_015);
 
 /// The minimum network protocol version accepted by this crate for each network,
 /// represented as a network upgrade.

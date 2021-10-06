@@ -4,6 +4,62 @@ All notable changes to Zebra will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-alpha.18](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.18) - 2021-10-05
+
+Zebra's latest alpha updates dependencies, consensus parameters, and Orchard for NU5 testnet activation.
+It continues our work on the mempool, including some mempool features that are used during network upgrade activation.
+
+### Added
+
+#### Mempool
+
+- Send crawled transaction IDs to the mempool downloader (#2801)
+- Cancel mempool download tasks when a network upgrade activates (#2816)
+- Send mined transaction IDs to the mempool download/verify task for cancellation (#2786)
+- Remove expired transactions from the mempool (#2774)
+- Cancel download and verify tasks when the mempool is deactivated (#2764, #2754)
+- Reject mempool transactions with conflicting spends (#2765)
+- Clear mempool at a network upgrade (#2773, #2785)
+
+#### Network Upgrade 5
+
+- Update Zebra's advertised network protocol version to the latest NU5 testnet version (#2803)
+
+#### Testing and CI
+
+- Add tests to ensure mempool is working correctly (#2769, #2770, #2815)
+- Create and use a helper MockService type to help with writing tests (#2810, #2748, #2790)
+- Update Zebra tests to use the NU5 testnet activation height (#2802)
+- Regenerate NU5 test cases with the latest network upgrade parameters (#2802)
+
+#### Metrics
+
+- Add Zebra metrics and a Grafana dashboard for connected peers and their network protocol versions (#2804, #2811)
+
+### Changed
+
+- Stop sending empty network messages to peers (#2791)
+- Correctly validate transactions which never expire (#2782)
+
+#### Network Upgrade 5
+
+- Update `zcash_script` dependency to support V5 transactions (#2825)
+- Set the NU5 testnet activation network upgrade parameters (#2802)
+- Update shared Zcash Rust NU5 dependencies  (#2739)
+- Update Zebra to use modified APIs in shared Zcash Rust NU5 dependencies (#2739)
+
+### Fixed
+
+- Stop panicking when using sync and async methods on the same `ChainTipChange` (#2800)
+- Fix an incorrect assertion when the block locator is at the tip (#2789)
+- Fix a missing NULL pointer check in `zebra_script`'s FFI (#2802)
+
+### Security
+
+#### Network Upgrade 5
+
+- Update Zebra's orchard commitment calculations based on the latest orchard circuit (#2807)
+
 ## [Zebra 1.0.0-alpha.17](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.17) - 2021-09-14
 
 Zebra's latest alpha continues work on the mempool.

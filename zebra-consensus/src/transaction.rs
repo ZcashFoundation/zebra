@@ -385,7 +385,6 @@ where
 
         // TODO:
         // - verify orchard shielded pool (ZIP-224) (#2105)
-        // - ZIP-216 (#1798)
         // - ZIP-244 (#1874)
         // - remaining consensus rules (#2379)
         // - remove `should_panic` from tests

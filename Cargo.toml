@@ -33,6 +33,7 @@ tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52a
 
 # TODO: remove these after a new librustzcash release.
 # These are librustzcash requirements specified in its workspace Cargo.toml that we must replicate here
-halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "37b1b7f357cd34d93f9c55bb96efd05ab4e84408" }
-zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
+zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
