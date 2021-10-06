@@ -18,7 +18,7 @@ It continues our work on the mempool, including some mempool features that are u
 - Send mined transaction IDs to the mempool download/verify task for cancellation (#2786)
 - Remove expired transactions from the mempool (#2774)
 - Cancel download and verify tasks when the mempool is deactivated (#2764, #2754)
-- Reject conflicting mempool transactions (#2765)
+- Reject mempool transactions with conflicting spends (#2765)
 - Clear mempool at a network upgrade (#2773, #2785)
 
 #### Network Upgrade 5
@@ -49,7 +49,7 @@ It continues our work on the mempool, including some mempool features that are u
 - Update Zebra to use modified APIs in shared Zcash Rust NU5 dependencies (#2739)
 ### Fixed
 
-- Stop panicking when using sync and async methods on the same chain tip (#2800)
+- Stop panicking when using sync and async methods on the same `ChainTipChange` (#2800)
 - Fix an incorrect assertion when the block locator is at the tip (#2789)
 - Fix a missing NULL pointer check in `zebra_script`'s FFI (#2802)
 
