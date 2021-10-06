@@ -50,7 +50,7 @@ tokio = { version = "0.3.6", features = ["full"] }
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
 # Note: if updating this, also update the workspace Cargo.toml to match.
 halo2 = "=0.1.0-beta.1"
-jubjub = "0.7.0"
+jubjub = "0.8.0"
 
 proptest = "0.10.1"
 proptest-derive = "0.3"
