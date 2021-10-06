@@ -1,10 +1,12 @@
 //! Randomised property tests for the mempool.
 
 use proptest::prelude::*;
+use proptest_derive::Arbitrary;
+
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
-use zebra_chain::{parameters::Network, transaction::VerifiedUnminedTx};
+use zebra_chain::{parameters::Network, transaction::UnminedTx, transaction::VerifiedUnminedTx};
 use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
@@ -25,6 +27,75 @@ type MockState = MockService<zs::Request, zs::Response, PropTestAssertion>;
 type MockTxVerifier = MockService<tx::Request, tx::Response, PropTestAssertion, TransactionError>;
 
 proptest! {
+    /// Test if the mempool storage is cleared on multiple chain resets.
+    #[test]
+    fn storage_is_cleared_on_chain_resets(
+        network in any::<Network>(),
+        transaction in any::<UnminedTx>(),
+        // fake_chain_tips in vec(any::<FakeChainTip>(), 1..2),
+        initial_chain_tip in any::<ChainTipBlock>(),
+        fake_chain_tip in any::<FakeChainTip>(),
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
+        let _guard = runtime.enter();
+
+        runtime.block_on(async move {
+            let (
+                mut mempool,
+                mut peer_set,
+                mut state_service,
+                mut tx_verifier,
+                mut recent_syncs,
+                mut chain_tip_sender,
+            ) = setup(network);
+
+            time::pause();
+
+            mempool.enable(&mut recent_syncs).await;
+
+            // Set the initial chain tip.
+            chain_tip_sender.set_best_non_finalized_tip(initial_chain_tip.clone());
+
+            // Get a new chain tip.
+            let chain_tip = fake_chain_tip.into_chain_tip_block(&initial_chain_tip);
+
+            // Insert a dummy transaction into the mempool.
+            mempool
+                .storage()
+                .insert(transaction.clone())
+                .expect("Inserting a transaction should succeed");
+
+
+            // Set the new chain tip.
+            chain_tip_sender.set_best_non_finalized_tip(chain_tip.clone());
+
+            // Call the mempool so that it has a chance to clear.
+            mempool.dummy_call().await;
+
+            match fake_chain_tip {
+                FakeChainTip::Grow(_) => {
+                    // The mempool should not be empty if we had a regular chain tip grow.
+                    // TODO: This assertion does not hold. :(
+                    prop_assert!(!mempool.storage().tx_ids().is_empty());
+                }
+
+                FakeChainTip::Reset(_) => {
+                    // The mempool should be empty if we had a chain tip reset.
+                    prop_assert!(mempool.storage().tx_ids().is_empty());
+                },
+            }
+
+            peer_set.expect_no_requests().await?;
+            state_service.expect_no_requests().await?;
+            tx_verifier.expect_no_requests().await?;
+
+            Ok(())
+        })?;
+    }
+
     /// Test if the mempool storage is cleared on a chain reset.
     #[test]
     fn storage_is_cleared_on_chain_reset(
@@ -172,4 +243,29 @@ fn setup(
         recent_syncs,
         chain_tip_sender,
     )
+}
+
+/// A helper enum for simulating either chain grows or resets.
+#[derive(Arbitrary, Debug, Clone)]
+enum FakeChainTip {
+    Grow(ChainTipBlock),
+    Reset(ChainTipBlock),
+}
+
+impl FakeChainTip {
+    /// Returns a new [`ChainTipBlock`] placed on top of the previous block if
+    /// the chain is supposed to grow. Otherwise returns a [`ChainTipBlock`]
+    /// that does not reference the previous one.
+    fn into_chain_tip_block(&self, previous: &ChainTipBlock) -> ChainTipBlock {
+        match self {
+            Self::Grow(chain_tip_block) => ChainTipBlock {
+                hash: chain_tip_block.hash,
+                height: block::Height(previous.height.0 + 1),
+                transaction_hashes: chain_tip_block.transaction_hashes.clone(),
+                previous_block_hash: previous.hash,
+            },
+
+            Self::Reset(chain_tip_block) => chain_tip_block.clone(),
+        }
+    }
 }
