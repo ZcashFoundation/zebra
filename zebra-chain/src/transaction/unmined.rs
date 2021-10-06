@@ -153,7 +153,7 @@ pub struct UnminedTx {
     /// The unmined transaction itself.
     pub transaction: Arc<Transaction>,
 
-    /// The size in bytes of the transaction
+    /// The size in bytes of the serialized transaction data
     pub size: usize,
 }
 
@@ -164,10 +164,10 @@ impl From<Transaction> for UnminedTx {
     fn from(transaction: Transaction) -> Self {
         Self {
             id: (&transaction).into(),
-            transaction: Arc::new(transaction.clone()),
             size: transaction
                 .zcash_serialized_size()
                 .expect("all transactions have a size"),
+            transaction: Arc::new(transaction),
         }
     }
 }
@@ -188,10 +188,10 @@ impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
         Self {
             id: transaction.as_ref().into(),
-            transaction: transaction.clone(),
             size: transaction
                 .zcash_serialized_size()
                 .expect("all transactions have a size"),
+            transaction,
         }
     }
 }

@@ -772,15 +772,7 @@ impl Arbitrary for UnminedTx {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<super::UnminedTxId>(), any::<Transaction>())
-            .prop_map(|(id, transaction)| Self {
-                id,
-                transaction: Arc::new(transaction.clone()),
-                size: transaction
-                    .zcash_serialized_size()
-                    .expect("all transactions have a size"),
-            })
-            .boxed()
+        any::<Transaction>().prop_map_into().boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

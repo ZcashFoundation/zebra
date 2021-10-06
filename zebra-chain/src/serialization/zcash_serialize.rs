@@ -37,7 +37,7 @@ pub trait ZcashSerialize: Sized {
     }
 }
 
-/// A fake writter helper used to get object lenghts without allocating RAM.
+/// A fake writer helper used to get object lengths without allocating RAM.
 pub struct FakeWriter(pub usize);
 
 impl std::io::Write for FakeWriter {
