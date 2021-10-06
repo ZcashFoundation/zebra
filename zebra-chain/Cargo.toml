@@ -65,7 +65,7 @@ color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
 itertools = "0.10.1"
 spandoc = "0.2"
-tracing = "0.1.28"
+tracing = "0.1.29"
 
 proptest = "0.10"
 proptest-derive = "0.3"
