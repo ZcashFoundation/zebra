@@ -219,6 +219,10 @@ where
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
+
+                    metrics::counter!("state.full_verifier.committed.block.count", 1);
+                    metrics::gauge!("state.full_verifier.committed.block.height", height.0 as _);
+
                     Ok(hash)
                 }
                 _ => unreachable!("wrong response for CommitBlock"),

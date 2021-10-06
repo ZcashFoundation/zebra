@@ -180,9 +180,9 @@ impl FinalizedState {
             self.max_queued_height = height.0 as _;
         }
 
-        metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
+        metrics::gauge!("state.checkoint.queued.max.height", self.max_queued_height);
         metrics::gauge!(
-            "state.finalized.queued.block.count",
+            "state.checkpoint.queued.block.count",
             self.queued_by_prev_hash.len() as f64
         );
 
@@ -474,17 +474,17 @@ impl FinalizedState {
 
         let block_result;
         if result.is_ok() {
-            metrics::counter!("state.finalized.committed.block.count", 1);
+            metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
-                "state.finalized.committed.block.height",
+                "state.checkpoint.finalized.block.height",
                 finalized.height.0 as _
             );
 
             block_result = Ok(finalized);
         } else {
-            metrics::counter!("state.finalized.error.block.count", 1);
+            metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
-                "state.finalized.error.block.height",
+                "state.checkpoint.error.block.height",
                 finalized.height.0 as _
             );
 
@@ -722,6 +722,10 @@ fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Heig
         orchard_nullifier_count,
         "preparing to commit finalized block"
     );
+
+    metrics::counter!("state.finalized.block.count", 1);
+    metrics::gauge!("state.finalized.block.height", height.0 as _);
+
     metrics::counter!(
         "state.finalized.cumulative.transactions",
         transaction_count as u64
