@@ -5,33 +5,23 @@ use thiserror::Error;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-#[derive(Error, Clone, Debug, PartialEq)]
+use super::storage::StorageRejectionError;
+
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum MempoolError {
+    #[error("mempool storage has a cached rejection for this transaction")]
+    Storage(#[from] StorageRejectionError),
+
     #[error("transaction already exists in mempool")]
     InMempool,
-
-    #[error("transaction did not pass consensus validation")]
-    Invalid(#[from] zebra_consensus::error::TransactionError),
 
     #[error("transaction is committed in block {0:?}")]
     InBlock(zebra_chain::block::Hash),
 
-    #[error("transaction has expired")]
-    Expired,
-
-    #[error("transaction fee is too low for the current mempool state")]
-    LowFee,
-
     #[error("transaction was not found in mempool")]
     NotInMempool,
-
-    #[error("transaction evicted from the mempool due to size restrictions")]
-    Excess,
-
-    #[error("transaction is in the mempool rejected list")]
-    Rejected,
 
     /// The transaction hash is already queued, so this request was ignored.
     ///
@@ -47,13 +37,6 @@ pub enum MempoolError {
     /// The queue's capacity is [`super::downloads::MAX_INBOUND_CONCURRENCY`].
     #[error("transaction dropped because the queue is full")]
     FullQueue,
-
-    /// The transaction has a spend conflict with another transaction already in the mempool.
-    #[error(
-        "transaction rejected because another transaction in the mempool has already spent some of \
-        its inputs"
-    )]
-    SpendConflict,
 
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,

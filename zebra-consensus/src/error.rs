@@ -12,7 +12,7 @@ use crate::BoxError;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-#[derive(Error, Copy, Clone, Debug, PartialEq)]
+#[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
     NoCoinbase,
@@ -21,7 +21,7 @@ pub enum SubsidyError {
     FoundersRewardNotFound,
 }
 
-#[derive(Error, Clone, Debug, PartialEq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
@@ -128,7 +128,7 @@ impl From<SubsidyError> for BlockError {
     }
 }
 
-#[derive(Error, Clone, Debug, PartialEq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),
