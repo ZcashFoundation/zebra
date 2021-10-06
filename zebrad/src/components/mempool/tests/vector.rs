@@ -231,8 +231,8 @@ async fn mempool_queue() -> Result<(), Report> {
     assert_eq!(queued_responses.len(), 1);
     assert_eq!(
         queued_responses[0],
-        Err(MempoolError::Storage(
-            StorageRejectionError::RandomlyEvicted
+        Err(MempoolError::StorageEffects(
+            SameEffectsRejectionError::RandomlyEvicted
         ))
     );
 
