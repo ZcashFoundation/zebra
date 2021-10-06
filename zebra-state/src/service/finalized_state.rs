@@ -180,7 +180,7 @@ impl FinalizedState {
             self.max_queued_height = height.0 as _;
         }
 
-        metrics::gauge!("state.checkoint.queued.max.height", self.max_queued_height);
+        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
         metrics::gauge!(
             "state.checkpoint.queued.block.count",
             self.queued_by_prev_hash.len() as f64
