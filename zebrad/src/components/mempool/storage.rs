@@ -78,7 +78,7 @@ impl Storage {
         let tx_id = tx.id;
 
         // First, check if we have a cached rejection for this transaction.
-        if let Some(error) = self.rejection_error(&tx.id) {
+        if let Some(error) = self.rejection_error_exact(&tx.id) {
             return Err(error);
         }
 
@@ -165,6 +165,13 @@ impl Storage {
         original_size - self.verified.len()
     }
 
+    /// Clears the whole mempool storage.
+    pub fn clear(&mut self) {
+        self.verified.clear();
+        self.rejected_exact.clear();
+        self.rejected_same_effects.clear();
+    }
+
     /// Returns the set of [`UnminedTxId`]s in the mempool.
     pub fn tx_ids(&self) -> impl Iterator<Item = UnminedTxId> + '_ {
         self.verified.iter().map(|tx| tx.id)
@@ -201,16 +208,17 @@ impl Storage {
         self.verified.iter().any(|tx| &tx.id == txid)
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching the supplied [`UnminedTxId`] is in
-    /// the mempool rejected list.
-    pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
-        self.rejected_exact.contains_key(txid)
-            || self.rejected_same_effects.contains_key(&txid.mined_id())
+    /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
+    #[allow(dead_code)]
+    pub fn rejected_transaction_count(&self) -> usize {
+        self.rejected_exact.len() + self.rejected_same_effects.len()
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
+    /// Returns `true` if a [`UnminedTx`] exactly matching an [`UnminedTxId`] is in
     /// the mempool rejected list.
-    pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
+    ///
+    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    pub fn rejection_error_exact(&self, txid: &UnminedTxId) -> Option<MempoolError> {
         if let Some(exact_error) = self.rejected_exact.get(txid) {
             return Some(exact_error.clone().into());
         }
@@ -222,25 +230,25 @@ impl Storage {
         None
     }
 
-    /// Returns the set of [`UnminedTxId`]s matching ids in the rejected list.
-    pub fn rejected_transactions(&self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTxId> {
+    /// Returns the set of [`UnminedTxId`]s exactly matching ids in the rejected list.
+    ///
+    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    pub fn rejected_transactions_exact(
+        &self,
+        tx_ids: HashSet<UnminedTxId>,
+    ) -> impl Iterator<Item = UnminedTxId> + '_ {
         tx_ids
             .into_iter()
-            .filter(|txid| self.contains_rejected(txid))
-            .collect()
+            .filter(move |txid| self.contains_rejected_exact(txid))
     }
 
-    /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
-    #[allow(dead_code)]
-    pub fn rejected_transaction_count(&self) -> usize {
-        self.rejected_exact.len() + self.rejected_same_effects.len()
-    }
-
-    /// Clears the whole mempool storage.
-    pub fn clear(&mut self) {
-        self.verified.clear();
-        self.rejected_exact.clear();
-        self.rejected_same_effects.clear();
+    /// Returns `true` if a [`UnminedTx`] exactly matching the supplied [`UnminedTxId`] is in
+    /// the mempool rejected list.
+    ///
+    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    pub fn contains_rejected_exact(&self, txid: &UnminedTxId) -> bool {
+        self.rejected_exact.contains_key(txid)
+            || self.rejected_same_effects.contains_key(&txid.mined_id())
     }
 
     /// Checks if the `tx` transaction has spend conflicts with another transaction in the mempool.
