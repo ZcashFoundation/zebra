@@ -34,7 +34,7 @@ tracing = "0.1"
 tracing-futures = "0.2"
 tracing-flame = "0.1.0"
 tracing-journald = "0.1.0"
-tracing-subscriber = { version = "0.2.24", features = ["tracing-log"] }
+tracing-subscriber = { version = "0.2.25", features = ["tracing-log"] }
 tracing-error = "0.1.2"
 metrics = "0.13.0-alpha.8"
 metrics-exporter-prometheus = "0.1.0-alpha.7"
