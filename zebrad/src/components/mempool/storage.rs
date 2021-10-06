@@ -5,7 +5,7 @@ use std::{
 
 use zebra_chain::{
     block,
-    transaction::{Transaction, UnminedTx, UnminedTxId},
+    transaction::{self, Transaction, UnminedTx, UnminedTxId},
 };
 use zebra_consensus::error::TransactionError;
 
@@ -104,24 +104,49 @@ impl Storage {
         self.verified.iter().any(|tx| &tx.id == txid)
     }
 
-    /// Remove a [`UnminedTx`] from the mempool via [`UnminedTxId`].  Returns
-    /// whether the transaction was present.
+    /// Remove [`UnminedTx`]es from the mempool via exact [`UnminedTxId`].
     ///
-    /// Removes from the 'verified' set, does not remove from the 'rejected'
-    /// tracking set, if present. Maintains the order in which the other unmined
-    /// transactions have been inserted into the mempool.
-    pub fn remove(&mut self, txid: &UnminedTxId) -> Option<UnminedTx> {
-        // If the txid exists in the verified set and is then deleted,
-        // `retain()` removes it and returns `Some(UnminedTx)`. If it's not
-        // present and nothing changes, returns `None`.
+    /// For v5 transactions, transactions are matched by WTXID, using both the:
+    /// - non-malleable transaction ID, and
+    /// - authorizing data hash.
+    ///
+    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    ///
+    /// Returns the number of transactions which were removed.
+    ///
+    /// Removes from the 'verified' set, if present.
+    /// Maintains the order in which the other unmined transactions have been inserted into the mempool.
+    ///
+    /// Does not add or remove from the 'rejected' tracking set.
+    #[allow(dead_code)]
+    pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
+        let original_size = self.verified.len();
 
-        match self.verified.clone().iter().find(|tx| &tx.id == txid) {
-            Some(tx) => {
-                self.verified.retain(|tx| &tx.id != txid);
-                Some(tx.clone())
-            }
-            None => None,
-        }
+        self.verified.retain(|tx| !exact_wtxids.contains(&tx.id));
+
+        original_size - self.verified.len()
+    }
+
+    /// Remove [`UnminedTx`]es from the mempool via non-malleable [`transaction::Hash`].
+    ///
+    /// For v5 transactions, transactions are matched by TXID,
+    /// using only the non-malleable transaction ID.
+    /// This matches any transaction with the same effect on the blockchain state,
+    /// even if its signatures and proofs are different.
+    ///
+    /// Returns the number of transactions which were removed.
+    ///
+    /// Removes from the 'verified' set, if present.
+    /// Maintains the order in which the other unmined transactions have been inserted into the mempool.
+    ///
+    /// Does not add or remove from the 'rejected' tracking set.
+    pub fn remove_same_effects(&mut self, mined_ids: &HashSet<transaction::Hash>) -> usize {
+        let original_size = self.verified.len();
+
+        self.verified
+            .retain(|tx| !mined_ids.contains(&tx.id.mined_id()));
+
+        original_size - self.verified.len()
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
@@ -129,13 +154,18 @@ impl Storage {
         self.verified.iter().map(|tx| tx.id).collect()
     }
 
-    /// Returns the set of [`Transaction`]s matching ids in the mempool.
+    /// Returns the set of [`Transaction`]s matching `tx_ids` in the mempool.
     pub fn transactions(&self, tx_ids: HashSet<UnminedTxId>) -> Vec<UnminedTx> {
         self.verified
             .iter()
             .filter(|tx| tx_ids.contains(&tx.id))
             .cloned()
             .collect()
+    }
+
+    /// Returns the set of [`Transaction`]s in the mempool.
+    pub fn transactions_all(&self) -> Vec<UnminedTx> {
+        self.verified.iter().cloned().collect()
     }
 
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
