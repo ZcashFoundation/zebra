@@ -228,8 +228,6 @@ impl FinalizedState {
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        block_precommit_metrics(&finalized);
-
         let finalized_tip_height = self.finalized_tip_height();
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
@@ -442,6 +440,9 @@ impl FinalizedState {
 
         // In case of errors, propagate and do not write the batch.
         let batch = prepare_commit()?;
+
+        // The block has passed contextual validation, so update the metrics
+        block_precommit_metrics(&block, hash, height);
 
         let result = self.db.write(batch).map(|()| hash);
 
@@ -677,9 +678,7 @@ impl Drop for FinalizedState {
     }
 }
 
-fn block_precommit_metrics(finalized: &FinalizedBlock) {
-    let (hash, height, block) = (finalized.hash, finalized.height, finalized.block.as_ref());
-
+fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
     let transaction_count = block.transactions.len();
     let transparent_prevout_count = block
         .transactions
