@@ -25,7 +25,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
-      "decimals": 6,
+      "decimals": 0,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
