@@ -15,8 +15,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 3,
-  "iteration": 1614572686856,
+  "id": 2,
+  "iteration": 1633492869106,
   "links": [],
   "panels": [
     {
@@ -26,9 +26,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -57,7 +55,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -100,13 +98,15 @@
           "refId": "D"
         },
         {
-          "expr": "state_finalized_committed_block_height{job=\"$job\"}",
+          "exemplar": true,
+          "expr": "state_checkpoint_committed_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_committed_block_height",
           "refId": "E"
         },
         {
-          "expr": "state_finalized_queued_max_height{job=\"$job\"}",
+          "exemplar": true,
+          "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_max_height",
           "refId": "F"
@@ -132,6 +132,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:84",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -140,6 +141,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:85",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -160,9 +162,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -191,12 +191,12 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1614572686856,
+      "repeatIteration": 1633492869106,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -295,9 +295,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -326,7 +324,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -351,7 +349,8 @@
           "refId": "A"
         },
         {
-          "expr": "rate(state_finalized_committed_block_count[1s])",
+          "exemplar": true,
+          "expr": "rate(state_checkpoint_committed_block_count[1s])",
           "interval": "",
           "legendFormat": "state commit rate [1s]",
           "refId": "C"
@@ -389,6 +388,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:252",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -397,6 +397,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:253",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -417,9 +418,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -448,12 +447,12 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1614572686856,
+      "repeatIteration": 1633492869106,
       "repeatPanelId": 8,
       "scopedVars": {
         "job": {
@@ -540,9 +539,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -571,7 +568,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -596,7 +593,8 @@
           "refId": "A"
         },
         {
-          "expr": "state_finalized_queued_block_count{job=\"$job\"}",
+          "exemplar": true,
+          "expr": "state_checkpoint_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_block_count",
           "refId": "B"
@@ -658,6 +656,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:337",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -666,6 +665,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:338",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -686,9 +686,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -717,12 +715,12 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1614572686856,
+      "repeatIteration": 1633492869106,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -828,7 +826,7 @@
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 26,
+  "schemaVersion": 27,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -836,7 +834,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
             "All"
           ],
@@ -846,13 +844,18 @@
         },
         "datasource": "Prometheus-Zebra",
         "definition": "label_values(sync_prospective_tips_len, job)",
+        "description": null,
+        "error": null,
         "hide": 0,
         "includeAll": true,
         "label": null,
         "multi": true,
         "name": "job",
         "options": [],
-        "query": "label_values(sync_prospective_tips_len, job)",
+        "query": {
+          "query": "label_values(sync_prospective_tips_len, job)",
+          "refId": "Prometheus-Zebra-job-Variable-Query"
+        },
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -886,5 +889,5 @@
   "timezone": "",
   "title": "checkpoint verification",
   "uid": "o4LmN_OMk",
-  "version": 42
+  "version": 2
 }
