@@ -2,7 +2,11 @@
 
 use thiserror::Error;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 #[derive(Error, Clone, Debug, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum MempoolError {
     #[error("transaction already exists in mempool")]

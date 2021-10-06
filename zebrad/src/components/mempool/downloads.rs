@@ -89,7 +89,7 @@ pub enum TransactionDownloadVerifyError {
 }
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Gossip {
     Id(UnminedTxId),
     Tx(UnminedTx),

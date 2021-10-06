@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-alpha.17"
+version = "1.0.0-alpha.18"
 edition = "2018"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
@@ -61,6 +61,7 @@ proptest = "0.10"
 proptest-derive = "0.3"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus/", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test" }
 
