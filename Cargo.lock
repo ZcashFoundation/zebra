@@ -299,21 +299,22 @@ checksum = "474a626a67200bd107d44179bb3d4fc61891172d11696609264589be6a0e6a43"
 
 [[package]]
 name = "bellman"
-version = "0.10.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7db9a104adfbc817ea09dec27d616c32dbf1d56fd741dcdc2444a3dfa1b9fffd"
+checksum = "0944d18a9a37691b87733b39c9360c9950af9aa5f97e2455bc108d8eb64fc1c1"
 dependencies = [
  "bitvec",
  "blake2s_simd",
  "byteorder",
- "crossbeam",
- "ff 0.10.0",
- "futures 0.1.30",
- "futures-cpupool",
- "group 0.10.0",
+ "crossbeam-channel 0.5.1",
+ "ff 0.11.0",
+ "group 0.11.0",
+ "lazy_static",
+ "log",
  "num_cpus",
- "pairing 0.20.0",
+ "pairing 0.21.0",
  "rand_core 0.6.3",
+ "rayon",
  "subtle",
 ]
 
@@ -1352,12 +1353,6 @@ checksum = "1847abb9cb65d566acd5942e94aea9c8f547ad02c98e1649326fc0e8910b8b1e"
 
 [[package]]
 name = "futures"
-version = "0.1.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c7e4c2612746b0df8fed4ce0c69156021b704c9aefa360311c04e6e9e002eed"
-
-[[package]]
-name = "futures"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a12aa0eb539080d55c3f2d45a67c3b58b6b0773c1a3ca2dfec66d58c97fd66ca"
@@ -1386,16 +1381,6 @@ name = "futures-core"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88d1c26957f23603395cd326b0ffe64124b818f4449552f960d815cfba83a53d"
-
-[[package]]
-name = "futures-cpupool"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab90cde24b3319636588d0c35fe03b1333857621051837ed769faefb4c2162e4"
-dependencies = [
- "futures 0.1.30",
- "num_cpus",
-]
 
 [[package]]
 name = "futures-executor"
@@ -3989,7 +3974,7 @@ version = "0.2.14"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
- "futures 0.3.17",
+ "futures",
  "futures-core",
  "pin-project 1.0.7",
  "rand 0.8.4",
@@ -4771,7 +4756,7 @@ dependencies = [
  "ed25519-zebra",
  "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "fpe 0.4.0",
- "futures 0.3.17",
+ "futures",
  "group 0.11.0",
  "halo2",
  "hex",
@@ -4815,7 +4800,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "displaydoc",
- "futures 0.3.17",
+ "futures",
  "futures-util",
  "jubjub 0.7.0",
  "lazy_static",
@@ -4851,7 +4836,7 @@ dependencies = [
  "byteorder",
  "bytes 0.6.0",
  "chrono",
- "futures 0.3.17",
+ "futures",
  "hex",
  "indexmap",
  "lazy_static",
@@ -4900,7 +4885,7 @@ dependencies = [
  "color-eyre",
  "dirs",
  "displaydoc",
- "futures 0.3.17",
+ "futures",
  "halo2",
  "hex",
  "itertools 0.10.1",
@@ -4930,7 +4915,7 @@ name = "zebra-test"
 version = "1.0.0-alpha.15"
 dependencies = [
  "color-eyre",
- "futures 0.3.17",
+ "futures",
  "hex",
  "lazy_static",
  "once_cell",
@@ -4973,7 +4958,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "dirs",
- "futures 0.3.17",
+ "futures",
  "gumdrop",
  "hyper 0.14.0-dev",
  "inferno",
