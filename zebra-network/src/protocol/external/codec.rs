@@ -15,8 +15,9 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     serialization::{
-        sha256d, zcash_deserialize_bytes_external_count, ReadZcashExt, SerializationError as Error,
-        WriteZcashExt, ZcashDeserialize, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
+        sha256d, zcash_deserialize_bytes_external_count, FakeWriter, ReadZcashExt,
+        SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::Transaction,
 };
@@ -181,21 +182,8 @@ impl Codec {
     /// for large data structures like lists, blocks, and transactions.
     /// See #1774.
     fn body_length(&self, msg: &Message) -> usize {
-        struct FakeWriter(usize);
+        let mut writer = FakeWriter { 0: 0 };
 
-        impl std::io::Write for FakeWriter {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                self.0 += buf.len();
-
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let mut writer = FakeWriter(0);
         self.write_body(msg, &mut writer)
             .expect("writer should never fail");
         writer.0

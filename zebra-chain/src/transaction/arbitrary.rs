@@ -30,7 +30,7 @@ use crate::{
 
 use itertools::Itertools;
 
-use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction};
+use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx};
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
 ///
@@ -763,6 +763,16 @@ impl Arbitrary for Transaction {
             ]
             .boxed(),
         }
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for UnminedTx {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<Transaction>().prop_map_into().boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

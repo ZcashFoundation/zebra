@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-alpha.17"
+version = "1.0.0-alpha.18"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -15,7 +15,7 @@ bench = ["zebra-test"]
 [dependencies]
 aes = "0.6"
 bech32 = "0.8.1"
-bigint = "4"
+bigint = "4.4.3"
 bitflags = "1.2.1"
 bitvec = "0.22"
 blake2b_simd = "0.5.11"
@@ -27,10 +27,8 @@ chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.2"
 fpe = "0.4"
 futures = "0.3"
-group = "0.10"
-# TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
-# Note: if updating this, also update the workspace Cargo.toml to match.
-halo2 = { git = "https://github.com/zcash/halo2.git", rev = "236115917df9db45282fec24d1e1e36f275f71ab" }
+group = "0.11"
+halo2 = "=0.1.0-beta.1"
 hex = "0.4"
 incrementalmerkletree = "0.1.0"
 jubjub = "0.7.0"
@@ -45,8 +43,8 @@ subtle = "2.4"
 thiserror = "1"
 uint = "0.9.1"
 x25519-dalek = { version = "1.1", features = ["serde"] }
-zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "0c3ed159985affa774e44d10172d4471d798a85a" }
+zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
@@ -67,7 +65,7 @@ color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
 itertools = "0.10.1"
 spandoc = "0.2"
-tracing = "0.1.28"
+tracing = "0.1.29"
 
 proptest = "0.10"
 proptest-derive = "0.3"
