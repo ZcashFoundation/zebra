@@ -47,6 +47,7 @@ It continues our work on the mempool, including some mempool features that are u
 - Set the NU5 testnet activation network upgrade parameters (#2802)
 - Update shared Zcash Rust NU5 dependencies  (#2739)
 - Update Zebra to use modified APIs in shared Zcash Rust NU5 dependencies (#2739)
+
 ### Fixed
 
 - Stop panicking when using sync and async methods on the same `ChainTipChange` (#2800)
