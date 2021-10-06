@@ -138,7 +138,7 @@
         },
         {
           "$$hashKey": "object:85",
-          "format": "short",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
