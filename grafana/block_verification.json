@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1633496074821,
+  "iteration": 1633497866311,
   "links": [],
   "panels": [
     {
@@ -25,6 +25,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "decimals": 6,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -40,13 +41,16 @@
       "hiddenSeries": false,
       "id": 4,
       "legend": {
+        "alignAsTable": false,
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
+        "rightSide": true,
         "show": true,
+        "sideWidth": null,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -153,6 +157,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "decimals": 6,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -168,13 +173,16 @@
       "hiddenSeries": false,
       "id": 6,
       "legend": {
+        "alignAsTable": false,
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
+        "rightSide": true,
         "show": true,
+        "sideWidth": null,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -187,7 +195,7 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1633496074821,
+      "repeatIteration": 1633497866311,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -439,7 +447,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633496074821,
+      "repeatIteration": 1633497866311,
       "repeatPanelId": 5,
       "scopedVars": {
         "job": {
@@ -684,7 +692,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633496074821,
+      "repeatIteration": 1633497866311,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -818,5 +826,5 @@
   "timezone": "",
   "title": "block verification",
   "uid": "rO_Cl5tGz",
-  "version": 5
+  "version": 8
 }

@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 2,
-  "iteration": 1633492869106,
+  "iteration": 1633497830198,
   "links": [],
   "panels": [
     {
@@ -25,6 +25,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "decimals": 6,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -41,12 +42,13 @@
       "id": 2,
       "legend": {
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
+        "rightSide": true,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -161,6 +163,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "decimals": 6,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -177,12 +180,13 @@
       "id": 9,
       "legend": {
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
+        "rightSide": true,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -196,7 +200,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633492869106,
+      "repeatIteration": 1633497830198,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -235,13 +239,15 @@
           "refId": "D"
         },
         {
-          "expr": "state_finalized_committed_block_height{job=\"$job\"}",
+          "exemplar": true,
+          "expr": "state_checkpoint_committed_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_committed_block_height",
           "refId": "E"
         },
         {
-          "expr": "state_finalized_queued_max_height{job=\"$job\"}",
+          "exemplar": true,
+          "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_max_height",
           "refId": "F"
@@ -267,6 +273,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:84",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -275,6 +282,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:85",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -452,7 +460,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633492869106,
+      "repeatIteration": 1633497830198,
       "repeatPanelId": 8,
       "scopedVars": {
         "job": {
@@ -473,7 +481,8 @@
           "refId": "A"
         },
         {
-          "expr": "rate(state_finalized_committed_block_count[1s])",
+          "exemplar": true,
+          "expr": "rate(state_checkpoint_committed_block_count[1s])",
           "interval": "",
           "legendFormat": "state commit rate [1s]",
           "refId": "C"
@@ -511,6 +520,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:252",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -519,6 +529,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:253",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -720,7 +731,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633492869106,
+      "repeatIteration": 1633497830198,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -741,7 +752,8 @@
           "refId": "A"
         },
         {
-          "expr": "state_finalized_queued_block_count{job=\"$job\"}",
+          "exemplar": true,
+          "expr": "state_checkpoint_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_block_count",
           "refId": "B"
@@ -803,6 +815,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:337",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -811,6 +824,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:338",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -889,5 +903,5 @@
   "timezone": "",
   "title": "checkpoint verification",
   "uid": "o4LmN_OMk",
-  "version": 2
+  "version": 4
 }
