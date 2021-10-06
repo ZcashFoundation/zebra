@@ -12,7 +12,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 [dependencies]
 blake2b_simd = "0.5.11"
 bellman = "0.10.0"
-bls12_381 = "0.5.0"
+bls12_381 = "0.6.0"
 chrono = "0.4.19"
 displaydoc = "0.2.2"
 jubjub = "0.7.0"

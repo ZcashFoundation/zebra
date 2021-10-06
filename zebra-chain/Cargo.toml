@@ -20,7 +20,7 @@ bitflags = "1.2.1"
 bitvec = "0.22"
 blake2b_simd = "0.5.11"
 blake2s_simd = "0.5.11"
-bls12_381 = "0.5.0"
+bls12_381 = "0.6.0"
 bs58 = { version = "0.4", features = ["check"] }
 byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
