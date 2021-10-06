@@ -28,24 +28,13 @@ use crate::components::{
 async fn mempool_requests_for_transactions() {
     let (
         inbound_service,
-        committed_blocks,
+        _committed_blocks,
         added_transactions,
-        _,
+        _mock_tx_verifier,
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
     ) = setup(true).await;
-
-    // Make sure there is an additional request broadcasting the
-    // committed blocks to peers.
-    //
-    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
-    for block in committed_blocks.iter().skip(1) {
-        peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
-            .await
-            .respond(Response::Nil);
-    }
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
@@ -99,24 +88,13 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
     let (
         inbound_service,
-        committed_blocks,
-        _,
+        _committed_blocks,
+        _added_transactions,
         mut tx_verifier,
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
     ) = setup(false).await;
-
-    // Make sure there is an additional request broadcasting the
-    // committed blocks to peers.
-    //
-    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
-    for block in committed_blocks.iter().skip(1) {
-        peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
-            .await
-            .respond(Response::Nil);
-    }
 
     // Test `Request::PushTransaction`
     let request = inbound_service
@@ -175,24 +153,13 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
 
     let (
         inbound_service,
-        committed_blocks,
-        _,
+        _committed_blocks,
+        _added_transactions,
         mut tx_verifier,
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
     ) = setup(false).await;
-
-    // Make sure there is an additional request broadcasting the
-    // committed blocks to peers.
-    //
-    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
-    for block in committed_blocks.iter().skip(1) {
-        peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
-            .await
-            .respond(Response::Nil);
-    }
 
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
@@ -266,24 +233,13 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Get services
     let (
         inbound_service,
-        committed_blocks,
-        _,
+        _committed_blocks,
+        _added_transactions,
         mut tx_verifier,
         mut peer_set,
         state_service,
         sync_gossip_task_handle,
     ) = setup(false).await;
-
-    // Make sure there is an additional request broadcasting the
-    // committed blocks to peers.
-    //
-    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
-    for block in committed_blocks.iter().skip(1) {
-        peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
-            .await
-            .respond(Response::Nil);
-    }
 
     // Push test transaction
     let request = inbound_service
@@ -495,7 +451,7 @@ async fn setup(
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
-    let peer_set = MockService::build().for_unit_tests();
+    let mut peer_set = MockService::build().for_unit_tests();
     let buffered_peer_set = Buffer::new(BoxService::new(peer_set.clone()), 10);
 
     let mock_tx_verifier = MockService::build().for_unit_tests();
@@ -576,6 +532,17 @@ async fn setup(
         chain_tip_change,
         peer_set.clone(),
     ));
+
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
 
     (
         inbound_service,
