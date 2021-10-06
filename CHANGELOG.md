@@ -29,6 +29,8 @@ It continues our work on the mempool, including some mempool features that are u
 
 - Add tests to ensure mempool is working correctly (#2769, #2770, #2815)
 - Create and use a helper MockService type to help with writing tests (#2810, #2748, #2790)
+- Update Zebra tests to use the NU5 testnet activation height (#2802)
+- Regenerate NU5 test cases with the latest network upgrade parameters (#2802)
 
 #### Metrics
 
@@ -39,10 +41,17 @@ It continues our work on the mempool, including some mempool features that are u
 - Stop sending empty network messages to peers (#2791)
 - Correctly validate transactions which never expire (#2782)
 
+#### Network Upgrade 5
+
+- Update `zcash_script` dependency to support V5 transactions (#2825)
+- Set the NU5 testnet activation network upgrade parameters (#2802)
+- Update shared Zcash Rust NU5 dependencies  (#2739)
+- Update Zebra to use modified APIs in shared Zcash Rust NU5 dependencies (#2739)
 ### Fixed
 
 - Stop panicking when using sync and async methods on the same chain tip (#2800)
 - Fix an incorrect assertion when the block locator is at the tip (#2789)
+- Fix a missing NULL pointer check in `zebra_script`'s FFI (#2802)
 
 ### Security
 
