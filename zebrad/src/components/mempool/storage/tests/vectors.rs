@@ -115,19 +115,17 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let all_ids: HashSet<UnminedTxId> = unmined_transactions.iter().map(|tx| tx.id).collect();
 
     // Convert response to a `HashSet`, because the order of the response doesn't matter.
-    let rejected_response: HashSet<UnminedTxId> = storage
-        .rejected_transactions_exact(all_ids)
-        .into_iter()
-        .collect();
+    let rejected_response: HashSet<UnminedTxId> =
+        storage.rejected_transactions(all_ids).into_iter().collect();
 
     let rejected_ids = expected_to_be_rejected.iter().map(|tx| tx.id).collect();
 
     assert_eq!(rejected_response, rejected_ids);
 
     // Make sure the first id stored is now rejected
-    assert!(storage.contains_rejected_exact(&expected_to_be_rejected[0].id));
+    assert!(storage.contains_rejected(&expected_to_be_rejected[0].id));
     // Make sure the last id stored is not rejected
-    assert!(!storage.contains_rejected_exact(&expected_in_mempool[0].id));
+    assert!(!storage.contains_rejected(&expected_in_mempool[0].id));
 
     Ok(())
 }

@@ -184,7 +184,7 @@ impl Mempool {
         if storage.contains_transaction_exact(&txid) {
             return Err(MempoolError::InMempool);
         }
-        if let Some(error) = storage.rejection_error_exact(&txid) {
+        if let Some(error) = storage.rejection_error(&txid) {
             return Err(error);
         }
         Ok(())
@@ -266,7 +266,7 @@ impl Service<Request> for Mempool {
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
                 Request::RejectedTransactionIds(ids) => {
-                    let res = storage.rejected_transactions_exact(ids).collect();
+                    let res = storage.rejected_transactions(ids).collect();
                     async move { Ok(Response::RejectedTransactionIds(res)) }.boxed()
                 }
                 Request::Queue(gossiped_txs) => {

@@ -78,7 +78,7 @@ impl Storage {
         let tx_id = tx.id;
 
         // First, check if we have a cached rejection for this transaction.
-        if let Some(error) = self.rejection_error_exact(&tx.id) {
+        if let Some(error) = self.rejection_error(&tx.id) {
             return Err(error);
         }
 
@@ -214,11 +214,11 @@ impl Storage {
         self.rejected_exact.len() + self.rejected_same_effects.len()
     }
 
-    /// Returns `true` if a [`UnminedTx`] exactly matching an [`UnminedTxId`] is in
-    /// the mempool rejected list.
+    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
+    /// any mempool rejected list.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
-    pub fn rejection_error_exact(&self, txid: &UnminedTxId) -> Option<MempoolError> {
+    /// This matches transactions based on each rejection list's matching rule.
+    pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
         if let Some(exact_error) = self.rejected_exact.get(txid) {
             return Some(exact_error.clone().into());
         }
@@ -230,23 +230,23 @@ impl Storage {
         None
     }
 
-    /// Returns the set of [`UnminedTxId`]s exactly matching ids in the rejected list.
+    /// Returns the set of [`UnminedTxId`]s matching `tx_ids` in the rejected list.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
-    pub fn rejected_transactions_exact(
+    /// This matches transactions based on each rejection list's matching rule.
+    pub fn rejected_transactions(
         &self,
         tx_ids: HashSet<UnminedTxId>,
     ) -> impl Iterator<Item = UnminedTxId> + '_ {
         tx_ids
             .into_iter()
-            .filter(move |txid| self.contains_rejected_exact(txid))
+            .filter(move |txid| self.contains_rejected(txid))
     }
 
-    /// Returns `true` if a [`UnminedTx`] exactly matching the supplied [`UnminedTxId`] is in
+    /// Returns `true` if a [`UnminedTx`] matching the supplied [`UnminedTxId`] is in
     /// the mempool rejected list.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
-    pub fn contains_rejected_exact(&self, txid: &UnminedTxId) -> bool {
+    /// This matches transactions based on each rejection list's matching rule.
+    pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
         self.rejected_exact.contains_key(txid)
             || self.rejected_same_effects.contains_key(&txid.mined_id())
     }
