@@ -10,8 +10,6 @@ use zebra_chain::{
     transparent,
 };
 
-use super::MEMPOOL_SIZE;
-
 /// The set of verified transactions stored in the mempool.
 ///
 /// This also caches the all the spent outputs from the transactions in the mempool. The spent
@@ -24,8 +22,6 @@ use super::MEMPOOL_SIZE;
 #[derive(Default)]
 pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
-    ///
-    /// This has at most [`MEMPOOL_SIZE`] transactions.
     transactions: VecDeque<UnminedTx>,
 
     /// The set of spent out points by the verified transactions.
@@ -90,11 +86,20 @@ impl VerifiedSet {
     /// The transaction is assumed to not have spend conflicts with any other transaction already
     /// in the set. Use [`Self::has_spend_conflicts`] to ensure this before calling this method.
     pub fn insert(&mut self, transaction: UnminedTx) {
-        self.ensure_space_for_insertion();
         self.cache_outputs_from(&transaction.transaction);
-        self.transactions.push_front(transaction);
+        self.transactions.push_front(dbg!(transaction));
+    }
 
-        assert!(self.transactions.len() <= MEMPOOL_SIZE);
+    /// Evict one transaction from the set to open space for another transaction.
+    pub fn evict_one(&mut self) -> Option<UnminedTx> {
+        if self.transactions.is_empty() {
+            None
+        } else {
+            // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
+            let last_index = self.transactions.len() - 1;
+
+            Some(self.remove(last_index))
+        }
     }
 
     /// Removes all transactions in the set that matches the `predicate`.
@@ -124,34 +129,15 @@ impl VerifiedSet {
     ///
     /// Also removes its outputs from the internal caches.
     // TODO: Maybe replace `usize` with `UnminedTxId` when `VecDeque` is no longer used?
-    fn remove(&mut self, transaction_index: usize) {
+    fn remove(&mut self, transaction_index: usize) -> UnminedTx {
         let removed_tx = self
             .transactions
             .remove(transaction_index)
             .expect("invalid transaction index");
 
         self.remove_outputs(&removed_tx);
-    }
 
-    /// Ensures there's at least one empty space for insertion of a new transaction.
-    fn ensure_space_for_insertion(&mut self) {
-        while self.transactions.len() >= MEMPOOL_SIZE {
-            let tx_to_evict = self
-                .select_for_eviction()
-                .expect("mempool is empty, but it was checked to be full");
-
-            self.remove(tx_to_evict);
-        }
-    }
-
-    /// Evict one transaction from the set to open space for another transaction.
-    // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
-    fn select_for_eviction(&mut self) -> Option<usize> {
-        if self.transactions.is_empty() {
-            None
-        } else {
-            Some(self.transactions.len() - 1)
-        }
+        removed_tx
     }
 
     /// Inserts the transaction's outputs into the internal caches.

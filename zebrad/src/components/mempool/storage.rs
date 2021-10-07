@@ -151,10 +151,20 @@ impl Storage {
 
         // Security: stop the transaction or rejection lists using too much memory
 
-        // Once inserted, we evict transactions over the pool size limit in FIFO
-        // order.
-        //
-        // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
+        // Once inserted, we evict transactions over the pool size limit.
+        while self.verified.transaction_count() > MEMPOOL_SIZE {
+            let evicted_tx = self
+                .verified
+                .evict_one()
+                .expect("mempool is empty, but was expected to be full");
+
+            let _ = self.chain_rejected_same_effects.insert(
+                evicted_tx.id.mined_id(),
+                SameEffectsChainRejectionError::RandomlyEvicted,
+            );
+        }
+
+        assert!(self.verified.transaction_count() <= MEMPOOL_SIZE);
 
         self.limit_rejection_list_memory();
 
