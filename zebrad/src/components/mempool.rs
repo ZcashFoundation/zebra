@@ -100,11 +100,17 @@ pub struct Config {
     pub eviction_memory_minutes: Duration,
 }
 
+/// Consensus rules:
+///
+/// - There MUST be a configuration option mempooltxcostlimit, which SHOULD default to 80000000.
+/// - There MUST be a configuration option mempoolevictionmemoryminutes, which SHOULD default to 60.
+///
+/// https://zips.z.cash/zip-0401#specification
 impl Default for Config {
     fn default() -> Self {
         Self {
             tx_cost_limit: 80_000_000,
-            eviction_memory_minutes: Duration::from_secs(60*60),
+            eviction_memory_minutes: Duration::from_secs(60 * 60),
         }
     }
 }
