@@ -17,6 +17,16 @@ pub mod tests;
 
 const MEMPOOL_SIZE: usize = 2;
 
+/// The size limit for mempool transaction rejection lists.
+///
+/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries` entries,
+/// > which is the constant 40000.
+///
+/// https://zips.z.cash/zip-0401#specification
+///
+/// We use the specified value for all lists for consistency.
+const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
+
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
 /// These rejections are only valid for the current tip.
 ///
@@ -125,6 +135,8 @@ impl Storage {
         // Then, we insert into the pool.
         self.verified.push_front(tx);
 
+        // Security: stop the transaction or rejection lists using too much memory
+
         // Once inserted, we evict transactions over the pool size limit in FIFO
         // order.
         //
@@ -139,6 +151,8 @@ impl Storage {
 
             assert_eq!(self.verified.len(), MEMPOOL_SIZE);
         }
+
+        self.limit_rejection_list_memory();
 
         Ok(tx_id)
     }
@@ -200,6 +214,25 @@ impl Storage {
     pub fn clear_tip_rejections(&mut self) {
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
+    }
+
+    /// Clears rejections that only apply to the current tip.
+    ///
+    /// # Security
+    ///
+    /// This method must be called at the end of every method that adds rejections.
+    /// Otherwise, peers could make our reject lists use a lot of RAM.
+    fn limit_rejection_list_memory(&mut self) {
+        // These lists are an optimisation - it's ok to totally clear them as needed.
+        if self.tip_rejected_exact.len() > MAX_EVICTION_MEMORY_ENTRIES {
+            self.tip_rejected_exact.clear();
+        }
+        if self.tip_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
+            self.tip_rejected_same_effects.clear();
+        }
+        if self.chain_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
+            self.chain_rejected_same_effects.clear();
+        }
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
