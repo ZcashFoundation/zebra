@@ -33,7 +33,7 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
-pub use self::storage::StorageRejectionError;
+pub use self::storage::{ExactRejectionError, SameEffectsRejectionError};
 
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;
@@ -185,7 +185,7 @@ impl Mempool {
             return Err(MempoolError::InMempool);
         }
         if let Some(error) = storage.rejection_error(&txid) {
-            return Err(error.into());
+            return Err(error);
         }
         Ok(())
     }

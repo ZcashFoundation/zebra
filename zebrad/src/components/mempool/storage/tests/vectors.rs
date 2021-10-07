@@ -96,7 +96,10 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     assert_eq!(storage.verified.len(), MEMPOOL_SIZE);
 
     // The rest of the transactions will be in rejected
-    assert_eq!(storage.rejected.len(), rejected_transaction_count);
+    assert_eq!(
+        storage.rejected_transaction_count(),
+        rejected_transaction_count
+    );
 
     // Make sure the last MEMPOOL_SIZE transactions we sent are in the verified
     for tx in expected_in_mempool {
