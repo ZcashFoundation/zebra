@@ -480,6 +480,12 @@ impl FinalizedState {
                 finalized.height.0 as _
             );
 
+            // This height gauge is updated for both fully verified and checkpoint blocks.
+            // These updates can't conflict, because the state makes sure that blocks
+            // are committed in order.
+            metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
+            metrics::counter!("zcash.chain.verified.block.total", 1);
+
             block_result = Ok(finalized);
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);

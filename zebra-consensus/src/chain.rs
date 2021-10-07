@@ -131,9 +131,7 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        let height = block.coinbase_height();
-
-        let result = match height {
+        match block.coinbase_height() {
             Some(height) if height <= self.max_checkpoint_height => self
                 .checkpoint
                 .call(block)
@@ -146,18 +144,7 @@ where
                 .call(block)
                 .map_err(VerifyChainError::Block)
                 .boxed(),
-        };
-
-        // Update the metrics if semantic and contextual validation passes
-        result
-            .inspect_ok(move |_| {
-                let height = height.expect("unexpected valid block with no coinbase height");
-
-                tracing::trace!(?height, "verified block");
-                metrics::gauge!("zcash.chain.verified.block.height", height.0 as _);
-                metrics::counter!("zcash.chain.verified.block.total", 1);
-            })
-            .boxed()
+        }
     }
 }
 

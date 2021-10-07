@@ -203,6 +203,20 @@ impl StateService {
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
         let tip_block = self.mem.best_tip_block().map(ChainTipBlock::from);
+
+        // update metrics using the best non-finalized tip
+        if let Some(tip_block) = tip_block.as_ref() {
+            metrics::gauge!(
+                "state.full_verifier.committed.block.height",
+                tip_block.height.0 as _
+            );
+
+            // This height gauge is updated for both fully verified and checkpoint blocks.
+            // These updates can't conflict, because the state makes sure that blocks
+            // are committed in order.
+            metrics::gauge!("zcash.chain.verified.block.height", tip_block.height.0 as _);
+        }
+
         self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
         tracing::trace!("finished processing queued block");
@@ -260,6 +274,11 @@ impl StateService {
                 } else {
                     tracing::trace!(?child_hash, "validating queued child");
                     result = self.validate_and_commit(child).map_err(CloneError::from);
+                    if result.is_ok() {
+                        // Update the metrics if semantic and contextual validation passes
+                        metrics::counter!("state.full_verifier.committed.block.count", 1);
+                        metrics::counter!("zcash.chain.verified.block.total", 1);
+                    }
                 }
 
                 let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
