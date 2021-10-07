@@ -33,6 +33,7 @@ use tower::util::BoxService;
 use crate::{
     components::{
         mempool::{self, Mempool},
+        sync,
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
     },
@@ -105,11 +106,26 @@ impl StartCmd {
             .send((peer_set.clone(), address_book, mempool.clone()))
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
+        let syncer_error_future = syncer.sync();
+
+        let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change,
+            peer_set.clone(),
+        ));
+
+        let mempool_crawler_task_handle = mempool::Crawler::spawn(peer_set, mempool, sync_status);
+
         select! {
-            result = syncer.sync().fuse() => result,
-            _ = mempool::Crawler::spawn(peer_set, mempool, sync_status).fuse() => {
-                unreachable!("The mempool crawler only stops if it panics");
-            }
+            sync_result = syncer_error_future.fuse() => sync_result,
+
+            sync_gossip_result = sync_gossip_task_handle.fuse() => sync_gossip_result
+                .expect("unexpected panic in the chain tip block gossip task")
+                .map_err(|e| eyre!(e)),
+
+            mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
+                .expect("unexpected panic in the mempool crawler")
+                .map_err(|e| eyre!(e)),
         }
     }
 }

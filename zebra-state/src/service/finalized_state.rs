@@ -180,9 +180,9 @@ impl FinalizedState {
             self.max_queued_height = height.0 as _;
         }
 
-        metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
+        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
         metrics::gauge!(
-            "state.finalized.queued.block.count",
+            "state.checkpoint.queued.block.count",
             self.queued_by_prev_hash.len() as f64
         );
 
@@ -228,8 +228,6 @@ impl FinalizedState {
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        block_precommit_metrics(&finalized);
-
         let finalized_tip_height = self.finalized_tip_height();
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
@@ -443,6 +441,9 @@ impl FinalizedState {
         // In case of errors, propagate and do not write the batch.
         let batch = prepare_commit()?;
 
+        // The block has passed contextual validation, so update the metrics
+        block_precommit_metrics(&block, hash, height);
+
         let result = self.db.write(batch).map(|()| hash);
 
         tracing::trace!(?source, "committed block from");
@@ -473,17 +474,23 @@ impl FinalizedState {
 
         let block_result;
         if result.is_ok() {
-            metrics::counter!("state.finalized.committed.block.count", 1);
+            metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
-                "state.finalized.committed.block.height",
+                "state.checkpoint.finalized.block.height",
                 finalized.height.0 as _
             );
 
+            // This height gauge is updated for both fully verified and checkpoint blocks.
+            // These updates can't conflict, because the state makes sure that blocks
+            // are committed in order.
+            metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
+            metrics::counter!("zcash.chain.verified.block.total", 1);
+
             block_result = Ok(finalized);
         } else {
-            metrics::counter!("state.finalized.error.block.count", 1);
+            metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
-                "state.finalized.error.block.height",
+                "state.checkpoint.error.block.height",
                 finalized.height.0 as _
             );
 
@@ -677,9 +684,7 @@ impl Drop for FinalizedState {
     }
 }
 
-fn block_precommit_metrics(finalized: &FinalizedBlock) {
-    let (hash, height, block) = (finalized.hash, finalized.height, finalized.block.as_ref());
-
+fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
     let transaction_count = block.transactions.len();
     let transparent_prevout_count = block
         .transactions
@@ -723,6 +728,10 @@ fn block_precommit_metrics(finalized: &FinalizedBlock) {
         orchard_nullifier_count,
         "preparing to commit finalized block"
     );
+
+    metrics::counter!("state.finalized.block.count", 1);
+    metrics::gauge!("state.finalized.block.height", height.0 as _);
+
     metrics::counter!(
         "state.finalized.cumulative.transactions",
         transaction_count as u64
