@@ -233,7 +233,12 @@ async fn mempool_queue() -> Result<(), Report> {
         _ => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
-    assert_eq!(queued_responses[0], Err(MempoolError::Rejected));
+    assert_eq!(
+        queued_responses[0],
+        Err(MempoolError::Storage(
+            StorageRejectionError::RandomlyEvicted
+        ))
+    );
 
     Ok(())
 }

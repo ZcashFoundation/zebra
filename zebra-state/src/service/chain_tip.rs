@@ -540,6 +540,15 @@ impl TipAction {
         }
     }
 
+    /// Returns the block height of this tip action,
+    /// regardless of the underlying variant.
+    pub fn best_tip_height(&self) -> block::Height {
+        match self {
+            Grow { block } => block.height,
+            Reset { height, .. } => *height,
+        }
+    }
+
     /// Returns a [`Grow`] based on `block`.
     pub(crate) fn grow_with(block: ChainTipBlock) -> Self {
         Grow { block }
