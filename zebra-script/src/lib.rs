@@ -24,7 +24,7 @@ use zebra_chain::{
     transparent,
 };
 
-#[derive(Copy, Clone, Debug, Display, Error, PartialEq)]
+#[derive(Copy, Clone, Debug, Display, Error, PartialEq, Eq)]
 #[non_exhaustive]
 /// An Error type representing the error codes returned from zcash_script.
 pub enum Error {

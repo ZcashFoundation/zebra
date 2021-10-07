@@ -33,6 +33,8 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
+pub use self::storage::StorageRejectionError;
+
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;
 
@@ -182,8 +184,8 @@ impl Mempool {
         if storage.contains(&txid) {
             return Err(MempoolError::InMempool);
         }
-        if storage.contains_rejected(&txid) {
-            return Err(MempoolError::Rejected);
+        if let Some(error) = storage.rejection_error(&txid) {
+            return Err(error.into());
         }
         Ok(())
     }
@@ -210,11 +212,12 @@ impl Service<Request> for Mempool {
                             storage.clear();
                             tx_downloads.cancel_all();
                         }
-                        // Cancel downloads/verifications of transactions with the same
-                        // IDs as recently mined transactions.
+                        // Cancel downloads/verifications/storage of transactions
+                        // with the same mined IDs as recently mined transactions.
                         TipAction::Grow { block } => {
-                            let txid_set = block.transaction_hashes.iter().collect();
-                            tx_downloads.cancel(txid_set);
+                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                            tx_downloads.cancel(&mined_ids);
+                            storage.remove_same_effects(&mined_ids);
                         }
                     }
                 }
@@ -309,14 +312,16 @@ fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
 ) {
-    let ids = storage.tx_ids().iter().copied().collect();
-    let transactions = storage.transactions(ids);
+    let mut txid_set = HashSet::new();
 
-    for t in transactions {
+    for t in storage.transactions_all() {
         if let Some(expiry_height) = t.transaction.expiry_height() {
             if tip_height >= expiry_height {
-                storage.remove(&t.id);
+                txid_set.insert(t.id.mined_id());
             }
         }
     }
+
+    // expiry height is effecting data, so we match by non-malleable TXID
+    storage.remove_same_effects(&txid_set);
 }
