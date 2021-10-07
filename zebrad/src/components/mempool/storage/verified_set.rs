@@ -87,7 +87,7 @@ impl VerifiedSet {
     /// in the set. Use [`Self::has_spend_conflicts`] to ensure this before calling this method.
     pub fn insert(&mut self, transaction: UnminedTx) {
         self.cache_outputs_from(&transaction.transaction);
-        self.transactions.push_front(dbg!(transaction));
+        self.transactions.push_front(transaction);
     }
 
     /// Evict one transaction from the set to open space for another transaction.
