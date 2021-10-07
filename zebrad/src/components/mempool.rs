@@ -36,13 +36,16 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
-pub use self::storage::{ExactRejectionError, SameEffectsRejectionError};
+pub use self::storage::{
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+};
 
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;
 
 use self::downloads::{
-    Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, Gossip, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
+    TRANSACTION_VERIFY_TIMEOUT,
 };
 
 use super::sync::SyncStatus;
@@ -245,17 +248,24 @@ impl Service<Request> for Mempool {
                             let mined_ids = block.transaction_hashes.iter().cloned().collect();
                             tx_downloads.cancel(&mined_ids);
                             storage.remove_same_effects(&mined_ids);
+                            storage.clear_tip_rejections();
                         }
                     }
                 }
 
                 // Clean up completed download tasks and add to mempool if successful.
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
-                    if let Ok(tx) = r {
-                        // Storage handles conflicting transactions or a full mempool internally,
-                        // so just ignore the storage result here
-                        let _ = storage.insert(tx);
-                    }
+                    match r {
+                        Ok(tx) => {
+                            // Storage handles conflicting transactions or a full mempool internally,
+                            // so just ignore the storage result here
+                            let _ = storage.insert(tx);
+                        }
+                        Err((txid, e)) => {
+                            reject_if_needed(storage, txid, e);
+                            // TODO: should we also log the result?
+                        }
+                    };
                 }
 
                 // Remove expired transactions from the mempool.
@@ -350,4 +360,39 @@ fn remove_expired_transactions(
 
     // expiry height is effecting data, so we match by non-malleable TXID
     storage.remove_same_effects(&txid_set);
+}
+
+/// Add a transaction that failed download and verification to the rejected list
+/// if needed, depending on the reason for the failure.
+fn reject_if_needed(
+    storage: &mut storage::Storage,
+    txid: UnminedTxId,
+    e: TransactionDownloadVerifyError,
+) {
+    match e {
+        // Rejecting a transaction already in state would speed up further
+        // download attempts without checking the state. However it would
+        // make the reject list grow forever.
+        // TODO: revisit after reviewing the rejected list cleanup criteria?
+        // TODO: if we decide to reject it, then we need to pass the block hash
+        // to State::Confirmed. This would require the zs::Response::Transaction
+        // to include the hash, which would need to be implemented.
+        TransactionDownloadVerifyError::InState |
+        // An unknown error in the state service, better do nothing
+        TransactionDownloadVerifyError::StateError(_) |
+        // Sync has just started. Mempool shouldn't even be enabled, so will not
+        // happen in practice.
+        TransactionDownloadVerifyError::NoTip |
+        // If download failed, do nothing; the crawler will end up trying to
+        // download it again.
+        TransactionDownloadVerifyError::DownloadFailed(_) |
+        // If it was cancelled then a block was mined, or there was a network
+        // upgrade, etc. No reason to reject it.
+        TransactionDownloadVerifyError::Cancelled => {}
+        // Consensus verification failed. Reject transaction to avoid
+        // having to download and verify it again just for it to fail again.
+        TransactionDownloadVerifyError::Invalid(e) => {
+            storage.reject(txid, ExactTipRejectionError::FailedVerification(e).into())
+        }
+    }
 }

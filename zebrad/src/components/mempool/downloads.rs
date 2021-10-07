@@ -5,13 +5,13 @@ use std::{
     time::Duration,
 };
 
-use color_eyre::eyre::eyre;
 use futures::{
     future::TryFutureExt,
     ready,
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
+use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -64,6 +64,29 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
 pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
+
+/// Errors that can occur while downloading and verifying a transaction.
+#[derive(Error, Debug)]
+#[allow(dead_code)]
+pub enum TransactionDownloadVerifyError {
+    #[error("transaction is already in state")]
+    InState,
+
+    #[error("error in state service")]
+    StateError(#[source] BoxError),
+
+    #[error("transaction not validated because the tip is empty")]
+    NoTip,
+
+    #[error("error downloading transaction")]
+    DownloadFailed(#[source] BoxError),
+
+    #[error("transaction download / verification was cancelled")]
+    Cancelled,
+
+    #[error("transaction did not pass consensus validation")]
+    Invalid(#[from] zebra_consensus::error::TransactionError),
+}
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
 #[derive(Debug, Eq, PartialEq)]
@@ -120,7 +143,9 @@ where
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
     #[pin]
-    pending: FuturesUnordered<JoinHandle<Result<UnminedTx, (BoxError, UnminedTxId)>>>,
+    pending: FuturesUnordered<
+        JoinHandle<Result<UnminedTx, (TransactionDownloadVerifyError, UnminedTxId)>>,
+    >,
 
     /// A list of channels that can be used to cancel pending transaction download and
     /// verify tasks.
@@ -136,7 +161,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<UnminedTx, BoxError>;
+    type Item = Result<UnminedTx, (UnminedTxId, TransactionDownloadVerifyError)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -157,7 +182,7 @@ where
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
+                    Poll::Ready(Some(Err((hash, e))))
                 }
             }
         } else {
@@ -237,21 +262,27 @@ where
             Self::transaction_in_state(&mut state, txid).await?;
 
             let height = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Err("no block at the tip".into()),
+                Ok(zs::Response::Tip(None)) => Err(TransactionDownloadVerifyError::NoTip),
                 Ok(zs::Response::Tip(Some((height, _hash)))) => Ok(height),
                 Ok(_) => unreachable!("wrong response"),
-                Err(e) => Err(e),
+                Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
             }?;
-            let height = (height + 1).ok_or_else(|| eyre!("no next height"))?;
+            let height = (height + 1).expect("must have next height");
 
             let tx = match gossiped_tx {
                 Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
-                    let tx = match network.oneshot(req).await? {
-                        zn::Response::Transactions(mut txs) => txs
-                            .pop()
-                            .expect("successful response has the transaction in it"),
+                    let tx = match network
+                        .oneshot(req)
+                        .await
+                        .map_err(|e| TransactionDownloadVerifyError::DownloadFailed(e))?
+                    {
+                        zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
+                            TransactionDownloadVerifyError::DownloadFailed(
+                                "no transactions returned".into(),
+                            )
+                        })?,
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
@@ -274,7 +305,7 @@ where
 
             tracing::debug!(?txid, ?result, "verified transaction for the mempool");
 
-            result
+            result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
         .map_ok(|tx| {
             metrics::counter!("gossip.verified.transaction.count", 1);
@@ -292,7 +323,7 @@ where
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
                     metrics::counter!("gossip.cancelled.count", 1);
-                    Err(("canceled".into(), txid))
+                    Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
                 verification = fut => verification,
             }
@@ -357,18 +388,22 @@ where
     }
 
     /// Check if transaction is already in the state.
-    async fn transaction_in_state(state: &mut ZS, txid: UnminedTxId) -> Result<(), BoxError> {
+    async fn transaction_in_state(
+        state: &mut ZS,
+        txid: UnminedTxId,
+    ) -> Result<(), TransactionDownloadVerifyError> {
         // Check if the transaction is already in the state.
         match state
             .ready_and()
-            .await?
+            .await
+            .map_err(|e| TransactionDownloadVerifyError::StateError(e))?
             .call(zs::Request::Transaction(txid.mined_id()))
             .await
         {
             Ok(zs::Response::Transaction(None)) => Ok(()),
-            Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
+            Ok(zs::Response::Transaction(Some(_))) => Err(TransactionDownloadVerifyError::InState),
             Ok(_) => unreachable!("wrong response"),
-            Err(e) => Err(e),
+            Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
         }?;
 
         Ok(())
