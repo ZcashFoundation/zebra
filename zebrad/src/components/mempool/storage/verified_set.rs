@@ -102,7 +102,7 @@ impl VerifiedSet {
         }
     }
 
-    /// Removes all transactions in the set that matches the `predicate`.
+    /// Removes all transactions in the set that match the `predicate`.
     ///
     /// Returns the amount of transactions removed.
     pub fn remove_all_that(&mut self, predicate: impl Fn(&UnminedTx) -> bool) -> usize {
