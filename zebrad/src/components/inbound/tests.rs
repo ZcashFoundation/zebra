@@ -34,6 +34,7 @@ async fn mempool_requests_for_transactions() {
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
+        _tx_gossip_task_handle,
     ) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
@@ -94,6 +95,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
+        tx_gossip_task_handle,
     ) = setup(false).await;
 
     // Test `Request::PushTransaction`
@@ -140,6 +142,13 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         sync_gossip_result,
     );
 
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
     Ok(())
 }
 
@@ -165,6 +174,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
+        tx_gossip_task_handle,
     ) = setup(false).await;
 
     // Test `Request::AdvertiseTransactionIds`
@@ -222,6 +232,13 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         sync_gossip_result,
     );
 
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
     Ok(())
 }
 
@@ -251,6 +268,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         mut peer_set,
         state_service,
         sync_gossip_task_handle,
+        tx_gossip_task_handle,
     ) = setup(false).await;
 
     // Push test transaction
@@ -446,6 +464,13 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         sync_gossip_result,
     );
 
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
     Ok(())
 }
 
@@ -466,6 +491,7 @@ async fn setup(
         zebra_state::Request,
     >,
     JoinHandle<Result<(), BlockGossipError>>,
+    JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
@@ -537,11 +563,6 @@ async fn setup(
     // Enable the mempool
     mempool_service.enable(&mut recent_syncs).await;
 
-    let _ = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_receiver,
-        peer_set.clone(),
-    ));
-
     let mut added_transactions = Vec::new();
     if add_transactions {
         added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
@@ -571,6 +592,11 @@ async fn setup(
         peer_set.clone(),
     ));
 
+    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
+        transaction_receiver,
+        peer_set.clone(),
+    ));
+
     // Make sure there is an additional request broadcasting the
     // committed blocks to peers.
     //
@@ -590,6 +616,7 @@ async fn setup(
         peer_set,
         state_service,
         sync_gossip_task_handle,
+        tx_gossip_task_handle,
     )
 }
 
