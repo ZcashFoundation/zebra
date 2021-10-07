@@ -111,6 +111,11 @@ impl QueuedBlocks {
                 self.blocks.remove(&hash).expect("block is present");
             let parent_hash = &expired_block.block.header.previous_block_hash;
 
+            // we don't care if the receiver was dropped
+            let _ = expired_sender.send(Err(
+                "pruned block at or below the finalized tip height".into()
+            ));
+
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)
             for outpoint in expired_block.new_outputs.keys() {
