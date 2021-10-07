@@ -40,7 +40,7 @@ pub struct ZebradConfig {
     pub sync: SyncSection,
 
     /// Mempool configuration
-    pub mempol: MempoolSection,
+    pub mempool: MempoolSection,
 }
 
 /// Tracing configuration section.
