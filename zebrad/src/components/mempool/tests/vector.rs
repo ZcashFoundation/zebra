@@ -599,14 +599,16 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     time::pause();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -701,14 +703,16 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     time::pause();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
