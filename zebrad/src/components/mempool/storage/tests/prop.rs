@@ -45,7 +45,7 @@ proptest! {
                 Err(MempoolError::StorageEffects(SameEffectsRejectionError::SpendConflict))
             );
 
-            assert!(storage.contains_rejected_exact(&id_to_reject));
+            assert!(storage.contains_rejected(&id_to_reject));
 
             storage.clear();
         }
