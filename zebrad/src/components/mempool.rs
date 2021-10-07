@@ -220,6 +220,7 @@ impl Service<Request> for Mempool {
                             let mined_ids = block.transaction_hashes.iter().cloned().collect();
                             tx_downloads.cancel(&mined_ids);
                             storage.remove_same_effects(&mined_ids);
+                            storage.clear_tip_rejections();
                         }
                     }
                 }

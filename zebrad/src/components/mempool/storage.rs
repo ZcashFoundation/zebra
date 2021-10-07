@@ -196,6 +196,12 @@ impl Storage {
         self.chain_rejected_same_effects.clear();
     }
 
+    /// Clears rejections that only apply to the current tip.
+    pub fn clear_tip_rejections(&mut self) {
+        self.tip_rejected_exact.clear();
+        self.tip_rejected_same_effects.clear();
+    }
+
     /// Returns the set of [`UnminedTxId`]s in the mempool.
     pub fn tx_ids(&self) -> impl Iterator<Item = UnminedTxId> + '_ {
         self.verified.iter().map(|tx| tx.id)
