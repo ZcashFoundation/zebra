@@ -198,11 +198,6 @@ where
                     .map_err(VerifyBlockError::Transaction)?;
             }
 
-            // Update the metrics after all the validation is finished
-            tracing::trace!("verified block");
-            metrics::gauge!("zcash.chain.verified.block.height", height.0 as _);
-            metrics::counter!("zcash.chain.verified.block.total", 1);
-
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 

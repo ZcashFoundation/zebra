@@ -348,7 +348,7 @@ where
 
     /// Cancel download/verification tasks of transactions with the
     /// given transaction hash (see [`UnminedTxId::mined_id`]).
-    pub fn cancel(&mut self, mined_ids: HashSet<&transaction::Hash>) {
+    pub fn cancel(&mut self, mined_ids: &HashSet<transaction::Hash>) {
         // TODO: this can be simplified with [`HashMap::drain_filter`] which
         // is currently nightly-only experimental API.
         let removed_txids: Vec<UnminedTxId> = self

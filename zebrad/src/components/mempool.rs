@@ -33,6 +33,10 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
+pub use self::storage::{
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+};
+
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;
 
@@ -180,11 +184,11 @@ impl Mempool {
         txid: UnminedTxId,
     ) -> Result<(), MempoolError> {
         // Check if the transaction is already in the mempool.
-        if storage.contains(&txid) {
+        if storage.contains_transaction_exact(&txid) {
             return Err(MempoolError::InMempool);
         }
-        if storage.contains_rejected(&txid) {
-            return Err(MempoolError::Rejected);
+        if let Some(error) = storage.rejection_error(&txid) {
+            return Err(error);
         }
         Ok(())
     }
@@ -211,11 +215,13 @@ impl Service<Request> for Mempool {
                             storage.clear();
                             tx_downloads.cancel_all();
                         }
-                        // Cancel downloads/verifications of transactions with the same
-                        // IDs as recently mined transactions.
+                        // Cancel downloads/verifications/storage of transactions
+                        // with the same mined IDs as recently mined transactions.
                         TipAction::Grow { block } => {
-                            let txid_set = block.transaction_hashes.iter().collect();
-                            tx_downloads.cancel(txid_set);
+                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                            tx_downloads.cancel(&mined_ids);
+                            storage.remove_same_effects(&mined_ids);
+                            storage.clear_tip_rejections();
                         }
                     }
                 }
@@ -262,17 +268,16 @@ impl Service<Request> for Mempool {
                 tx_downloads,
             } => match req {
                 Request::TransactionIds => {
-                    let res = storage.tx_ids();
+                    let res = storage.tx_ids().collect();
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
                 Request::TransactionsById(ids) => {
-                    let rsp = Ok(storage.transactions(ids)).map(Response::Transactions);
-                    async move { rsp }.boxed()
+                    let res = storage.transactions_exact(ids).cloned().collect();
+                    async move { Ok(Response::Transactions(res)) }.boxed()
                 }
                 Request::RejectedTransactionIds(ids) => {
-                    let rsp = Ok(storage.rejected_transactions(ids))
-                        .map(Response::RejectedTransactionIds);
-                    async move { rsp }.boxed()
+                    let res = storage.rejected_transactions(ids).collect();
+                    async move { Ok(Response::RejectedTransactionIds(res)) }.boxed()
                 }
                 Request::Queue(gossiped_txs) => {
                     let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
@@ -316,16 +321,18 @@ fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
 ) {
-    let ids = storage.tx_ids().iter().copied().collect();
-    let transactions = storage.transactions(ids);
+    let mut txid_set = HashSet::new();
 
-    for t in transactions {
+    for t in storage.transactions() {
         if let Some(expiry_height) = t.transaction.expiry_height() {
             if tip_height >= expiry_height {
-                storage.remove(&t.id);
+                txid_set.insert(t.id.mined_id());
             }
         }
     }
+
+    // expiry height is effecting data, so we match by non-malleable TXID
+    storage.remove_same_effects(&txid_set);
 }
 
 /// Add a transaction that failed download and verification to the rejected list

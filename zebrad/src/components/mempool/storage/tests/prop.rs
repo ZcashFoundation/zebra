@@ -11,6 +11,8 @@ use zebra_chain::{
     transparent, LedgerState,
 };
 
+use crate::components::mempool::storage::SameEffectsTipRejectionError;
+
 use super::super::{MempoolError, Storage};
 
 proptest! {
@@ -40,7 +42,7 @@ proptest! {
 
             assert_eq!(
                 storage.insert(transaction_to_reject),
-                Err(MempoolError::Rejected)
+                Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
             assert!(storage.contains_rejected(&id_to_reject));
