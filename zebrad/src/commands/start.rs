@@ -119,7 +119,8 @@ impl StartCmd {
             peer_set.clone(),
         ));
 
-        let mempool_crawler_task_handle = mempool::Crawler::spawn(peer_set.clone(), mempool, sync_status);
+        let mempool_crawler_task_handle =
+            mempool::Crawler::spawn(peer_set.clone(), mempool, sync_status);
 
         let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
             mempool_transaction_receiver,
