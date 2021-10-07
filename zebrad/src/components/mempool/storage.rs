@@ -146,7 +146,6 @@ impl Storage {
         }
 
         // Then, we insert into the pool.
-        // This will a evict transactions to open space for the new transaction if needed.
         self.verified.insert(tx);
 
         // Security: stop the transaction or rejection lists using too much memory
