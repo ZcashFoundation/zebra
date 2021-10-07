@@ -657,7 +657,12 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         _ => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
-    assert_eq!(queued_responses[0], Err(MempoolError::Rejected));
+    assert!(matches!(
+        queued_responses[0],
+        Err(MempoolError::StorageExactTip(
+            ExactTipRejectionError::FailedVerification(_)
+        ))
+    ));
 
     Ok(())
 }

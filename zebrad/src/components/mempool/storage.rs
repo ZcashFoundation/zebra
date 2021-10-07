@@ -76,6 +76,18 @@ pub enum SameEffectsChainRejectionError {
     RandomlyEvicted,
 }
 
+/// Storage error that combines all other specific error types.
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum RejectionError {
+    #[error(transparent)]
+    ExactTip(#[from] ExactTipRejectionError),
+    #[error(transparent)]
+    SameEffectsTip(#[from] SameEffectsTipRejectionError),
+    #[error(transparent)]
+    SameEffectsChain(#[from] SameEffectsChainRejectionError),
+}
+
 #[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
@@ -280,8 +292,19 @@ impl Storage {
     }
 
     /// Add a transaction to the rejected list for the given reason.
-    pub fn reject(&mut self, txid: UnminedTxId, reason: State) {
-        self.rejected.insert(txid, reason);
+    pub fn reject(&mut self, txid: UnminedTxId, reason: RejectionError) {
+        match reason {
+            RejectionError::ExactTip(e) => {
+                self.tip_rejected_exact.insert(txid, e);
+            }
+            RejectionError::SameEffectsTip(e) => {
+                self.tip_rejected_same_effects.insert(txid.mined_id(), e);
+            }
+            RejectionError::SameEffectsChain(e) => {
+                self.chain_rejected_same_effects.insert(txid.mined_id(), e);
+            }
+        }
+        self.limit_rejection_list_memory();
     }
 
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in

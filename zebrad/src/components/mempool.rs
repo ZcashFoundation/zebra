@@ -365,7 +365,7 @@ fn reject_if_needed(
         // Consensus verification failed. Reject transaction to avoid
         // having to download and verify it again just for it to fail again.
         TransactionDownloadVerifyError::Invalid(e) => {
-            storage.reject(txid, storage::State::Invalid(e))
+            storage.reject(txid, ExactTipRejectionError::FailedVerification(e).into())
         }
     }
 }
