@@ -563,3 +563,204 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 
     Ok(())
 }
+
+/// Check if a transaction that fails verification is rejected by the mempool.
+#[tokio::test]
+async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
+    // Using the mainnet for now
+    let network = Network::Mainnet;
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+    let peer_set = MockService::build().for_unit_tests();
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (state, latest_chain_tip, chain_tip_change) =
+        zebra_state::init(state_config.clone(), network);
+
+    let mut state_service = ServiceBuilder::new().buffer(1).service(state);
+    let (_chain_verifier, _tx_verifier) =
+        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
+            .await;
+    let mut tx_verifier = MockService::build().for_unit_tests();
+
+    // Get transactions to use in the test
+    let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
+    let rejected_tx = unmined_transactions.next().unwrap().clone();
+
+    time::pause();
+
+    // Start the mempool service
+    let mut mempool = Mempool::new(
+        network,
+        Buffer::new(BoxService::new(peer_set.clone()), 1),
+        state_service.clone(),
+        Buffer::new(BoxService::new(tx_verifier.clone()), 1),
+        sync_status,
+        latest_chain_tip,
+        chain_tip_change,
+    );
+
+    // Enable the mempool
+    let _ = mempool.enable(&mut recent_syncs).await;
+
+    // Push the genesis block to the state, since downloader needs a valid tip.
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .ready_and()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Queue first transaction for verification
+    // (queue the transaction itself to avoid a download).
+    let request = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_tx.clone().into()]));
+    // Make the mock verifier return that the transaction is invalid.
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        responder.respond(Err(TransactionError::BadBalance));
+    });
+    let (response, _) = futures::join!(request, verification);
+    let queued_responses = match response.unwrap() {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    // Check that the request was enqueued successfully.
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+
+    for _ in 0..2 {
+        // Query the mempool just to poll it and make get the downloader/verifier result.
+        mempool.dummy_call().await;
+        // Sleep to avoid starvation and make sure the verification failure is picked up.
+        time::sleep(time::Duration::from_millis(100)).await;
+    }
+
+    // Try to queue the same transaction by its ID and check if it's correctly
+    // rejected.
+    let response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_tx.id.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(matches!(
+        queued_responses[0],
+        Err(MempoolError::StorageExactTip(
+            ExactTipRejectionError::FailedVerification(_)
+        ))
+    ));
+
+    Ok(())
+}
+
+/// Check if a transaction that fails download is _not_ rejected.
+#[tokio::test]
+async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
+    // Using the mainnet for now
+    let network = Network::Mainnet;
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+    let mut peer_set = MockService::build().for_unit_tests();
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (state, latest_chain_tip, chain_tip_change) =
+        zebra_state::init(state_config.clone(), network);
+
+    let mut state_service = ServiceBuilder::new().buffer(1).service(state);
+    let (_chain_verifier, tx_verifier) =
+        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
+            .await;
+
+    // Get transactions to use in the test
+    let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
+    let rejected_valid_tx = unmined_transactions.next().unwrap().clone();
+
+    time::pause();
+
+    // Start the mempool service
+    let mut mempool = Mempool::new(
+        network,
+        Buffer::new(BoxService::new(peer_set.clone()), 1),
+        state_service.clone(),
+        tx_verifier,
+        sync_status,
+        latest_chain_tip,
+        chain_tip_change,
+    );
+
+    // Enable the mempool
+    let _ = mempool.enable(&mut recent_syncs).await;
+
+    // Push the genesis block to the state, since downloader needs a valid tip.
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .ready_and()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    // Queue second transaction for download and verification.
+    let request = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_valid_tx.id.into()]));
+    // Make the mock peer set return that the download failed.
+    let verification = peer_set
+        .expect_request_that(|r| matches!(r, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![]));
+        });
+    let (response, _) = futures::join!(request, verification);
+    let queued_responses = match response.unwrap() {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    // Check that the request was enqueued successfully.
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+
+    for _ in 0..2 {
+        // Query the mempool just to poll it and make get the downloader/verifier result.
+        mempool.dummy_call().await;
+        // Sleep to avoid starvation and make sure the download failure is picked up.
+        time::sleep(time::Duration::from_millis(100)).await;
+    }
+
+    // Try to queue the same transaction by its ID and check if it's not being
+    // rejected.
+    let response = mempool
+        .ready_and()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_valid_tx.id.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+
+    Ok(())
+}
