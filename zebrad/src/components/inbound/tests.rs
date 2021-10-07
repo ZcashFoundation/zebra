@@ -295,6 +295,15 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
+    // Test transaction 1 is gossiped
+    let mut hs = HashSet::new();
+    hs.insert(tx1_id);
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .await
+        .respond(Response::Nil);
+
+    // Block is gossiped then
     peer_set
         .expect_request(Request::AdvertiseBlock(block_two.hash()))
         .await
@@ -327,6 +336,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
+    // Block is gossiped
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash()))
         .await
@@ -363,6 +373,14 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         ),
     };
 
+    // Test transaction 2 is gossiped
+    let mut hs = HashSet::new();
+    hs.insert(tx2_id);
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .await
+        .respond(Response::Nil);
+
     // Add all the rest of the continous blocks we have to test tx2 will never expire.
     let more_blocks: Vec<Arc<Block>> = vec![
         zebra_test::vectors::BLOCK_MAINNET_4_BYTES
@@ -396,6 +414,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
+        // Block is gossiped
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await
