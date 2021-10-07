@@ -57,7 +57,7 @@ proptest! {
             // The first call to `poll_ready` shouldn't clear the storage yet.
             mempool.dummy_call().await;
 
-            prop_assert_eq!(mempool.storage().tx_ids().len(), 1);
+            prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
             // Simulate a chain reset.
             chain_tip_sender.set_finalized_tip(chain_tip);
@@ -65,7 +65,7 @@ proptest! {
             // This time a call to `poll_ready` should clear the storage.
             mempool.dummy_call().await;
 
-            prop_assert!(mempool.storage().tx_ids().is_empty());
+            prop_assert_eq!(mempool.storage().transaction_count(), 0);
 
             peer_set.expect_no_requests().await?;
             state_service.expect_no_requests().await?;
@@ -110,7 +110,7 @@ proptest! {
             // The first call to `poll_ready` shouldn't clear the storage yet.
             mempool.dummy_call().await;
 
-            prop_assert_eq!(mempool.storage().tx_ids().len(), 1);
+            prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
             // Simulate the synchronizer catching up to the network chain tip.
             mempool.disable(&mut recent_syncs).await;
@@ -121,7 +121,7 @@ proptest! {
             // Enable the mempool again so the storage can be accessed.
             mempool.enable(&mut recent_syncs).await;
 
-            prop_assert!(mempool.storage().tx_ids().is_empty());
+            prop_assert_eq!(mempool.storage().transaction_count(), 0);
 
             peer_set.expect_no_requests().await?;
             state_service.expect_no_requests().await?;
