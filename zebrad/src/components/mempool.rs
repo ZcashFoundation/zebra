@@ -97,7 +97,7 @@ pub struct Config {
     /// The transaction cost limit
     pub tx_cost_limit: u32,
     /// Max amount of minutes for transactions to be in recently evicted
-    pub eviction_memory_minutes: Duration,
+    pub eviction_memory_time: Duration,
 }
 
 /// Consensus rules:
@@ -110,7 +110,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             tx_cost_limit: 80_000_000,
-            eviction_memory_minutes: Duration::from_secs(60 * 60),
+            eviction_memory_time: Duration::from_secs(60 * 60),
         }
     }
 }
