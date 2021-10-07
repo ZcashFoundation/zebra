@@ -138,7 +138,7 @@ impl StartCmd {
                 .expect("unexpected panic in the mempool crawler")
                 .map_err(|e| eyre!(e)),
 
-            tx_gossip_result = tx_gossip_task_handle.fuse() =>tx_gossip_result
+            tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result
                 .expect("unexpected panic in the transaction gossip task")
                 .map_err(|e| eyre!(e)),
         }
