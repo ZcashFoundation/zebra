@@ -8,7 +8,7 @@
 mod inbound;
 pub mod mempool;
 pub mod metrics;
-mod sync;
+pub mod sync;
 pub mod tokio;
 pub mod tracing;
 

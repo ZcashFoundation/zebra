@@ -69,6 +69,8 @@ where
     /// Runs until the [`SyncStatus`] loses its connection to the chain syncer, which happens when
     /// Zebra is shutting down.
     pub async fn run(mut self) -> Result<(), BoxError> {
+        info!("initializing mempool crawler task");
+
         while self.status.wait_until_close_to_tip().await.is_ok() {
             self.crawl_transactions().await?;
             sleep(RATE_LIMIT_DELAY).await;
