@@ -128,7 +128,6 @@ impl VerifiedSet {
     /// Removes a transaction from the set.
     ///
     /// Also removes its outputs from the internal caches.
-    // TODO: Maybe replace `usize` with `UnminedTxId` when `VecDeque` is no longer used?
     fn remove(&mut self, transaction_index: usize) -> UnminedTx {
         let removed_tx = self
             .transactions
