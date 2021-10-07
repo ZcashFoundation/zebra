@@ -118,6 +118,8 @@ impl VerifiedSet {
 
         let removed_count = indices_to_remove.len();
 
+        // Correctness: remove indexes in reverse order,
+        // so earlier indexes still correspond to the same transactions
         for index_to_remove in indices_to_remove.into_iter().rev() {
             self.remove(index_to_remove);
         }
