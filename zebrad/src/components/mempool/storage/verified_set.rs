@@ -114,29 +114,43 @@ impl VerifiedSet {
         let removed_count = indices_to_remove.len();
 
         for index_to_remove in indices_to_remove.into_iter().rev() {
-            let removed_tx = self
-                .transactions
-                .remove(index_to_remove)
-                .expect("Index was obtained from the VecDeque");
-
-            self.remove_outputs(&removed_tx);
+            self.remove(index_to_remove);
         }
 
         removed_count
     }
 
-    /// Evict one transaction from the set to open space for another transaction.
-    // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
-    pub fn evict_one(&mut self) {
-        if let Some(evicted_tx) = self.transactions.pop_back() {
-            self.remove_outputs(&evicted_tx);
-        }
+    /// Removes a transaction from the set.
+    ///
+    /// Also removes its outputs from the internal caches.
+    // TODO: Maybe replace `usize` with `UnminedTxId` when `VecDeque` is no longer used?
+    fn remove(&mut self, transaction_index: usize) {
+        let removed_tx = self
+            .transactions
+            .remove(transaction_index)
+            .expect("invalid transaction index");
+
+        self.remove_outputs(&removed_tx);
     }
 
     /// Ensures there's at least one empty space for insertion of a new transaction.
     fn ensure_space_for_insertion(&mut self) {
         while self.transactions.len() >= MEMPOOL_SIZE {
-            self.evict_one();
+            let tx_to_evict = self
+                .select_for_eviction()
+                .expect("mempool is empty, but it was checked to be full");
+
+            self.remove(tx_to_evict);
+        }
+    }
+
+    /// Evict one transaction from the set to open space for another transaction.
+    // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
+    fn select_for_eviction(&mut self) -> Option<usize> {
+        if self.transactions.is_empty() {
+            None
+        } else {
+            Some(self.transactions.len() - 1)
         }
     }
 
