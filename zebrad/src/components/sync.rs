@@ -21,6 +21,7 @@ use zebra_state as zs;
 use crate::{config::ZebradConfig, BoxError};
 
 mod downloads;
+mod gossip;
 mod recent_sync_lengths;
 mod status;
 
@@ -28,6 +29,8 @@ mod status;
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
+
+pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
