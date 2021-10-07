@@ -1,11 +1,14 @@
 //! Zebra mempool.
 
+use serde::{Deserialize, Serialize};
+
 use std::{
     collections::HashSet,
     future::Future,
     iter,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{future::FutureExt, stream::Stream};
@@ -91,6 +94,30 @@ enum ActiveState {
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
+}
+
+/// Mempool configuration section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Config {
+    /// The transaction cost limit
+    pub tx_cost_limit: u32,
+    /// Max amount of minutes for transactions to be in recently evicted
+    pub eviction_memory_time: Duration,
+}
+
+/// Consensus rules:
+///
+/// - There MUST be a configuration option mempooltxcostlimit, which SHOULD default to 80000000.
+/// - There MUST be a configuration option mempoolevictionmemoryminutes, which SHOULD default to 60.
+///
+/// https://zips.z.cash/zip-0401#specification
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            tx_cost_limit: 80_000_000,
+            eviction_memory_time: Duration::from_secs(60 * 60),
+        }
+    }
 }
 
 /// Mempool async management and query service.
