@@ -10,6 +10,8 @@ use zebra_chain::{
     transparent,
 };
 
+use super::super::SameEffectsTipRejectionError;
+
 /// The set of verified transactions stored in the mempool.
 ///
 /// This also caches the all the spent outputs from the transactions in the mempool. The spent
@@ -54,20 +56,6 @@ impl VerifiedSet {
         self.transactions.iter().any(|tx| &tx.id == id)
     }
 
-    /// Returns `true` if the given `transaction` has any spend conflicts with transactions in the
-    /// mempool.
-    ///
-    /// Two transactions have a spend conflict if they spent the same UTXO or if they reveal the
-    /// same nullifier.
-    pub fn has_spend_conflicts(&self, unmined_tx: &UnminedTx) -> bool {
-        let tx = &unmined_tx.transaction;
-
-        Self::has_conflicts(&self.spent_outpoints, tx.spent_outpoints())
-            || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers().copied())
-            || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers().copied())
-            || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers().copied())
-    }
-
     /// Clear the set of verified transactions.
     ///
     /// Also clears all internal caches.
@@ -79,15 +67,22 @@ impl VerifiedSet {
         self.orchard_nullifiers.clear();
     }
 
-    /// Insert a transaction into the set.
+    /// Insert a `transaction` into the set.
     ///
-    /// # Correctness
+    /// Returns an error if the `transaction` has spend conflicts with any other transaction
+    /// already in the set.
     ///
-    /// The transaction is assumed to not have spend conflicts with any other transaction already
-    /// in the set. Use [`Self::has_spend_conflicts`] to ensure this before calling this method.
-    pub fn insert(&mut self, transaction: UnminedTx) {
+    /// Two transactions have a spend conflict if they spend the same UTXO or if they reveal the
+    /// same nullifier.
+    pub fn insert(&mut self, transaction: UnminedTx) -> Result<(), SameEffectsTipRejectionError> {
+        if self.has_spend_conflicts(&transaction) {
+            return Err(SameEffectsTipRejectionError::SpendConflict);
+        }
+
         self.cache_outputs_from(&transaction.transaction);
         self.transactions.push_front(transaction);
+
+        Ok(())
     }
 
     /// Evict one transaction from the set to open space for another transaction.
@@ -142,6 +137,20 @@ impl VerifiedSet {
         self.remove_outputs(&removed_tx);
 
         removed_tx
+    }
+
+    /// Returns `true` if the given `transaction` has any spend conflicts with transactions in the
+    /// mempool.
+    ///
+    /// Two transactions have a spend conflict if they spend the same UTXO or if they reveal the
+    /// same nullifier.
+    fn has_spend_conflicts(&self, unmined_tx: &UnminedTx) -> bool {
+        let tx = &unmined_tx.transaction;
+
+        Self::has_conflicts(&self.spent_outpoints, tx.spent_outpoints())
+            || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers().copied())
+            || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers().copied())
+            || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers().copied())
     }
 
     /// Inserts the transaction's outputs into the internal caches.

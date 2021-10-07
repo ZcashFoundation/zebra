@@ -135,18 +135,12 @@ impl Storage {
             return Err(MempoolError::InMempool);
         }
 
-        // If `tx` spends an UTXO already spent by another transaction in the mempool or reveals a
-        // nullifier already revealed by another transaction in the mempool, reject that
-        // transaction.
-        if self.verified.has_spend_conflicts(&tx) {
-            let error = SameEffectsTipRejectionError::SpendConflict;
+        // Then, we try to insert into the pool. If this fails the transaction is rejected.
+        if let Err(rejection_error) = self.verified.insert(tx) {
             self.tip_rejected_same_effects
-                .insert(tx.id.mined_id(), error.clone());
-            return Err(error.into());
+                .insert(tx_id.mined_id(), rejection_error.clone());
+            return Err(rejection_error.into());
         }
-
-        // Then, we insert into the pool.
-        self.verified.insert(tx);
 
         // Security: stop the transaction or rejection lists using too much memory
 
