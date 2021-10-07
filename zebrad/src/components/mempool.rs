@@ -33,7 +33,9 @@ mod tests;
 
 pub use self::crawler::Crawler;
 pub use self::error::MempoolError;
-pub use self::storage::{ExactRejectionError, SameEffectsRejectionError};
+pub use self::storage::{
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+};
 
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;

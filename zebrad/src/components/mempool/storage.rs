@@ -18,26 +18,41 @@ pub mod tests;
 const MEMPOOL_SIZE: usize = 2;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
-/// or for other reasons.
+/// These rejections are only valid for the current tip.
+///
+/// Each committed block clears these rejections, because new blocks can supply missing inputs.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
-pub enum ExactRejectionError {
+pub enum ExactTipRejectionError {
     #[error("transaction did not pass consensus validation")]
     FailedVerification(#[from] zebra_consensus::error::TransactionError),
 }
 
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).
+/// These rejections are only valid for the current tip.
+///
+/// Each committed block clears these rejections, because new blocks can evict other transactions.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
-pub enum SameEffectsRejectionError {
+pub enum SameEffectsTipRejectionError {
     #[error(
         "transaction rejected because another transaction in the mempool has already spent some of \
         its inputs"
     )]
     SpendConflict,
+}
 
+/// Transactions rejected based only on their effects (spends, outputs, transaction header).
+/// These rejections are valid while the current chain continues to grow.
+///
+/// Rollbacks and network upgrades clear these rejections, because they can lower the tip height,
+/// or change the consensus rules.
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[allow(dead_code)]
+pub enum SameEffectsChainRejectionError {
     #[error("best chain tip has reached transaction expiry height")]
     Expired,
 
@@ -58,15 +73,22 @@ pub struct Storage {
     verified: VecDeque<UnminedTx>,
 
     /// The set of transactions rejected due to bad authorizations, or for other reasons,
-    /// and their rejection reasons.
+    /// and their rejection reasons. These rejections only apply to the current tip.
     ///
     /// Only transactions with the exact `UnminedTxId` are invalid.
-    rejected_exact: HashMap<UnminedTxId, ExactRejectionError>,
+    tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
 
-    /// The set of transactions rejected for their effects, and their rejection reasons.
+    /// A set of transactions rejected for their effects, and their rejection reasons.
+    /// These rejections only apply to the current tip.
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
-    rejected_same_effects: HashMap<transaction::Hash, SameEffectsRejectionError>,
+    tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
+
+    /// The set of transactions rejected for their effects, and their rejection reasons.
+    /// These rejections apply until a rollback or network upgrade.
+    ///
+    /// Any transaction with the same `transaction::Hash` is invalid.
+    chain_rejected_same_effects: HashMap<transaction::Hash, SameEffectsChainRejectionError>,
 }
 
 impl Storage {
@@ -94,9 +116,10 @@ impl Storage {
         // nullifier already revealed by another transaction in the mempool, reject that
         // transaction.
         if self.check_spend_conflicts(&tx) {
-            self.rejected_same_effects
-                .insert(tx.id.mined_id(), SameEffectsRejectionError::SpendConflict);
-            return Err(SameEffectsRejectionError::SpendConflict.into());
+            let error = SameEffectsTipRejectionError::SpendConflict;
+            self.tip_rejected_same_effects
+                .insert(tx.id.mined_id(), error.clone());
+            return Err(error.into());
         }
 
         // Then, we insert into the pool.
@@ -108,9 +131,9 @@ impl Storage {
         // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
         if self.verified.len() > MEMPOOL_SIZE {
             for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
-                let _ = self.rejected_same_effects.insert(
+                let _ = self.chain_rejected_same_effects.insert(
                     evicted_tx.id.mined_id(),
-                    SameEffectsRejectionError::RandomlyEvicted,
+                    SameEffectsChainRejectionError::RandomlyEvicted,
                 );
             }
 
@@ -168,8 +191,9 @@ impl Storage {
     /// Clears the whole mempool storage.
     pub fn clear(&mut self) {
         self.verified.clear();
-        self.rejected_exact.clear();
-        self.rejected_same_effects.clear();
+        self.tip_rejected_exact.clear();
+        self.tip_rejected_same_effects.clear();
+        self.chain_rejected_same_effects.clear();
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
@@ -211,7 +235,9 @@ impl Storage {
     /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
     #[allow(dead_code)]
     pub fn rejected_transaction_count(&self) -> usize {
-        self.rejected_exact.len() + self.rejected_same_effects.len()
+        self.tip_rejected_exact.len()
+            + self.tip_rejected_same_effects.len()
+            + self.chain_rejected_same_effects.len()
     }
 
     /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
@@ -219,12 +245,16 @@ impl Storage {
     ///
     /// This matches transactions based on each rejection list's matching rule.
     pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
-        if let Some(exact_error) = self.rejected_exact.get(txid) {
-            return Some(exact_error.clone().into());
+        if let Some(error) = self.tip_rejected_exact.get(txid) {
+            return Some(error.clone().into());
         }
 
-        if let Some(effects_error) = self.rejected_same_effects.get(&txid.mined_id()) {
-            return Some(effects_error.clone().into());
+        if let Some(error) = self.tip_rejected_same_effects.get(&txid.mined_id()) {
+            return Some(error.clone().into());
+        }
+
+        if let Some(error) = self.chain_rejected_same_effects.get(&txid.mined_id()) {
+            return Some(error.clone().into());
         }
 
         None
@@ -247,8 +277,13 @@ impl Storage {
     ///
     /// This matches transactions based on each rejection list's matching rule.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
-        self.rejected_exact.contains_key(txid)
-            || self.rejected_same_effects.contains_key(&txid.mined_id())
+        self.tip_rejected_exact.contains_key(txid)
+            || self
+                .tip_rejected_same_effects
+                .contains_key(&txid.mined_id())
+            || self
+                .chain_rejected_same_effects
+                .contains_key(&txid.mined_id())
     }
 
     /// Checks if the `tx` transaction has spend conflicts with another transaction in the mempool.

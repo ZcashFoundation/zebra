@@ -5,17 +5,26 @@ use thiserror::Error;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use super::storage::{ExactRejectionError, SameEffectsRejectionError};
+use super::storage::{
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+};
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum MempoolError {
-    #[error("mempool storage has a cached rejection for this exact transaction")]
-    StorageExact(#[from] ExactRejectionError),
+    #[error("mempool storage has a cached tip rejection for this exact transaction")]
+    StorageExactTip(#[from] ExactTipRejectionError),
 
-    #[error("mempool storage has a cached rejection for any transaction with the same effects")]
-    StorageEffects(#[from] SameEffectsRejectionError),
+    #[error(
+        "mempool storage has a cached tip rejection for any transaction with the same effects"
+    )]
+    StorageEffectsTip(#[from] SameEffectsTipRejectionError),
+
+    #[error(
+        "mempool storage has a cached chain rejection for any transaction with the same effects"
+    )]
+    StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
     #[error("transaction already exists in mempool")]
     InMempool,
