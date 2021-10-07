@@ -15,8 +15,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 5,
-  "iteration": 1614572681383,
+  "id": 1,
+  "iteration": 1633497866311,
   "links": [],
   "panels": [
     {
@@ -25,10 +25,9 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "decimals": 0,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -42,13 +41,16 @@
       "hiddenSeries": false,
       "id": 4,
       "legend": {
+        "alignAsTable": false,
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
+        "rightSide": true,
         "show": true,
+        "sideWidth": null,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -57,7 +59,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -75,17 +77,42 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
           "interval": "",
-          "legendFormat": "verified block height",
+          "legendFormat": "committed block height",
           "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "state_full_verifier_committed_block_height{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "full block verifier height",
+          "refId": "B"
+        },
+        {
+          "exemplar": true,
+          "expr": "state_checkpoint_finalized_block_height{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "checkpoint verifier height",
+          "refId": "C"
+        },
+        {
+          "exemplar": true,
+          "expr": "state_finalized_block_height{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "finalized block height",
+          "refId": "D"
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Block Verifier Block Height - $job",
+      "title": "Verified Block Height - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -101,7 +128,8 @@
       },
       "yaxes": [
         {
-          "format": "short",
+          "$$hashKey": "object:84",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -109,7 +137,8 @@
           "show": true
         },
         {
-          "format": "short",
+          "$$hashKey": "object:85",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -128,10 +157,9 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "decimals": 6,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -145,13 +173,16 @@
       "hiddenSeries": false,
       "id": 6,
       "legend": {
+        "alignAsTable": false,
         "avg": false,
-        "current": false,
+        "current": true,
         "max": false,
         "min": false,
+        "rightSide": true,
         "show": true,
+        "sideWidth": null,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -160,11 +191,11 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeatIteration": 1614572681383,
+      "repeatIteration": 1633497866311,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -179,17 +210,42 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
           "interval": "",
-          "legendFormat": "verified block height",
+          "legendFormat": "committed block height",
           "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "state_full_verifier_committed_block_height{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "full block verifier height",
+          "refId": "B"
+        },
+        {
+          "exemplar": true,
+          "expr": "state_checkpoint_finalized_block_height{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "checkpoint verifier height",
+          "refId": "C"
+        },
+        {
+          "exemplar": true,
+          "expr": "state_finalized_block_height{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "finalized block height",
+          "refId": "D"
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Block Verifier Block Height - $job",
+      "title": "Verified Block Height - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -205,6 +261,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:84",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -213,6 +270,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:85",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -233,9 +291,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -264,7 +320,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -311,7 +367,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Block Verifier Sync Count - $job",
+      "title": "Block Sync Count - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -327,6 +383,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:167",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -335,6 +392,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:168",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -355,9 +413,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -386,12 +442,12 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1614572681383,
+      "repeatIteration": 1633497866311,
       "repeatPanelId": 5,
       "scopedVars": {
         "job": {
@@ -434,7 +490,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Block Verifier Sync Count - $job",
+      "title": "Block Sync Count - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -450,6 +506,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:167",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -458,6 +515,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:168",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -478,9 +536,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -509,7 +565,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -556,7 +612,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Block Verifier Gossip Count - $job",
+      "title": "Block Gossip Count - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -572,6 +628,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:252",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -580,6 +637,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:253",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -600,9 +658,7 @@
       "dashes": false,
       "datasource": null,
       "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -631,12 +687,12 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.2.2",
+      "pluginVersion": "7.5.7",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1614572681383,
+      "repeatIteration": 1633497866311,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -679,7 +735,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Block Verifier Gossip Count - $job",
+      "title": "Block Gossip Count - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -695,6 +751,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:252",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -703,6 +760,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:253",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -718,7 +776,7 @@
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 26,
+  "schemaVersion": 27,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -726,7 +784,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
             "All"
           ],
@@ -736,13 +794,18 @@
         },
         "datasource": "Prometheus-Zebra",
         "definition": "label_values(zcash_chain_verified_block_height, job)",
+        "description": null,
+        "error": null,
         "hide": 0,
         "includeAll": true,
         "label": null,
         "multi": true,
         "name": "job",
         "options": [],
-        "query": "label_values(zcash_chain_verified_block_height, job)",
+        "query": {
+          "query": "label_values(zcash_chain_verified_block_height, job)",
+          "refId": "Prometheus-Zebra-job-Variable-Query"
+        },
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -763,5 +826,5 @@
   "timezone": "",
   "title": "block verification",
   "uid": "rO_Cl5tGz",
-  "version": 19
+  "version": 8
 }
