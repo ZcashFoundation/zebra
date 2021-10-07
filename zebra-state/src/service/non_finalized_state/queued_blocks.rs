@@ -75,6 +75,8 @@ impl QueuedBlocks {
 
         for queued in &queued_children {
             self.by_height.remove(&queued.0.height);
+            // TODO: only remove UTXOs if there are no queued blocks with that UTXO
+            //       (known_utxos is best-effort, so this is ok for now)
             for outpoint in queued.0.new_outputs.keys() {
                 self.known_utxos.remove(outpoint);
             }
@@ -105,8 +107,15 @@ impl QueuedBlocks {
         mem::swap(&mut self.by_height, &mut by_height);
 
         for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
-            let expired = self.blocks.remove(&hash).expect("block is present");
-            let parent_hash = &expired.0.block.header.previous_block_hash;
+            let (expired_block, expired_sender) =
+                self.blocks.remove(&hash).expect("block is present");
+            let parent_hash = &expired_block.block.header.previous_block_hash;
+
+            // TODO: only remove UTXOs if there are no queued blocks with that UTXO
+            //       (known_utxos is best-effort, so this is ok for now)
+            for outpoint in expired_block.new_outputs.keys() {
+                self.known_utxos.remove(outpoint);
+            }
 
             let parent_list = self
                 .by_parent
@@ -198,18 +207,22 @@ mod tests {
         assert_eq!(0, queue.blocks.len());
         assert_eq!(0, queue.by_parent.len());
         assert_eq!(0, queue.by_height.len());
+        assert_eq!(0, queue.known_utxos.len());
 
-        // Inserting the first block gives us 1 in each table
+        // Inserting the first block gives us 1 in each table, and some UTXOs
         queue.queue(block1.clone().into_queued());
         assert_eq!(1, queue.blocks.len());
         assert_eq!(1, queue.by_parent.len());
         assert_eq!(1, queue.by_height.len());
+        assert_eq!(2, queue.known_utxos.len());
 
-        // The second gives us one in each table because its a child of the first
+        // The second gives us another in each table because its a child of the first,
+        // and a lot of UTXOs
         queue.queue(child1.clone().into_queued());
         assert_eq!(2, queue.blocks.len());
         assert_eq!(2, queue.by_parent.len());
         assert_eq!(2, queue.by_height.len());
+        assert_eq!(632, queue.known_utxos.len());
 
         // The 3rd only increments blocks, because it is also a child of the
         // first block, so for the second and third tables it gets added to the
@@ -218,6 +231,7 @@ mod tests {
         assert_eq!(3, queue.blocks.len());
         assert_eq!(2, queue.by_parent.len());
         assert_eq!(2, queue.by_height.len());
+        assert_eq!(634, queue.known_utxos.len());
 
         // Dequeueing the first block removes 1 block from each list
         let children = queue.dequeue_children(parent);
@@ -226,6 +240,7 @@ mod tests {
         assert_eq!(2, queue.blocks.len());
         assert_eq!(1, queue.by_parent.len());
         assert_eq!(1, queue.by_height.len());
+        assert_eq!(632, queue.known_utxos.len());
 
         // Dequeueing the children of the first block removes both of the other
         // blocks, and empties all lists
@@ -241,6 +256,7 @@ mod tests {
         assert_eq!(0, queue.blocks.len());
         assert_eq!(0, queue.by_parent.len());
         assert_eq!(0, queue.by_height.len());
+        assert_eq!(0, queue.known_utxos.len());
 
         Ok(())
     }
@@ -262,6 +278,7 @@ mod tests {
         assert_eq!(3, queue.blocks.len());
         assert_eq!(2, queue.by_parent.len());
         assert_eq!(2, queue.by_height.len());
+        assert_eq!(634, queue.known_utxos.len());
 
         // Pruning the first height removes only block1
         queue.prune_by_height(block1.coinbase_height().unwrap());
@@ -271,8 +288,9 @@ mod tests {
         assert!(queue.get_mut(&block1.hash()).is_none());
         assert!(queue.get_mut(&child1.hash()).is_some());
         assert!(queue.get_mut(&child2.hash()).is_some());
+        assert_eq!(632, queue.known_utxos.len());
 
-        // Dequeueing the children of the first block removes both of the other
+        // Pruning the children of the first block removes both of the other
         // blocks, and empties all lists
         queue.prune_by_height(child1.coinbase_height().unwrap());
         assert_eq!(0, queue.blocks.len());
@@ -280,6 +298,7 @@ mod tests {
         assert_eq!(0, queue.by_height.len());
         assert!(queue.get_mut(&child1.hash()).is_none());
         assert!(queue.get_mut(&child2.hash()).is_none());
+        assert_eq!(0, queue.known_utxos.len());
 
         Ok(())
     }
