@@ -1,5 +1,7 @@
 //! Zebra mempool.
 
+use serde::{Deserialize, Serialize};
+
 use std::{
     collections::HashSet,
     future::Future,
@@ -86,6 +88,28 @@ enum ActiveState {
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
+}
+
+/// Mempool configuration section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// The transaction cost limit
+    pub tx_cost_limit: u32,
+    /// Max amount of minutes for transactions to be in recently eviced
+    pub eviction_memory_minutes: u32,
+}
+
+// we like our default configs to be explicit
+#[allow(unknown_lints)]
+#[allow(clippy::derivable_impls)]
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            tx_cost_limit: 80000000,
+            eviction_memory_minutes: 60,
+        }
+    }
 }
 
 /// Mempool async management and query service.

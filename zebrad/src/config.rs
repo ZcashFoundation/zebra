@@ -8,6 +8,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::components::mempool::Config as MempoolSection;
 use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
@@ -37,6 +38,9 @@ pub struct ZebradConfig {
 
     /// Sync configuration
     pub sync: SyncSection,
+
+    /// Mempool configuration
+    pub mempol: MempoolSection,
 }
 
 /// Tracing configuration section.
