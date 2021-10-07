@@ -8,6 +8,7 @@ use std::{
     iter,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{future::FutureExt, stream::Stream};
@@ -92,22 +93,18 @@ enum ActiveState {
 
 /// Mempool configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The transaction cost limit
     pub tx_cost_limit: u32,
-    /// Max amount of minutes for transactions to be in recently eviced
-    pub eviction_memory_minutes: u32,
+    /// Max amount of minutes for transactions to be in recently evicted
+    pub eviction_memory_minutes: Duration,
 }
 
-// we like our default configs to be explicit
-#[allow(unknown_lints)]
-#[allow(clippy::derivable_impls)]
 impl Default for Config {
     fn default() -> Self {
         Self {
-            tx_cost_limit: 80000000,
-            eviction_memory_minutes: 60,
+            tx_cost_limit: 80_000_000,
+            eviction_memory_minutes: Duration::from_secs(60*60),
         }
     }
 }
