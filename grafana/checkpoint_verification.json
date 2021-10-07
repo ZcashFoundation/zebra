@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 2,
-  "iteration": 1633497830198,
+  "iteration": 1633574016226,
   "links": [],
   "panels": [
     {
@@ -25,7 +25,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
-      "decimals": 6,
+      "decimals": null,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -135,7 +135,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:84",
-          "format": "short",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -144,7 +144,7 @@
         },
         {
           "$$hashKey": "object:85",
-          "format": "short",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -163,7 +163,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
-      "decimals": 6,
+      "decimals": null,
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -200,7 +200,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633497830198,
+      "repeatIteration": 1633574016226,
       "repeatPanelId": 2,
       "scopedVars": {
         "job": {
@@ -274,7 +274,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:84",
-          "format": "short",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -283,7 +283,7 @@
         },
         {
           "$$hashKey": "object:85",
-          "format": "short",
+          "format": "none",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -460,7 +460,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633497830198,
+      "repeatIteration": 1633574016226,
       "repeatPanelId": 8,
       "scopedVars": {
         "job": {
@@ -731,7 +731,7 @@
       "points": false,
       "renderer": "flot",
       "repeatDirection": "h",
-      "repeatIteration": 1633497830198,
+      "repeatIteration": 1633574016226,
       "repeatPanelId": 4,
       "scopedVars": {
         "job": {
@@ -903,5 +903,5 @@
   "timezone": "",
   "title": "checkpoint verification",
   "uid": "o4LmN_OMk",
-  "version": 4
+  "version": 6
 }
