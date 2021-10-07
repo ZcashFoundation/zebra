@@ -106,7 +106,10 @@ impl VerifiedSet {
     ///
     /// Returns the amount of transactions removed.
     pub fn remove_all_that(&mut self, predicate: impl Fn(&UnminedTx) -> bool) -> usize {
-        // Clippy is unable to detect that there will be a borrow conflict without the `collect`.
+        // Clippy suggests to remove the `collect` and the `into_iter` further down. However, it is
+        // unable to detect that when that is done, there is a borrow conflict. What happens is the
+        // iterator borrows `self.transactions` immutably, but it also need to be borrowed mutably
+        // in order to remove the transactions while traversing the iterator.
         #[allow(clippy::needless_collect)]
         let indices_to_remove: Vec<_> = self
             .transactions
