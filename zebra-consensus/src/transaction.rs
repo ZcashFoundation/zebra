@@ -11,8 +11,9 @@ use std::{
 
 use futures::{
     stream::{FuturesUnordered, StreamExt},
-    FutureExt,
+    FutureExt, TryFutureExt,
 };
+use tokio::sync::mpsc;
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -178,6 +179,10 @@ where
         async move {
             tracing::trace!(?req);
 
+            // the size of this channel is bounded by the maximum number of inputs in a transaction
+            // (approximately 50,000 for a 2 MB transaction)
+            let (utxo_sender, mut utxo_receiver) = mpsc::unbounded_channel();
+
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
 
@@ -219,6 +224,7 @@ where
                     network,
                     script_verifier,
                     inputs,
+                    utxo_sender,
                     joinsplit_data,
                     sapling_shielded_data,
                 )?,
@@ -232,12 +238,18 @@ where
                     network,
                     script_verifier,
                     inputs,
+                    utxo_sender,
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
             };
 
             async_checks.check().await?;
+
+            let mut spent_utxos = HashMap::new();
+            while let Some(script_rsp) = utxo_receiver.recv().await {
+                spent_utxos.insert(script_rsp.spent_outpoint, script_rsp.spent_utxo);
+            }
 
             Ok(id)
         }
@@ -274,6 +286,7 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
+        utxo_sender: mpsc::UnboundedSender<script::Response>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -284,22 +297,21 @@ where
 
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
-        Ok(
-            Self::verify_transparent_inputs_and_outputs(
-                &request,
-                network,
-                inputs,
-                script_verifier,
-            )?
-            .and(Self::verify_sprout_shielded_data(
-                joinsplit_data,
-                &shielded_sighash,
-            ))
-            .and(Self::verify_sapling_shielded_data(
-                sapling_shielded_data,
-                &shielded_sighash,
-            )?),
-        )
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            &request,
+            network,
+            script_verifier,
+            inputs,
+            utxo_sender,
+        )?
+        .and(Self::verify_sprout_shielded_data(
+            joinsplit_data,
+            &shielded_sighash,
+        ))
+        .and(Self::verify_sapling_shielded_data(
+            sapling_shielded_data,
+            &shielded_sighash,
+        )?))
     }
 
     /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
@@ -356,6 +368,7 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
+        utxo_sender: mpsc::UnboundedSender<script::Response>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -366,22 +379,21 @@ where
 
         let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
-        Ok(
-            Self::verify_transparent_inputs_and_outputs(
-                &request,
-                network,
-                inputs,
-                script_verifier,
-            )?
-            .and(Self::verify_sapling_shielded_data(
-                sapling_shielded_data,
-                &shielded_sighash,
-            )?)
-            .and(Self::verify_orchard_shielded_data(
-                orchard_shielded_data,
-                &shielded_sighash,
-            )?),
-        )
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            &request,
+            network,
+            script_verifier,
+            inputs,
+            utxo_sender,
+        )?
+        .and(Self::verify_sapling_shielded_data(
+            sapling_shielded_data,
+            &shielded_sighash,
+        )?)
+        .and(Self::verify_orchard_shielded_data(
+            orchard_shielded_data,
+            &shielded_sighash,
+        )?))
 
         // TODO:
         // - verify orchard shielded pool (ZIP-224) (#2105)
@@ -423,8 +435,9 @@ where
     fn verify_transparent_inputs_and_outputs(
         request: &Request,
         network: Network,
-        inputs: &[transparent::Input],
         script_verifier: script::Verifier<ZS>,
+        inputs: &[transparent::Input],
+        utxo_sender: mpsc::UnboundedSender<script::Response>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
@@ -442,6 +455,8 @@ where
             let script_checks = (0..inputs.len())
                 .into_iter()
                 .map(move |input_index| {
+                    let utxo_sender = utxo_sender.clone();
+
                     let request = script::Request {
                         upgrade,
                         known_utxos: known_utxos.clone(),
@@ -449,7 +464,9 @@ where
                         input_index,
                     };
 
-                    script_verifier.clone().oneshot(request)
+                    script_verifier.clone().oneshot(request).map_ok(move |rsp| {
+                        utxo_sender.send(rsp).expect("receiver is not dropped");
+                    })
                 })
                 .collect();
 
