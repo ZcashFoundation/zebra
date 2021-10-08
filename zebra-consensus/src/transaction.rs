@@ -251,6 +251,33 @@ where
                 spent_utxos.insert(script_rsp.spent_outpoint, script_rsp.spent_utxo);
             }
 
+            // temporary assertions for testing ticket #2440
+            //
+            // TODO: use spent_utxos to calculate the transaction fee (#2779)
+            //       and remove these assertions
+            if tx.has_valid_coinbase_transaction_inputs() {
+                assert_eq!(
+                    spent_utxos.len(),
+                    0,
+                    "already checked that coinbase transactions don't spend UTXOs"
+                );
+            } else if spent_utxos.len() < tx.inputs().len() {
+                // TODO: replace with double-spend check in PR #2843
+                return Err(TransactionError::InternalDowncastError(format!(
+                    "transparent double-spend within a transaction: \
+                     expected {} input UTXOs, got {} unique spent UTXOs",
+                    tx.inputs().len(),
+                    spent_utxos.len()
+                )));
+            } else {
+                assert_eq!(
+                    spent_utxos.len(),
+                    tx.inputs().len(),
+                    "unexpected excess looked-up spent UTXOs in transaction: \
+                     expected exactly one UTXO per verified transparent input"
+                );
+            }
+
             Ok(id)
         }
         .instrument(span)
