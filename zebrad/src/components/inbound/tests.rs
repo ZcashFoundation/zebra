@@ -571,13 +571,14 @@ async fn setup(
     // Enable the mempool
     mempool_service.enable(&mut recent_syncs).await;
 
+    // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();
     if add_transactions {
         added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
     }
 
     let mempool_service = BoxService::new(mempool_service);
-    let mempool = ServiceBuilder::new().buffer(1).service(mempool_service);
+    let mempool_service = ServiceBuilder::new().buffer(1).service(mempool_service);
 
     let (setup_tx, setup_rx) = oneshot::channel();
 
@@ -590,7 +591,7 @@ async fn setup(
             block_verifier.clone(),
         ));
 
-    let r = setup_tx.send((buffered_peer_set, address_book, mempool));
+    let r = setup_tx.send((buffered_peer_set, address_book, mempool_service));
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
@@ -628,6 +629,9 @@ async fn setup(
     )
 }
 
+/// Manually add a transaction to the mempool storage.
+///
+/// Skips some mempool functionality, like transaction verification and peer broadcasts.
 fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
     // get the genesis block coinbase transaction from the Zcash blockchain.
     let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, network)
