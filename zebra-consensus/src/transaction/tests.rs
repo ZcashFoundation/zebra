@@ -958,7 +958,8 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
         .try_into()
         .expect("Invalid JoinSplit transparent input");
     let anchor = sprout::tree::Root::default();
-    let nullifier = sprout::note::Nullifier([0u8; 32]);
+    let first_nullifier = sprout::note::Nullifier([0u8; 32]);
+    let second_nullifier = sprout::note::Nullifier([1u8; 32]);
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
         x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand07::thread_rng()));
@@ -973,7 +974,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
         vpub_old: zero_amount,
         vpub_new: zero_amount,
         anchor,
-        nullifiers: [nullifier; 2],
+        nullifiers: [first_nullifier, second_nullifier],
         commitments: [commitment; 2],
         ephemeral_key,
         random_seed,
