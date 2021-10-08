@@ -141,7 +141,14 @@ pub fn disabled_add_to_sprout_pool(
 /// An internal spend conflict happens if the transaction spends a UTXO more than once or if it
 /// reveals a nullifier more than once.
 ///
-/// Consensus rule:
+/// Consensus rules:
+///
+/// "each output of a particular transaction
+/// can only be used as an input once in the block chain.
+/// Any subsequent reference is a forbidden double spend-
+/// an attempt to spend the same satoshis twice."
+///
+/// https://developer.bitcoin.org/devguide/block_chain.html#introduction
 ///
 /// A _nullifier_ *MUST NOT* repeat either within a _transaction_, or across _transactions_ in a
 /// _valid blockchain_ . *Sprout* and *Sapling* and *Orchard* _nulliers_ are considered disjoint,
