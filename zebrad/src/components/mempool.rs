@@ -12,11 +12,11 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
+use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
     chain_tip::ChainTip,
-    parameters::Network,
     transaction::{UnminedTx, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
@@ -29,6 +29,7 @@ pub use crate::BoxError;
 mod crawler;
 pub mod downloads;
 mod error;
+pub mod gossip;
 mod storage;
 
 #[cfg(test)]
@@ -42,6 +43,7 @@ pub use self::storage::{
 
 #[cfg(test)]
 pub use self::storage::tests::unmined_transactions_in_blocks;
+pub use gossip::gossip_mempool_transaction_id;
 
 use self::downloads::{
     Downloads as TxDownloads, Gossip, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
@@ -146,17 +148,21 @@ pub struct Mempool {
     /// Handle to the transaction verifier service.
     /// Used to construct the transaction downloader.
     tx_verifier: TxVerifier,
+
+    /// Sender part of a gossip transactions channel.
+    /// Used to broadcast transaction ids to peers.
+    transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
 }
 
 impl Mempool {
     pub(crate) fn new(
-        _network: Network,
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
+        transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
     ) -> Self {
         Mempool {
             active_state: ActiveState::Disabled,
@@ -166,6 +172,7 @@ impl Mempool {
             outbound,
             state,
             tx_verifier,
+            transaction_sender,
         }
     }
 
@@ -254,18 +261,26 @@ impl Service<Request> for Mempool {
                 }
 
                 // Clean up completed download tasks and add to mempool if successful.
+                // Also, send succesful transactions to peers.
+                let mut inserted_txids = HashSet::new();
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     match r {
                         Ok(tx) => {
                             // Storage handles conflicting transactions or a full mempool internally,
                             // so just ignore the storage result here
-                            let _ = storage.insert(tx);
+                            let _ = storage.insert(tx.clone());
+                            // Save transaction ids that we will send to peers
+                            inserted_txids.insert(tx.id);
                         }
                         Err((txid, e)) => {
                             reject_if_needed(storage, txid, e);
                             // TODO: should we also log the result?
                         }
                     };
+                }
+                // Send any newly inserted transactions to peers
+                if !inserted_txids.is_empty() {
+                    let _ = self.transaction_sender.send(inserted_txids)?;
                 }
 
                 // Remove expired transactions from the mempool.
