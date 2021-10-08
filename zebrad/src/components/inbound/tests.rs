@@ -34,7 +34,7 @@ async fn mempool_requests_for_transactions() {
         mut peer_set,
         _state_guard,
         sync_gossip_task_handle,
-        _tx_gossip_task_handle,
+        tx_gossip_task_handle,
     ) = setup(true).await;
 
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
@@ -59,6 +59,7 @@ async fn mempool_requests_for_transactions() {
         .collect::<HashSet<_>>();
 
     let response = inbound_service
+        .clone()
         .oneshot(Request::TransactionsById(hash_set))
         .await;
 
@@ -75,6 +76,13 @@ async fn mempool_requests_for_transactions() {
         matches!(sync_gossip_result, None),
         "unexpected error or panic in sync gossip task: {:?}",
         sync_gossip_result,
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
     );
 }
 
