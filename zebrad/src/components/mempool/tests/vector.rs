@@ -4,7 +4,7 @@ use color_eyre::Report;
 use tokio::time;
 use tower::{ServiceBuilder, ServiceExt};
 
-use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 use zebra_consensus::Config as ConsensusConfig;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::MockService;
@@ -36,14 +36,16 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let more_transactions = unmined_transactions;
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut service = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -163,14 +165,16 @@ async fn mempool_queue() -> Result<(), Report> {
     let stored_tx = transactions.next_back().unwrap().clone();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut service = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -262,14 +266,16 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let more_transactions = unmined_transactions;
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut service = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Test if mempool is disabled (it should start disabled)
@@ -383,14 +389,16 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     time::pause();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -495,14 +503,16 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
             .await;
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -589,14 +599,16 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     time::pause();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool
@@ -691,14 +703,16 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     time::pause();
 
     // Start the mempool service
+    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
+
     let mut mempool = Mempool::new(
-        network,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         tx_verifier,
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        transaction_sender,
     );
 
     // Enable the mempool

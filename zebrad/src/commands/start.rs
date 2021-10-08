@@ -26,6 +26,7 @@
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::{select, FutureExt};
+use std::collections::HashSet;
 use tokio::sync::oneshot;
 use tower::builder::ServiceBuilder;
 use tower::util::BoxService;
@@ -91,14 +92,18 @@ impl StartCmd {
             ChainSync::new(&config, peer_set.clone(), state.clone(), chain_verifier);
 
         info!("initializing mempool");
+
+        let (mempool_transaction_sender, mempool_transaction_receiver) =
+            tokio::sync::watch::channel(HashSet::new());
+
         let mempool_service = BoxService::new(Mempool::new(
-            config.network.network,
             peer_set.clone(),
             state,
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip,
             chain_tip_change.clone(),
+            mempool_transaction_sender,
         ));
         let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
 
@@ -114,7 +119,13 @@ impl StartCmd {
             peer_set.clone(),
         ));
 
-        let mempool_crawler_task_handle = mempool::Crawler::spawn(peer_set, mempool, sync_status);
+        let mempool_crawler_task_handle =
+            mempool::Crawler::spawn(peer_set.clone(), mempool, sync_status);
+
+        let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
+            mempool_transaction_receiver,
+            peer_set,
+        ));
 
         select! {
             sync_result = syncer_error_future.fuse() => sync_result,
@@ -125,6 +136,10 @@ impl StartCmd {
 
             mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
                 .expect("unexpected panic in the mempool crawler")
+                .map_err(|e| eyre!(e)),
+
+            tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result
+                .expect("unexpected panic in the transaction gossip task")
                 .map_err(|e| eyre!(e)),
         }
     }
