@@ -408,10 +408,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .oneshot(mempool::Request::Queue(vec![tx1_id.into()]))
         .await
         .unwrap();
+
     let queued_responses = match response {
         mempool::Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
     };
+
     assert_eq!(queued_responses.len(), 1);
     assert_eq!(
         queued_responses[0],
