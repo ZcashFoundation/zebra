@@ -2,10 +2,7 @@ use std::{collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromSt
 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{
-    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, Service,
-    ServiceExt,
-};
+use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
 use tracing::Span;
 
 use zebra_chain::{
@@ -492,8 +489,11 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 async fn setup(
     add_transactions: bool,
 ) -> (
-    LoadShed<tower::buffer::Buffer<super::Inbound, zebra_network::Request>>,
-    BoxService<mempool::Request, mempool::Response, BoxError>,
+    Buffer<
+        BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
+        zebra_network::Request,
+    >,
+    Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Vec<Arc<Block>>,
     Vec<UnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
@@ -585,12 +585,13 @@ async fn setup(
 
     let inbound_service = ServiceBuilder::new()
         .load_shed()
-        .buffer(1)
         .service(super::Inbound::new(
             setup_rx,
             state_service.clone(),
             block_verifier.clone(),
         ));
+    let inbound_service = BoxService::new(inbound_service);
+    let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
 
     let r = setup_tx.send((buffered_peer_set, address_book, mempool_service.clone()));
     // We can't expect or unwrap because the returned Result does not implement Debug
@@ -620,7 +621,7 @@ async fn setup(
 
     (
         inbound_service,
-        BoxService::new(mempool_service),
+        mempool_service,
         committed_blocks,
         added_transactions,
         mock_tx_verifier,
