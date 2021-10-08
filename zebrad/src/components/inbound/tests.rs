@@ -273,7 +273,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Get services
     let (
         inbound_service,
-        _mempool_guard,
+        mempool,
         _committed_blocks,
         _added_transactions,
         mut tx_verifier,
@@ -402,6 +402,23 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
         ),
     };
+    // Check if tx1 was added to the rejected list as well
+    let response = mempool
+        .clone()
+        .oneshot(mempool::Request::Queue(vec![tx1_id.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        mempool::Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert_eq!(
+        queued_responses[0],
+        Err(mempool::MempoolError::StorageEffectsChain(
+            mempool::SameEffectsChainRejectionError::Expired
+        ))
+    );
 
     // Test transaction 2 is gossiped
     let mut hs = HashSet::new();

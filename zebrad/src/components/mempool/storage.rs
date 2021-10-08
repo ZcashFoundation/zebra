@@ -59,7 +59,7 @@ pub enum SameEffectsTipRejectionError {
 ///
 /// Rollbacks and network upgrades clear these rejections, because they can lower the tip height,
 /// or change the consensus rules.
-#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum SameEffectsChainRejectionError {
@@ -106,11 +106,12 @@ pub struct Storage {
     /// Any transaction with the same `transaction::Hash` is invalid.
     tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
 
-    /// The set of transactions rejected for their effects, and their rejection reasons.
+    /// Sets of transactions rejected for their effects, keyed by rejection reason.
     /// These rejections apply until a rollback or network upgrade.
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
-    chain_rejected_same_effects: HashMap<transaction::Hash, SameEffectsChainRejectionError>,
+    chain_rejected_same_effects:
+        HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
 }
 
 impl Storage {
@@ -155,10 +156,11 @@ impl Storage {
         // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
         if self.verified.len() > MEMPOOL_SIZE {
             for evicted_tx in self.verified.drain(MEMPOOL_SIZE..) {
-                let _ = self.chain_rejected_same_effects.insert(
-                    evicted_tx.id.mined_id(),
-                    SameEffectsChainRejectionError::RandomlyEvicted,
-                );
+                let _ = self
+                    .chain_rejected_same_effects
+                    .entry(SameEffectsChainRejectionError::RandomlyEvicted)
+                    .or_default()
+                    .insert(evicted_tx.id.mined_id());
             }
 
             assert_eq!(self.verified.len(), MEMPOOL_SIZE);
@@ -242,8 +244,10 @@ impl Storage {
         if self.tip_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
             self.tip_rejected_same_effects.clear();
         }
-        if self.chain_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
-            self.chain_rejected_same_effects.clear();
+        for (_, map) in self.chain_rejected_same_effects.iter_mut() {
+            if map.len() > MAX_EVICTION_MEMORY_ENTRIES {
+                map.clear();
+            }
         }
     }
 
@@ -288,7 +292,11 @@ impl Storage {
     pub fn rejected_transaction_count(&self) -> usize {
         self.tip_rejected_exact.len()
             + self.tip_rejected_same_effects.len()
-            + self.chain_rejected_same_effects.len()
+            + self
+                .chain_rejected_same_effects
+                .iter()
+                .map(|(_, map)| map.len())
+                .sum::<usize>()
     }
 
     /// Add a transaction to the rejected list for the given reason.
@@ -301,7 +309,10 @@ impl Storage {
                 self.tip_rejected_same_effects.insert(txid.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
-                self.chain_rejected_same_effects.insert(txid.mined_id(), e);
+                self.chain_rejected_same_effects
+                    .entry(e)
+                    .or_default()
+                    .insert(txid.mined_id());
             }
         }
         self.limit_rejection_list_memory();
@@ -320,8 +331,10 @@ impl Storage {
             return Some(error.clone().into());
         }
 
-        if let Some(error) = self.chain_rejected_same_effects.get(&txid.mined_id()) {
-            return Some(error.clone().into());
+        for (error, set) in self.chain_rejected_same_effects.iter() {
+            if set.contains(&txid.mined_id()) {
+                return Some(error.clone().into());
+            }
         }
 
         None
@@ -350,7 +363,8 @@ impl Storage {
                 .contains_key(&txid.mined_id())
             || self
                 .chain_rejected_same_effects
-                .contains_key(&txid.mined_id())
+                .iter()
+                .any(|(_, map)| map.contains(&txid.mined_id()))
     }
 
     /// Checks if the `tx` transaction has spend conflicts with another transaction in the mempool.
