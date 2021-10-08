@@ -498,16 +498,9 @@ async fn setup(
     Vec<UnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     MockService<Request, Response, PanicAssertion>,
-    Buffer<
-        BoxService<
-            zebra_state::Request,
-            zebra_state::Response,
-            Box<dyn std::error::Error + Send + Sync>,
-        >,
-        zebra_state::Request,
-    >,
+    Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     JoinHandle<Result<(), BlockGossipError>>,
-    JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    JoinHandle<Result<(), BoxError>>,
 ) {
     let network = Network::Mainnet;
     let consensus_config = ConsensusConfig::default();
