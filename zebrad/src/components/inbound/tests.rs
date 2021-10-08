@@ -19,15 +19,19 @@ use zebra_network::{AddressBook, Request, Response};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use crate::components::{
-    mempool::{gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool},
-    sync::{self, BlockGossipError, SyncStatus},
+use crate::{
+    components::{
+        mempool::{self, gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool},
+        sync::{self, BlockGossipError, SyncStatus},
+    },
+    BoxError,
 };
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
     let (
         inbound_service,
+        _mempool_guard,
         _committed_blocks,
         added_transactions,
         _mock_tx_verifier,
@@ -97,6 +101,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
     let (
         inbound_service,
+        _mempool_guard,
         _committed_blocks,
         _added_transactions,
         mut tx_verifier,
@@ -176,6 +181,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
 
     let (
         inbound_service,
+        _mempool_guard,
         _committed_blocks,
         _added_transactions,
         mut tx_verifier,
@@ -270,6 +276,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Get services
     let (
         inbound_service,
+        _mempool_guard,
         _committed_blocks,
         _added_transactions,
         mut tx_verifier,
@@ -486,6 +493,7 @@ async fn setup(
     add_transactions: bool,
 ) -> (
     LoadShed<tower::buffer::Buffer<super::Inbound, zebra_network::Request>>,
+    BoxService<mempool::Request, mempool::Response, BoxError>,
     Vec<Arc<Block>>,
     Vec<UnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
@@ -591,7 +599,7 @@ async fn setup(
             block_verifier.clone(),
         ));
 
-    let r = setup_tx.send((buffered_peer_set, address_book, mempool_service));
+    let r = setup_tx.send((buffered_peer_set, address_book, mempool_service.clone()));
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
@@ -619,6 +627,7 @@ async fn setup(
 
     (
         inbound_service,
+        BoxService::new(mempool_service),
         committed_blocks,
         added_transactions,
         mock_tx_verifier,
