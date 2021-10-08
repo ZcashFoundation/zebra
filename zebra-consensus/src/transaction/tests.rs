@@ -428,6 +428,57 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     );
 }
 
+/// Test if V4 transaction with an internal double spend of transparent funds is rejected.
+#[tokio::test]
+async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input.clone(), input.clone()],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    let expected_outpoint = input.outpoint().expect("Input should have an outpoint");
+
+    assert_eq!(
+        result,
+        Err(TransactionError::DuplicateTransparentSpend(
+            expected_outpoint
+        ))
+    );
+}
+
 /// Test if V5 transaction with transparent funds is accepted.
 #[tokio::test]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
@@ -579,6 +630,59 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         Err(TransactionError::InternalDowncastError(
             "downcast to known transaction error type failed, original error: ScriptInvalid"
                 .to_string()
+        ))
+    );
+}
+
+/// Test if V5 transaction with an internal double spend of transparent funds is rejected.
+#[tokio::test]
+async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input.clone(), input.clone()],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    let expected_outpoint = input.outpoint().expect("Input should have an outpoint");
+
+    assert_eq!(
+        result,
+        Err(TransactionError::DuplicateTransparentSpend(
+            expected_outpoint
         ))
     );
 }
