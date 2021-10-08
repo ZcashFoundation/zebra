@@ -1,6 +1,6 @@
 use std::{collections::HashSet, convert::TryFrom, fmt::Debug};
 
-use proptest::prelude::*;
+use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use zebra_chain::{
@@ -9,13 +9,14 @@ use zebra_chain::{
     sapling,
     serialization::AtLeastOne,
     sprout,
-    transaction::{self, JoinSplitData, Transaction, UnminedTx},
+    transaction::{self, JoinSplitData, Transaction, UnminedTx, UnminedTxId},
     transparent, LedgerState,
 };
 
 use crate::components::mempool::storage::SameEffectsTipRejectionError;
 
-use super::super::{MempoolError, Storage};
+use self::MultipleTransactionRemovalTestInput::*;
+use super::super::{MempoolError, Storage, MEMPOOL_SIZE};
 
 proptest! {
     /// Test if a transaction that has a spend conflict with a transaction already in the mempool
@@ -101,6 +102,47 @@ proptest! {
             );
 
             storage.clear();
+        }
+    }
+
+    /// Test if multiple transactions are properly removed.
+    ///
+    /// Attempting to remove multiple transactions must remove all of them and leave all of the
+    /// others.
+    #[test]
+    fn removal_of_multiple_transactions(input in any::<MultipleTransactionRemovalTestInput>()) {
+        let mut storage = Storage::default();
+
+        // Insert all input transactions, and keep track of the IDs of the one that were actually
+        // inserted.
+        let inserted_transactions: HashSet<_> = input.transactions().filter_map(|transaction| {
+            let id = transaction.id;
+
+            storage.insert(transaction.clone()).ok().map(|_| id)}).collect();
+
+        // Check that the inserted transactions are still there.
+        for transaction_id in &inserted_transactions {
+            assert!(storage.contains_transaction_exact(transaction_id));
+        }
+
+        // Remove some transactions.
+        match &input {
+            RemoveExact { wtx_ids_to_remove, .. } => storage.remove_exact(wtx_ids_to_remove),
+            RemoveSameEffects { mined_ids_to_remove, .. } => storage.remove_same_effects(mined_ids_to_remove),
+        };
+
+        // Check that the removed transactions are not in the storage.
+        let removed_transactions = input.removed_transaction_ids();
+
+        for removed_transaction_id in &removed_transactions {
+            assert!(!storage.contains_transaction_exact(removed_transaction_id));
+        }
+
+        // Check that the remaining transactions are still in the storage.
+        let remaining_transactions = inserted_transactions.difference(&removed_transactions);
+
+        for remaining_transaction_id in remaining_transactions {
+            assert!(storage.contains_transaction_exact(remaining_transaction_id));
         }
     }
 }
@@ -591,6 +633,98 @@ impl OrchardSpendConflict {
                 self.new_shielded_data.actions.first().action.nullifier;
         } else {
             *orchard_shielded_data = Some(self.new_shielded_data);
+        }
+    }
+}
+
+/// A series of transactions and a sub-set of them to remove.
+///
+/// The set of transactions to remove can either be exact WTX IDs to remove exact transactions or
+/// mined IDs to remove transactions that have the same effects specified by the ID.
+#[derive(Clone, Debug)]
+pub enum MultipleTransactionRemovalTestInput {
+    RemoveExact {
+        transactions: Vec<UnminedTx>,
+        wtx_ids_to_remove: HashSet<UnminedTxId>,
+    },
+
+    RemoveSameEffects {
+        transactions: Vec<UnminedTx>,
+        mined_ids_to_remove: HashSet<transaction::Hash>,
+    },
+}
+
+impl Arbitrary for MultipleTransactionRemovalTestInput {
+    type Parameters = ();
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        vec(any::<UnminedTx>(), 1..MEMPOOL_SIZE)
+            .prop_flat_map(|transactions| {
+                let indices_to_remove =
+                    vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {
+                        removal_markers
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, should_remove)| *should_remove)
+                            .map(|(index, _)| index)
+                            .collect::<HashSet<usize>>()
+                    });
+
+                (Just(transactions), indices_to_remove)
+            })
+            .prop_flat_map(|(transactions, indices_to_remove)| {
+                let wtx_ids_to_remove: HashSet<_> = indices_to_remove
+                    .iter()
+                    .map(|&index| transactions[index].id)
+                    .collect();
+
+                let mined_ids_to_remove = wtx_ids_to_remove
+                    .iter()
+                    .map(|unmined_id| unmined_id.mined_id())
+                    .collect();
+
+                prop_oneof![
+                    Just(RemoveSameEffects {
+                        transactions: transactions.clone(),
+                        mined_ids_to_remove,
+                    }),
+                    Just(RemoveExact {
+                        transactions,
+                        wtx_ids_to_remove,
+                    }),
+                ]
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl MultipleTransactionRemovalTestInput {
+    /// Iterate over all transactions generated as input.
+    pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> + '_ {
+        match self {
+            RemoveExact { transactions, .. } | RemoveSameEffects { transactions, .. } => {
+                transactions.iter()
+            }
+        }
+    }
+
+    /// Return a [`HashSet`] of [`UnminedTxId`]s of the transactions to be removed.
+    pub fn removed_transaction_ids(&self) -> HashSet<UnminedTxId> {
+        match self {
+            RemoveExact {
+                wtx_ids_to_remove, ..
+            } => wtx_ids_to_remove.clone(),
+
+            RemoveSameEffects {
+                transactions,
+                mined_ids_to_remove,
+            } => transactions
+                .iter()
+                .map(|transaction| transaction.id)
+                .filter(|id| mined_ids_to_remove.contains(&id.mined_id()))
+                .collect(),
         }
     }
 }
