@@ -3,7 +3,7 @@
 //! Zebra uses a generic spend type for `V4` and `V5` transactions.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
-use std::io;
+use std::{fmt, io};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
@@ -71,6 +71,21 @@ pub struct SpendPrefixInTransactionV5 {
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
     pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+}
+
+impl<AnchorV> fmt::Display for Spend<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f
+            .debug_struct(format!("sapling::Spend<{}>", std::any::type_name::<AnchorV>()).as_str());
+
+        fmter.field("per_spend_anchor", &self.per_spend_anchor);
+        fmter.field("nullifier", &self.nullifier);
+
+        fmter.finish()
+    }
 }
 
 impl From<(Spend<SharedAnchor>, tree::Root)> for Spend<PerSpendAnchor> {

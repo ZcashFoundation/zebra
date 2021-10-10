@@ -471,27 +471,27 @@ enum SpendConflictForTransactionV5 {
 /// A conflict caused by spending the same UTXO.
 #[derive(Arbitrary, Clone, Debug)]
 struct TransparentSpendConflict {
-    new_input: transparent::Input,
+    new_input: DisplayToDebug<transparent::Input>,
 }
 
 /// A conflict caused by revealing the same Sprout nullifier.
 #[derive(Arbitrary, Clone, Debug)]
 struct SproutSpendConflict {
-    new_joinsplit_data: transaction::JoinSplitData<Groth16Proof>,
+    new_joinsplit_data: DisplayToDebug<transaction::JoinSplitData<Groth16Proof>>,
 }
 
 /// A conflict caused by revealing the same Sapling nullifier.
 #[derive(Clone, Debug)]
 struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
-    new_spend: sapling::Spend<A>,
+    new_spend: DisplayToDebug<sapling::Spend<A>>,
     new_shared_anchor: A::Shared,
-    fallback_shielded_data: sapling::ShieldedData<A>,
+    fallback_shielded_data: DisplayToDebug<sapling::ShieldedData<A>>,
 }
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
 struct OrchardSpendConflict {
-    new_shielded_data: orchard::ShieldedData,
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -548,7 +548,7 @@ impl TransparentSpendConflict {
     /// Adds a new input to a transaction's list of transparent `inputs`. The transaction will then
     /// conflict with any other transaction that also has that same new input.
     pub fn apply_to(self, inputs: &mut Vec<transparent::Input>) {
-        inputs.push(self.new_input);
+        inputs.push(self.new_input.0);
     }
 }
 
@@ -566,7 +566,7 @@ impl SproutSpendConflict {
             existing_joinsplit_data.first.nullifiers[0] =
                 self.new_joinsplit_data.first.nullifiers[0];
         } else {
-            *joinsplit_data = Some(self.new_joinsplit_data);
+            *joinsplit_data = Some(self.new_joinsplit_data.0);
         }
     }
 }
@@ -588,9 +588,9 @@ where
         any::<(sapling::Spend<A>, A::Shared, sapling::ShieldedData<A>)>()
             .prop_map(|(new_spend, new_shared_anchor, fallback_shielded_data)| {
                 SaplingSpendConflict {
-                    new_spend,
+                    new_spend: new_spend.into(),
                     new_shared_anchor,
-                    fallback_shielded_data,
+                    fallback_shielded_data: fallback_shielded_data.into(),
                 }
             })
             .boxed()
@@ -611,16 +611,16 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     pub fn apply_to(self, sapling_shielded_data: &mut Option<sapling::ShieldedData<A>>) {
         use sapling::TransferData::*;
 
-        let shielded_data = sapling_shielded_data.get_or_insert(self.fallback_shielded_data);
+        let shielded_data = sapling_shielded_data.get_or_insert(self.fallback_shielded_data.0);
 
         match &mut shielded_data.transfers {
-            SpendsAndMaybeOutputs { ref mut spends, .. } => spends.push(self.new_spend),
+            SpendsAndMaybeOutputs { ref mut spends, .. } => spends.push(self.new_spend.0),
             JustOutputs { ref mut outputs } => {
                 let new_outputs = outputs.clone();
 
                 shielded_data.transfers = SpendsAndMaybeOutputs {
                     shared_anchor: self.new_shared_anchor,
-                    spends: at_least_one![self.new_spend],
+                    spends: at_least_one![self.new_spend.0],
                     maybe_outputs: new_outputs.into_vec(),
                 };
             }
@@ -642,7 +642,7 @@ impl OrchardSpendConflict {
             shielded_data.actions.first_mut().action.nullifier =
                 self.new_shielded_data.actions.first().action.nullifier;
         } else {
-            *orchard_shielded_data = Some(self.new_shielded_data);
+            *orchard_shielded_data = Some(self.new_shielded_data.0);
         }
     }
 }
