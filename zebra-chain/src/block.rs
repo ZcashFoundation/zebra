@@ -55,11 +55,14 @@ pub struct Block {
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("Block");
+
         if let Some(height) = self.coinbase_height() {
             fmter.field("height", &height);
         }
+        fmter.field("transactions", &self.transactions.len());
+        fmter.field("hash", &DisplayToDebug(self.hash()));
 
-        fmter.field("hash", &DisplayToDebug(self.hash())).finish()
+        fmter.finish()
     }
 }
 
