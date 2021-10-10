@@ -4,7 +4,9 @@ use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use zebra_chain::{
-    at_least_one, orchard,
+    at_least_one,
+    fmt::DisplayToDebug,
+    orchard,
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::AtLeastOne,
@@ -155,22 +157,30 @@ proptest! {
 enum SpendConflictTestInput {
     /// Test V4 transactions to include Sprout nullifier conflicts.
     V4 {
-        #[proptest(strategy = "Transaction::v4_strategy(LedgerState::default())")]
-        first: Transaction,
+        #[proptest(
+            strategy = "Transaction::v4_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        first: DisplayToDebug<Transaction>,
 
-        #[proptest(strategy = "Transaction::v4_strategy(LedgerState::default())")]
-        second: Transaction,
+        #[proptest(
+            strategy = "Transaction::v4_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        second: DisplayToDebug<Transaction>,
 
         conflict: SpendConflictForTransactionV4,
     },
 
     /// Test V5 transactions to include Orchard nullifier conflicts.
     V5 {
-        #[proptest(strategy = "Transaction::v5_strategy(LedgerState::default())")]
-        first: Transaction,
+        #[proptest(
+            strategy = "Transaction::v5_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        first: DisplayToDebug<Transaction>,
 
-        #[proptest(strategy = "Transaction::v5_strategy(LedgerState::default())")]
-        second: Transaction,
+        #[proptest(
+            strategy = "Transaction::v5_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        second: DisplayToDebug<Transaction>,
 
         conflict: SpendConflictForTransactionV5,
     },
@@ -202,7 +212,7 @@ impl SpendConflictTestInput {
             }
         };
 
-        (first.into(), second.into())
+        (first.0.into(), second.0.into())
     }
 
     /// Return two transactions that have no spend conflicts.
@@ -217,7 +227,7 @@ impl SpendConflictTestInput {
         Self::remove_sapling_conflicts(&mut first, &mut second);
         Self::remove_orchard_conflicts(&mut first, &mut second);
 
-        (first.into(), second.into())
+        (first.0.into(), second.0.into())
     }
 
     /// Find transparent outpoint spends shared by two transactions, then remove them from the
