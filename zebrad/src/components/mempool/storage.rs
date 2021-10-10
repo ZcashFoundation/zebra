@@ -16,7 +16,7 @@ pub mod tests;
 mod verified_set;
 
 /// The maximum number of verified transactions to store in the mempool.
-const MEMPOOL_SIZE: usize = 2;
+const MEMPOOL_SIZE: usize = 4;
 
 /// The size limit for mempool transaction rejection lists.
 ///
