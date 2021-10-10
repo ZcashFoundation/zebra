@@ -5,7 +5,7 @@ use proptest_derive::Arbitrary;
 
 use zebra_chain::{
     at_least_one,
-    fmt::DisplayToDebug,
+    fmt::{DisplayToDebug, SummaryDebug},
     orchard,
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
@@ -654,13 +654,13 @@ impl OrchardSpendConflict {
 #[derive(Clone, Debug)]
 pub enum MultipleTransactionRemovalTestInput {
     RemoveExact {
-        transactions: Vec<UnminedTx>,
-        wtx_ids_to_remove: HashSet<UnminedTxId>,
+        transactions: SummaryDebug<Vec<UnminedTx>>,
+        wtx_ids_to_remove: SummaryDebug<HashSet<UnminedTxId>>,
     },
 
     RemoveSameEffects {
-        transactions: Vec<UnminedTx>,
-        mined_ids_to_remove: HashSet<transaction::Hash>,
+        transactions: SummaryDebug<Vec<UnminedTx>>,
+        mined_ids_to_remove: SummaryDebug<HashSet<transaction::Hash>>,
     },
 }
 
@@ -688,19 +688,19 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
                     .map(|&index| transactions[index].id)
                     .collect();
 
-                let mined_ids_to_remove = wtx_ids_to_remove
+                let mined_ids_to_remove: HashSet<transaction::Hash> = wtx_ids_to_remove
                     .iter()
                     .map(|unmined_id| unmined_id.mined_id())
                     .collect();
 
                 prop_oneof![
                     Just(RemoveSameEffects {
-                        transactions: transactions.clone(),
-                        mined_ids_to_remove,
+                        transactions: transactions.clone().into(),
+                        mined_ids_to_remove: mined_ids_to_remove.into(),
                     }),
                     Just(RemoveExact {
-                        transactions,
-                        wtx_ids_to_remove,
+                        transactions: transactions.into(),
+                        wtx_ids_to_remove: wtx_ids_to_remove.into(),
                     }),
                 ]
             })
@@ -725,7 +725,7 @@ impl MultipleTransactionRemovalTestInput {
         match self {
             RemoveExact {
                 wtx_ids_to_remove, ..
-            } => wtx_ids_to_remove.clone(),
+            } => wtx_ids_to_remove.0.clone(),
 
             RemoveSameEffects {
                 transactions,
