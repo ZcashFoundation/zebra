@@ -20,7 +20,7 @@ use super::Transaction;
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct AuthDigest(pub(crate) [u8; 32]);
+pub struct AuthDigest(pub [u8; 32]);
 
 impl From<Transaction> for AuthDigest {
     /// Computes the authorizing data commitment for a transaction.

@@ -26,7 +26,7 @@ const MEMPOOL_SIZE: usize = 4;
 /// https://zips.z.cash/zip-0401#specification
 ///
 /// We use the specified value for all lists for consistency.
-const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
+pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
 /// These rejections are only valid for the current tip.
@@ -79,6 +79,7 @@ pub enum SameEffectsChainRejectionError {
 
 /// Storage error that combines all other specific error types.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum RejectionError {
     #[error(transparent)]
@@ -116,11 +117,18 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Insert a [`UnminedTx`] into the mempool.
+    /// Insert a [`UnminedTx`] into the mempool, caching any rejections.
     ///
-    /// If its insertion results in evicting other transactions, they will be tracked
+    /// Returns an error if the mempool's verified transactions or rejection caches
+    /// prevent this transaction from being inserted.
+    /// These errors should not be propagated to peers, because the transactions are valid.
+    ///
+    /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`StorageRejectionError::RandomlyEvicted`].
     pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
+        // # Security
+        //
+        // This method must call `reject`, rather than modifying the rejection lists directly.
         let tx_id = tx.id;
 
         // First, check if we have a cached rejection for this transaction.
@@ -137,10 +145,11 @@ impl Storage {
         }
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
+        let mut result = Ok(tx_id);
         if let Err(rejection_error) = self.verified.insert(tx) {
-            self.tip_rejected_same_effects
-                .insert(tx_id.mined_id(), rejection_error.clone());
-            return Err(rejection_error.into());
+            // We could return here, but we still want to check the mempool size
+            self.reject(tx_id, rejection_error.clone().into());
+            result = Err(rejection_error.into());
         }
 
         // Once inserted, we evict transactions over the pool size limit.
@@ -150,19 +159,21 @@ impl Storage {
                 .evict_one()
                 .expect("mempool is empty, but was expected to be full");
 
-            let _ = self
-                .chain_rejected_same_effects
-                .entry(SameEffectsChainRejectionError::RandomlyEvicted)
-                .or_default()
-                .insert(evicted_tx.id.mined_id());
+            self.reject(
+                evicted_tx.id,
+                SameEffectsChainRejectionError::RandomlyEvicted.into(),
+            );
+
+            // If this transaction gets evicted, set its result to the same error
+            // (we could return here, but we still want to check the mempool size)
+            if evicted_tx.id == tx_id {
+                result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+            }
         }
 
         assert!(self.verified.transaction_count() <= MEMPOOL_SIZE);
 
-        // Security: stop the transaction or rejection lists using too much memory
-        self.limit_rejection_list_memory();
-
-        Ok(tx_id)
+        result
     }
 
     /// Remove [`UnminedTx`]es from the mempool via exact [`UnminedTxId`].

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, convert::TryFrom, fmt::Debug};
+use std::{collections::HashSet, convert::TryFrom, env, fmt::Debug};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
@@ -15,10 +15,176 @@ use zebra_chain::{
     transparent, LedgerState,
 };
 
-use crate::components::mempool::storage::SameEffectsTipRejectionError;
+use crate::components::mempool::{
+    storage::{
+        MempoolError, RejectionError, SameEffectsTipRejectionError, Storage,
+        MAX_EVICTION_MEMORY_ENTRIES, MEMPOOL_SIZE,
+    },
+    SameEffectsChainRejectionError,
+};
 
 use self::MultipleTransactionRemovalTestInput::*;
-use super::super::{MempoolError, Storage, MEMPOOL_SIZE};
+
+/// The mempool list limit tests can run for a long time.
+///
+/// We reduce the number of cases for those tests,
+/// so individual tests take less than 10 seconds on most machines.
+const DEFAULT_MEMPOOL_LIST_PROPTEST_CASES: u32 = 64;
+
+proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MEMPOOL_LIST_PROPTEST_CASES))
+    )]
+
+    /// Test that the reject list length limits are applied when inserting conflicting transactions.
+    #[test]
+    fn reject_lists_are_limited_insert_conflict(
+        input in any::<SpendConflictTestInput>(),
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::default();
+
+        let (first_transaction, second_transaction) = input.conflicting_transactions();
+        let input_permutations = vec![
+            (first_transaction.clone(), second_transaction.clone()),
+            (second_transaction, first_transaction),
+        ];
+
+        for (transaction_to_accept, transaction_to_reject) in input_permutations {
+            let id_to_accept = transaction_to_accept.id;
+
+            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+
+            // Make unique IDs by converting the index to bytes, and writing it to each ID
+            let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
+                let index = index.to_le_bytes();
+                rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+                if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                    auth_digest.0[0..4].copy_from_slice(&index);
+                }
+
+                rejection_template
+            });
+
+            for rejection in unique_ids {
+                storage.reject(rejection, SameEffectsTipRejectionError::SpendConflict.into());
+            }
+
+            // Make sure there were no duplicates
+            prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+
+            // The transaction_to_reject will conflict with at least one of:
+            // - transaction_to_accept, or
+            // - a rejection from rejections
+            prop_assert_eq!(
+                storage.insert(transaction_to_reject),
+                Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
+            );
+
+            // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
+            // the storage should have cleared the reject list
+            prop_assert_eq!(storage.rejected_transaction_count(), 0);
+
+            storage.clear();
+        }
+    }
+
+    /// Test that the reject list length limits are applied when evicting transactions.
+    #[test]
+    fn reject_lists_are_limited_insert_eviction(
+        transactions in vec(any::<UnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::default();
+
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        });
+
+        for rejection in unique_ids {
+            storage.reject(rejection, SameEffectsChainRejectionError::RandomlyEvicted.into());
+        }
+
+        // Make sure there were no duplicates
+        prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+
+        for transaction in transactions {
+            let tx_id = transaction.id;
+
+            if storage.transaction_count() < MEMPOOL_SIZE {
+                // The initial transactions should be successful
+                prop_assert_eq!(
+                    storage.insert(transaction),
+                    Ok(tx_id)
+                );
+            } else {
+                // The final transaction will cause a random eviction,
+                // which might return an error if this transaction is chosen
+                let result = storage.insert(transaction);
+
+                if result.is_ok() {
+                    prop_assert_eq!(
+                        result,
+                        Ok(tx_id)
+                    );
+                } else {
+                    prop_assert_eq!(
+                        result,
+                        Err(MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::RandomlyEvicted))
+                    );
+                }
+            }
+        }
+
+        // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
+        // the storage should have cleared the reject list
+        prop_assert_eq!(storage.rejected_transaction_count(), 0);
+    }
+
+    /// Test that the reject list length limits are applied when directly rejecting transactions.
+    #[test]
+    fn reject_lists_are_limited_reject(
+        rejection_error in any::<RejectionError>(),
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::default();
+
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let unique_ids = (0..(MAX_EVICTION_MEMORY_ENTRIES + 1) as u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        });
+
+        for (index, rejection) in unique_ids.enumerate() {
+            storage.reject(rejection, rejection_error.clone());
+
+            if index == MAX_EVICTION_MEMORY_ENTRIES - 1 {
+                // Make sure there were no duplicates
+                prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+            } else if index == MAX_EVICTION_MEMORY_ENTRIES {
+                // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
+                // all with the same error,
+                // the storage should have cleared the reject list
+                prop_assert_eq!(storage.rejected_transaction_count(), 0);
+            }
+        }
+    }
+}
 
 proptest! {
     /// Test if a transaction that has a spend conflict with a transaction already in the mempool
