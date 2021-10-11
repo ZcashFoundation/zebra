@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -44,6 +46,18 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     pub pub_key: ed25519::VerificationKeyBytes,
     /// The JoinSplit signature.
     pub sig: ed25519::Signature,
+}
+
+impl<P: ZkSnarkProof> fmt::Display for JoinSplitData<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter =
+            f.debug_struct(format!("JoinSplitData<{}>", std::any::type_name::<P>()).as_str());
+
+        fmter.field("joinsplits", &self.joinsplits().count());
+        fmter.field("value_balance", &self.value_balance());
+
+        fmter.finish()
+    }
 }
 
 impl<P: ZkSnarkProof> JoinSplitData<P> {

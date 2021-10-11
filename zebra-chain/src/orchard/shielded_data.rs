@@ -2,7 +2,7 @@
 
 use std::{
     cmp::{Eq, PartialEq},
-    fmt::Debug,
+    fmt::{self, Debug},
     io,
 };
 
@@ -37,6 +37,22 @@ pub struct ShieldedData {
     pub actions: AtLeastOne<AuthorizedAction>,
     /// A signature on the transaction `sighash`.
     pub binding_sig: Signature<Binding>,
+}
+
+impl fmt::Display for ShieldedData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f.debug_struct("orchard::ShieldedData");
+
+        fmter.field("actions", &self.actions.len());
+        fmter.field("value_balance", &self.value_balance);
+        fmter.field("flags", &self.flags);
+
+        fmter.field("proof_len", &self.proof.zcash_serialized_size());
+
+        fmter.field("shared_anchor", &self.shared_anchor);
+
+        fmter.finish()
+    }
 }
 
 impl ShieldedData {
