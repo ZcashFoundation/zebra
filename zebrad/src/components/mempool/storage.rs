@@ -276,6 +276,8 @@ impl Storage {
     }
 
     /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
+    ///
+    /// Transactions on multiple rejected lists are counted multiple times.
     #[allow(dead_code)]
     pub fn rejected_transaction_count(&self) -> usize {
         self.tip_rejected_exact.len()
