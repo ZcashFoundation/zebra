@@ -246,7 +246,7 @@ async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     };
     if config.listen_addr.port() == wrong_net.default_port() {
         warn!(
-            "We are configured with port {} for {:?}, but that port is the default port for {:?}. Default port for {:?} is {}.",
+            "We are configured with port {} for {:?}, but that port is the default port for {:?}. The default port for {:?} is {}.",
             config.listen_addr.port(),
             config.network,
             wrong_net,
