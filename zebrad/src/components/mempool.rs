@@ -365,7 +365,8 @@ fn remove_expired_transactions(
     tip_height: zebra_chain::block::Height,
 ) {
     let mut txid_set = HashSet::new();
-    // we need a separate set since we need the original unmined ID for reject()
+    // we need a separate set, since reject() takes the original unmined ID,
+    // then extracts the mined ID out of it
     let mut unmined_id_set = HashSet::new();
 
     for t in storage.transactions() {
