@@ -261,15 +261,18 @@ impl Service<Request> for Mempool {
                     }
                 }
 
+                // Collect inserted transaction ids and hashes.
+                let mut send_to_peers_ids = vec![];
+                let mut inserted_hashes = HashSet::<_>::new();
+
                 // Clean up completed download tasks and add to mempool if successful.
-                // Also, send succesful transactions to peers.
-                let mut inserted_txids = HashSet::new();
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     match r {
                         Ok(tx) => {
-                            if let Ok(inserted_id) = storage.insert(tx) {
+                            if let Ok(inserted_id) = storage.insert(tx.clone()) {
                                 // Save transaction ids that we will send to peers
-                                inserted_txids.insert(inserted_id);
+                                send_to_peers_ids.push(inserted_id);
+                                inserted_hashes.insert(tx.transaction.hash());
                             }
                         }
                         Err((txid, e)) => {
@@ -278,14 +281,28 @@ impl Service<Request> for Mempool {
                         }
                     };
                 }
-                // Send any newly inserted transactions to peers
-                if !inserted_txids.is_empty() {
-                    let _ = self.transaction_sender.send(inserted_txids)?;
-                }
 
                 // Remove expired transactions from the mempool.
                 if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-                    remove_expired_transactions(storage, tip_height);
+                    let expired_transactions = remove_expired_transactions(storage, tip_height);
+
+                    // Remove transactions that are expired from the peers list
+                    let intersection: HashSet<_> = inserted_hashes
+                        .intersection(&expired_transactions)
+                        .collect();
+
+                    for hash in intersection {
+                        let maybe_index = inserted_hashes.iter().position(|h| h == hash);
+                        if let Some(index) = maybe_index {
+                            send_to_peers_ids.remove(index);
+                        }
+                    }
+                }
+
+                // Send transactions that were not rejected nor expired to peers
+                let inserted_txids: HashSet<_> = send_to_peers_ids.into_iter().collect();
+                if !inserted_txids.is_empty() {
+                    let _ = self.transaction_sender.send(inserted_txids)?;
                 }
             }
             ActiveState::Disabled => {
@@ -362,7 +379,7 @@ impl Service<Request> for Mempool {
 fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
-) {
+) -> HashSet<zebra_chain::transaction::Hash> {
     let mut txid_set = HashSet::new();
 
     for t in storage.transactions() {
@@ -375,6 +392,8 @@ fn remove_expired_transactions(
 
     // expiry height is effecting data, so we match by non-malleable TXID
     storage.remove_same_effects(&txid_set);
+
+    txid_set
 }
 
 /// Add a transaction that failed download and verification to the rejected list
