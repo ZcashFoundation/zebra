@@ -33,7 +33,7 @@ use crate::{
     block, transaction,
 };
 
-use std::{collections::HashMap, iter};
+use std::{collections::HashMap, fmt, iter};
 
 /// The maturity threshold for transparent coinbase outputs.
 ///
@@ -121,6 +121,33 @@ pub enum Input {
         /// The sequence number for the output.
         sequence: u32,
     },
+}
+
+impl fmt::Display for Input {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Input::PrevOut {
+                outpoint,
+                unlock_script,
+                ..
+            } => {
+                let mut fmter = f.debug_struct("transparent::Input::PrevOut");
+
+                fmter.field("unlock_script_len", &unlock_script.as_raw_bytes().len());
+                fmter.field("outpoint", outpoint);
+
+                fmter.finish()
+            }
+            Input::Coinbase { height, data, .. } => {
+                let mut fmter = f.debug_struct("transparent::Input::Coinbase");
+
+                fmter.field("height", height);
+                fmter.field("data_len", &data.0.len());
+
+                fmter.finish()
+            }
+        }
+    }
 }
 
 impl Input {
