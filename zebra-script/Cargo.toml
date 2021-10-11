@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "1caa29e975405400983f679a376fb1c86527d5f2" }
 zebra-chain = { path = "../zebra-chain" }
-thiserror = "1.0.29"
+thiserror = "1.0.30"
 displaydoc = "0.2.2"
 
 [dev-dependencies]
