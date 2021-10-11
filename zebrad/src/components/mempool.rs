@@ -267,11 +267,10 @@ impl Service<Request> for Mempool {
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     match r {
                         Ok(tx) => {
-                            // Storage handles conflicting transactions or a full mempool internally,
-                            // so just ignore the storage result here
-                            let _ = storage.insert(tx.clone());
-                            // Save transaction ids that we will send to peers
-                            inserted_txids.insert(tx.id);
+                            if let Ok(inserted_id) = storage.insert(tx) {
+                                // Save transaction ids that we will send to peers
+                                inserted_txids.insert(inserted_id);
+                            }
                         }
                         Err((txid, e)) => {
                             reject_if_needed(storage, txid, e);
