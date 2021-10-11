@@ -26,6 +26,10 @@ pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
     transactions: VecDeque<UnminedTx>,
 
+    /// The total size of the transactions in the mempool if they were
+    /// serialized.
+    transactions_serialized_size: usize,
+
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
 
@@ -65,6 +69,8 @@ impl VerifiedSet {
         self.sprout_nullifiers.clear();
         self.sapling_nullifiers.clear();
         self.orchard_nullifiers.clear();
+        self.transactions_serialized_size = 0;
+        self.update_metrics();
     }
 
     /// Insert a `transaction` into the set.
@@ -80,7 +86,10 @@ impl VerifiedSet {
         }
 
         self.cache_outputs_from(&transaction.transaction);
+        self.transactions_serialized_size += transaction.size;
         self.transactions.push_front(transaction);
+
+        self.update_metrics();
 
         Ok(())
     }
@@ -134,7 +143,10 @@ impl VerifiedSet {
             .remove(transaction_index)
             .expect("invalid transaction index");
 
+        self.transactions_serialized_size -= removed_tx.size;
         self.remove_outputs(&removed_tx);
+
+        self.update_metrics();
 
         removed_tx
     }
@@ -195,5 +207,16 @@ impl VerifiedSet {
         for item in items {
             set.remove(&item);
         }
+    }
+
+    fn update_metrics(&mut self) {
+        metrics::gauge!(
+            "zcash.mempool.size.transactions",
+            self.transaction_count() as _
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.bytes",
+            self.transactions_serialized_size as _
+        );
     }
 }
