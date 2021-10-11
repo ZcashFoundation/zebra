@@ -285,9 +285,10 @@ impl Service<Request> for Mempool {
                     let expired_transactions = remove_expired_transactions(storage, tip_height);
 
                     // Remove transactions that are expired from the peers list
-                    let wat = send_to_peers_ids.clone();
-                    let intersection: HashSet<_> =
-                        wat.intersection(&expired_transactions).collect();
+                    let peer_ids_cloned = send_to_peers_ids.clone();
+                    let intersection: HashSet<_> = peer_ids_cloned
+                        .intersection(&expired_transactions)
+                        .collect();
 
                     send_to_peers_ids.retain(|id| !intersection.contains(id));
                 }
