@@ -306,10 +306,12 @@ impl Storage {
         self.limit_rejection_list_memory();
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
-    /// any mempool rejected list.
+    /// Returns the rejection error if a [`UnminedTx`] matching an [`UnminedTxId`]
+    /// is in any mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
+    ///
+    /// Returns an arbitrary error if the transaction is in multiple lists.
     pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
         if let Some(error) = self.tip_rejected_exact.get(txid) {
             return Some(error.clone().into());
