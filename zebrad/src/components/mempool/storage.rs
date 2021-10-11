@@ -60,7 +60,7 @@ pub enum SameEffectsTipRejectionError {
 ///
 /// Rollbacks and network upgrades clear these rejections, because they can lower the tip height,
 /// or change the consensus rules.
-#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum SameEffectsChainRejectionError {
@@ -107,11 +107,12 @@ pub struct Storage {
     /// Any transaction with the same `transaction::Hash` is invalid.
     tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
 
-    /// The set of transactions rejected for their effects, and their rejection reasons.
+    /// Sets of transactions rejected for their effects, keyed by rejection reason.
     /// These rejections apply until a rollback or network upgrade.
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
-    chain_rejected_same_effects: HashMap<transaction::Hash, SameEffectsChainRejectionError>,
+    chain_rejected_same_effects:
+        HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
 }
 
 impl Storage {
@@ -142,8 +143,6 @@ impl Storage {
             return Err(rejection_error.into());
         }
 
-        // Security: stop the transaction or rejection lists using too much memory
-
         // Once inserted, we evict transactions over the pool size limit.
         while self.verified.transaction_count() > MEMPOOL_SIZE {
             let evicted_tx = self
@@ -151,14 +150,16 @@ impl Storage {
                 .evict_one()
                 .expect("mempool is empty, but was expected to be full");
 
-            let _ = self.chain_rejected_same_effects.insert(
-                evicted_tx.id.mined_id(),
-                SameEffectsChainRejectionError::RandomlyEvicted,
-            );
+            let _ = self
+                .chain_rejected_same_effects
+                .entry(SameEffectsChainRejectionError::RandomlyEvicted)
+                .or_default()
+                .insert(evicted_tx.id.mined_id());
         }
 
         assert!(self.verified.transaction_count() <= MEMPOOL_SIZE);
 
+        // Security: stop the transaction or rejection lists using too much memory
         self.limit_rejection_list_memory();
 
         Ok(tx_id)
@@ -230,8 +231,10 @@ impl Storage {
         if self.tip_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
             self.tip_rejected_same_effects.clear();
         }
-        if self.chain_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
-            self.chain_rejected_same_effects.clear();
+        for (_, map) in self.chain_rejected_same_effects.iter_mut() {
+            if map.len() > MAX_EVICTION_MEMORY_ENTRIES {
+                map.clear();
+            }
         }
     }
 
@@ -273,11 +276,17 @@ impl Storage {
     }
 
     /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
+    ///
+    /// Transactions on multiple rejected lists are counted multiple times.
     #[allow(dead_code)]
     pub fn rejected_transaction_count(&self) -> usize {
         self.tip_rejected_exact.len()
             + self.tip_rejected_same_effects.len()
-            + self.chain_rejected_same_effects.len()
+            + self
+                .chain_rejected_same_effects
+                .iter()
+                .map(|(_, map)| map.len())
+                .sum::<usize>()
     }
 
     /// Add a transaction to the rejected list for the given reason.
@@ -290,16 +299,21 @@ impl Storage {
                 self.tip_rejected_same_effects.insert(txid.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
-                self.chain_rejected_same_effects.insert(txid.mined_id(), e);
+                self.chain_rejected_same_effects
+                    .entry(e)
+                    .or_default()
+                    .insert(txid.mined_id());
             }
         }
         self.limit_rejection_list_memory();
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching an [`UnminedTxId`] is in
-    /// any mempool rejected list.
+    /// Returns the rejection error if a [`UnminedTx`] matching an [`UnminedTxId`]
+    /// is in any mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
+    ///
+    /// Returns an arbitrary error if the transaction is in multiple lists.
     pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
         if let Some(error) = self.tip_rejected_exact.get(txid) {
             return Some(error.clone().into());
@@ -309,8 +323,10 @@ impl Storage {
             return Some(error.clone().into());
         }
 
-        if let Some(error) = self.chain_rejected_same_effects.get(&txid.mined_id()) {
-            return Some(error.clone().into());
+        for (error, set) in self.chain_rejected_same_effects.iter() {
+            if set.contains(&txid.mined_id()) {
+                return Some(error.clone().into());
+            }
         }
 
         None
@@ -333,12 +349,6 @@ impl Storage {
     ///
     /// This matches transactions based on each rejection list's matching rule.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
-        self.tip_rejected_exact.contains_key(txid)
-            || self
-                .tip_rejected_same_effects
-                .contains_key(&txid.mined_id())
-            || self
-                .chain_rejected_same_effects
-                .contains_key(&txid.mined_id())
+        self.rejection_error(txid).is_some()
     }
 }
