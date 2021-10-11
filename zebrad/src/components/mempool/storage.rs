@@ -345,13 +345,6 @@ impl Storage {
     ///
     /// This matches transactions based on each rejection list's matching rule.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
-        self.tip_rejected_exact.contains_key(txid)
-            || self
-                .tip_rejected_same_effects
-                .contains_key(&txid.mined_id())
-            || self
-                .chain_rejected_same_effects
-                .iter()
-                .any(|(_, map)| map.contains(&txid.mined_id()))
+        self.rejection_error(txid).is_some()
     }
 }
