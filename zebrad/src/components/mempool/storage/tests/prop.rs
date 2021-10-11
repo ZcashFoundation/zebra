@@ -206,14 +206,14 @@ proptest! {
             let id_to_accept = transaction_to_accept.id;
             let id_to_reject = transaction_to_reject.id;
 
-            assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
 
-            assert_eq!(
+            prop_assert_eq!(
                 storage.insert(transaction_to_reject),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
-            assert!(storage.contains_rejected(&id_to_reject));
+            prop_assert!(storage.contains_rejected(&id_to_reject));
 
             storage.clear();
         }
@@ -252,19 +252,19 @@ proptest! {
             let second_id_to_accept = second_transaction_to_accept.id;
             let id_to_reject = transaction_to_reject.id;
 
-            assert_eq!(
+            prop_assert_eq!(
                 storage.insert(first_transaction_to_accept),
                 Ok(first_id_to_accept)
             );
 
-            assert_eq!(
+            prop_assert_eq!(
                 storage.insert(transaction_to_reject),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
-            assert!(storage.contains_rejected(&id_to_reject));
+            prop_assert!(storage.contains_rejected(&id_to_reject));
 
-            assert_eq!(
+            prop_assert_eq!(
                 storage.insert(second_transaction_to_accept),
                 Ok(second_id_to_accept)
             );
@@ -290,7 +290,7 @@ proptest! {
 
         // Check that the inserted transactions are still there.
         for transaction_id in &inserted_transactions {
-            assert!(storage.contains_transaction_exact(transaction_id));
+            prop_assert!(storage.contains_transaction_exact(transaction_id));
         }
 
         // Remove some transactions.
@@ -303,14 +303,14 @@ proptest! {
         let removed_transactions = input.removed_transaction_ids();
 
         for removed_transaction_id in &removed_transactions {
-            assert!(!storage.contains_transaction_exact(removed_transaction_id));
+            prop_assert!(!storage.contains_transaction_exact(removed_transaction_id));
         }
 
         // Check that the remaining transactions are still in the storage.
         let remaining_transactions = inserted_transactions.difference(&removed_transactions);
 
         for remaining_transaction_id in remaining_transactions {
-            assert!(storage.contains_transaction_exact(remaining_transaction_id));
+            prop_assert!(storage.contains_transaction_exact(remaining_transaction_id));
         }
     }
 }
