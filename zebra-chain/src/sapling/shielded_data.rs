@@ -23,7 +23,7 @@ use crate::{
 
 use std::{
     cmp::{max, Eq, PartialEq},
-    fmt::Debug,
+    fmt::{self, Debug},
 };
 
 /// Per-Spend Sapling anchors, used in Transaction V4 and the
@@ -177,6 +177,27 @@ where
         /// [`Outputs`]s in this `TransferData`.
         outputs: AtLeastOne<Output>,
     },
+}
+
+impl<AnchorV> fmt::Display for ShieldedData<AnchorV>
+where
+    AnchorV: AnchorVariant + Clone,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f.debug_struct(
+            format!(
+                "sapling::ShieldedData<{}>",
+                std::any::type_name::<AnchorV>()
+            )
+            .as_str(),
+        );
+
+        fmter.field("spends", &self.transfers.spends().count());
+        fmter.field("outputs", &self.transfers.outputs().count());
+        fmter.field("value_balance", &self.value_balance);
+
+        fmter.finish()
+    }
 }
 
 impl<AnchorV> ShieldedData<AnchorV>

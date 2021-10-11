@@ -93,7 +93,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let expected_in_mempool = &unmined_transactions[rejected_transaction_count..];
 
     // Only MEMPOOL_SIZE should land in verified
-    assert_eq!(storage.verified.len(), MEMPOOL_SIZE);
+    assert_eq!(storage.verified.transaction_count(), MEMPOOL_SIZE);
 
     // The rest of the transactions will be in rejected
     assert_eq!(
