@@ -155,7 +155,7 @@ impl Mempool {
         };
 
         // Make sure `is_enabled` is accurate.
-        // It is only updated in `poll_ready`, right before each service call.
+        // Otherwise, it is only updated in `poll_ready`, right before each service call.
         service.update_state();
 
         (service, transaction_receiver)
