@@ -579,6 +579,7 @@ async fn setup(
     let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut mempool_service = Mempool::new(
+        &mempool::Config::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),

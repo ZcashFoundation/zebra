@@ -9,7 +9,7 @@ use zebra_consensus::Config as ConsensusConfig;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::MockService;
 
-use super::super::{storage::tests::unmined_transactions_in_blocks, *};
+use crate::components::mempool::{self, storage::tests::unmined_transactions_in_blocks, *};
 
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
@@ -39,6 +39,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut service = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -168,6 +169,7 @@ async fn mempool_queue() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut service = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -269,6 +271,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut service = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -392,6 +395,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut mempool = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -506,6 +510,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut mempool = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
         tx_verifier,
@@ -602,6 +607,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut mempool = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
@@ -706,6 +712,7 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
 
     let mut mempool = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         tx_verifier,

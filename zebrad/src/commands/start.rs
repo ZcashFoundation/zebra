@@ -97,6 +97,7 @@ impl StartCmd {
             tokio::sync::watch::channel(HashSet::new());
 
         let mempool_service = BoxService::new(Mempool::new(
+            &config.mempool,
             peer_set.clone(),
             state,
             tx_verifier,

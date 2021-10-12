@@ -132,6 +132,7 @@ pub struct Mempool {
 
 impl Mempool {
     pub(crate) fn new(
+        _config: &Config,
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
