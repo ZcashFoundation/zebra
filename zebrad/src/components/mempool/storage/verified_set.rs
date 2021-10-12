@@ -50,6 +50,11 @@ impl VerifiedSet {
         self.transactions.len()
     }
 
+    /// Returns the total serialized size of the transactions in the set.
+    pub fn transactions_serialized_size(&self) -> usize {
+        self.transactions().map(|tx| tx.size).sum()
+    }
+
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified `id.
     pub fn contains(&self, id: &UnminedTxId) -> bool {
@@ -65,6 +70,7 @@ impl VerifiedSet {
         self.sprout_nullifiers.clear();
         self.sapling_nullifiers.clear();
         self.orchard_nullifiers.clear();
+        self.update_metrics();
     }
 
     /// Insert a `transaction` into the set.
@@ -81,6 +87,8 @@ impl VerifiedSet {
 
         self.cache_outputs_from(&transaction.transaction);
         self.transactions.push_front(transaction);
+
+        self.update_metrics();
 
         Ok(())
     }
@@ -135,6 +143,8 @@ impl VerifiedSet {
             .expect("invalid transaction index");
 
         self.remove_outputs(&removed_tx);
+
+        self.update_metrics();
 
         removed_tx
     }
@@ -195,5 +205,16 @@ impl VerifiedSet {
         for item in items {
             set.remove(&item);
         }
+    }
+
+    fn update_metrics(&mut self) {
+        metrics::gauge!(
+            "zcash.mempool.size.transactions",
+            self.transaction_count() as _
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.bytes",
+            self.transactions_serialized_size() as _
+        );
     }
 }

@@ -1,14 +1,11 @@
 //! Zebra mempool.
 
-use serde::{Deserialize, Serialize};
-
 use std::{
     collections::HashSet,
     future::Future,
     iter,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use futures::{future::FutureExt, stream::Stream};
@@ -24,8 +21,9 @@ use zebra_network as zn;
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-pub use crate::BoxError;
+use crate::components::sync::SyncStatus;
 
+mod config;
 mod crawler;
 pub mod downloads;
 mod error;
@@ -35,22 +33,23 @@ mod storage;
 #[cfg(test)]
 mod tests;
 
-pub use self::crawler::Crawler;
-pub use self::error::MempoolError;
-pub use self::storage::{
+pub use crate::BoxError;
+
+pub use config::Config;
+pub use crawler::Crawler;
+pub use error::MempoolError;
+pub use gossip::gossip_mempool_transaction_id;
+pub use storage::{
     ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
 };
 
 #[cfg(test)]
-pub use self::storage::tests::unmined_transactions_in_blocks;
-pub use gossip::gossip_mempool_transaction_id;
+pub use storage::tests::unmined_transactions_in_blocks;
 
-use self::downloads::{
+use downloads::{
     Downloads as TxDownloads, Gossip, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
     TRANSACTION_VERIFY_TIMEOUT,
 };
-
-use super::sync::SyncStatus;
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
@@ -97,30 +96,6 @@ enum ActiveState {
     },
 }
 
-/// Mempool configuration section.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Config {
-    /// The transaction cost limit
-    pub tx_cost_limit: u32,
-    /// Max amount of minutes for transactions to be in recently evicted
-    pub eviction_memory_time: Duration,
-}
-
-/// Consensus rules:
-///
-/// - There MUST be a configuration option mempooltxcostlimit, which SHOULD default to 80000000.
-/// - There MUST be a configuration option mempoolevictionmemoryminutes, which SHOULD default to 60.
-///
-/// https://zips.z.cash/zip-0401#specification
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            tx_cost_limit: 80_000_000,
-            eviction_memory_time: Duration::from_secs(60 * 60),
-        }
-    }
-}
-
 /// Mempool async management and query service.
 ///
 /// The mempool is the set of all verified transactions that this node is aware
@@ -157,15 +132,18 @@ pub struct Mempool {
 
 impl Mempool {
     pub(crate) fn new(
+        _config: &Config,
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-        transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
-    ) -> Self {
-        Mempool {
+    ) -> (Self, watch::Receiver<HashSet<UnminedTxId>>) {
+        let (transaction_sender, transaction_receiver) =
+            tokio::sync::watch::channel(HashSet::new());
+
+        let mut service = Mempool {
             active_state: ActiveState::Disabled,
             sync_status,
             latest_chain_tip,
@@ -174,7 +152,13 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
-        }
+        };
+
+        // Make sure `is_enabled` is accurate.
+        // Otherwise, it is only updated in `poll_ready`, right before each service call.
+        service.update_state();
+
+        (service, transaction_receiver)
     }
 
     /// Update the mempool state (enabled / disabled) depending on how close to

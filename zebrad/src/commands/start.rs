@@ -26,10 +26,8 @@
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::{select, FutureExt};
-use std::collections::HashSet;
 use tokio::sync::oneshot;
-use tower::builder::ServiceBuilder;
-use tower::util::BoxService;
+use tower::{builder::ServiceBuilder, util::BoxService};
 
 use crate::{
     components::{
@@ -92,20 +90,17 @@ impl StartCmd {
             ChainSync::new(&config, peer_set.clone(), state.clone(), chain_verifier);
 
         info!("initializing mempool");
-
-        let (mempool_transaction_sender, mempool_transaction_receiver) =
-            tokio::sync::watch::channel(HashSet::new());
-
-        let mempool_service = BoxService::new(Mempool::new(
+        let (mempool, mempool_transaction_receiver) = Mempool::new(
+            &config.mempool,
             peer_set.clone(),
             state,
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip,
             chain_tip_change.clone(),
-            mempool_transaction_sender,
-        ));
-        let mempool = ServiceBuilder::new().buffer(20).service(mempool_service);
+        );
+        let mempool = BoxService::new(mempool);
+        let mempool = ServiceBuilder::new().buffer(20).service(mempool);
 
         setup_tx
             .send((peer_set.clone(), address_book, mempool.clone()))
