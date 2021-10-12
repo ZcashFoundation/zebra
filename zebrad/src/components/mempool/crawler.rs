@@ -37,7 +37,7 @@ const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 pub struct Crawler<PeerSet, Mempool> {
     peer_set: Timeout<PeerSet>,
     mempool: Mempool,
-    status: SyncStatus,
+    sync_status: SyncStatus,
 }
 
 impl<PeerSet, Mempool> Crawler<PeerSet, Mempool>
@@ -53,12 +53,12 @@ where
     pub fn spawn(
         peer_set: PeerSet,
         mempool: Mempool,
-        status: SyncStatus,
+        sync_status: SyncStatus,
     ) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
             mempool,
-            status,
+            sync_status,
         };
 
         tokio::spawn(crawler.run())
@@ -71,7 +71,7 @@ where
     pub async fn run(mut self) -> Result<(), BoxError> {
         info!("initializing mempool crawler task");
 
-        while self.status.wait_until_close_to_tip().await.is_ok() {
+        while self.sync_status.wait_until_close_to_tip().await.is_ok() {
             self.crawl_transactions().await?;
             sleep(RATE_LIMIT_DELAY).await;
         }
