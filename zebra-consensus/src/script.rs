@@ -66,12 +66,27 @@ pub struct Request {
     pub upgrade: NetworkUpgrade,
 }
 
+/// A script verification response.
+///
+/// A successful response returns the known or looked-up UTXO for the transaction input.
+/// This allows the transaction verifier to calculate the value of the transparent input.
+#[derive(Debug)]
+pub struct Response {
+    /// The `OutPoint` for the UTXO spent by the verified transparent input.
+    pub spent_outpoint: transparent::OutPoint,
+
+    /// The UTXO spent by the verified transparent input.
+    ///
+    /// The value of this UTXO is the value of the input.
+    pub spent_utxo: transparent::Utxo,
+}
+
 impl<ZS> tower::Service<Request> for Verifier<ZS>
 where
     ZS: tower::Service<zebra_state::Request, Response = zebra_state::Response, Error = BoxError>,
     ZS::Future: Send + 'static,
 {
-    type Response = ();
+    type Response = Response;
     type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -119,10 +134,13 @@ where
                     tracing::trace!(?utxo, "got UTXO");
 
                     cached_ffi_transaction
-                        .is_valid(branch_id, (input_index as u32, utxo.output))?;
+                        .is_valid(branch_id, (input_index as u32, utxo.clone().output))?;
                     tracing::trace!("script verification succeeded");
 
-                    Ok(())
+                    Ok(Response {
+                        spent_outpoint: outpoint,
+                        spent_utxo: utxo,
+                    })
                 }
                 .instrument(span)
                 .boxed()
