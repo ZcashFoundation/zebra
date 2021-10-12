@@ -135,7 +135,6 @@ pub struct Mempool {
 
     /// Allow efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
-
     /// Allows the detection of chain tip resets.
     chain_tip_change: ChainTipChange,
 
