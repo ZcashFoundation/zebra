@@ -71,12 +71,12 @@ where
     pub async fn run(mut self) -> Result<(), BoxError> {
         info!("initializing mempool crawler task");
 
-        while self.sync_status.wait_until_close_to_tip().await.is_ok() {
+        loop {
+            self.sync_status.wait_until_close_to_tip().await?;
+
             self.crawl_transactions().await?;
             sleep(RATE_LIMIT_DELAY).await;
         }
-
-        Ok(())
     }
 
     /// Crawl peers for transactions.
