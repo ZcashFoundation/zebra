@@ -25,22 +25,33 @@ pub struct Config {
     /// This corresponds to `mempoolevictionmemoryminutes` from
     /// [ZIP-401](https://zips.z.cash/zip-0401#specification).
     pub eviction_memory_time: Duration,
+
+    /// If the state's best chain tip has reached this height, always enable the mempool,
+    /// regardless of Zebra's sync status.
+    ///
+    /// Set to `None` by default: Zebra always checks the sync status before enabling the mempool.
+    //
+    // TODO: allow the mempool to be enabled before the genesis block is committed?
+    //       we could replace `Option` with an enum that has an `AlwaysEnable` variant
+    pub debug_enable_at_height: Option<u32>,
 }
 
-/// Consensus rules:
-///
-/// > There MUST be a configuration option mempooltxcostlimit,
-/// > which SHOULD default to 80000000.
-/// >
-/// > There MUST be a configuration option mempoolevictionmemoryminutes,
-/// > which SHOULD default to 60 [minutes].
-///
-/// https://zips.z.cash/zip-0401#specification
 impl Default for Config {
     fn default() -> Self {
         Self {
+            /// Consensus rules:
+            ///
+            /// > There MUST be a configuration option mempooltxcostlimit,
+            /// > which SHOULD default to 80000000.
+            /// >
+            /// > There MUST be a configuration option mempoolevictionmemoryminutes,
+            /// > which SHOULD default to 60 [minutes].
+            ///
+            /// https://zips.z.cash/zip-0401#specification
             tx_cost_limit: 80_000_000,
             eviction_memory_time: Duration::from_secs(60 * 60),
+
+            debug_enable_at_height: None,
         }
     }
 }

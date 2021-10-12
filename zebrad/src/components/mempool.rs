@@ -13,6 +13,7 @@ use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
+    block::Height,
     chain_tip::ChainTip,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -108,6 +109,9 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     sync_status: SyncStatus,
 
+    /// If the state's best chain tip has reached this height, always enable the mempool.
+    debug_enable_at_height: Option<Height>,
+
     /// Allow efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
 
@@ -134,7 +138,7 @@ pub struct Mempool {
 
 impl Mempool {
     pub(crate) fn new(
-        _config: &Config,
+        config: &Config,
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
@@ -148,6 +152,7 @@ impl Mempool {
         let mut service = Mempool {
             active_state: ActiveState::Disabled,
             sync_status,
+            debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
             outbound,
@@ -163,10 +168,29 @@ impl Mempool {
         (service, transaction_receiver)
     }
 
+    /// Is the mempool enabled by a debug config option?
+    fn is_enabled_by_debug(&self) -> bool {
+        // optimise non-debug performance
+        if self.debug_enable_at_height.is_none() {
+            return false;
+        }
+
+        let enable_at_height = self
+            .debug_enable_at_height
+            .expect("unexpected debug_enable_at_height: just checked for None");
+
+        if let Some(best_tip_height) = self.latest_chain_tip.best_tip_height() {
+            best_tip_height >= enable_at_height
+        } else {
+            false
+        }
+    }
+
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     fn update_state(&mut self) {
-        let is_close_to_tip = self.sync_status.is_close_to_tip();
+        let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
+
         if self.is_enabled() == is_close_to_tip {
             // the active state is up to date
             return;
