@@ -110,7 +110,9 @@ pub struct Mempool {
 
     /// Allow efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
-    /// Allows the detection of chain tip resets.
+
+    /// Allows the detection of newly added chain tip blocks,
+    /// and chain tip resets.
     chain_tip_change: ChainTipChange,
 
     /// Handle to the outbound service.
@@ -415,6 +417,7 @@ fn reject_if_needed(
         // If it was cancelled then a block was mined, or there was a network
         // upgrade, etc. No reason to reject it.
         TransactionDownloadVerifyError::Cancelled => {}
+
         // Consensus verification failed. Reject transaction to avoid
         // having to download and verify it again just for it to fail again.
         TransactionDownloadVerifyError::Invalid(e) => {
