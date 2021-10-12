@@ -287,7 +287,7 @@ impl Service<Request> for Mempool {
                     // Remove transactions that are expired from the peers list
                     send_to_peers_ids = send_to_peers_ids
                         .difference(&expired_transactions)
-                        .map(|id| *id)
+                        .copied()
                         .collect();
                 }
 
