@@ -81,6 +81,7 @@ pub enum Response {
 ///
 /// Indicates wether it is enabled or disabled and, if enabled, contains
 /// the necessary data to run it.
+#[allow(clippy::large_enum_variant)]
 enum ActiveState {
     /// The Mempool is disabled.
     Disabled,
@@ -364,17 +365,26 @@ fn remove_expired_transactions(
     tip_height: zebra_chain::block::Height,
 ) {
     let mut txid_set = HashSet::new();
+    // we need a separate set, since reject() takes the original unmined ID,
+    // then extracts the mined ID out of it
+    let mut unmined_id_set = HashSet::new();
 
     for t in storage.transactions() {
         if let Some(expiry_height) = t.transaction.expiry_height() {
             if tip_height >= expiry_height {
                 txid_set.insert(t.id.mined_id());
+                unmined_id_set.insert(t.id);
             }
         }
     }
 
     // expiry height is effecting data, so we match by non-malleable TXID
     storage.remove_same_effects(&txid_set);
+
+    // also reject it
+    for id in unmined_id_set {
+        storage.reject(id, SameEffectsChainRejectionError::Expired.into());
+    }
 }
 
 /// Add a transaction that failed download and verification to the rejected list
