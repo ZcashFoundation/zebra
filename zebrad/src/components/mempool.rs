@@ -285,18 +285,15 @@ impl Service<Request> for Mempool {
                     let expired_transactions = remove_expired_transactions(storage, tip_height);
 
                     // Remove transactions that are expired from the peers list
-                    let peer_ids_cloned = send_to_peers_ids.clone();
-                    let intersection: HashSet<_> = peer_ids_cloned
-                        .intersection(&expired_transactions)
+                    send_to_peers_ids = send_to_peers_ids
+                        .difference(&expired_transactions)
+                        .map(|id| *id)
                         .collect();
-
-                    send_to_peers_ids.retain(|id| !intersection.contains(id));
                 }
 
                 // Send transactions that were not rejected nor expired to peers
-                let inserted_txids: HashSet<_> = send_to_peers_ids.into_iter().collect();
-                if !inserted_txids.is_empty() {
-                    let _ = self.transaction_sender.send(inserted_txids)?;
+                if !send_to_peers_ids.is_empty() {
+                    let _ = self.transaction_sender.send(send_to_peers_ids)?;
                 }
             }
             ActiveState::Disabled => {
@@ -392,8 +389,8 @@ fn remove_expired_transactions(
     storage.remove_same_effects(&txid_set);
 
     // also reject it
-    for id in unmined_id_set.clone() {
-        storage.reject(id, SameEffectsChainRejectionError::Expired.into());
+    for id in unmined_id_set.iter() {
+        storage.reject(*id, SameEffectsChainRejectionError::Expired.into());
     }
 
     unmined_id_set
