@@ -53,7 +53,7 @@ rand = { version = "0.8", optional = true }
 rand_chacha = { version = "0.3", optional = true }
 
 # ZF deps
-ed25519-zebra = "2"
+ed25519-zebra = "3.0.0"
 equihash = "0.1"
 # TODO: Update to 0.5 release when published
 redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", rev = "f772176560b0b7daf25eff2460e08dc127ac8407" }
