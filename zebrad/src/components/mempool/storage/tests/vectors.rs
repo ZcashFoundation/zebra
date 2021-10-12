@@ -1,8 +1,15 @@
 use std::iter;
 
+use crate::components::mempool::{remove_expired_from_peer_list, remove_expired_transactions};
+
 use super::{super::*, unmined_transactions_in_blocks};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    block::{Block, Height},
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+    transaction::UnminedTxId,
+};
 
 use color_eyre::eyre::Result;
 
@@ -126,6 +133,61 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     assert!(storage.contains_rejected(&expected_to_be_rejected[0].id));
     // Make sure the last id stored is not rejected
     assert!(!storage.contains_rejected(&expected_in_mempool[0].id));
+
+    Ok(())
+}
+
+#[test]
+fn mempool_expired_basic() -> Result<()> {
+    zebra_test::init();
+
+    mempool_expired_basic_for_network(Network::Mainnet)?;
+    mempool_expired_basic_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
+    // Create an empty storage
+    let mut storage: Storage = Default::default();
+
+    let block: Block = match network {
+        Network::Mainnet => {
+            zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?
+        }
+        Network::Testnet => {
+            zebra_test::vectors::BLOCK_TESTNET_925483_BYTES.zcash_deserialize_into()?
+        }
+    };
+
+    // Get a test transaction
+    let tx = &*(block.transactions[1]).clone();
+
+    // Change the expiration height of the test transaction
+    let mut tx = tx.clone();
+    *tx.expiry_height_mut() = zebra_chain::block::Height(1);
+
+    let tx_id = tx.unmined_id();
+
+    // Insert the transaction into the mempool
+    storage.insert(UnminedTx::from(tx))?;
+
+    assert_eq!(storage.transaction_count(), 1);
+
+    // Get everything available in mempool now
+    let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
+    assert_eq!(everything_in_mempool.len(), 1);
+    assert!(everything_in_mempool.contains(&tx_id));
+
+    // remove_expired_transactions() will return what was removed
+    let expired = remove_expired_transactions(&mut storage, Height(1));
+    assert!(expired.contains(&tx_id));
+    let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
+    assert_eq!(everything_in_mempool.len(), 0);
+
+    // No transaction will be sent to peers
+    let send_to_peers = remove_expired_from_peer_list(&everything_in_mempool, &expired);
+    assert_eq!(send_to_peers.len(), 0);
 
     Ok(())
 }

@@ -283,12 +283,9 @@ impl Service<Request> for Mempool {
                 // Remove expired transactions from the mempool.
                 if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
                     let expired_transactions = remove_expired_transactions(storage, tip_height);
-
                     // Remove transactions that are expired from the peers list
-                    send_to_peers_ids = send_to_peers_ids
-                        .difference(&expired_transactions)
-                        .copied()
-                        .collect();
+                    send_to_peers_ids =
+                        remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
                 }
 
                 // Send transactions that were not rejected nor expired to peers
@@ -394,6 +391,17 @@ fn remove_expired_transactions(
     }
 
     unmined_id_set
+}
+
+/// Remove expired transaction ids from a given list of inserted ones.
+fn remove_expired_from_peer_list(
+    send_to_peers_ids: &HashSet<UnminedTxId>,
+    expired_transactions: &HashSet<UnminedTxId>,
+) -> HashSet<UnminedTxId> {
+    send_to_peers_ids
+        .difference(&expired_transactions)
+        .copied()
+        .collect()
 }
 
 /// Add a transaction that failed download and verification to the rejected list
