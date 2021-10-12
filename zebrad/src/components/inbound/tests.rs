@@ -1,3 +1,5 @@
+//! Inbound service tests.
+
 use std::{collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc};
 
 use futures::FutureExt;
@@ -576,16 +578,14 @@ async fn setup(
         .unwrap();
     committed_blocks.push(block_one);
 
-    let (transaction_sender, transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
-
-    let mut mempool_service = Mempool::new(
+    let (mut mempool_service, transaction_receiver) = Mempool::new(
+        &mempool::Config::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
         latest_chain_tip,
         chain_tip_change.clone(),
-        transaction_sender,
     );
 
     // Enable the mempool

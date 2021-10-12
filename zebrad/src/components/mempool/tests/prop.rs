@@ -1,5 +1,6 @@
+//! Randomised property tests for the mempool.
+
 use proptest::prelude::*;
-use std::collections::HashSet;
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
@@ -9,8 +10,10 @@ use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
-use super::super::Mempool;
-use crate::components::sync::{RecentSyncLengths, SyncStatus};
+use crate::components::{
+    mempool::{self, Mempool},
+    sync::{RecentSyncLengths, SyncStatus},
+};
 
 /// A [`MockService`] representing the network service.
 type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
@@ -151,16 +154,14 @@ fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
 
-    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
-
-    let mempool = Mempool::new(
+    let (mempool, _transaction_receiver) = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         Buffer::new(BoxService::new(state_service.clone()), 1),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
         chain_tip_change,
-        transaction_sender,
     );
 
     (
