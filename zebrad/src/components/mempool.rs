@@ -399,7 +399,7 @@ fn remove_expired_from_peer_list(
     expired_transactions: &HashSet<UnminedTxId>,
 ) -> HashSet<UnminedTxId> {
     send_to_peers_ids
-        .difference(&expired_transactions)
+        .difference(expired_transactions)
         .copied()
         .collect()
 }
