@@ -99,23 +99,23 @@
             "targets": [
                 {
                     "exemplar": true,
-                    "expr": "rate(gossip_downloaded_transaction_count{job=\"$job\"}[1m]) * 60",
+                    "expr": "rate(mempool_downloaded_transactions_total{job=\"$job\"}[1m]) * 60",
                     "interval": "",
-                    "legendFormat": "gossip_downloaded_transaction_count per min",
+                    "legendFormat": "mempool_downloaded_transactions_total per min",
                     "refId": "C"
                 },
                 {
                     "exemplar": true,
-                    "expr": "rate(gossip_verified_transaction_count{job=\"$job\"}[1m]) * 60",
+                    "expr": "rate(mempool_verified_transactions_total{job=\"$job\"}[1m]) * 60",
                     "interval": "",
-                    "legendFormat": "gossip_verified_transaction_count per min",
+                    "legendFormat": "mempool_verified_transactions_total per min",
                     "refId": "D"
                 },
                 {
                     "exemplar": true,
-                    "expr": "gossip_queued_transaction_count{job=\"$job\"}",
+                    "expr": "mempool_currently_queued_transactions_total{job=\"$job\"}",
                     "interval": "",
-                    "legendFormat": "gossip_queued_transaction_count",
+                    "legendFormat": "mempool_currently_queued_transactions_total",
                     "refId": "E"
                 }
             ],

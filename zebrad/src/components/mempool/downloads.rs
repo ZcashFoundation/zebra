@@ -286,11 +286,11 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
-                    metrics::counter!("gossip.downloaded.transaction.count", 1);
+                    metrics::counter!("mempool.downloaded.transactions.total", 1);
                     tx
                 }
                 Gossip::Tx(tx) => {
-                    metrics::counter!("gossip.pushed.transaction.count", 1);
+                    metrics::counter!("mempool.pushed.transactions.total", 1);
                     tx
                 }
             };
@@ -308,7 +308,7 @@ where
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
         .map_ok(|tx| {
-            metrics::counter!("gossip.verified.transaction.count", 1);
+            metrics::counter!("mempool.verified.transactions.total", 1);
             tx
         })
         // Tack the hash onto the error so we can remove the cancel handle
@@ -322,7 +322,7 @@ where
             tokio::select! {
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
-                    metrics::counter!("gossip.cancelled.count", 1);
+                    metrics::counter!("mempool.cancelled.verify.tasks.total", 1);
                     Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
                 verification = fut => verification,
@@ -341,7 +341,10 @@ where
             ?MAX_INBOUND_CONCURRENCY,
             "queued transaction hash for download"
         );
-        metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
+        metrics::gauge!(
+            "mempool.currently.queued.transactions.total",
+            self.pending.len() as _
+        );
 
         Ok(())
     }
