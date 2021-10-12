@@ -110,12 +110,17 @@ impl StartCmd {
 
         let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
             sync_status.clone(),
-            chain_tip_change,
+            chain_tip_change.clone(),
             peer_set.clone(),
         ));
 
-        let mempool_crawler_task_handle =
-            mempool::Crawler::spawn(peer_set.clone(), mempool, sync_status);
+        let mempool_crawler_task_handle = mempool::Crawler::spawn(
+            &config.mempool,
+            peer_set.clone(),
+            mempool,
+            sync_status,
+            chain_tip_change,
+        );
 
         let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
             mempool_transaction_receiver,
