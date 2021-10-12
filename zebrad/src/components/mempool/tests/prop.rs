@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+//! Randomised property tests for the mempool.
 
 use proptest::prelude::*;
 use tokio::time;
@@ -154,9 +154,7 @@ fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
 
-    let (transaction_sender, _transaction_receiver) = tokio::sync::watch::channel(HashSet::new());
-
-    let mempool = Mempool::new(
+    let (mempool, _transaction_receiver) = Mempool::new(
         &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         Buffer::new(BoxService::new(state_service.clone()), 1),
@@ -164,7 +162,6 @@ fn setup(
         sync_status,
         latest_chain_tip,
         chain_tip_change,
-        transaction_sender,
     );
 
     (

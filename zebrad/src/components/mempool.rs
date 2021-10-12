@@ -139,9 +139,11 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-        transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
-    ) -> Self {
-        Mempool {
+    ) -> (Self, watch::Receiver<HashSet<UnminedTxId>>) {
+        let (transaction_sender, transaction_receiver) =
+            tokio::sync::watch::channel(HashSet::new());
+
+        let mut service = Mempool {
             active_state: ActiveState::Disabled,
             sync_status,
             latest_chain_tip,
@@ -150,7 +152,13 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
-        }
+        };
+
+        // Make sure `is_enabled` is accurate.
+        // It is only updated in `poll_ready`, right before each service call.
+        service.update_state();
+
+        (service, transaction_receiver)
     }
 
     /// Update the mempool state (enabled / disabled) depending on how close to
