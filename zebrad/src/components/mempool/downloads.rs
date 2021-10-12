@@ -286,11 +286,19 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
-                    metrics::counter!("mempool.downloaded.transactions.total", 1);
+                    metrics::counter!(
+                        "mempool.downloaded.transactions.total",
+                        1,
+                        "version" => format!("{}",tx.transaction.version()),
+                    );
                     tx
                 }
                 Gossip::Tx(tx) => {
-                    metrics::counter!("mempool.pushed.transactions.total", 1);
+                    metrics::counter!(
+                        "mempool.pushed.transactions.total",
+                        1,
+                        "version" => format!("{}",tx.transaction.version()),
+                    );
                     tx
                 }
             };
@@ -308,7 +316,11 @@ where
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
         .map_ok(|tx| {
-            metrics::counter!("mempool.verified.transactions.total", 1);
+            metrics::counter!(
+                "mempool.verified.transactions.total",
+                1,
+                "version" => format!("{}",tx.transaction.version()),
+            );
             tx
         })
         // Tack the hash onto the error so we can remove the cancel handle
