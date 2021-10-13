@@ -714,6 +714,7 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         SMALL_CHECKPOINT_TIMEOUT,
         None,
         true,
+        None,
     )
     .map(|_tempdir| ())
 }
@@ -730,6 +731,7 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         SMALL_CHECKPOINT_TIMEOUT,
         None,
         true,
+        None,
     )
     .map(|_tempdir| ())
 }
@@ -753,6 +755,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         SMALL_CHECKPOINT_TIMEOUT,
         None,
         true,
+        None,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -762,11 +765,28 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         network,
         "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
-        Some(reuse_tempdir),
+        reuse_tempdir,
         false,
+        None,
     )?;
 
     Ok(())
+}
+
+/// Test if `zebrad` can activate the mempool on mainnet.
+/// Debug activation happens after committing the genesis block.
+#[test]
+fn activate_mempool_mainnet() -> Result<()> {
+    sync_until(
+        Height(1),
+        Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        SMALL_CHECKPOINT_TIMEOUT,
+        None,
+        true,
+        Some(Height(0)),
+    )
+    .map(|_tempdir| ())
 }
 
 /// Test if `zebrad` can sync some larger checkpoints on mainnet.
@@ -784,6 +804,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
+        None,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -791,8 +812,9 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         Mainnet,
         "previous state height is greater than the stop height",
         STOP_ON_LOAD_TIMEOUT,
-        Some(reuse_tempdir),
+        reuse_tempdir,
         false,
+        None,
     )?;
 
     Ok(())
@@ -804,6 +826,13 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
 /// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
 /// use it as the test's temporary directory.
+///
+/// If `check_legacy_chain` is true,
+/// make sure the logs contain the legacy chain check.
+///
+/// If `enable_mempool_at_height` is `Some(Height(_))`,
+/// configure `zebrad` to debug-enable the mempool at that height.
+/// Then check the logs for the mempool being enabled.
 ///
 /// If `stop_regex` is encountered before the process exits, kills the
 /// process, and mark the test as successful, even if `height` has not
@@ -819,8 +848,9 @@ fn sync_until(
     network: Network,
     stop_regex: &str,
     timeout: Duration,
-    reuse_tempdir: Option<TempDir>,
+    reuse_tempdir: impl Into<Option<TempDir>>,
     check_legacy_chain: bool,
+    enable_mempool_at_height: impl Into<Option<Height>>,
 ) -> Result<TempDir> {
     zebra_test::init();
 
@@ -828,11 +858,15 @@ fn sync_until(
         return testdir();
     }
 
+    let reuse_tempdir = reuse_tempdir.into();
+    let enable_mempool_at_height = enable_mempool_at_height.into();
+
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
+    config.mempool.debug_enable_at_height = enable_mempool_at_height.map(|height| height.0);
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
         reuse_tempdir.replace_config(&mut config)?
@@ -848,6 +882,11 @@ fn sync_until(
     if check_legacy_chain {
         child.expect_stdout_line_matches("starting legacy chain check")?;
         child.expect_stdout_line_matches("no legacy chain found")?;
+    }
+
+    if enable_mempool_at_height.is_some() {
+        child.expect_stdout_line_matches("enabling mempool for debugging")?;
+        child.expect_stdout_line_matches("activating mempool")?;
     }
 
     child.expect_stdout_line_matches(stop_regex)?;
