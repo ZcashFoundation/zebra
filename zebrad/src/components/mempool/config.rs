@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Mempool configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The mempool transaction cost limit.
     ///

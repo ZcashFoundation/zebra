@@ -17,6 +17,7 @@ const MAX_SINGLE_PEER_RETRIES: usize = 2;
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address on which this node should listen for connections.
     ///
