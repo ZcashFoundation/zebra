@@ -170,9 +170,11 @@ impl Mempool {
 
     /// Is the mempool enabled by a debug config option?
     fn is_enabled_by_debug(&self) -> bool {
+        let mut is_debug_enabled = false;
+
         // optimise non-debug performance
         if self.debug_enable_at_height.is_none() {
-            return false;
+            return is_debug_enabled;
         }
 
         let enable_at_height = self
@@ -180,10 +182,18 @@ impl Mempool {
             .expect("unexpected debug_enable_at_height: just checked for None");
 
         if let Some(best_tip_height) = self.latest_chain_tip.best_tip_height() {
-            best_tip_height >= enable_at_height
-        } else {
-            false
+            is_debug_enabled = best_tip_height >= enable_at_height;
+
+            if is_debug_enabled && !self.is_enabled() {
+                info!(
+                    ?best_tip_height,
+                    ?enable_at_height,
+                    "enabling mempool for debugging"
+                );
+            }
         }
+
+        is_debug_enabled
     }
 
     /// Update the mempool state (enabled / disabled) depending on how close to
@@ -198,6 +208,8 @@ impl Mempool {
 
         // Update enabled / disabled state
         if is_close_to_tip {
+            info!("activating mempool: Zebra is close to the tip");
+
             let tx_downloads = Box::pin(TxDownloads::new(
                 Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                 Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
@@ -208,6 +220,8 @@ impl Mempool {
                 tx_downloads,
             };
         } else {
+            info!("deactivating mempool: Zebra is syncing lots of blocks");
+
             self.active_state = ActiveState::Disabled
         }
     }
