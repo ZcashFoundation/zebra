@@ -357,6 +357,7 @@ where
             "mempool.currently.queued.transactions.total",
             self.pending.len() as _
         );
+        metrics::counter!("mempool.queued.transactions.total", 1);
 
         Ok(())
     }

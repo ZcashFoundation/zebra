@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    mem::size_of,
+};
 
 use thiserror::Error;
 
@@ -220,12 +223,14 @@ impl Storage {
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
         self.chain_rejected_same_effects.clear();
+        self.update_rejected_metrics();
     }
 
     /// Clears rejections that only apply to the current tip.
     pub fn clear_tip_rejections(&mut self) {
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
+        self.update_rejected_metrics();
     }
 
     /// Clears rejections that only apply to the current tip.
@@ -247,6 +252,7 @@ impl Storage {
                 map.clear();
             }
         }
+        self.update_rejected_metrics();
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
@@ -361,5 +367,22 @@ impl Storage {
     /// This matches transactions based on each rejection list's matching rule.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
         self.rejection_error(txid).is_some()
+    }
+
+    /// Update metrics related to the rejected lists.
+    ///
+    /// Must be called every time the rejected lists change.
+    fn update_rejected_metrics(&self) {
+        metrics::gauge!(
+            "mempool.rejected.transaction.ids.total",
+            self.rejected_transaction_count() as _
+        );
+        // This is just an approximation.
+        // TODO: make it more accurate #2869
+        let item_size = size_of::<(transaction::Hash, SameEffectsTipRejectionError)>();
+        metrics::gauge!(
+            "mempool.rejected.transaction.ids.bytes",
+            (self.rejected_transaction_count() * item_size) as _
+        );
     }
 }

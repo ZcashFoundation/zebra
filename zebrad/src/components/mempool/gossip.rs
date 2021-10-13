@@ -35,11 +35,14 @@ where
         receiver.changed().await?;
 
         let txs = receiver.borrow().clone();
+        let txs_len = txs.len();
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
         info!(?request, "sending mempool transaction broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready_and().await?.call(request).await;
+
+        metrics::counter!("mempool.gossiped.transactions.total", txs_len as _);
     }
 }

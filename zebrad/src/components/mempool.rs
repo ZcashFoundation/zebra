@@ -280,6 +280,7 @@ impl Service<Request> for Mempool {
                             }
                         }
                         Err((txid, e)) => {
+                            metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => e.to_string());
                             reject_if_needed(storage, txid, e);
                             // TODO: should we also log the result?
                         }
