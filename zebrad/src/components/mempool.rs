@@ -245,17 +245,17 @@ impl Service<Request> for Mempool {
                     }
                 }
 
+                // Collect inserted transaction ids.
+                let mut send_to_peers_ids = HashSet::<_>::new();
+
                 // Clean up completed download tasks and add to mempool if successful.
-                // Also, send succesful transactions to peers.
-                let mut inserted_txids = HashSet::new();
                 while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                     match r {
                         Ok(tx) => {
-                            // Storage handles conflicting transactions or a full mempool internally,
-                            // so just ignore the storage result here
-                            let _ = storage.insert(tx.clone());
-                            // Save transaction ids that we will send to peers
-                            inserted_txids.insert(tx.id);
+                            if let Ok(inserted_id) = storage.insert(tx.clone()) {
+                                // Save transaction ids that we will send to peers
+                                send_to_peers_ids.insert(inserted_id);
+                            }
                         }
                         Err((txid, e)) => {
                             reject_if_needed(storage, txid, e);
@@ -263,14 +263,18 @@ impl Service<Request> for Mempool {
                         }
                     };
                 }
-                // Send any newly inserted transactions to peers
-                if !inserted_txids.is_empty() {
-                    let _ = self.transaction_sender.send(inserted_txids)?;
-                }
 
                 // Remove expired transactions from the mempool.
                 if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-                    remove_expired_transactions(storage, tip_height);
+                    let expired_transactions = remove_expired_transactions(storage, tip_height);
+                    // Remove transactions that are expired from the peers list
+                    send_to_peers_ids =
+                        remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
+                }
+
+                // Send transactions that were not rejected nor expired to peers
+                if !send_to_peers_ids.is_empty() {
+                    let _ = self.transaction_sender.send(send_to_peers_ids)?;
                 }
             }
             ActiveState::Disabled => {
@@ -347,7 +351,7 @@ impl Service<Request> for Mempool {
 fn remove_expired_transactions(
     storage: &mut storage::Storage,
     tip_height: zebra_chain::block::Height,
-) {
+) -> HashSet<UnminedTxId> {
     let mut txid_set = HashSet::new();
     // we need a separate set, since reject() takes the original unmined ID,
     // then extracts the mined ID out of it
@@ -366,9 +370,22 @@ fn remove_expired_transactions(
     storage.remove_same_effects(&txid_set);
 
     // also reject it
-    for id in unmined_id_set {
-        storage.reject(id, SameEffectsChainRejectionError::Expired.into());
+    for id in unmined_id_set.iter() {
+        storage.reject(*id, SameEffectsChainRejectionError::Expired.into());
     }
+
+    unmined_id_set
+}
+
+/// Remove expired transaction ids from a given list of inserted ones.
+fn remove_expired_from_peer_list(
+    send_to_peers_ids: &HashSet<UnminedTxId>,
+    expired_transactions: &HashSet<UnminedTxId>,
+) -> HashSet<UnminedTxId> {
+    send_to_peers_ids
+        .difference(expired_transactions)
+        .copied()
+        .collect()
 }
 
 /// Add a transaction that failed download and verification to the rejected list
