@@ -13,6 +13,7 @@ use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
+    block::Height,
     chain_tip::ChainTip,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -108,9 +109,14 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     sync_status: SyncStatus,
 
+    /// If the state's best chain tip has reached this height, always enable the mempool.
+    debug_enable_at_height: Option<Height>,
+
     /// Allow efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
-    /// Allows the detection of chain tip resets.
+
+    /// Allows the detection of newly added chain tip blocks,
+    /// and chain tip resets.
     chain_tip_change: ChainTipChange,
 
     /// Handle to the outbound service.
@@ -132,7 +138,7 @@ pub struct Mempool {
 
 impl Mempool {
     pub(crate) fn new(
-        _config: &Config,
+        config: &Config,
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
@@ -146,6 +152,7 @@ impl Mempool {
         let mut service = Mempool {
             active_state: ActiveState::Disabled,
             sync_status,
+            debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
             outbound,
@@ -161,10 +168,39 @@ impl Mempool {
         (service, transaction_receiver)
     }
 
+    /// Is the mempool enabled by a debug config option?
+    fn is_enabled_by_debug(&self) -> bool {
+        let mut is_debug_enabled = false;
+
+        // optimise non-debug performance
+        if self.debug_enable_at_height.is_none() {
+            return is_debug_enabled;
+        }
+
+        let enable_at_height = self
+            .debug_enable_at_height
+            .expect("unexpected debug_enable_at_height: just checked for None");
+
+        if let Some(best_tip_height) = self.latest_chain_tip.best_tip_height() {
+            is_debug_enabled = best_tip_height >= enable_at_height;
+
+            if is_debug_enabled && !self.is_enabled() {
+                info!(
+                    ?best_tip_height,
+                    ?enable_at_height,
+                    "enabling mempool for debugging"
+                );
+            }
+        }
+
+        is_debug_enabled
+    }
+
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     fn update_state(&mut self) {
-        let is_close_to_tip = self.sync_status.is_close_to_tip();
+        let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
+
         if self.is_enabled() == is_close_to_tip {
             // the active state is up to date
             return;
@@ -172,6 +208,8 @@ impl Mempool {
 
         // Update enabled / disabled state
         if is_close_to_tip {
+            info!("activating mempool: Zebra is close to the tip");
+
             let tx_downloads = Box::pin(TxDownloads::new(
                 Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                 Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
@@ -182,6 +220,8 @@ impl Mempool {
                 tx_downloads,
             };
         } else {
+            info!("deactivating mempool: Zebra is syncing lots of blocks");
+
             self.active_state = ActiveState::Disabled
         }
     }
@@ -415,6 +455,7 @@ fn reject_if_needed(
         // If it was cancelled then a block was mined, or there was a network
         // upgrade, etc. No reason to reject it.
         TransactionDownloadVerifyError::Cancelled => {}
+
         // Consensus verification failed. Reject transaction to avoid
         // having to download and verify it again just for it to fail again.
         TransactionDownloadVerifyError::Invalid(e) => {
