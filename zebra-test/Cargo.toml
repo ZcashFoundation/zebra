@@ -20,7 +20,7 @@ tokio = { version = "0.3", features = ["full"] }
 futures = "0.3.17"
 
 color-eyre = "0.5.11"
-owo-colors = "3.0.0"
+owo-colors = "3.0.1"
 pretty_assertions = "1.0.0"
 spandoc = "0.2.0"
 thiserror = "1.0.30"
