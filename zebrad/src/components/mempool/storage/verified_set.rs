@@ -26,6 +26,10 @@ pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
     transactions: VecDeque<UnminedTx>,
 
+    /// The total size of the transactions in the mempool if they were
+    /// serialized.
+    transactions_serialized_size: usize,
+
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
 
@@ -50,11 +54,6 @@ impl VerifiedSet {
         self.transactions.len()
     }
 
-    /// Returns the total serialized size of the transactions in the set.
-    pub fn transactions_serialized_size(&self) -> usize {
-        self.transactions().map(|tx| tx.size).sum()
-    }
-
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified `id.
     pub fn contains(&self, id: &UnminedTxId) -> bool {
@@ -70,6 +69,7 @@ impl VerifiedSet {
         self.sprout_nullifiers.clear();
         self.sapling_nullifiers.clear();
         self.orchard_nullifiers.clear();
+        self.transactions_serialized_size = 0;
         self.update_metrics();
     }
 
@@ -86,6 +86,7 @@ impl VerifiedSet {
         }
 
         self.cache_outputs_from(&transaction.transaction);
+        self.transactions_serialized_size += transaction.size;
         self.transactions.push_front(transaction);
 
         self.update_metrics();
@@ -142,6 +143,7 @@ impl VerifiedSet {
             .remove(transaction_index)
             .expect("invalid transaction index");
 
+        self.transactions_serialized_size -= removed_tx.size;
         self.remove_outputs(&removed_tx);
 
         self.update_metrics();
@@ -214,7 +216,7 @@ impl VerifiedSet {
         );
         metrics::gauge!(
             "zcash.mempool.size.bytes",
-            self.transactions_serialized_size() as _
+            self.transactions_serialized_size as _
         );
     }
 }
