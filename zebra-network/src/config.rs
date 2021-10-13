@@ -65,6 +65,9 @@ pub struct Config {
     /// - regularly, every time `crawl_new_peer_interval` elapses, and
     /// - if the peer set is busy, and there aren't any peer addresses for the
     ///   next connection attempt.
+    //
+    // Note: Durations become a TOML table, so they must be the final item in the config
+    //       We'll replace them with a more user-friendly format in #2847
     pub crawl_new_peer_interval: Duration,
 }
 
