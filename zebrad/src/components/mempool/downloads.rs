@@ -1,3 +1,14 @@
+//! Transaction downloader and verifier.
+//!
+//! The main struct [`Downloads`] allows downloading and verifying transactions.
+//! It is used by the mempool to get transactions into it. It is also able to
+//! just verify transactions that were directly pushed.
+//!
+//! The verification itself is done by the [`zebra_consensus`] crate.
+//!
+//! Verified transactions are returned to the caller in [`Downloads::poll_next`].
+//! This is in contrast to the block downloader and verifiers which don't
+//! return anything and forward the verified blocks by themselves.
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
@@ -204,8 +215,11 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    /// Initialize a new download stream with the provided `network` and
-    /// `verifier` services.
+    /// Initialize a new download stream with the provided services.
+    ///
+    /// `network` is used to download transactions.
+    /// `verifier` is used to verify transactions.
+    /// `state` is used to check if transaction are already in the state.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
