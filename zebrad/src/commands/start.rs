@@ -15,13 +15,27 @@
 //!    * handles all validation logic for the node
 //!    * verifies blocks using zebra-chain and zebra-script, then stores verified
 //!      blocks in zebra-state
+//!  * State Service
+//!    * contextually verifies blocks
+//!    * handles in-memory storage of multiple non-finalized chains
+//!    * handles permanent storage of the best finalized chain
 //!  * Sync Task
 //!    * runs in the background and continuously queries the network for
 //!      new blocks to be verified and added to the local state
 //!  * Inbound Service
-//!    * handles requests from peers for network data and chain data
-//!    * performs transaction and block diffusion
-//!    * downloads and verifies gossiped blocks and transactions
+//!    * handles requests from peers for network data, chain data, and mempool transactions
+//!    * downloads and verifies gossiped blocks
+//!    * sends gossiped transactions to the mempool service
+//!  * Block Gossip Task
+//!    * runs in the background and continuously queries the state for
+//!      newly committed blocks to be gossiped to peers
+//!  * Mempool Service
+//!    * activates when the syncer is near the chain tip
+//!    * launches a background task that crawls peer mempools for new transactions
+//!    * handles storage of unmined transactions
+//!  * Transaction Gossip Task
+//!    * runs in the background and gossips newly added mempool transactions
+//!      to peers
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
