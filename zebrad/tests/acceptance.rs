@@ -781,7 +781,7 @@ fn activate_mempool_mainnet() -> Result<()> {
         Height(1),
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
-        LARGE_CHECKPOINT_TIMEOUT,
+        SMALL_CHECKPOINT_TIMEOUT,
         None,
         true,
         Some(Height(0)),
@@ -822,6 +822,22 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 
 // TODO: We had a `sync_large_checkpoints_testnet` here but it was removed because
 // the testnet is unreliable (#1222). Enable after we have more testnet instances (#1791).
+
+/// Test if `zebrad` can run side by side with the mempool.
+/// This is done by running the mempool and sync some large checkpoints.
+#[test]
+fn running_mempool_mainnet() -> Result<()> {
+    sync_until(
+        LARGE_CHECKPOINT_TEST_HEIGHT,
+        Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+        true,
+        Some(Height(0)),
+    )
+    .map(|_tempdir| ())
+}
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
 /// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
@@ -889,7 +905,7 @@ fn sync_until(
         child.expect_stdout_line_matches("activating mempool")?;
 
         // make sure zebra is running with the mempool
-        child.expect_stdout_line_matches("verified checkpoint range block_count=400")?;
+        child.expect_stdout_line_matches("verified checkpoint range")?;
     }
 
     child.expect_stdout_line_matches(stop_regex)?;
