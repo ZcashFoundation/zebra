@@ -255,14 +255,19 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
-            // Calculate the transaction fee from `value_balance`.
-            let _tx_fee = match value_balance {
-                Ok(vb) => match vb.remaining_transaction_value() {
-                    Ok(tx_rtv) => Ok(tx_rtv),
-                    Err(_) => Err(TransactionError::IncorrectFee),
-                },
-                Err(_) => Err(TransactionError::IncorrectFee),
-            };
+            // Initialize the transaction fee to zero.
+            let mut tx_fee = Amount::<NonNegative>::zero();
+
+            // Calculate the fee only for non-coinbase transactions.
+            if !tx.has_valid_coinbase_transaction_inputs() {
+                tx_fee = match value_balance {
+                    Ok(vb) => match vb.remaining_transaction_value() {
+                        Ok(tx_rtv) => tx_rtv,
+                        Err(_) => return Err(TransactionError::IncorrectFee),
+                    },
+                    Err(_) => return Err(TransactionError::IncorrectFee),
+                };
+            }
 
             Ok((id, tx_fee))
         }
