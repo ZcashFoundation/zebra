@@ -23,7 +23,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 15,
-  "iteration": 1634236017044,
+  "iteration": 1634237713386,
   "links": [],
   "panels": [
     {
@@ -590,6 +590,113 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": null,
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "hiddenSeries": false,
+      "id": 12,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(mempool_downloaded_transactions_total{job=\"$job\"}[1m]) * 60",
+          "interval": "",
+          "legendFormat": "downloaded per min",
+          "refId": "Downloaded"
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(mempool_verified_transactions_total{job=\"$job\"}[1m]) * 60",
+          "interval": "",
+          "legendFormat": "verified per min",
+          "refId": "Verified"
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(mempool_queued_transactions_total{job=\"$job\"}[1m]) * 60",
+          "interval": "",
+          "legendFormat": "queued per min",
+          "refId": "Queued"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Transaction Downloader and Verifier (Rates) - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:1174",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:1175",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
       "description": "",
       "fill": 1,
       "fillGradient": 1,
@@ -597,7 +704,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 42
       },
       "hiddenSeries": false,
       "id": 10,
@@ -742,5 +849,5 @@
   "timezone": "",
   "title": "mempool",
   "uid": "wVXGE6v7z",
-  "version": 5
+  "version": 7
 }
