@@ -9,8 +9,8 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::watch;
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceBuilder};
+use tokio::sync::{mpsc, watch};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
     block::Height,
@@ -21,6 +21,7 @@ use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
+use zs::ChainTipBlock;
 
 use crate::components::sync::SyncStatus;
 
@@ -48,8 +49,7 @@ pub use storage::{
 pub use storage::tests::unmined_transactions_in_blocks;
 
 use downloads::{
-    Downloads as TxDownloads, Gossip, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
-    TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -87,7 +87,14 @@ enum ActiveState {
     Disabled,
     /// The Mempool is enabled.
     Enabled {
-        mempool_crawler_task_handle: tokio::task::JoinHandle<Result<(), BoxError>>,
+        /// The join handle for the crawler task.
+        ///
+        /// Used to receive panics and errors from the task,
+        /// and abort the task when the mempool is disabled.
+        crawler_task_handle: tokio::task::JoinHandle<Result<(), BoxError>>,
+
+        /// Used to receive crawled transaction IDs from the crawler task.
+        crawled_transaction_receiver: mpsc::Receiver<HashSet<UnminedTxId>>,
 
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
@@ -120,18 +127,136 @@ impl ActiveState {
         std::mem::take(self)
     }
 
+    /// Clean up completed download and verify tasks, and add to mempool if successful.
+    ///
+    /// Returns inserted transaction IDs, so they can be gossiped to peers.
+    fn insert_verified_transactions(&mut self, cx: &mut Context<'_>) -> HashSet<UnminedTxId> {
+        // Collect inserted transaction ids.
+        let mut inserted_ids = HashSet::<_>::new();
+
+        if let ActiveState::Enabled {
+            crawler_task_handle: _,
+            crawled_transaction_receiver: _,
+            tx_downloads,
+            storage,
+        } = self
+        {
+            while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
+                match r {
+                    Ok(tx) => {
+                        if let Ok(inserted_id) = storage.insert(tx.clone()) {
+                            // Save transaction ids that we will send to peers
+                            inserted_ids.insert(inserted_id);
+                        }
+                    }
+                    Err((txid, e)) => {
+                        storage.reject_if_needed(txid, e);
+                        // TODO: should we also log the result?
+                    }
+                };
+            }
+        }
+
+        inserted_ids
+    }
+
+    /// Remove mined and expired transactions,
+    /// in response to `block` being added to the best chain tip.
+    ///
+    /// Returns the set of inserted transactions,
+    /// after removing mined and expired transactions.
+    #[must_use = "the remaining transaction IDs should not be discarded"]
+    fn remove_rejected_transactions(
+        &mut self,
+        block: ChainTipBlock,
+        mut inserted_ids: HashSet<UnminedTxId>,
+    ) -> HashSet<UnminedTxId> {
+        if let ActiveState::Enabled {
+            crawler_task_handle: _,
+            crawled_transaction_receiver: _,
+            tx_downloads,
+            storage,
+        } = self
+        {
+            // Remove mined transaction from the mempool.
+            let mined_ids = block.transaction_hashes.iter().cloned().collect();
+            tx_downloads.cancel(&mined_ids);
+            storage.remove_same_effects(&mined_ids);
+            storage.clear_tip_rejections();
+            inserted_ids = remove_mined_from_peer_list(&inserted_ids, &mined_ids);
+
+            // Remove expired transactions from the mempool.
+            // These transactions are added to the reject list,
+            // which removes them from gossiped
+            let expired_ids = storage.remove_expired_transactions(block.height);
+            inserted_ids = remove_expired_from_peer_list(&inserted_ids, &expired_ids);
+        }
+
+        inserted_ids
+    }
+
+    /// Queue `transaction` for download, if needed.
+    /// Returns the corresponding error if the transaction should not be downloaded.
+    ///
+    /// Checks the storage and existing queue to see if each transaction should be downloaded.
+    //
+    // Note: This is implemented as an associated method to simplify the calling code,
+    //       which partly borrows the ActiveState's fields.
+    fn queue_for_download(
+        tx_downloads: &mut Pin<Box<InboundTxDownloads>>,
+        storage: &mut storage::Storage,
+        transaction: Gossip,
+    ) -> Result<(), MempoolError> {
+        storage.should_download_or_verify(transaction.id())?;
+        tx_downloads.download_if_needed_and_verify(transaction)?;
+
+        Ok(())
+    }
+
+    /// Queues all the crawled transaction IDs in the channel.
+    ///
+    /// If the channel is closed, returns an error.
+    fn queue_crawled_transaction_ids(&mut self) -> Result<(), mpsc::error::TryRecvError> {
+        if let ActiveState::Enabled {
+            crawled_transaction_receiver,
+            tx_downloads,
+            storage,
+            ..
+        } = self
+        {
+            let mut unique_ids = HashSet::new();
+
+            loop {
+                match crawled_transaction_receiver.try_recv() {
+                    Ok(ids) => unique_ids.extend(ids),
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    closed @ Err(mpsc::error::TryRecvError::Closed) => {
+                        closed?;
+                    }
+                }
+            }
+
+            for tx_id in unique_ids {
+                // It's ok for crawled transactions to be rejected by the mempool
+                let _ = ActiveState::queue_for_download(tx_downloads, storage, tx_id.into());
+            }
+        }
+
+        Ok(())
+    }
+
     /// Checks if the mempool crawler task has panicked or exited.
     ///
     /// If the task is still running, or the mempool is disabled, returns this `ActiveState`.
     /// Otherwise, returns an error.
-    fn mempool_crawler_task_result(&mut self) -> Result<(), BoxError> {
+    fn crawler_task_result(&mut self) -> Result<(), BoxError> {
         if let ActiveState::Enabled {
-            mempool_crawler_task_handle,
+            crawler_task_handle,
             ..
         } = self
         {
             // the crawler should never return, even with a success value
-            if let Some(panic_result) = mempool_crawler_task_handle.now_or_never() {
+            if let Some(panic_result) = crawler_task_handle.now_or_never() {
                 let task_result =
                     panic_result.expect("unexpected panic or cancellation in mempool crawler task");
                 task_result?;
@@ -142,24 +267,28 @@ impl ActiveState {
 
         Ok(())
     }
+}
 
-    /// Aborts the mempool crawler task, returning any previous errors from that task.
-    fn abort_mempool_crawler_task(mut self) -> Result<(), BoxError> {
-        self.mempool_crawler_task_result()?;
+impl Drop for ActiveState {
+    fn drop(&mut self) {
+        if let ActiveState::Enabled { tx_downloads, .. } = self {
+            tx_downloads.cancel_all();
+        }
+
+        self.crawler_task_result()
+            .expect("unexpected panic or return from crawler task");
 
         if let ActiveState::Enabled {
-            mempool_crawler_task_handle,
+            crawler_task_handle,
             ..
         } = self
         {
-            mempool_crawler_task_handle.abort();
+            crawler_task_handle.abort();
 
             // We could check for errors during abort,
             // but we'd need to filter out `JoinError::Cancelled`,
             // because it is returned when the task aborts.
         }
-
-        Ok(())
     }
 }
 
@@ -197,14 +326,8 @@ pub struct Mempool {
     /// Used to construct the transaction downloader.
     tx_verifier: TxVerifier,
 
-    /// Sender part of a gossip transactions channel.
-    /// Used to broadcast transaction ids to peers.
-    transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
-
-    /// A channel containing buffered access to this service instance.
-    ///
-    /// Used to give spawned tasks access to this service.
-    this_service: watch::Receiver<Option<Buffer<BoxService<Request, Response, BoxError>, Request>>>,
+    /// Used to broadcast transaction ids to peers via the gossip task.
+    gossiped_transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
 }
 
 impl Mempool {
@@ -216,14 +339,9 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-    ) -> (
-        Buffer<BoxService<Request, Response, BoxError>, Request>,
-        watch::Receiver<HashSet<UnminedTxId>>,
-    ) {
-        let (transaction_sender, transaction_receiver) =
+    ) -> (Mempool, watch::Receiver<HashSet<UnminedTxId>>) {
+        let (gossiped_transaction_sender, gossiped_transaction_receiver) =
             tokio::sync::watch::channel(HashSet::new());
-
-        let (this_service_sender, this_service_receiver) = tokio::sync::watch::channel(None);
 
         let mut service = Mempool {
             active_state: ActiveState::Disabled,
@@ -234,8 +352,7 @@ impl Mempool {
             outbound,
             state,
             tx_verifier,
-            transaction_sender,
-            this_service: this_service_receiver,
+            gossiped_transaction_sender,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -244,12 +361,7 @@ impl Mempool {
             .update_state()
             .expect("unexpected error in newly initialized crawler task");
 
-        // Keep a buffered clone of ourselves, for spawned tasks
-        let service = BoxService::new(service);
-        let service = ServiceBuilder::new().buffer(20).service(service);
-        this_service_sender.send(Some(service));
-
-        (service, transaction_receiver)
+        (service, gossiped_transaction_receiver)
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -283,7 +395,8 @@ impl Mempool {
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     fn update_state(&mut self) -> Result<(), BoxError> {
-        self.active_state.mempool_crawler_task_result()?;
+        // check for errors before possibly aborting the task
+        self.active_state.crawler_task_result()?;
 
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
@@ -302,22 +415,20 @@ impl Mempool {
                 self.state.clone(),
             ));
 
-            let mempool_crawler_task_handle = Crawler::spawn(
-                self.outbound.clone(),
-                self.this_service
-                    .borrow()
-                    .expect("unexpected missing mempool service: should have been initialized"),
-            );
+            let (crawler_task_handle, crawled_transaction_receiver) =
+                Crawler::spawn(self.outbound.clone());
 
             self.active_state = ActiveState::Enabled {
-                mempool_crawler_task_handle,
+                crawler_task_handle,
+                crawled_transaction_receiver,
                 tx_downloads,
                 storage: Default::default(),
             };
         } else {
             info!("deactivating mempool: Zebra is syncing lots of blocks");
 
-            self.active_state.take().abort_mempool_crawler_task()?;
+            // The drop implementation cancels the crawler and download tasks
+            self.active_state = ActiveState::Disabled;
         }
 
         Ok(())
@@ -326,24 +437,6 @@ impl Mempool {
     /// Return whether the mempool is enabled or not.
     pub fn is_enabled(&self) -> bool {
         self.active_state.is_enabled()
-    }
-
-    /// Check if transaction should be downloaded and/or verified.
-    ///
-    /// If it is already in the mempool (or in its rejected list)
-    /// then it shouldn't be downloaded/verified.
-    fn should_download_or_verify(
-        storage: &mut storage::Storage,
-        txid: UnminedTxId,
-    ) -> Result<(), MempoolError> {
-        // Check if the transaction is already in the mempool.
-        if storage.contains_transaction_exact(&txid) {
-            return Err(MempoolError::InMempool);
-        }
-        if let Some(error) = storage.rejection_error(&txid) {
-            return Err(error);
-        }
-        Ok(())
     }
 }
 
@@ -356,67 +449,41 @@ impl Service<Request> for Mempool {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.update_state()?;
 
-        match &mut self.active_state {
-            ActiveState::Enabled {
-                mempool_crawler_task_handle: _,
-                tx_downloads,
-                storage,
-            } => {
-                if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
-                    match tip_action {
-                        // Clear the mempool and cancel downloads if there has been a chain tip reset.
-                        TipAction::Reset { .. } => {
-                            storage.clear();
-                            tx_downloads.cancel_all();
-                        }
-                        // Cancel downloads/verifications/storage of transactions
-                        // with the same mined IDs as recently mined transactions.
-                        TipAction::Grow { block } => {
-                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
-                            tx_downloads.cancel(&mined_ids);
-                            storage.remove_same_effects(&mined_ids);
-                            storage.clear_tip_rejections();
+        if self.active_state.is_enabled() {
+            if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
+                match tip_action {
+                    // Clear the mempool and cancel downloads if there has been a chain tip reset.
+                    TipAction::Reset { .. } => {
+                        // use the same code for disable and reset, for consistency
+
+                        // drop the state, cancelling tasks if it is active
+                        std::mem::drop(self.active_state.take());
+
+                        // create a new active state, if we are currently active
+                        self.update_state()?;
+                    }
+                    // Cancel downloads/verifications/storage of transactions
+                    // with the same mined IDs as recently mined transactions.
+                    TipAction::Grow { block } => {
+                        let send_to_peers_ids = self.active_state.insert_verified_transactions(cx);
+                        let send_to_peers_ids = self
+                            .active_state
+                            .remove_rejected_transactions(block, send_to_peers_ids);
+
+                        // Send transactions that were not rejected nor expired to peers
+                        if !send_to_peers_ids.is_empty() {
+                            let _ = self.gossiped_transaction_sender.send(send_to_peers_ids)?;
                         }
                     }
                 }
-
-                // Collect inserted transaction ids.
-                let mut send_to_peers_ids = HashSet::<_>::new();
-
-                // Clean up completed download tasks and add to mempool if successful.
-                while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
-                    match r {
-                        Ok(tx) => {
-                            if let Ok(inserted_id) = storage.insert(tx.clone()) {
-                                // Save transaction ids that we will send to peers
-                                send_to_peers_ids.insert(inserted_id);
-                            }
-                        }
-                        Err((txid, e)) => {
-                            reject_if_needed(storage, txid, e);
-                            // TODO: should we also log the result?
-                        }
-                    };
-                }
-
-                // Remove expired transactions from the mempool.
-                if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-                    let expired_transactions = remove_expired_transactions(storage, tip_height);
-                    // Remove transactions that are expired from the peers list
-                    send_to_peers_ids =
-                        remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
-                }
-
-                // Send transactions that were not rejected nor expired to peers
-                if !send_to_peers_ids.is_empty() {
-                    let _ = self.transaction_sender.send(send_to_peers_ids)?;
-                }
             }
-            ActiveState::Disabled => {
-                // When the mempool is disabled we still return that the service is ready.
-                // Otherwise, callers could block waiting for the mempool to be enabled,
-                // which may not be the desired behavior.
-            }
+
+            // After any reset, queue newly crawled transaction IDs for download and verification
+            self.active_state.queue_crawled_transaction_ids()?;
+        } else {
+            // When the mempool is disabled we still return that the service is ready.
+            // Otherwise, callers could block waiting for the mempool to be enabled,
+            // which may not be the desired behavior.
         }
 
         Poll::Ready(Ok(()))
@@ -430,7 +497,8 @@ impl Service<Request> for Mempool {
     fn call(&mut self, req: Request) -> Self::Future {
         match &mut self.active_state {
             ActiveState::Enabled {
-                mempool_crawler_task_handle: _,
+                crawler_task_handle: _,
+                crawled_transaction_receiver: _,
                 tx_downloads,
                 storage,
             } => match req {
@@ -450,9 +518,8 @@ impl Service<Request> for Mempool {
                     let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
                         .into_iter()
                         .map(|gossiped_tx| {
-                            Self::should_download_or_verify(storage, gossiped_tx.id())?;
-                            tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
-                            Ok(())
+                            ActiveState::queue_for_download(tx_downloads, storage, gossiped_tx)
+                                .map_err(Into::into)
                         })
                         .collect();
                     async move { Ok(Response::Queued(rsp)) }.boxed()
@@ -481,81 +548,24 @@ impl Service<Request> for Mempool {
     }
 }
 
-/// Remove transactions from the mempool if they have not been mined after a specified height.
-///
-/// https://zips.z.cash/zip-0203#specification
-fn remove_expired_transactions(
-    storage: &mut storage::Storage,
-    tip_height: zebra_chain::block::Height,
+/// Returns inserted IDs after removing mined transaction IDs.
+#[must_use = "the difference between the sets should not be discarded"]
+fn remove_mined_from_peer_list(
+    send_to_peers_ids: &HashSet<UnminedTxId>,
+    mined_ids: &HashSet<zebra_chain::transaction::Hash>,
 ) -> HashSet<UnminedTxId> {
-    let mut txid_set = HashSet::new();
-    // we need a separate set, since reject() takes the original unmined ID,
-    // then extracts the mined ID out of it
-    let mut unmined_id_set = HashSet::new();
+    let mut unmined_ids = send_to_peers_ids.clone();
 
-    for t in storage.transactions() {
-        if let Some(expiry_height) = t.transaction.expiry_height() {
-            if tip_height >= expiry_height {
-                txid_set.insert(t.id.mined_id());
-                unmined_id_set.insert(t.id);
-            }
-        }
-    }
+    unmined_ids.retain(|unmined_id| !mined_ids.contains(&unmined_id.mined_id()));
 
-    // expiry height is effecting data, so we match by non-malleable TXID
-    storage.remove_same_effects(&txid_set);
-
-    // also reject it
-    for id in unmined_id_set.iter() {
-        storage.reject(*id, SameEffectsChainRejectionError::Expired.into());
-    }
-
-    unmined_id_set
+    unmined_ids
 }
 
-/// Remove expired transaction ids from a given list of inserted ones.
+/// Returns inserted IDs after removing expired transaction IDs.
+#[must_use = "the difference between the sets should not be discarded"]
 fn remove_expired_from_peer_list(
     send_to_peers_ids: &HashSet<UnminedTxId>,
-    expired_transactions: &HashSet<UnminedTxId>,
+    expired_ids: &HashSet<UnminedTxId>,
 ) -> HashSet<UnminedTxId> {
-    send_to_peers_ids
-        .difference(expired_transactions)
-        .copied()
-        .collect()
-}
-
-/// Add a transaction that failed download and verification to the rejected list
-/// if needed, depending on the reason for the failure.
-fn reject_if_needed(
-    storage: &mut storage::Storage,
-    txid: UnminedTxId,
-    e: TransactionDownloadVerifyError,
-) {
-    match e {
-        // Rejecting a transaction already in state would speed up further
-        // download attempts without checking the state. However it would
-        // make the reject list grow forever.
-        // TODO: revisit after reviewing the rejected list cleanup criteria?
-        // TODO: if we decide to reject it, then we need to pass the block hash
-        // to State::Confirmed. This would require the zs::Response::Transaction
-        // to include the hash, which would need to be implemented.
-        TransactionDownloadVerifyError::InState |
-        // An unknown error in the state service, better do nothing
-        TransactionDownloadVerifyError::StateError(_) |
-        // Sync has just started. Mempool shouldn't even be enabled, so will not
-        // happen in practice.
-        TransactionDownloadVerifyError::NoTip |
-        // If download failed, do nothing; the crawler will end up trying to
-        // download it again.
-        TransactionDownloadVerifyError::DownloadFailed(_) |
-        // If it was cancelled then a block was mined, or there was a network
-        // upgrade, etc. No reason to reject it.
-        TransactionDownloadVerifyError::Cancelled => {}
-
-        // Consensus verification failed. Reject transaction to avoid
-        // having to download and verify it again just for it to fail again.
-        TransactionDownloadVerifyError::Invalid(e) => {
-            storage.reject(txid, ExactTipRejectionError::FailedVerification(e).into())
-        }
-    }
+    send_to_peers_ids.difference(expired_ids).copied().collect()
 }

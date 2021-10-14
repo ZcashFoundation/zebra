@@ -2,15 +2,14 @@
 //!
 //! The crawler periodically requests transactions from peers in order to populate the mempool.
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use tokio::{task::JoinHandle, time::sleep};
+use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
+use zebra_chain::transaction::UnminedTxId;
 use zebra_network as zn;
-
-use crate::components::mempool::{self, downloads::Gossip};
 
 #[cfg(test)]
 mod tests;
@@ -31,31 +30,40 @@ const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
 const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// The mempool transaction crawler.
-pub struct Crawler<PeerSet, Mempool> {
+pub struct Crawler<PeerSet> {
     /// The network peer set to crawl.
     peer_set: Timeout<PeerSet>,
 
-    /// The mempool service that receives crawled transaction IDs.
-    mempool: Mempool,
+    /// Used to send crawled transaction IDs to the mempool.
+    crawled_transaction_sender: mpsc::Sender<HashSet<UnminedTxId>>,
 }
 
-impl<PeerSet, Mempool> Crawler<PeerSet, Mempool>
+impl<PeerSet> Crawler<PeerSet>
 where
     PeerSet:
         Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone + Send + 'static,
     PeerSet::Future: Send,
-    Mempool:
-        Service<mempool::Request, Response = mempool::Response, Error = BoxError> + Send + 'static,
-    Mempool::Future: Send,
 {
-    /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(peer_set: PeerSet, mempool: Mempool) -> JoinHandle<Result<(), BoxError>> {
+    /// Spawn an asynchronous task to run the mempool crawler on the peers in `peer_set`.
+    ///
+    /// Returns the task's [`JoinHandle`], and a channel that receives crawled transaction IDs.
+    pub fn spawn(
+        peer_set: PeerSet,
+    ) -> (
+        JoinHandle<Result<(), BoxError>>,
+        mpsc::Receiver<HashSet<UnminedTxId>>,
+    ) {
+        let (crawled_transaction_sender, crawled_transaction_receiver) =
+            tokio::sync::mpsc::channel(FANOUT);
+
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
-            mempool,
+            crawled_transaction_sender,
         };
 
-        tokio::spawn(crawler.run())
+        let task = tokio::spawn(crawler.run());
+
+        (task, crawled_transaction_receiver)
     }
 
     /// Periodically crawl peers for transactions to include in the mempool.
@@ -103,8 +111,8 @@ where
 
     /// Handle a peer's response to the crawler's request for transactions.
     async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
-        let transaction_ids: Vec<_> = match response {
-            zn::Response::TransactionIds(ids) => ids.into_iter().map(Gossip::Id).collect(),
+        let transaction_ids: HashSet<_> = match response {
+            zn::Response::TransactionIds(ids) => ids.into_iter().collect(),
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
         };
 
@@ -121,28 +129,14 @@ where
     }
 
     /// Forward the crawled transactions IDs to the mempool transaction downloader.
-    async fn queue_transactions(&mut self, transaction_ids: Vec<Gossip>) -> Result<(), BoxError> {
-        let call_result = self
-            .mempool
-            .ready_and()
-            .await?
-            .call(mempool::Request::Queue(transaction_ids))
-            .await;
-
-        let queue_errors = match call_result {
-            Ok(mempool::Response::Queued(queue_results)) => {
-                queue_results.into_iter().filter_map(Result::err)
-            }
-            Ok(_) => unreachable!("Mempool did not respond with queue results to mempool crawler"),
-            Err(call_error) => {
-                debug!("Ignoring unexpected peer behavior: {}", call_error);
-                return Ok(());
-            }
-        };
-
-        for error in queue_errors {
-            debug!("Failed to download a crawled transaction: {}", error);
-        }
+    async fn queue_transactions(
+        &mut self,
+        transaction_ids: HashSet<UnminedTxId>,
+    ) -> Result<(), BoxError> {
+        // TODO: use Sender::borrow to extend the HashSet, rather than replacing it (#2200)
+        self.crawled_transaction_sender
+            .send(transaction_ids)
+            .await?;
 
         Ok(())
     }
