@@ -300,7 +300,7 @@ where
                     transaction: tx.clone(),
                     height,
                 })
-                .map_ok(|_hash| tx)
+                .map_ok(|(_tx_id, _tx_fee)| tx)
                 .await;
 
             tracing::debug!(?txid, ?result, "verified transaction for the mempool");
