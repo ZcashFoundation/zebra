@@ -216,6 +216,7 @@ impl Storage {
     }
 
     /// Clears the whole mempool storage.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.verified.clear();
         self.tip_rejected_exact.clear();

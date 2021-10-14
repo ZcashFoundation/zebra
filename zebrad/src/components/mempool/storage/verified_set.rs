@@ -43,6 +43,13 @@ pub struct VerifiedSet {
     orchard_nullifiers: HashSet<orchard::Nullifier>,
 }
 
+impl Drop for VerifiedSet {
+    fn drop(&mut self) {
+        // update the metrics on drop
+        self.clear()
+    }
+}
+
 impl VerifiedSet {
     /// Returns an iterator over the transactions in the set.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> + '_ {
