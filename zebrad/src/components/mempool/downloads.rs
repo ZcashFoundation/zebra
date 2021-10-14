@@ -10,7 +10,7 @@ use futures::{
     ready,
     stream::{FuturesUnordered, Stream},
 };
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
@@ -118,7 +118,7 @@ impl From<UnminedTx> for Gossip {
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
-#[pin_project]
+#[pin_project(PinnedDrop)]
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZS>
 where
@@ -394,6 +394,10 @@ where
         }
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
+        metrics::gauge!(
+            "mempool.currently.queued.transactions.total",
+            self.pending.len() as _
+        );
     }
 
     /// Get the number of currently in-flight download tasks.
@@ -423,5 +427,20 @@ where
         }?;
 
         Ok(())
+    }
+}
+
+#[pinned_drop]
+impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN::Future: Send,
+    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
+{
+    fn drop(self: Pin<&mut Self>) {
+        metrics::gauge!("mempool.currently.queued.transactions.total", 0 as _);
     }
 }

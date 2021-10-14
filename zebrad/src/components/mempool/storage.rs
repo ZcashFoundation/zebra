@@ -119,6 +119,12 @@ pub struct Storage {
         HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
 }
 
+impl Drop for Storage {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
 impl Storage {
     /// Insert a [`UnminedTx`] into the mempool, caching any rejections.
     ///
