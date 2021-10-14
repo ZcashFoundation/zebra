@@ -781,7 +781,7 @@ fn activate_mempool_mainnet() -> Result<()> {
         Height(1),
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
-        SMALL_CHECKPOINT_TIMEOUT,
+        LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
         Some(Height(0)),
@@ -887,10 +887,22 @@ fn sync_until(
     if enable_mempool_at_height.is_some() {
         child.expect_stdout_line_matches("enabling mempool for debugging")?;
         child.expect_stdout_line_matches("activating mempool")?;
+
+        // make sure zebra is running with the mempool
+        child.expect_stdout_line_matches("verified checkpoint range block_count=400")?;
     }
 
     child.expect_stdout_line_matches(stop_regex)?;
-    child.kill()?;
+
+    // make sure there is never a mempool if we don't explicity enable it
+    if enable_mempool_at_height.is_none() {
+        // this call failure will kill the process
+        assert!(child
+            .expect_stdout_line_matches("activating mempool")
+            .is_err());
+    } else {
+        child.kill()?;
+    }
 
     Ok(child.dir)
 }
