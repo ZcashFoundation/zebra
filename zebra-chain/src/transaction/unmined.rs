@@ -17,12 +17,14 @@ use std::{fmt, sync::Arc};
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::ZcashSerialize;
-
-use super::{
-    AuthDigest, Hash,
-    Transaction::{self, *},
-    WtxId,
+use crate::{
+    amount::{Amount, NonNegative},
+    serialization::ZcashSerialize,
+    transaction::{
+        AuthDigest, Hash,
+        Transaction::{self, *},
+        WtxId,
+    },
 };
 
 use UnminedTxId::*;
@@ -164,6 +166,9 @@ impl UnminedTxId {
 }
 
 /// An unmined transaction, and its pre-calculated unique identifying ID.
+///
+/// This transaction has been structurally verified.
+/// (But it might still need semantic or contextual verification.)
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnminedTx {
     /// A unique identifier for this unmined transaction.
@@ -224,5 +229,24 @@ impl From<&Arc<Transaction>> for UnminedTx {
                 .zcash_serialized_size()
                 .expect("all transactions have a size"),
         }
+    }
+}
+
+/// A verified unmined transaction, and the corresponding transaction fee.
+///
+/// This transaction has been fully verified, in the context of the mempool.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedUnminedTx {
+    /// The unmined transaction.
+    pub tx: UnminedTx,
+
+    /// The transaction fee for this unmined transaction.
+    pub miner_fee: Amount<NonNegative>,
+}
+
+impl VerifiedUnminedTx {
+    /// Create a new verified unmined transaction from a transaction and its fee.
+    pub fn new(tx: UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+        Self { tx, miner_fee }
     }
 }
