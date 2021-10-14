@@ -10,7 +10,7 @@ use std::{
 
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::watch;
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
+use tower::{buffer::Buffer, service_fn, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
     block::Height,
@@ -87,14 +87,80 @@ enum ActiveState {
     Disabled,
     /// The Mempool is enabled.
     Enabled {
+        mempool_crawler_task_handle: tokio::task::JoinHandle<Result<(), BoxError>>,
+
+        /// The transaction download and verify stream.
+        tx_downloads: Pin<Box<InboundTxDownloads>>,
+
         /// The Mempool storage itself.
         ///
         /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
         storage: storage::Storage,
-        /// The transaction download and verify stream.
-        tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
+}
+
+impl Default for ActiveState {
+    fn default() -> Self {
+        ActiveState::Disabled
+    }
+}
+
+impl ActiveState {
+    /// Return whether the mempool is enabled or not.
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            ActiveState::Disabled => false,
+            ActiveState::Enabled { .. } => true,
+        }
+    }
+
+    /// Returns the current state, leaving a [`Disabled`] in its place.
+    fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+
+    /// Checks if the mempool crawler task has panicked or exited.
+    ///
+    /// If the task is still running, or the mempool is disabled, returns this `ActiveState`.
+    /// Otherwise, returns an error.
+    fn mempool_crawler_task_result(&mut self) -> Result<(), BoxError> {
+        if let ActiveState::Enabled {
+            mempool_crawler_task_handle,
+            ..
+        } = self
+        {
+            // the crawler should never return, even with a success value
+            if let Some(panic_result) = mempool_crawler_task_handle.now_or_never() {
+                let task_result =
+                    panic_result.expect("unexpected panic or cancellation in mempool crawler task");
+                task_result?;
+
+                return Err("mempool crawler task unexpectedly exited, with no errors".into());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Aborts the mempool crawler task, returning any previous errors from that task.
+    fn abort_mempool_crawler_task(mut self) -> Result<(), BoxError> {
+        self.mempool_crawler_task_result()?;
+
+        if let ActiveState::Enabled {
+            mempool_crawler_task_handle,
+            ..
+        } = self
+        {
+            mempool_crawler_task_handle.abort();
+
+            // We could check for errors during abort,
+            // but we'd need to filter out `JoinError::Cancelled`,
+            // because it is returned when the task aborts.
+        }
+
+        Ok(())
+    }
 }
 
 /// Mempool async management and query service.
@@ -163,7 +229,9 @@ impl Mempool {
 
         // Make sure `is_enabled` is accurate.
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
-        service.update_state();
+        service
+            .update_state()
+            .expect("unexpected error in newly initialized crawler task");
 
         (service, transaction_receiver)
     }
@@ -198,12 +266,14 @@ impl Mempool {
 
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
-    fn update_state(&mut self) {
+    fn update_state(&mut self) -> Result<(), BoxError> {
+        self.active_state.mempool_crawler_task_result()?;
+
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
         if self.is_enabled() == is_close_to_tip {
             // the active state is up to date
-            return;
+            return Ok(());
         }
 
         // Update enabled / disabled state
@@ -215,23 +285,34 @@ impl Mempool {
                 Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
                 self.state.clone(),
             ));
+
+            let mempool_crawler_task_handle = Crawler::spawn(
+                &Config::default(),
+                self.outbound.clone(),
+                service_fn(|_| async {
+                    todo!("pass a queue sender and check the receiver in poll ready")
+                }),
+                self.sync_status.clone(),
+                self.chain_tip_change.clone(),
+            );
+
             self.active_state = ActiveState::Enabled {
-                storage: Default::default(),
+                mempool_crawler_task_handle,
                 tx_downloads,
+                storage: Default::default(),
             };
         } else {
             info!("deactivating mempool: Zebra is syncing lots of blocks");
 
-            self.active_state = ActiveState::Disabled
+            self.active_state.take().abort_mempool_crawler_task()?;
         }
+
+        Ok(())
     }
 
     /// Return whether the mempool is enabled or not.
     pub fn is_enabled(&self) -> bool {
-        match self.active_state {
-            ActiveState::Disabled => false,
-            ActiveState::Enabled { .. } => true,
-        }
+        self.active_state.is_enabled()
     }
 
     /// Check if transaction should be downloaded and/or verified.
@@ -260,12 +341,13 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.update_state();
+        self.update_state()?;
 
         match &mut self.active_state {
             ActiveState::Enabled {
-                storage,
+                mempool_crawler_task_handle: _,
                 tx_downloads,
+                storage,
             } => {
                 if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
                     match tip_action {
@@ -335,8 +417,9 @@ impl Service<Request> for Mempool {
     fn call(&mut self, req: Request) -> Self::Future {
         match &mut self.active_state {
             ActiveState::Enabled {
-                storage,
+                mempool_crawler_task_handle: _,
                 tx_downloads,
+                storage,
             } => match req {
                 Request::TransactionIds => {
                     let res = storage.tx_ids().collect();

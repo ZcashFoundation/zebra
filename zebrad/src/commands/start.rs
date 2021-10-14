@@ -128,14 +128,6 @@ impl StartCmd {
             peer_set.clone(),
         ));
 
-        let mempool_crawler_task_handle = mempool::Crawler::spawn(
-            &config.mempool,
-            peer_set.clone(),
-            mempool,
-            sync_status,
-            chain_tip_change,
-        );
-
         let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
             mempool_transaction_receiver,
             peer_set,
@@ -146,10 +138,6 @@ impl StartCmd {
 
             sync_gossip_result = sync_gossip_task_handle.fuse() => sync_gossip_result
                 .expect("unexpected panic in the chain tip block gossip task")
-                .map_err(|e| eyre!(e)),
-
-            mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
-                .expect("unexpected panic in the mempool crawler")
                 .map_err(|e| eyre!(e)),
 
             tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result
