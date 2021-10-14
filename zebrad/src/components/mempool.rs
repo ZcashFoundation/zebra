@@ -196,8 +196,6 @@ impl ActiveState {
             inserted_ids = remove_mined_from_peer_list(&inserted_ids, &mined_ids);
 
             // Remove expired transactions from the mempool.
-            // These transactions are added to the reject list,
-            // which removes them from gossiped
             let expired_ids = storage.remove_expired_transactions(block.height);
             inserted_ids = remove_expired_from_peer_list(&inserted_ids, &expired_ids);
         }
