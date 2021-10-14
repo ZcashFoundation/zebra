@@ -267,24 +267,6 @@ impl Service<Request> for Mempool {
                 storage,
                 tx_downloads,
             } => {
-                if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
-                    match tip_action {
-                        // Clear the mempool and cancel downloads if there has been a chain tip reset.
-                        TipAction::Reset { .. } => {
-                            storage.clear();
-                            tx_downloads.cancel_all();
-                        }
-                        // Cancel downloads/verifications/storage of transactions
-                        // with the same mined IDs as recently mined transactions.
-                        TipAction::Grow { block } => {
-                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
-                            tx_downloads.cancel(&mined_ids);
-                            storage.remove_same_effects(&mined_ids);
-                            storage.clear_tip_rejections();
-                        }
-                    }
-                }
-
                 // Collect inserted transaction ids.
                 let mut send_to_peers_ids = HashSet::<_>::new();
 
@@ -302,6 +284,25 @@ impl Service<Request> for Mempool {
                             // TODO: should we also log the result?
                         }
                     };
+                }
+
+                // Handle best chain tip changes
+                if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
+                    match tip_action {
+                        // Clear the mempool and cancel downloads if there has been a chain tip reset.
+                        TipAction::Reset { .. } => {
+                            storage.clear();
+                            tx_downloads.cancel_all();
+                        }
+                        TipAction::Grow { block } => {
+                            // Cancel downloads/verifications/storage of transactions
+                            // with the same mined IDs as recently mined transactions.
+                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                            tx_downloads.cancel(&mined_ids);
+                            storage.remove_same_effects(&mined_ids);
+                            storage.clear_tip_rejections();
+                        }
+                    }
                 }
 
                 // Remove expired transactions from the mempool.
