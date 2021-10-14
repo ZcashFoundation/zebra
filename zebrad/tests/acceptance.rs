@@ -912,13 +912,20 @@ fn sync_until(
 
     // make sure there is never a mempool if we don't explicity enable it
     if enable_mempool_at_height.is_none() {
-        // this call failure will kill the process
-        assert!(child
+        // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
+        // the error is delayed until the test timeout, or until the child reaches the stop height and exits.
+        let mempool_is_activated = child
             .expect_stdout_line_matches("activating mempool")
-            .is_err());
-    } else {
-        child.kill()?;
+            .is_ok();
+
+        // if there is a matching line, we panic and kill the test process.
+        // but we also need to kill the `zebrad` child before the test panics.
+        if mempool_is_activated {
+            child.kill()?;
+            panic!("unexpected mempool activation: mempool should not activate while syncing lots of blocks")
+        }
     }
+    child.kill()?;
 
     Ok(child.dir)
 }
