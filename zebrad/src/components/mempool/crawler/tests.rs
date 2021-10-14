@@ -1,8 +1,9 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use proptest::{collection::vec, prelude::*};
-use tokio::time;
+use tokio::{sync::watch, time};
 
+use tower::{util::BoxService, ServiceBuilder};
 use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 use zebra_network as zn;
 use zebra_state::ChainTipSender;
@@ -11,12 +12,12 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use crate::components::{
     mempool::{
         self,
-        crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
+        crawler::{FANOUT, RATE_LIMIT_DELAY},
         downloads::Gossip,
         error::MempoolError,
-        Config,
+        Config, Mempool,
     },
-    sync::RecentSyncLengths,
+    sync::{RecentSyncLengths, SyncStatus},
 };
 
 /// The number of iterations to crawl while testing.
@@ -57,8 +58,14 @@ proptest! {
         sync_lengths.push(0);
 
         runtime.block_on(async move {
-            let (mut peer_set, _mempool, sync_status, mut recent_sync_lengths, _chain_tip_sender,
- ) = setup_crawler();
+            let (
+                mut peer_set,
+                _mempool,
+                _mempool_transaction_receiver,
+                sync_status,
+                mut recent_sync_lengths,
+                _chain_tip_sender,
+            ) = setup_crawler();
 
             time::pause();
 
@@ -107,8 +114,14 @@ proptest! {
         let transaction_id_count = transaction_ids.len();
 
         runtime.block_on(async move {
-            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths, _chain_tip_sender) =
-                setup_crawler();
+            let (
+                mut peer_set,
+                mut mempool,
+                _mempool_transaction_receiver,
+                sync_status,
+                mut recent_sync_lengths,
+                _chain_tip_sender,
+            ) = setup_crawler();
 
             time::pause();
 
@@ -148,8 +161,14 @@ proptest! {
         let _guard = runtime.enter();
 
         runtime.block_on(async move {
-            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths, _chain_tip_sender) =
-                setup_crawler();
+            let (
+                mut peer_set,
+                mut mempool,
+                _mempool_transaction_receiver,
+                sync_status,
+                mut recent_sync_lengths,
+                _chain_tip_sender,
+            ) = setup_crawler();
 
             time::pause();
 
@@ -224,30 +243,41 @@ proptest! {
 /// Spawn a crawler instance using mock services.
 fn setup_crawler() -> (
     MockPeerSet,
-    MockMempool,
+    Mempool,
+    watch::Receiver<HashSet<UnminedTxId>>,
     SyncStatus,
     RecentSyncLengths,
     ChainTipSender,
 ) {
     let peer_set = MockService::build().for_prop_tests();
-    let mempool = MockService::build().for_prop_tests();
+    let state = MockService::build().for_prop_tests();
+    let tx_verifier = MockService::build().for_prop_tests();
     let (sync_status, recent_sync_lengths) = SyncStatus::new();
 
     // the network should be irrelevant here
-    let (chain_tip_sender, _latest_chain_tip, chain_tip_change) =
+    let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
         ChainTipSender::new(None, Network::Mainnet);
 
-    Crawler::spawn(
+    let (mempool, mempool_transaction_receiver) = Mempool::new(
         &Config::default(),
-        peer_set.clone(),
-        mempool.clone(),
-        sync_status.clone(),
+        ServiceBuilder::new()
+            .buffer(1)
+            .service(BoxService::new(peer_set)),
+        ServiceBuilder::new()
+            .buffer(1)
+            .service(BoxService::new(state)),
+        ServiceBuilder::new()
+            .buffer(1)
+            .service(BoxService::new(tx_verifier)),
+        sync_status,
+        latest_chain_tip,
         chain_tip_change,
     );
 
     (
         peer_set,
         mempool,
+        mempool_transaction_receiver,
         sync_status,
         recent_sync_lengths,
         chain_tip_sender,

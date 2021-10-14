@@ -10,7 +10,7 @@ use std::{
 
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::watch;
-use tower::{buffer::Buffer, service_fn, timeout::Timeout, util::BoxService, Service};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceBuilder};
 
 use zebra_chain::{
     block::Height,
@@ -200,6 +200,11 @@ pub struct Mempool {
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+
+    /// A channel containing buffered access to this service instance.
+    ///
+    /// Used to give spawned tasks access to this service.
+    this_service: watch::Receiver<Option<Buffer<BoxService<Request, Response, BoxError>, Request>>>,
 }
 
 impl Mempool {
@@ -211,9 +216,14 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-    ) -> (Self, watch::Receiver<HashSet<UnminedTxId>>) {
+    ) -> (
+        Buffer<BoxService<Request, Response, BoxError>, Request>,
+        watch::Receiver<HashSet<UnminedTxId>>,
+    ) {
         let (transaction_sender, transaction_receiver) =
             tokio::sync::watch::channel(HashSet::new());
+
+        let (this_service_sender, this_service_receiver) = tokio::sync::watch::channel(None);
 
         let mut service = Mempool {
             active_state: ActiveState::Disabled,
@@ -225,6 +235,7 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            this_service: this_service_receiver,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -232,6 +243,11 @@ impl Mempool {
         service
             .update_state()
             .expect("unexpected error in newly initialized crawler task");
+
+        // Keep a buffered clone of ourselves, for spawned tasks
+        let service = BoxService::new(service);
+        let service = ServiceBuilder::new().buffer(20).service(service);
+        this_service_sender.send(Some(service));
 
         (service, transaction_receiver)
     }
@@ -287,13 +303,10 @@ impl Mempool {
             ));
 
             let mempool_crawler_task_handle = Crawler::spawn(
-                &Config::default(),
                 self.outbound.clone(),
-                service_fn(|_| async {
-                    todo!("pass a queue sender and check the receiver in poll ready")
-                }),
-                self.sync_status.clone(),
-                self.chain_tip_change.clone(),
+                self.this_service
+                    .borrow()
+                    .expect("unexpected missing mempool service: should have been initialized"),
             );
 
             self.active_state = ActiveState::Enabled {

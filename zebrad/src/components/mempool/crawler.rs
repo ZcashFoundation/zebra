@@ -4,18 +4,13 @@
 
 use std::time::Duration;
 
-use futures::{future, pin_mut, stream::FuturesUnordered, StreamExt};
-use tokio::{sync::watch, task::JoinHandle, time::sleep};
+use futures::{stream::FuturesUnordered, StreamExt};
+use tokio::{task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
-use zebra_chain::block::Height;
 use zebra_network as zn;
-use zebra_state::ChainTipChange;
 
-use crate::components::{
-    mempool::{self, downloads::Gossip, Config},
-    sync::SyncStatus,
-};
+use crate::components::mempool::{self, downloads::Gossip};
 
 #[cfg(test)]
 mod tests;
@@ -42,15 +37,6 @@ pub struct Crawler<PeerSet, Mempool> {
 
     /// The mempool service that receives crawled transaction IDs.
     mempool: Mempool,
-
-    /// Allows checking if we are near the tip to enable/disable the mempool crawler.
-    sync_status: SyncStatus,
-
-    /// Notifies the crawler when the best chain tip height changes.
-    chain_tip_change: ChainTipChange,
-
-    /// If the state's best chain tip has reached this height, always enable the mempool crawler.
-    debug_enable_at_height: Option<Height>,
 }
 
 impl<PeerSet, Mempool> Crawler<PeerSet, Mempool>
@@ -63,66 +49,13 @@ where
     Mempool::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool crawler.
-    pub fn spawn(
-        config: &Config,
-        peer_set: PeerSet,
-        mempool: Mempool,
-        sync_status: SyncStatus,
-        chain_tip_change: ChainTipChange,
-    ) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(peer_set: PeerSet, mempool: Mempool) -> JoinHandle<Result<(), BoxError>> {
         let crawler = Crawler {
             peer_set: Timeout::new(peer_set, PEER_RESPONSE_TIMEOUT),
             mempool,
-            sync_status,
-            chain_tip_change,
-            debug_enable_at_height: config.debug_enable_at_height.map(Height),
         };
 
         tokio::spawn(crawler.run())
-    }
-
-    /// Waits until the mempool crawler is enabled by a debug config option.
-    ///
-    /// Returns an error if communication with the state is lost.
-    async fn wait_until_enabled_by_debug(&mut self) -> Result<(), watch::error::RecvError> {
-        // optimise non-debug performance
-        if self.debug_enable_at_height.is_none() {
-            return future::pending().await;
-        }
-
-        let enable_at_height = self
-            .debug_enable_at_height
-            .expect("unexpected debug_enable_at_height: just checked for None");
-
-        loop {
-            let best_tip_height = self
-                .chain_tip_change
-                .wait_for_tip_change()
-                .await?
-                .best_tip_height();
-
-            if best_tip_height >= enable_at_height {
-                return Ok(());
-            }
-        }
-    }
-
-    /// Waits until the mempool crawler is enabled.
-    ///
-    /// Returns an error if communication with the syncer or state is lost.
-    async fn wait_until_enabled(&mut self) -> Result<(), watch::error::RecvError> {
-        let mut sync_status = self.sync_status.clone();
-        let tip_future = sync_status.wait_until_close_to_tip();
-        let debug_future = self.wait_until_enabled_by_debug();
-
-        pin_mut!(tip_future);
-        pin_mut!(debug_future);
-
-        let (result, _unready_future) = future::select(tip_future, debug_future)
-            .await
-            .factor_first();
-
-        result
     }
 
     /// Periodically crawl peers for transactions to include in the mempool.
@@ -133,7 +66,6 @@ where
         info!("initializing mempool crawler task");
 
         loop {
-            self.wait_until_enabled().await?;
             self.crawl_transactions().await?;
             sleep(RATE_LIMIT_DELAY).await;
         }
