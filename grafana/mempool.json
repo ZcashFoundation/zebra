@@ -23,7 +23,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 15,
-  "iteration": 1634237713386,
+  "iteration": 1634239984015,
   "links": [],
   "panels": [
     {
@@ -528,7 +528,7 @@
           "expr": "mempool_failed_verify_tasks_total{job=\"$job\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "failed",
+          "legendFormat": "failed - {{reason}}",
           "refId": "Failed"
         },
         {
@@ -849,5 +849,5 @@
   "timezone": "",
   "title": "mempool",
   "uid": "wVXGE6v7z",
-  "version": 7
+  "version": 8
 }
