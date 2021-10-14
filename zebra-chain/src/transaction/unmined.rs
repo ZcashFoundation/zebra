@@ -238,7 +238,7 @@ impl From<&Arc<Transaction>> for UnminedTx {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedUnminedTx {
     /// The unmined transaction.
-    pub tx: UnminedTx,
+    pub transaction: UnminedTx,
 
     /// The transaction fee for this unmined transaction.
     pub miner_fee: Amount<NonNegative>,
@@ -246,7 +246,10 @@ pub struct VerifiedUnminedTx {
 
 impl VerifiedUnminedTx {
     /// Create a new verified unmined transaction from a transaction and its fee.
-    pub fn new(tx: UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
-        Self { tx, miner_fee }
+    pub fn new(transaction: UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+        Self {
+            transaction,
+            miner_fee,
+        }
     }
 }
