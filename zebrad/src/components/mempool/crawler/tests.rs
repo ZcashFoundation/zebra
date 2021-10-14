@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use proptest::{collection::vec, prelude::*};
 use tokio::{sync::watch, time};
 
-use tower::{util::BoxService, ServiceBuilder};
+use tower::{util::BoxService, Service, ServiceBuilder, ServiceExt};
 use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 use zebra_network as zn;
 use zebra_state::ChainTipSender;
@@ -13,8 +13,6 @@ use crate::components::{
     mempool::{
         self,
         crawler::{FANOUT, RATE_LIMIT_DELAY},
-        downloads::Gossip,
-        error::MempoolError,
         Config, Mempool,
     },
     sync::{RecentSyncLengths, SyncStatus},
@@ -36,9 +34,6 @@ const ERROR_MARGIN: Duration = Duration::from_millis(100);
 
 /// A [`MockService`] representing the network service.
 type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
-
-/// A [`MockService`] representing the mempool service.
-type MockMempool = MockService<mempool::Request, mempool::Response, PropTestAssertion>;
 
 proptest! {
     /// Test if crawler periodically crawls for transaction IDs.
@@ -118,7 +113,7 @@ proptest! {
                 mut peer_set,
                 mut mempool,
                 _mempool_transaction_receiver,
-                sync_status,
+                _sync_status,
                 mut recent_sync_lengths,
                 _chain_tip_sender,
             ) = setup_crawler();
@@ -130,13 +125,21 @@ proptest! {
 
             crawler_iteration(&mut peer_set, vec![transaction_ids.clone()]).await?;
 
-            respond_to_queue_request(
-                &mut mempool,
-                transaction_ids,
-                vec![Ok(()); transaction_id_count],
-            ).await?;
+            // The mempool's poll_ready method queues transactions for download.
+            let response = mempool
+                .ready_and()
+                .await
+                .expect("unexpected error in poll_ready")
+                .call(mempool::Request::TransactionIds)
+                .await
+                .expect("unexpected error in call");
 
-            mempool.expect_no_requests().await?;
+            // We expect the transactions to go on the download queue.
+            prop_assert_eq!(mempool.active_state.downloads_in_flight(), transaction_id_count);
+
+            // But the transactions should not get downloaded or verified,
+            // because we're using a mock peer set and verifier.
+            prop_assert_eq!(response, mempool::Response::TransactionIds(Vec::new()));
 
             Ok::<(), TestCaseError>(())
         })?;
@@ -165,14 +168,14 @@ fn setup_crawler() -> (
         &Config::default(),
         ServiceBuilder::new()
             .buffer(1)
-            .service(BoxService::new(peer_set)),
+            .service(BoxService::new(peer_set.clone())),
         ServiceBuilder::new()
             .buffer(1)
             .service(BoxService::new(state)),
         ServiceBuilder::new()
             .buffer(1)
             .service(BoxService::new(tx_verifier)),
-        sync_status,
+        sync_status.clone(),
         latest_chain_tip,
         chain_tip_change,
     );
@@ -228,56 +231,6 @@ async fn crawler_iteration(
     }
 
     peer_set.expect_no_requests().await?;
-
-    Ok(())
-}
-
-/// Intercept request for mempool to download and verify transactions.
-///
-/// The intercepted request will be verified to check if it has the `expected_transaction_ids`, and
-/// it will be answered with a list of results, one for each transaction requested to be
-/// downloaded.
-///
-/// # Panics
-///
-/// If `response` and `expected_transaction_ids` have different sizes.
-async fn respond_to_queue_request(
-    mempool: &mut MockMempool,
-    expected_transaction_ids: Vec<UnminedTxId>,
-    response: Vec<Result<(), MempoolError>>,
-) -> Result<(), TestCaseError> {
-    let request_parameter = expected_transaction_ids
-        .into_iter()
-        .map(Gossip::Id)
-        .collect();
-
-    mempool
-        .expect_request(mempool::Request::Queue(request_parameter))
-        .await?
-        .respond(mempool::Response::Queued(response));
-
-    Ok(())
-}
-
-/// Intercept request for mempool to download and verify transactions, and answer with an error.
-///
-/// The intercepted request will be verified to check if it has the `expected_transaction_ids`, and
-/// it will be answered with `error`, as if the service had an internal failure that prevented it
-/// from queuing the transactions for downloading.
-async fn respond_to_queue_request_with_error(
-    mempool: &mut MockMempool,
-    expected_transaction_ids: Vec<UnminedTxId>,
-    error: MempoolError,
-) -> Result<(), TestCaseError> {
-    let request_parameter = expected_transaction_ids
-        .into_iter()
-        .map(Gossip::Id)
-        .collect();
-
-    mempool
-        .expect_request(mempool::Request::Queue(request_parameter))
-        .await?
-        .respond(Err(error));
 
     Ok(())
 }

@@ -60,7 +60,7 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum Request {
     TransactionIds,
@@ -69,7 +69,7 @@ pub enum Request {
     Queue(Vec<Gossip>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Response {
     Transactions(Vec<UnminedTx>),
     TransactionIds(Vec<UnminedTxId>),
@@ -119,6 +119,16 @@ impl ActiveState {
         match self {
             ActiveState::Disabled => false,
             ActiveState::Enabled { .. } => true,
+        }
+    }
+
+    /// Returns the number of in-flight downloads.
+    #[allow(dead_code)]
+    pub fn downloads_in_flight(&self) -> usize {
+        if let ActiveState::Enabled { tx_downloads, .. } = self {
+            tx_downloads.in_flight()
+        } else {
+            0
         }
     }
 
