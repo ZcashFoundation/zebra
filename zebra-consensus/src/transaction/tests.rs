@@ -274,7 +274,10 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
         })
         .await;
 
-    assert_eq!(result, Ok(expected_hash));
+    assert_eq!(
+        result.expect("expected a tx_id and tx_fee").0,
+        expected_hash
+    );
 }
 
 /// Test if V4 transaction with transparent funds is accepted.
@@ -320,7 +323,10 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
         })
         .await;
 
-    assert_eq!(result, Ok(transaction_hash));
+    assert_eq!(
+        result.expect("expected a tx_id and tx_fee").0,
+        transaction_hash
+    );
 }
 
 /// Test if V4 coinbase transaction is accepted.
@@ -363,7 +369,10 @@ async fn v4_coinbase_transaction_is_accepted() {
         })
         .await;
 
-    assert_eq!(result, Ok(transaction_hash));
+    assert_eq!(
+        result.expect("expected a tx_id and tx_fee").0,
+        transaction_hash
+    );
 }
 
 /// Test if V4 transaction with transparent funds is rejected if the source script prevents it.
@@ -464,7 +473,10 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
         })
         .await;
 
-    assert_eq!(result, Ok(transaction_hash));
+    assert_eq!(
+        result.expect("expected a tx_id and tx_fee").0,
+        transaction_hash
+    );
 }
 
 /// Test if V5 coinbase transaction is accepted.
@@ -510,7 +522,10 @@ async fn v5_coinbase_transaction_is_accepted() {
         })
         .await;
 
-    assert_eq!(result, Ok(transaction_hash));
+    assert_eq!(
+        result.expect("expected a tx_id and tx_fee").0,
+        transaction_hash
+    );
 }
 
 /// Test if V5 transaction with transparent funds is rejected if the source script prevents it.
@@ -627,7 +642,10 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             })
             .await;
 
-        assert_eq!(result, Ok(expected_hash));
+        assert_eq!(
+            result.expect("expected a tx_id and tx_fee").0,
+            expected_hash
+        );
     });
 }
 
@@ -725,7 +743,10 @@ fn v4_with_sapling_spends() {
             })
             .await;
 
-        assert_eq!(result, Ok(expected_hash));
+        assert_eq!(
+            result.expect("expected a tx_id and tx_fee").0,
+            expected_hash
+        );
     });
 }
 
@@ -766,7 +787,10 @@ fn v4_with_sapling_outputs_and_no_spends() {
             })
             .await;
 
-        assert_eq!(result, Ok(expected_hash));
+        assert_eq!(
+            result.expect("expected a tx_id and tx_fee").0,
+            expected_hash
+        );
     });
 }
 
@@ -810,7 +834,10 @@ fn v5_with_sapling_spends() {
             })
             .await;
 
-        assert_eq!(result, Ok(expected_hash));
+        assert_eq!(
+            result.expect("expected a tx_id and tx_fee").0,
+            expected_hash
+        );
     });
 }
 

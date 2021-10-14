@@ -18,6 +18,7 @@ use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
@@ -102,7 +103,7 @@ pub enum Request {
 ///
 /// [`Mempool`] requests are uniquely identified by the [`UnminedTxId`]
 /// variant for their transaction version.
-pub type Response = zebra_chain::transaction::UnminedTxId;
+pub type Response = (zebra_chain::transaction::UnminedTxId, Amount<NonNegative>);
 
 impl Request {
     /// The transaction to verify that's in this request.
@@ -251,6 +252,7 @@ where
                 spent_utxos.insert(script_rsp.spent_outpoint, script_rsp.spent_utxo);
             }
 
+            // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
             // Calculate the transaction fee from `value_balance`.
@@ -262,7 +264,7 @@ where
                 Err(_) => Err(TransactionError::IncorrectFee),
             };
 
-            Ok(id)
+            Ok((id, tx_fee))
         }
         .instrument(span)
         .boxed()
