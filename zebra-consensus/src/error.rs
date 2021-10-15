@@ -99,6 +99,9 @@ pub enum TransactionError {
 
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,
+
+    #[error("could not calculate the transaction fee")]
+    IncorrectFee,
 }
 
 impl From<BoxError> for TransactionError {
