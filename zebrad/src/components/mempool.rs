@@ -228,7 +228,10 @@ impl Mempool {
 
         // Update enabled / disabled state
         if is_close_to_tip {
-            info!("activating mempool: Zebra is close to the tip");
+            info!(
+                tip_height = ?self.latest_chain_tip.best_tip_height(),
+                "activating mempool: Zebra is close to the tip"
+            );
 
             let tx_downloads = Box::pin(TxDownloads::new(
                 Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
@@ -240,7 +243,10 @@ impl Mempool {
                 tx_downloads,
             };
         } else {
-            info!("deactivating mempool: Zebra is syncing lots of blocks");
+            info!(
+                tip_height = ?self.latest_chain_tip.best_tip_height(),
+                "deactivating mempool: Zebra is syncing lots of blocks"
+            );
 
             // This drops the previous ActiveState::Enabled,
             // cancelling its download tasks.
@@ -288,6 +294,11 @@ impl Service<Request> for Mempool {
 
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
         if matches!(tip_action, Some(TipAction::Reset { .. })) {
+            info!(
+                tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
+                "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
+            );
+
             // Use the same code for dropping and resetting the mempool,
             // to avoid subtle bugs.
 
