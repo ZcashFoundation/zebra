@@ -180,7 +180,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     assert!(everything_in_mempool.contains(&tx_id));
 
     // remove_expired_transactions() will return what was removed
-    let expired = Mempool::remove_expired_transactions(&mut storage, Height(1));
+    let expired = storage.remove_expired_transactions(Height(1));
     assert!(expired.contains(&tx_id));
     let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
     assert_eq!(everything_in_mempool.len(), 0);

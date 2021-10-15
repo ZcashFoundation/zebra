@@ -48,8 +48,7 @@ pub use storage::{
 pub use storage::tests::unmined_transactions_in_blocks;
 
 use downloads::{
-    Downloads as TxDownloads, Gossip, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
-    TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -234,57 +233,6 @@ impl Mempool {
         }
     }
 
-    /// Check if transaction should be downloaded and/or verified.
-    ///
-    /// If it is already in the mempool (or in its rejected list)
-    /// then it shouldn't be downloaded/verified.
-    fn should_download_or_verify(
-        storage: &mut storage::Storage,
-        txid: UnminedTxId,
-    ) -> Result<(), MempoolError> {
-        // Check if the transaction is already in the mempool.
-        if storage.contains_transaction_exact(&txid) {
-            return Err(MempoolError::InMempool);
-        }
-        if let Some(error) = storage.rejection_error(&txid) {
-            return Err(error);
-        }
-        Ok(())
-    }
-
-    /// Remove transactions from the mempool if they have not been mined after a
-    /// specified height.
-    ///
-    /// https://zips.z.cash/zip-0203#specification
-    fn remove_expired_transactions(
-        storage: &mut storage::Storage,
-        tip_height: zebra_chain::block::Height,
-    ) -> HashSet<UnminedTxId> {
-        let mut txid_set = HashSet::new();
-        // we need a separate set, since reject() takes the original unmined ID,
-        // then extracts the mined ID out of it
-        let mut unmined_id_set = HashSet::new();
-
-        for t in storage.transactions() {
-            if let Some(expiry_height) = t.transaction.expiry_height() {
-                if tip_height >= expiry_height {
-                    txid_set.insert(t.id.mined_id());
-                    unmined_id_set.insert(t.id);
-                }
-            }
-        }
-
-        // expiry height is effecting data, so we match by non-malleable TXID
-        storage.remove_same_effects(&txid_set);
-
-        // also reject it
-        for id in unmined_id_set.iter() {
-            storage.reject(*id, SameEffectsChainRejectionError::Expired.into());
-        }
-
-        unmined_id_set
-    }
-
     /// Remove expired transaction ids from a given list of inserted ones.
     fn remove_expired_from_peer_list(
         send_to_peers_ids: &HashSet<UnminedTxId>,
@@ -294,43 +242,6 @@ impl Mempool {
             .difference(expired_transactions)
             .copied()
             .collect()
-    }
-
-    /// Add a transaction that failed download and verification to the rejected list
-    /// if needed, depending on the reason for the failure.
-    fn reject_if_needed(
-        storage: &mut storage::Storage,
-        txid: UnminedTxId,
-        e: TransactionDownloadVerifyError,
-    ) {
-        match e {
-            // Rejecting a transaction already in state would speed up further
-            // download attempts without checking the state. However it would
-            // make the reject list grow forever.
-            //
-            // TODO: revisit after reviewing the rejected list cleanup criteria?
-            // TODO: if we decide to reject it, then we need to pass the block hash
-            // to State::Confirmed. This would require the zs::Response::Transaction
-            // to include the hash, which would need to be implemented.
-            TransactionDownloadVerifyError::InState |
-            // An unknown error in the state service, better do nothing
-            TransactionDownloadVerifyError::StateError(_) |
-            // Sync has just started. Mempool shouldn't even be enabled, so will not
-            // happen in practice.
-            TransactionDownloadVerifyError::NoTip |
-            // If download failed, do nothing; the crawler will end up trying to
-            // download it again.
-            TransactionDownloadVerifyError::DownloadFailed(_) |
-            // If it was cancelled then a block was mined, or there was a network
-            // upgrade, etc. No reason to reject it.
-            TransactionDownloadVerifyError::Cancelled => {}
-
-            // Consensus verification failed. Reject transaction to avoid
-            // having to download and verify it again just for it to fail again.
-            TransactionDownloadVerifyError::Invalid(e) => {
-                storage.reject(txid, ExactTipRejectionError::FailedVerification(e).into())
-            }
-        }
     }
 }
 
@@ -361,7 +272,7 @@ impl Service<Request> for Mempool {
                             }
                         }
                         Err((txid, e)) => {
-                            Self::reject_if_needed(storage, txid, e);
+                            storage.reject_if_needed(txid, e);
                             // TODO: should we also log the result?
                         }
                     };
@@ -388,8 +299,7 @@ impl Service<Request> for Mempool {
 
                 // Remove expired transactions from the mempool.
                 if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-                    let expired_transactions =
-                        Self::remove_expired_transactions(storage, tip_height);
+                    let expired_transactions = storage.remove_expired_transactions(tip_height);
                     // Remove transactions that are expired from the peers list
                     send_to_peers_ids = Self::remove_expired_from_peer_list(
                         &send_to_peers_ids,
@@ -439,7 +349,7 @@ impl Service<Request> for Mempool {
                     let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
                         .into_iter()
                         .map(|gossiped_tx| {
-                            Self::should_download_or_verify(storage, gossiped_tx.id())?;
+                            storage.should_download_or_verify(gossiped_tx.id())?;
                             tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
                             Ok(())
                         })
