@@ -36,10 +36,9 @@ extern crate tracing;
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-mod components;
-
 pub mod application;
 pub mod commands;
+pub mod components;
 pub mod config;
 pub mod prelude;
 pub mod sentry;

@@ -124,6 +124,7 @@ pub struct Inbound {
 }
 
 impl Inbound {
+    /// Initialize a new `Inbound` service.
     pub fn new(
         network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,

@@ -24,11 +24,15 @@ use zebra_state::{ChainTipChange, TipAction};
 
 use crate::components::sync::SyncStatus;
 
-mod config;
+pub mod config;
 mod crawler;
+#[allow(missing_docs)]
 pub mod downloads;
+#[allow(missing_docs)]
 mod error;
+#[allow(missing_docs)]
 pub mod gossip;
+#[allow(missing_docs)]
 mod storage;
 
 #[cfg(test)]
@@ -61,6 +65,7 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, St
 
 #[derive(Debug, Eq, PartialEq)]
 #[allow(dead_code)]
+#[allow(missing_docs)]
 pub enum Request {
     TransactionIds,
     TransactionsById(HashSet<UnminedTxId>),
@@ -69,6 +74,7 @@ pub enum Request {
 }
 
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub enum Response {
     Transactions(Vec<UnminedTx>),
     TransactionIds(Vec<UnminedTxId>),
