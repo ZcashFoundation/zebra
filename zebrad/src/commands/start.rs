@@ -117,10 +117,12 @@ impl StartCmd {
         let mempool_crawler_task_handle = mempool::Crawler::spawn(
             &config.mempool,
             peer_set.clone(),
-            mempool,
+            mempool.clone(),
             sync_status,
             chain_tip_change,
         );
+
+        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool);
 
         let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
             mempool_transaction_receiver,
@@ -136,6 +138,10 @@ impl StartCmd {
 
             mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
                 .expect("unexpected panic in the mempool crawler")
+                .map_err(|e| eyre!(e)),
+
+            mempool_queue_result = mempool_queue_checker_task_handle.fuse() => mempool_queue_result
+                .expect("unexpected panic in the mempool queue checker")
                 .map_err(|e| eyre!(e)),
 
             tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result

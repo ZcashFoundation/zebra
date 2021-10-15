@@ -29,6 +29,7 @@ mod crawler;
 pub mod downloads;
 mod error;
 pub mod gossip;
+mod queue_checker;
 mod storage;
 
 #[cfg(test)]
@@ -40,6 +41,7 @@ pub use config::Config;
 pub use crawler::Crawler;
 pub use error::MempoolError;
 pub use gossip::gossip_mempool_transaction_id;
+pub use queue_checker::QueueChecker;
 pub use storage::{
     ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
 };
