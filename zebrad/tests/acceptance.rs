@@ -823,6 +823,22 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 // TODO: We had a `sync_large_checkpoints_testnet` here but it was removed because
 // the testnet is unreliable (#1222). Enable after we have more testnet instances (#1791).
 
+/// Test if `zebrad` can run side by side with the mempool.
+/// This is done by running the mempool and sync some large checkpoints.
+#[test]
+fn running_mempool_mainnet() -> Result<()> {
+    sync_until(
+        LARGE_CHECKPOINT_TEST_HEIGHT,
+        Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+        true,
+        Some(Height(0)),
+    )
+    .map(|_tempdir| ())
+}
+
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
 /// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
 /// use it as the test's temporary directory.
@@ -887,10 +903,32 @@ fn sync_until(
     if enable_mempool_at_height.is_some() {
         child.expect_stdout_line_matches("enabling mempool for debugging")?;
         child.expect_stdout_line_matches("activating mempool")?;
+
+        // make sure zebra is running with the mempool
+        child.expect_stdout_line_matches("verified checkpoint range")?;
     }
 
     child.expect_stdout_line_matches(stop_regex)?;
-    child.kill()?;
+
+    // make sure there is never a mempool if we don't explicity enable it
+    if enable_mempool_at_height.is_none() {
+        // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
+        // the error is delayed until the test timeout, or until the child reaches the stop height and exits.
+        let mempool_is_activated = child
+            .expect_stdout_line_matches("activating mempool")
+            .is_ok();
+
+        // if there is a matching line, we panic and kill the test process.
+        // but we also need to kill the `zebrad` child before the test panics.
+        if mempool_is_activated {
+            child.kill()?;
+            panic!("unexpected mempool activation: mempool should not activate while syncing lots of blocks")
+        }
+    }
+
+    // make sure the child process is dead
+    // if it has already exited, ignore that error
+    let _ = child.kill();
 
     Ok(child.dir)
 }
