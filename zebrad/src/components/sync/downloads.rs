@@ -12,6 +12,7 @@ use futures::{
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
+use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -31,6 +32,23 @@ impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
     fn clone_request(&self, req: &Request) -> Option<Request> {
         Some(req.clone())
     }
+}
+
+/// Errors that can occur while downloading and verifying a block.
+#[derive(Error, Debug)]
+#[allow(dead_code)]
+pub enum BlockDownloadVerifyError {
+    #[error("error downloading block")]
+    DownloadFailed(#[source] BoxError),
+
+    #[error("error from the verifier service")]
+    VerifierError(#[source] BoxError),
+
+    #[error("block did not pass consensus validation")]
+    Invalid(#[from] zebra_consensus::chain::VerifyChainError),
+
+    #[error("block download / verification was cancelled")]
+    Cancelled,
 }
 
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
@@ -54,7 +72,8 @@ where
     // Internal downloads state
     /// A list of pending block download and verify tasks.
     #[pin]
-    pending: FuturesUnordered<JoinHandle<Result<block::Hash, (BoxError, block::Hash)>>>,
+    pending:
+        FuturesUnordered<JoinHandle<Result<block::Hash, (BlockDownloadVerifyError, block::Hash)>>>,
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
@@ -68,7 +87,7 @@ where
     ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
 {
-    type Item = Result<block::Hash, BoxError>;
+    type Item = Result<block::Hash, BlockDownloadVerifyError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -163,9 +182,9 @@ where
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
-                        return Err("canceled block_fetch_verify".into())
+                        return Err(BlockDownloadVerifyError::Cancelled)
                     }
-                    rsp = block_req => rsp?,
+                    rsp = block_req => rsp.map_err(BlockDownloadVerifyError::DownloadFailed)?,
                 };
 
                 let block = if let zn::Response::Blocks(blocks) = rsp {
@@ -178,14 +197,18 @@ where
                 };
                 metrics::counter!("sync.downloaded.block.count", 1);
 
-                let rsp = verifier.ready_and().await?.call(block);
+                let rsp = verifier
+                    .ready_and()
+                    .await
+                    .map_err(BlockDownloadVerifyError::VerifierError)?
+                    .call(block);
                 // TODO: if the verifier and cancel are both ready, which should
                 //       we prefer? (Currently, select! chooses one at random.)
                 let verification = tokio::select! {
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
-                        return Err("canceled block_fetch_verify".into())
+                        return Err(BlockDownloadVerifyError::Cancelled)
                     }
                     verification = rsp => verification,
                 };
@@ -193,7 +216,12 @@ where
                     metrics::counter!("sync.verified.block.count", 1);
                 }
 
-                verification
+                verification.map_err(|err| {
+                    match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
+                        Ok(e) => BlockDownloadVerifyError::Invalid(*e),
+                        Err(e) => BlockDownloadVerifyError::VerifierError(e),
+                    }
+                })
             }
             .in_current_span()
             // Tack the hash onto the error so we can remove the cancel handle

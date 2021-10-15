@@ -15,10 +15,15 @@ use zebra_chain::{
     block::{self, Block},
     parameters::genesis_hash,
 };
+use zebra_consensus::{
+    chain::VerifyChainError, BlockError, VerifyBlockError, VerifyCheckpointError,
+};
 use zebra_network as zn;
 use zebra_state as zs;
 
-use crate::{config::ZebradConfig, BoxError};
+use crate::{
+    components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
+};
 
 mod downloads;
 mod gossip;
@@ -315,10 +320,7 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            if format!("{:?}", e).contains("AlreadyVerified {") {
-                                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
-                            } else {
-                                tracing::warn!(?e, "error downloading and verifying block");
+                            if Self::should_restart_sync(e) {
                                 continue 'sync;
                             }
                         }
@@ -352,10 +354,7 @@ where
                         }
 
                         Err(e) => {
-                            if format!("{:?}", e).contains("AlreadyVerified {") {
-                                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
-                            } else {
-                                tracing::warn!(?e, "error downloading and verifying block");
+                            if Self::should_restart_sync(e) {
                                 continue 'sync;
                             }
                         }
@@ -714,5 +713,30 @@ where
             "sync.downloads.in_flight",
             self.downloads.in_flight() as f64
         );
+    }
+
+    /// Return if the sync should be restarted based on the given error
+    /// from the block downloader and verifier stream.
+    fn should_restart_sync(e: BlockDownloadVerifyError) -> bool {
+        match e {
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Checkpoint(
+                VerifyCheckpointError::AlreadyVerified { .. },
+            )) => {
+                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
+                VerifyBlockError::Block {
+                    source: BlockError::AlreadyInChain(_, _),
+                },
+            )) => {
+                tracing::debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
+                false
+            }
+            _ => {
+                tracing::warn!(?e, "error downloading and verifying block");
+                true
+            }
+        }
     }
 }
