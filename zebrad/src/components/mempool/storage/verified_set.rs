@@ -1,10 +1,12 @@
 use std::{
     borrow::Cow,
     collections::{HashSet, VecDeque},
+    convert::{TryFrom, TryInto},
     hash::Hash,
 };
 
 use zebra_chain::{
+    amount::Amount,
     orchard, sapling, sprout,
     transaction::{Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
@@ -29,6 +31,9 @@ pub struct VerifiedSet {
     /// The total size of the transactions in the mempool if they were
     /// serialized.
     transactions_serialized_size: usize,
+
+    /// The total cost of the verified transactons in the set.
+    total_cost: u32,
 
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
@@ -61,6 +66,13 @@ impl VerifiedSet {
         self.transactions.len()
     }
 
+    /// Returns the total cost of the verified transactions in the set.
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub fn total_cost(&self) -> u32 {
+        self.total_cost
+    }
+
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified `id.
     pub fn contains(&self, id: &UnminedTxId) -> bool {
@@ -77,6 +89,7 @@ impl VerifiedSet {
         self.sapling_nullifiers.clear();
         self.orchard_nullifiers.clear();
         self.transactions_serialized_size = 0;
+        self.total_cost = 0;
         self.update_metrics();
     }
 
@@ -97,6 +110,7 @@ impl VerifiedSet {
 
         self.cache_outputs_from(&transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
+        self.total_cost += transaction.transaction.cost;
         self.transactions.push_front(transaction);
 
         self.update_metrics();
@@ -104,15 +118,35 @@ impl VerifiedSet {
         Ok(())
     }
 
-    /// Evict one transaction from the set to open space for another transaction.
+    /// Evict one transaction from the set, returns the victim transaction.
+    ///
+    /// Removes a transaction with probability in direct proportion to the
+    /// eviction weight, as per [ZIP-401].
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
             None
         } else {
-            // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
-            let last_index = self.transactions.len() - 1;
+            use rand::distributions::{Distribution, WeightedIndex};
+            use rand::prelude::thread_rng;
 
-            Some(self.remove(last_index))
+            let weights = self
+                .transactions
+                .iter()
+                .map(|tx| {
+                    let low_fee_penalty = if tx.miner_fee < Amount::try_from(1_000)? {
+                        16_000
+                    } else {
+                        0
+                    };
+                    tx.transaction.cost + low_fee_penalty
+                })
+                .collect();
+
+            let dist = WeightedIndex::new(&weights).unwrap();
+
+            Some(self.remove(dist.sample(&mut thread_rng())))
         }
     }
 
@@ -154,6 +188,9 @@ impl VerifiedSet {
             .expect("invalid transaction index");
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
+        self.remove_outputs(&removed_tx.transaction);
+        self.transactions_serialized_size -= removed_tx.transaction.size;
+        self.total_cost -= removed_tx.transaction.cost;
         self.remove_outputs(&removed_tx.transaction);
 
         self.update_metrics();
@@ -228,5 +265,6 @@ impl VerifiedSet {
             "zcash.mempool.size.bytes",
             self.transactions_serialized_size as _
         );
+        metrics::gauge!("zcash.mempool.total_cost.bytes", self.total_cost as _);
     }
 }

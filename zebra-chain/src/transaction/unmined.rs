@@ -29,6 +29,14 @@ use crate::{
 
 use UnminedTxId::*;
 
+/// The minimum cost value for a transaction in the mempool.
+///
+/// Contributes to the randomized, weighted eviction of transactions from the
+/// mempool when it reaches a max size, also based on the total cost.
+///
+/// [ZIP-401]: https://zips.z.cash/zip-0401
+const MEMPOOL_TRANSACTION_COST_THRESHOLD: u32 = 4000;
+
 /// A unique identifier for an unmined transaction, regardless of version.
 ///
 /// "The transaction ID of a version 4 or earlier transaction is the SHA-256d hash
@@ -179,6 +187,15 @@ pub struct UnminedTx {
 
     /// The size in bytes of the serialized transaction data
     pub size: usize,
+
+    /// The cost in bytes of the transaction, as defined in [ZIP-401].
+    ///
+    /// A reflection of the work done by the network in processing them (proof
+    /// and signature verification; networking overheads; size of in-memory data
+    /// structures).
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub cost: u32,
 }
 
 impl fmt::Display for UnminedTx {
@@ -195,11 +212,14 @@ impl fmt::Display for UnminedTx {
 
 impl From<Transaction> for UnminedTx {
     fn from(transaction: Transaction) -> Self {
+        let size = transaction
+            .zcash_serialized_size()
+            .expect("all transactions have a size");
+
         Self {
             id: (&transaction).into(),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
+            size,
+            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
             transaction: Arc::new(transaction),
         }
     }
@@ -207,36 +227,45 @@ impl From<Transaction> for UnminedTx {
 
 impl From<&Transaction> for UnminedTx {
     fn from(transaction: &Transaction) -> Self {
+        let size = transaction
+            .zcash_serialized_size()
+            .expect("all transactions have a size");
+
         Self {
             id: transaction.into(),
             transaction: Arc::new(transaction.clone()),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
+            size,
+            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
         }
     }
 }
 
 impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
+        let size = transaction
+            .zcash_serialized_size()
+            .expect("all transactions have a size");
+
         Self {
             id: transaction.as_ref().into(),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
             transaction,
+            size,
+            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
         }
     }
 }
 
 impl From<&Arc<Transaction>> for UnminedTx {
     fn from(transaction: &Arc<Transaction>) -> Self {
+        let size = transaction
+            .zcash_serialized_size()
+            .expect("all transactions have a size");
+
         Self {
             id: transaction.as_ref().into(),
             transaction: transaction.clone(),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
+            size,
+            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
         }
     }
 }

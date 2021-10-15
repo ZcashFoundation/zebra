@@ -17,7 +17,7 @@ use thiserror::Error;
 use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
 use self::verified_set::VerifiedSet;
-use super::{downloads::TransactionDownloadVerifyError, MempoolError};
+use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -127,6 +127,10 @@ pub struct Storage {
     /// Any transaction with the same `transaction::Hash` is invalid.
     chain_rejected_same_effects:
         HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
+
+    /// Max total cost of the verified mempool set, beyond which transactions
+    /// are evicted to make room.
+    tx_cost_limit: u32,
 }
 
 impl Drop for Storage {
@@ -136,6 +140,13 @@ impl Drop for Storage {
 }
 
 impl Storage {
+    pub(crate) fn new(config: &config::Config) -> Self {
+        Storage {
+            tx_cost_limit: config.tx_cost_limit,
+            ..Default::default()
+        }
+    }
+
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
     /// Returns an error if the mempool's verified transactions or rejection caches
@@ -172,20 +183,22 @@ impl Storage {
         }
 
         // Once inserted, we evict transactions over the pool size limit.
-        while self.verified.transaction_count() > MEMPOOL_SIZE {
-            let evicted_tx = self
+        while self.verified.transaction_count() > MEMPOOL_SIZE
+            || self.verified.total_cost() > self.tx_cost_limit
+        {
+            let victim_tx = self
                 .verified
                 .evict_one()
                 .expect("mempool is empty, but was expected to be full");
 
             self.reject(
-                evicted_tx.transaction.id,
+                victim_tx.transaction.id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
             // If this transaction gets evicted, set its result to the same error
             // (we could return here, but we still want to check the mempool size)
-            if evicted_tx.transaction.id == tx_id {
+            if victim_tx.transaction.id == tx_id {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
@@ -333,6 +346,9 @@ impl Storage {
                 self.tip_rejected_same_effects.insert(txid.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
+                // TODO: track evicted victims times, removing those older than
+                // config.eviction_memory_time, as well as FIFO more than
+                // MAX_EVICTION_MEMORY_ENTRIES
                 self.chain_rejected_same_effects
                     .entry(e)
                     .or_default()
