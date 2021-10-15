@@ -925,7 +925,10 @@ fn sync_until(
             panic!("unexpected mempool activation: mempool should not activate while syncing lots of blocks")
         }
     }
-    child.kill()?;
+
+    // make sure the child process is dead
+    // if it has already exited, ignore that error
+    let _ = child.kill();
 
     Ok(child.dir)
 }
