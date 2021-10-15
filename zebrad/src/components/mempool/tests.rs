@@ -43,8 +43,8 @@ impl Mempool {
 
     /// Perform a dummy service call so that `poll_ready` is called.
     pub async fn dummy_call(&mut self) {
-        self.oneshot(Request::Queue(vec![]))
+        self.oneshot(Request::CheckForVerifiedTransactions)
             .await
-            .expect("Queuing no transactions shouldn't fail");
+            .expect("unexpected failure when checking for verified transactions");
     }
 }
