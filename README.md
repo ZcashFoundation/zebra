@@ -9,9 +9,51 @@
 ## About
 
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
-consensus-compatible implementation of the Zcash protocol, currently under
-development.  Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
+consensus-compatible implementation of a Zcash node, currently under
+development. It can be used to join the Zcash peer-to-peer network and help
+keep Zcash working by validating and broadcasting transactions, and maintaining
+the Zcash blockchain state in a distributed manner.
+Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
 like to find out more or get involved!
+
+Zcash is a cryptocurrency designed to preserve the user's privacy. Like most
+cryptocurrencies, it works by a collection of software nodes run by members of
+the Zcash community or any other interested parties. The nodes talk to each
+other in peer-to-peer fashion in order to maintain the state of the Zcash
+blockchain. They also communicate with miners who create news blocks. When a
+Zcash user sends Zcash, their wallet broadcasts transactions to these nodes
+which will eventually reach miners, and the mined transaction will then go
+through Zcash nodes until they reach the recipient's wallet which will report
+the received Zcash to the recipient.
+
+The original Zcash node is named `zcashd` and is developed by the Electric Coin
+Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
+an independent Zcash node implementation developed from scratch. Since they
+implement the same protocol, `zcashd` and Zebra nodes can communicate with each
+other.
+
+If you just want to send and receive Zcash then you don't need to use Zebra
+directly. You can download a Zcash wallet application which will handle that
+for you. (Eventually, Zebra can be used by wallets to implement their
+functionality.) You would want to run Zebra if you want to contribute to the
+Zcash network: the more nodes are run, the more reliable the network will be
+in terms of speed and resistance to denial of service attacks, for example.
+
+These are some of advantages of Zebra:
+
+- As an alternative implementation, it can protect the Zcash network
+  from bugs that affect only one implementation.
+- It helps keeping the Zcash network decentralized, by preventing a single node
+  implementation from dictating the network behavior.
+- Implementing Zebra allows the validation of the Zcash specification, to make
+  it sure that the specification is written in sufficient detail to allow
+  anyone else to develop their own node if desired.
+- Since it was implemented from scratch, it was able to be implemented
+  in a manner that is currently faster than `zcashd`.
+- Since it was developed in a memory-safe language (Rust), it is less likely
+  that it can be affected by security bugs that could compromise the environment
+  where it is run.
+
 
 ## Alpha Releases
 
