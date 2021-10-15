@@ -96,6 +96,27 @@ enum ActiveState {
     },
 }
 
+impl Default for ActiveState {
+    fn default() -> Self {
+        ActiveState::Disabled
+    }
+}
+
+impl Drop for ActiveState {
+    fn drop(&mut self) {
+        if let ActiveState::Enabled { tx_downloads, .. } = self {
+            tx_downloads.cancel_all();
+        }
+    }
+}
+
+impl ActiveState {
+    /// Returns the current state, leaving a [`Disabled`] in its place.
+    fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+}
+
 /// Mempool async management and query service.
 ///
 /// The mempool is the set of all verified transactions that this node is aware
