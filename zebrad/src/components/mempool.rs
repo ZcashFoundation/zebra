@@ -286,14 +286,16 @@ impl Service<Request> for Mempool {
 
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
         if matches!(tip_action, Some(TipAction::Reset { .. })) {
-            if let ActiveState::Enabled {
-                storage,
-                tx_downloads,
-            } = &mut self.active_state
-            {
-                storage.clear();
-                tx_downloads.cancel_all();
-            }
+            // Use the same code for dropping and resetting the mempool,
+            // to avoid subtle bugs.
+
+            // Drop the current contents of the state,
+            // cancelling any pending download tasks,
+            // and dropping completed verification results.
+            std::mem::drop(self.active_state.take());
+
+            // Re-initialise an empty state.
+            self.update_state();
 
             return Poll::Ready(Ok(()));
         }
