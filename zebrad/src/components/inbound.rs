@@ -396,7 +396,7 @@ impl Service<zn::Request> for Inbound {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                         mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
-                        mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids),
+                        mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
                         _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                     })
                     .boxed()
