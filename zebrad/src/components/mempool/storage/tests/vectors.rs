@@ -1,6 +1,6 @@
 use std::iter;
 
-use crate::components::mempool::{remove_expired_from_peer_list, remove_expired_transactions};
+use crate::components::mempool::Mempool;
 
 use super::{super::*, unmined_transactions_in_blocks};
 
@@ -180,13 +180,13 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     assert!(everything_in_mempool.contains(&tx_id));
 
     // remove_expired_transactions() will return what was removed
-    let expired = remove_expired_transactions(&mut storage, Height(1));
+    let expired = storage.remove_expired_transactions(Height(1));
     assert!(expired.contains(&tx_id));
     let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
     assert_eq!(everything_in_mempool.len(), 0);
 
     // No transaction will be sent to peers
-    let send_to_peers = remove_expired_from_peer_list(&everything_in_mempool, &expired);
+    let send_to_peers = Mempool::remove_expired_from_peer_list(&everything_in_mempool, &expired);
     assert_eq!(send_to_peers.len(), 0);
 
     Ok(())
