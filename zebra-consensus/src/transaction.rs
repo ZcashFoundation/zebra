@@ -134,12 +134,26 @@ pub enum Response {
     },
 }
 
+impl From<VerifiedUnminedTx> for Response {
+    fn from(transaction: VerifiedUnminedTx) -> Self {
+        Response::Mempool { transaction }
+    }
+}
+
 impl Request {
     /// The transaction to verify that's in this request.
     pub fn transaction(&self) -> Arc<Transaction> {
         match self {
             Request::Block { transaction, .. } => transaction.clone(),
             Request::Mempool { transaction, .. } => transaction.transaction.clone(),
+        }
+    }
+
+    /// The unverified mempool transaction, if this is a mempool request.
+    pub fn into_mempool_transaction(self) -> Option<UnminedTx> {
+        match self {
+            Request::Block { .. } => None,
+            Request::Mempool { transaction, .. } => Some(transaction),
         }
     }
 

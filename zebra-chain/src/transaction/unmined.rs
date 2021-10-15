@@ -181,6 +181,15 @@ pub struct UnminedTx {
     pub size: usize,
 }
 
+impl fmt::Display for UnminedTx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnminedTx")
+            .field("transaction", &self.transaction)
+            .field("serialized_size", &self.size)
+            .finish()
+    }
+}
+
 // Each of these conversions is implemented slightly differently,
 // to avoid cloning the transaction where possible.
 
@@ -242,6 +251,15 @@ pub struct VerifiedUnminedTx {
 
     /// The transaction fee for this unmined transaction.
     pub miner_fee: Amount<NonNegative>,
+}
+
+impl fmt::Display for VerifiedUnminedTx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedUnminedTx")
+            .field("transaction", &self.transaction)
+            .field("miner_fee", &self.miner_fee)
+            .finish()
+    }
 }
 
 impl VerifiedUnminedTx {
