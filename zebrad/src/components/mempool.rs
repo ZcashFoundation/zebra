@@ -242,6 +242,8 @@ impl Mempool {
         } else {
             info!("deactivating mempool: Zebra is syncing lots of blocks");
 
+            // This drops the previous ActiveState::Enabled,
+            // cancelling its download tasks.
             self.active_state = ActiveState::Disabled
         }
     }
