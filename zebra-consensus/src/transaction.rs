@@ -18,6 +18,7 @@ use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
@@ -102,7 +103,7 @@ pub enum Request {
 ///
 /// [`Mempool`] requests are uniquely identified by the [`UnminedTxId`]
 /// variant for their transaction version.
-pub type Response = zebra_chain::transaction::UnminedTxId;
+pub type Response = (zebra_chain::transaction::UnminedTxId, Amount<NonNegative>);
 
 impl Request {
     /// The transaction to verify that's in this request.
@@ -251,34 +252,24 @@ where
                 spent_utxos.insert(script_rsp.spent_outpoint, script_rsp.spent_utxo);
             }
 
-            // temporary assertions for testing ticket #2440
-            //
-            // TODO: use spent_utxos to calculate the transaction fee (#2779)
-            //       and remove these assertions
-            if tx.has_valid_coinbase_transaction_inputs() {
-                assert_eq!(
-                    spent_utxos.len(),
-                    0,
-                    "already checked that coinbase transactions don't spend UTXOs"
-                );
-            } else if spent_utxos.len() < tx.inputs().len() {
-                // TODO: replace with double-spend check in PR #2843
-                return Err(TransactionError::InternalDowncastError(format!(
-                    "transparent double-spend within a transaction: \
-                     expected {} input UTXOs, got {} unique spent UTXOs",
-                    tx.inputs().len(),
-                    spent_utxos.len()
-                )));
-            } else {
-                assert_eq!(
-                    spent_utxos.len(),
-                    tx.inputs().len(),
-                    "unexpected excess looked-up spent UTXOs in transaction: \
-                     expected exactly one UTXO per verified transparent input"
-                );
+            // Get the `value_balance` to calculate the transaction fee.
+            let value_balance = tx.value_balance(&spent_utxos);
+
+            // Initialize the transaction fee to zero.
+            let mut tx_fee = Amount::<NonNegative>::zero();
+
+            // Calculate the fee only for non-coinbase transactions.
+            if !tx.has_valid_coinbase_transaction_inputs() {
+                tx_fee = match value_balance {
+                    Ok(vb) => match vb.remaining_transaction_value() {
+                        Ok(tx_rtv) => tx_rtv,
+                        Err(_) => return Err(TransactionError::IncorrectFee),
+                    },
+                    Err(_) => return Err(TransactionError::IncorrectFee),
+                };
             }
 
-            Ok(id)
+            Ok((id, tx_fee))
         }
         .instrument(span)
         .boxed()

@@ -8,6 +8,7 @@ use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, 
 use tracing::Span;
 
 use zebra_chain::{
+    amount::Amount,
     block::Block,
     parameters::Network,
     serialization::ZcashDeserializeInto,
@@ -117,7 +118,10 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         let txid = responder.request().tx_id();
-        responder.respond(txid);
+
+        // Set a dummy fee.
+        let tx_fee = Amount::zero();
+        responder.respond((txid, tx_fee));
     });
     let (response, _) = futures::join!(request, verification);
     match response {
@@ -205,7 +209,10 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         let txid = responder.request().tx_id();
-        responder.respond(txid);
+
+        // Set a dummy fee.
+        let tx_fee = Amount::zero();
+        responder.respond((txid, tx_fee));
     });
     let (response, _, _) = futures::join!(request, peer_set_responder, verification);
 
@@ -292,7 +299,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx1_id = responder.request().tx_id();
-        responder.respond(tx1_id);
+
+        // Set a dummy fee.
+        let tx_fee = Amount::zero();
+        responder.respond((tx1_id, tx_fee));
     });
     let (response, _) = futures::join!(request, verification);
     match response {
@@ -381,7 +391,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx2_id = responder.request().tx_id();
-        responder.respond(tx2_id);
+
+        // Set a dummy fee.
+        let tx_fee = Amount::zero();
+        responder.respond((tx2_id, tx_fee));
     });
     let (response, _) = futures::join!(request, verification);
     match response {
