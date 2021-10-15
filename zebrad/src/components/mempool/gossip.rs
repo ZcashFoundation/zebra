@@ -1,7 +1,7 @@
 //! A task that gossips any [`zebra_chain::transaction::UnminedTxId`] that enters the mempool to peers.
 //!
 //! This module is just a function [`gossip_mempool_transaction_id`] that waits for mempool
-//! insertion events received in a channel and broadcast the transactions into peers.
+//! insertion events received in a channel and broadcasts the transactions to peers.
 
 use tower::{timeout::Timeout, Service, ServiceExt};
 
