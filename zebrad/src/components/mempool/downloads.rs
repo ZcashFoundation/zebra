@@ -8,7 +8,19 @@
 //!
 //! Verified transactions are returned to the caller in [`Downloads::poll_next`].
 //! This is in contrast to the block downloader and verifiers which don't
-//! return anything and forward the verified blocks by themselves.
+//! return anything and forward the verified blocks to the state themselves.
+//!
+//! # Correctness
+//!
+//! The mempool downloader doesn't send verified transactions to the [`Mempool`] service.
+//! So Zebra must spawn a task that regularly polls the downloader for ready transactions.
+//! (To ensure that transactions propagate across the entire network in each 75s block interval,
+//! the polling interval should be around 5-10 seconds.)
+//!
+//! Polling the downloader from [`Mempool::poll_ready`] is not sufficient.
+//! [`Service::poll_ready`] is only called when there is a service request.
+//! But we want to download and gossip transactions,
+//! even when there are no other service requests.
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
@@ -219,7 +231,7 @@ where
     ///
     /// `network` is used to download transactions.
     /// `verifier` is used to verify transactions.
-    /// `state` is used to check if transaction are already in the state.
+    /// `state` is used to check if transactions are already in the state.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
