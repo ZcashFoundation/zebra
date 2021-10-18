@@ -1,7 +1,11 @@
 use std::ops::RangeBounds;
 
 use zebra_chain::{
-    block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction::UnminedTx,
+    amount::Amount,
+    block::Block,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+    transaction::{UnminedTx, VerifiedUnminedTx},
 };
 
 mod prop;
@@ -10,7 +14,7 @@ mod vectors;
 pub fn unmined_transactions_in_blocks(
     block_height_range: impl RangeBounds<u32>,
     network: Network,
-) -> impl DoubleEndedIterator<Item = UnminedTx> {
+) -> impl DoubleEndedIterator<Item = VerifiedUnminedTx> {
     let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
@@ -25,8 +29,10 @@ pub fn unmined_transactions_in_blocks(
                 .expect("block test vector is structurally valid")
         });
 
-    // Extract the transactions from the blocks and warp each one as an unmined transaction.
+    // Extract the transactions from the blocks and wrap each one as an unmined transaction.
+    // Use a fake zero miner fee, because we don't have the UTXOs to calculate the correct fee.
     selected_blocks
         .flat_map(|block| block.transactions)
         .map(UnminedTx::from)
+        .map(|transaction| VerifiedUnminedTx::new(transaction, Amount::zero()))
 }
