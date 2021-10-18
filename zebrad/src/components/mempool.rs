@@ -275,68 +275,74 @@ impl Service<Request> for Mempool {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.update_state();
 
-        match &mut self.active_state {
-            ActiveState::Enabled {
+        // When the mempool is disabled we still return that the service is ready.
+        // Otherwise, callers could block waiting for the mempool to be enabled,
+        // which may not be the desired behavior.
+        if !self.is_enabled() {
+            return Poll::Ready(Ok(()));
+        }
+
+        let tip_action = self.chain_tip_change.last_tip_change();
+
+        // Clear the mempool and cancel downloads if there has been a chain tip reset.
+        if matches!(tip_action, Some(TipAction::Reset { .. })) {
+            if let ActiveState::Enabled {
                 storage,
                 tx_downloads,
-            } => {
-                // Collect inserted transaction ids.
-                let mut send_to_peers_ids = HashSet::<_>::new();
+            } = &mut self.active_state
+            {
+                storage.clear();
+                tx_downloads.cancel_all();
+            }
 
-                // Clean up completed download tasks and add to mempool if successful.
-                while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
-                    match r {
-                        Ok(tx) => {
-                            if let Ok(inserted_id) = storage.insert(tx.clone()) {
-                                // Save transaction ids that we will send to peers
-                                send_to_peers_ids.insert(inserted_id);
-                            }
-                        }
-                        Err((txid, e)) => {
-                            storage.reject_if_needed(txid, e);
-                            // TODO: should we also log the result?
-                        }
-                    };
-                }
+            return Poll::Ready(Ok(()));
+        }
 
-                // Handle best chain tip changes
-                if let Some(tip_action) = self.chain_tip_change.last_tip_change() {
-                    match tip_action {
-                        // Clear the mempool and cancel downloads if there has been a chain tip reset.
-                        TipAction::Reset { .. } => {
-                            storage.clear();
-                            tx_downloads.cancel_all();
-                        }
-                        TipAction::Grow { block } => {
-                            // Cancel downloads/verifications/storage of transactions
-                            // with the same mined IDs as recently mined transactions.
-                            let mined_ids = block.transaction_hashes.iter().cloned().collect();
-                            tx_downloads.cancel(&mined_ids);
-                            storage.remove_same_effects(&mined_ids);
-                            storage.clear_tip_rejections();
+        if let ActiveState::Enabled {
+            storage,
+            tx_downloads,
+        } = &mut self.active_state
+        {
+            // Collect inserted transaction ids.
+            let mut send_to_peers_ids = HashSet::<_>::new();
+
+            // Clean up completed download tasks and add to mempool if successful.
+            while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
+                match r {
+                    Ok(tx) => {
+                        if let Ok(inserted_id) = storage.insert(tx.clone()) {
+                            // Save transaction ids that we will send to peers
+                            send_to_peers_ids.insert(inserted_id);
                         }
                     }
-                }
-
-                // Remove expired transactions from the mempool.
-                if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
-                    let expired_transactions = storage.remove_expired_transactions(tip_height);
-                    // Remove transactions that are expired from the peers list
-                    send_to_peers_ids = Self::remove_expired_from_peer_list(
-                        &send_to_peers_ids,
-                        &expired_transactions,
-                    );
-                }
-
-                // Send transactions that were not rejected nor expired to peers
-                if !send_to_peers_ids.is_empty() {
-                    let _ = self.transaction_sender.send(send_to_peers_ids)?;
-                }
+                    Err((txid, e)) => {
+                        storage.reject_if_needed(txid, e);
+                        // TODO: should we also log the result?
+                    }
+                };
             }
-            ActiveState::Disabled => {
-                // When the mempool is disabled we still return that the service is ready.
-                // Otherwise, callers could block waiting for the mempool to be enabled,
-                // which may not be the desired behavior.
+
+            // Handle best chain tip changes
+            if let Some(TipAction::Grow { block }) = tip_action {
+                // Cancel downloads/verifications/storage of transactions
+                // with the same mined IDs as recently mined transactions.
+                let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                tx_downloads.cancel(&mined_ids);
+                storage.remove_same_effects(&mined_ids);
+                storage.clear_tip_rejections();
+            }
+
+            // Remove expired transactions from the mempool.
+            if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+                let expired_transactions = storage.remove_expired_transactions(tip_height);
+                // Remove transactions that are expired from the peers list
+                send_to_peers_ids =
+                    Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
+            }
+
+            // Send transactions that were not rejected nor expired to peers
+            if !send_to_peers_ids.is_empty() {
+                let _ = self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
 
