@@ -267,7 +267,7 @@ fn setup(
     )
 }
 
-/// A helper enum for simulating either chain grows or resets.
+/// A helper enum for simulating either a chain reset or growth.
 #[derive(Arbitrary, Debug, Clone)]
 enum FakeChainTip {
     Grow(ChainTipBlock),
