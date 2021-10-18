@@ -4,6 +4,7 @@ use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use zebra_chain::{
+    amount::Amount,
     at_least_one,
     fmt::{DisplayToDebug, SummaryDebug},
     orchard,
@@ -11,7 +12,7 @@ use zebra_chain::{
     sapling,
     serialization::AtLeastOne,
     sprout,
-    transaction::{self, JoinSplitData, Transaction, UnminedTx, UnminedTxId},
+    transaction::{self, JoinSplitData, Transaction, UnminedTxId, VerifiedUnminedTx},
     transparent, LedgerState,
 };
 
@@ -23,7 +24,7 @@ use crate::components::mempool::{
     SameEffectsChainRejectionError,
 };
 
-use self::MultipleTransactionRemovalTestInput::*;
+use MultipleTransactionRemovalTestInput::*;
 
 /// The mempool list limit tests can run for a long time.
 ///
@@ -54,7 +55,7 @@ proptest! {
         ];
 
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
-            let id_to_accept = transaction_to_accept.id;
+            let id_to_accept = transaction_to_accept.transaction.id;
 
             prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
 
@@ -95,7 +96,7 @@ proptest! {
     /// Test that the reject list length limits are applied when evicting transactions.
     #[test]
     fn reject_lists_are_limited_insert_eviction(
-        transactions in vec(any::<UnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
+        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
         let mut storage = Storage::default();
@@ -119,7 +120,7 @@ proptest! {
         prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
 
         for transaction in transactions {
-            let tx_id = transaction.id;
+            let tx_id = transaction.transaction.id;
 
             if storage.transaction_count() < MEMPOOL_SIZE {
                 // The initial transactions should be successful
@@ -203,8 +204,8 @@ proptest! {
         ];
 
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
-            let id_to_accept = transaction_to_accept.id;
-            let id_to_reject = transaction_to_reject.id;
+            let id_to_accept = transaction_to_accept.transaction.id;
+            let id_to_reject = transaction_to_reject.transaction.id;
 
             prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
 
@@ -248,9 +249,9 @@ proptest! {
         for (first_transaction_to_accept, transaction_to_reject, second_transaction_to_accept) in
             input_permutations
         {
-            let first_id_to_accept = first_transaction_to_accept.id;
-            let second_id_to_accept = second_transaction_to_accept.id;
-            let id_to_reject = transaction_to_reject.id;
+            let first_id_to_accept = first_transaction_to_accept.transaction.id;
+            let second_id_to_accept = second_transaction_to_accept.transaction.id;
+            let id_to_reject = transaction_to_reject.transaction.id;
 
             prop_assert_eq!(
                 storage.insert(first_transaction_to_accept),
@@ -284,7 +285,7 @@ proptest! {
         // Insert all input transactions, and keep track of the IDs of the one that were actually
         // inserted.
         let inserted_transactions: HashSet<_> = input.transactions().filter_map(|transaction| {
-            let id = transaction.id;
+            let id = transaction.transaction.id;
 
             storage.insert(transaction.clone()).ok().map(|_| id)}).collect();
 
@@ -354,7 +355,7 @@ enum SpendConflictTestInput {
 
 impl SpendConflictTestInput {
     /// Return two transactions that have a spend conflict.
-    pub fn conflicting_transactions(self) -> (UnminedTx, UnminedTx) {
+    pub fn conflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
         let (first, second) = match self {
             SpendConflictTestInput::V4 {
                 mut first,
@@ -378,11 +379,14 @@ impl SpendConflictTestInput {
             }
         };
 
-        (first.0.into(), second.0.into())
+        (
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero()),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero()),
+        )
     }
 
     /// Return two transactions that have no spend conflicts.
-    pub fn unconflicting_transactions(self) -> (UnminedTx, UnminedTx) {
+    pub fn unconflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
         let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 { first, second, .. } => (first, second),
             SpendConflictTestInput::V5 { first, second, .. } => (first, second),
@@ -393,7 +397,10 @@ impl SpendConflictTestInput {
         Self::remove_sapling_conflicts(&mut first, &mut second);
         Self::remove_orchard_conflicts(&mut first, &mut second);
 
-        (first.0.into(), second.0.into())
+        (
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero()),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero()),
+        )
     }
 
     /// Find transparent outpoint spends shared by two transactions, then remove them from the
@@ -820,12 +827,12 @@ impl OrchardSpendConflict {
 #[derive(Clone, Debug)]
 pub enum MultipleTransactionRemovalTestInput {
     RemoveExact {
-        transactions: SummaryDebug<Vec<UnminedTx>>,
+        transactions: SummaryDebug<Vec<VerifiedUnminedTx>>,
         wtx_ids_to_remove: SummaryDebug<HashSet<UnminedTxId>>,
     },
 
     RemoveSameEffects {
-        transactions: SummaryDebug<Vec<UnminedTx>>,
+        transactions: SummaryDebug<Vec<VerifiedUnminedTx>>,
         mined_ids_to_remove: SummaryDebug<HashSet<transaction::Hash>>,
     },
 }
@@ -834,7 +841,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        vec(any::<UnminedTx>(), 1..MEMPOOL_SIZE)
+        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_SIZE)
             .prop_flat_map(|transactions| {
                 let indices_to_remove =
                     vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {
@@ -851,7 +858,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
             .prop_flat_map(|(transactions, indices_to_remove)| {
                 let wtx_ids_to_remove: HashSet<_> = indices_to_remove
                     .iter()
-                    .map(|&index| transactions[index].id)
+                    .map(|&index| transactions[index].transaction.id)
                     .collect();
 
                 let mined_ids_to_remove: HashSet<transaction::Hash> = wtx_ids_to_remove
@@ -878,7 +885,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
 
 impl MultipleTransactionRemovalTestInput {
     /// Iterate over all transactions generated as input.
-    pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> + '_ {
+    pub fn transactions(&self) -> impl Iterator<Item = &VerifiedUnminedTx> + '_ {
         match self {
             RemoveExact { transactions, .. } | RemoveSameEffects { transactions, .. } => {
                 transactions.iter()
@@ -898,7 +905,7 @@ impl MultipleTransactionRemovalTestInput {
                 mined_ids_to_remove,
             } => transactions
                 .iter()
-                .map(|transaction| transaction.id)
+                .map(|transaction| transaction.transaction.id)
                 .filter(|id| mined_ids_to_remove.contains(&id.mined_id()))
                 .collect(),
         }
