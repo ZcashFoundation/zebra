@@ -1,8 +1,17 @@
+//! Mempool transaction storage.
+//!
+//! The main struct [`Storage`] holds verified and rejected transactions.
+//! [`Storage`] is effectively the data structure of the mempool. Convenient methods to
+//! manage it are included.
+//!
+//! [`Storage`] does not expose a service so it can only be used by other code directly.
+//! Only code inside the [`crate::components::mempool`] module has access to it.
+
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
 use self::verified_set::VerifiedSet;
 use super::{downloads::TransactionDownloadVerifyError, MempoolError};
@@ -90,6 +99,7 @@ pub enum RejectionError {
     SameEffectsChain(#[from] SameEffectsChainRejectionError),
 }
 
+/// Hold mempool verified and rejected mempool transactions.
 #[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
@@ -117,7 +127,7 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Insert a [`UnminedTx`] into the mempool, caching any rejections.
+    /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
     /// Returns an error if the mempool's verified transactions or rejection caches
     /// prevent this transaction from being inserted.
@@ -125,14 +135,14 @@ impl Storage {
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`StorageRejectionError::RandomlyEvicted`].
-    pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
+    pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
         // This method must call `reject`, rather than modifying the rejection lists directly.
-        let tx_id = tx.id;
+        let tx_id = tx.transaction.id;
 
         // First, check if we have a cached rejection for this transaction.
-        if let Some(error) = self.rejection_error(&tx.id) {
+        if let Some(error) = self.rejection_error(&tx_id) {
             return Err(error);
         }
 
@@ -140,7 +150,7 @@ impl Storage {
         //
         // Security: transactions must not get refreshed by new queries,
         // because that allows malicious peers to keep transactions live forever.
-        if self.verified.contains(&tx.id) {
+        if self.verified.contains(&tx_id) {
             return Err(MempoolError::InMempool);
         }
 
@@ -160,13 +170,13 @@ impl Storage {
                 .expect("mempool is empty, but was expected to be full");
 
             self.reject(
-                evicted_tx.id,
+                evicted_tx.transaction.id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
             // If this transaction gets evicted, set its result to the same error
             // (we could return here, but we still want to check the mempool size)
-            if evicted_tx.id == tx_id {
+            if evicted_tx.transaction.id == tx_id {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
@@ -176,7 +186,7 @@ impl Storage {
         result
     }
 
-    /// Remove [`UnminedTx`]es from the mempool via exact [`UnminedTxId`].
+    /// Remove transactions from the mempool via exact [`UnminedTxId`].
     ///
     /// For v5 transactions, transactions are matched by WTXID, using both the:
     /// - non-malleable transaction ID, and
@@ -193,10 +203,10 @@ impl Storage {
     #[allow(dead_code)]
     pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
         self.verified
-            .remove_all_that(|tx| exact_wtxids.contains(&tx.id))
+            .remove_all_that(|tx| exact_wtxids.contains(&tx.transaction.id))
     }
 
-    /// Remove [`UnminedTx`]es from the mempool via non-malleable [`transaction::Hash`].
+    /// Remove transactions from the mempool via non-malleable [`transaction::Hash`].
     ///
     /// For v5 transactions, transactions are matched by TXID,
     /// using only the non-malleable transaction ID.
@@ -211,10 +221,11 @@ impl Storage {
     /// Does not add or remove from the 'rejected' tracking set.
     pub fn remove_same_effects(&mut self, mined_ids: &HashSet<transaction::Hash>) -> usize {
         self.verified
-            .remove_all_that(|tx| mined_ids.contains(&tx.id.mined_id()))
+            .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id()))
     }
 
     /// Clears the whole mempool storage.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.verified.clear();
         self.tip_rejected_exact.clear();
@@ -254,7 +265,7 @@ impl Storage {
         self.verified.transactions().map(|tx| tx.id)
     }
 
-    /// Returns the set of [`Transaction`][transaction::Transaction]s in the mempool.
+    /// Returns the set of [`UnminedTx`]es in the mempool.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
         self.verified.transactions()
     }
@@ -265,7 +276,7 @@ impl Storage {
         self.verified.transaction_count()
     }
 
-    /// Returns the set of [`Transaction`][transaction::Transaction]s with exactly matching
+    /// Returns the set of [`UnminedTx`]es with exactly matching
     /// `tx_ids` in the mempool.
     ///
     /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
@@ -278,7 +289,7 @@ impl Storage {
             .filter(move |tx| tx_ids.contains(&tx.id))
     }
 
-    /// Returns `true` if a [`UnminedTx`] exactly matching an [`UnminedTxId`] is in
+    /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
     /// the mempool.
     ///
     /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
@@ -319,7 +330,7 @@ impl Storage {
         self.limit_rejection_list_memory();
     }
 
-    /// Returns the rejection error if a [`UnminedTx`] matching an [`UnminedTxId`]
+    /// Returns the rejection error if a transaction matching an [`UnminedTxId`]
     /// is in any mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
@@ -355,7 +366,7 @@ impl Storage {
             .filter(move |txid| self.contains_rejected(txid))
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching the supplied [`UnminedTxId`] is in
+    /// Returns `true` if a transaction matching the supplied [`UnminedTxId`] is in
     /// the mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
