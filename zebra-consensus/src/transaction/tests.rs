@@ -275,7 +275,7 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
         .await;
 
     assert_eq!(
-        result.expect("expected a tx_id and tx_fee").0,
+        result.expect("unexpected error response").tx_id(),
         expected_hash
     );
 }
@@ -324,7 +324,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
         .await;
 
     assert_eq!(
-        result.expect("expected a tx_id and tx_fee").0,
+        result.expect("unexpected error response").tx_id(),
         transaction_hash
     );
 }
@@ -370,7 +370,7 @@ async fn v4_coinbase_transaction_is_accepted() {
         .await;
 
     assert_eq!(
-        result.expect("expected a tx_id and tx_fee").0,
+        result.expect("unexpected error response").tx_id(),
         transaction_hash
     );
 }
@@ -474,7 +474,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
         .await;
 
     assert_eq!(
-        result.expect("expected a tx_id and tx_fee").0,
+        result.expect("unexpected error response").tx_id(),
         transaction_hash
     );
 }
@@ -523,7 +523,7 @@ async fn v5_coinbase_transaction_is_accepted() {
         .await;
 
     assert_eq!(
-        result.expect("expected a tx_id and tx_fee").0,
+        result.expect("unexpected error response").tx_id(),
         transaction_hash
     );
 }
@@ -643,7 +643,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             .await;
 
         assert_eq!(
-            result.expect("expected a tx_id and tx_fee").0,
+            result.expect("unexpected error response").tx_id(),
             expected_hash
         );
     });
@@ -744,7 +744,7 @@ fn v4_with_sapling_spends() {
             .await;
 
         assert_eq!(
-            result.expect("expected a tx_id and tx_fee").0,
+            result.expect("unexpected error response").tx_id(),
             expected_hash
         );
     });
@@ -788,7 +788,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
             .await;
 
         assert_eq!(
-            result.expect("expected a tx_id and tx_fee").0,
+            result.expect("unexpected error response").tx_id(),
             expected_hash
         );
     });
@@ -835,7 +835,7 @@ fn v5_with_sapling_spends() {
             .await;
 
         assert_eq!(
-            result.expect("expected a tx_id and tx_fee").0,
+            result.expect("unexpected error response").tx_id(),
             expected_hash
         );
     });
