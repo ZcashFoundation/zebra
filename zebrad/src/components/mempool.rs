@@ -71,8 +71,8 @@ pub enum Request {
 #[derive(Debug)]
 pub enum Response {
     Transactions(Vec<UnminedTx>),
-    TransactionIds(Vec<UnminedTxId>),
-    RejectedTransactionIds(Vec<UnminedTxId>),
+    TransactionIds(HashSet<UnminedTxId>),
+    RejectedTransactionIds(HashSet<UnminedTxId>),
     Queued(Vec<Result<(), MempoolError>>),
 }
 
