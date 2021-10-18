@@ -29,6 +29,7 @@ mod crawler;
 pub mod downloads;
 mod error;
 pub mod gossip;
+mod queue_checker;
 mod storage;
 
 #[cfg(test)]
@@ -40,6 +41,7 @@ pub use config::Config;
 pub use crawler::Crawler;
 pub use error::MempoolError;
 pub use gossip::gossip_mempool_transaction_id;
+pub use queue_checker::QueueChecker;
 pub use storage::{
     ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
 };
@@ -59,21 +61,75 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
+/// A mempool service request.
+///
+/// Requests can query the current set of mempool transactions,
+/// queue transactions to be downloaded and verified, or
+/// run the mempool to check for newly verified transactions.
+///
+/// Requests can't modify the mempool directly,
+/// because all mempool transactions must be verified.
 #[derive(Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum Request {
+    /// Query all transaction IDs in the mempool.
     TransactionIds,
+
+    /// Query matching  transactions in the mempool,
+    /// using a unique set of [`UnminedTxId`]s.
     TransactionsById(HashSet<UnminedTxId>),
+
+    /// Query matching cached rejected transaction IDs in the mempool,
+    /// using a unique set of [`UnminedTxId`]s.
     RejectedTransactionIds(HashSet<UnminedTxId>),
+
+    /// Queue a list of gossiped transactions or transaction IDs, or
+    /// crawled transaction IDs.
+    ///
+    /// The transaction downloader checks for duplicates across IDs and transactions.
     Queue(Vec<Gossip>),
+
+    /// Check for newly verified transactions.
+    ///
+    /// The transaction downloader does not push transactions into the mempool.
+    /// So a task should send this request regularly (every 5-10 seconds).
+    ///
+    /// These checks also happen for other request variants,
+    /// but we can't rely on peers to send queries regularly,
+    /// and crawler queue requests depend on peer responses.
+    /// Also, crawler requests aren't frequent enough for transaction propagation.
+    CheckForVerifiedTransactions,
 }
 
+/// A response to a mempool service request.
+///
+/// Responses can read the current set of mempool transactions,
+/// check the queued status of transactions to be downloaded and verified, or
+/// confirm that the mempool has been checked for newly verified transactions.
 #[derive(Debug)]
 pub enum Response {
-    Transactions(Vec<UnminedTx>),
+    /// Returns all transaction IDs from the mempool.
     TransactionIds(HashSet<UnminedTxId>),
+
+    /// Returns matching transactions from the mempool.
+    ///
+    /// Since the [`TransactionsById`] request is unique,
+    /// the response transactions are also unique.
+    Transactions(Vec<UnminedTx>),
+
+    /// Returns matching cached rejected transaction IDs from the mempool,
     RejectedTransactionIds(HashSet<UnminedTxId>),
+
+    /// Returns a list of queue results.
+    ///
+    /// These are the results of the initial queue checks.
+    /// The transaction may also fail download or verification later.
+    ///
+    /// Each result matches the request at the corresponding vector index.
     Queued(Vec<Result<(), MempoolError>>),
+
+    /// Confirms that the mempool has checked for recently verified transactions.
+    CheckedForVerifiedTransactions,
 }
 
 /// The state of the mempool.
@@ -376,6 +432,7 @@ impl Service<Request> for Mempool {
                 storage,
                 tx_downloads,
             } => match req {
+                // Queries
                 Request::TransactionIds => {
                     let res = storage.tx_ids().collect();
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
@@ -388,6 +445,8 @@ impl Service<Request> for Mempool {
                     let res = storage.rejected_transactions(ids).collect();
                     async move { Ok(Response::RejectedTransactionIds(res)) }.boxed()
                 }
+
+                // Queue mempool candidates
                 Request::Queue(gossiped_txs) => {
                     let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
                         .into_iter()
@@ -399,23 +458,40 @@ impl Service<Request> for Mempool {
                         .collect();
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
+
+                // Store successfully downloaded and verified transactions in the mempool
+                Request::CheckForVerifiedTransactions => {
+                    // all the work for this request is done in poll_ready
+                    async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
+                }
             },
             ActiveState::Disabled => {
                 // We can't return an error since that will cause a disconnection
                 // by the peer connection handler. Therefore, return successful
                 // empty responses.
                 let resp = match req {
+                    // Empty Queries
                     Request::TransactionIds => Response::TransactionIds(Default::default()),
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
                     }
-                    // Special case; we can signal the error inside the response.
+
+                    // Don't queue mempool candidates
                     Request::Queue(gossiped_txs) => Response::Queued(
+                        // Special case; we can signal the error inside the response,
+                        // because the inbound service ignores inner errors.
                         iter::repeat(Err(MempoolError::Disabled))
                             .take(gossiped_txs.len())
                             .collect(),
                     ),
+
+                    // Check if the mempool should be enabled.
+                    // This request makes sure mempools are debug-enabled in the acceptance tests.
+                    Request::CheckForVerifiedTransactions => {
+                        // all the work for this request is done in poll_ready
+                        Response::CheckedForVerifiedTransactions
+                    }
                 };
                 async move { Ok(resp) }.boxed()
             }
