@@ -17,12 +17,14 @@ use std::{fmt, sync::Arc};
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::ZcashSerialize;
-
-use super::{
-    AuthDigest, Hash,
-    Transaction::{self, *},
-    WtxId,
+use crate::{
+    amount::{Amount, NonNegative},
+    serialization::ZcashSerialize,
+    transaction::{
+        AuthDigest, Hash,
+        Transaction::{self, *},
+        WtxId,
+    },
 };
 
 use UnminedTxId::*;
@@ -164,6 +166,9 @@ impl UnminedTxId {
 }
 
 /// An unmined transaction, and its pre-calculated unique identifying ID.
+///
+/// This transaction has been structurally verified.
+/// (But it might still need semantic or contextual verification.)
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnminedTx {
     /// A unique identifier for this unmined transaction.
@@ -174,6 +179,15 @@ pub struct UnminedTx {
 
     /// The size in bytes of the serialized transaction data
     pub size: usize,
+}
+
+impl fmt::Display for UnminedTx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnminedTx")
+            .field("transaction", &self.transaction)
+            .field("serialized_size", &self.size)
+            .finish()
+    }
 }
 
 // Each of these conversions is implemented slightly differently,
@@ -223,6 +237,38 @@ impl From<&Arc<Transaction>> for UnminedTx {
             size: transaction
                 .zcash_serialized_size()
                 .expect("all transactions have a size"),
+        }
+    }
+}
+
+/// A verified unmined transaction, and the corresponding transaction fee.
+///
+/// This transaction has been fully verified, in the context of the mempool.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct VerifiedUnminedTx {
+    /// The unmined transaction.
+    pub transaction: UnminedTx,
+
+    /// The transaction fee for this unmined transaction.
+    pub miner_fee: Amount<NonNegative>,
+}
+
+impl fmt::Display for VerifiedUnminedTx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedUnminedTx")
+            .field("transaction", &self.transaction)
+            .field("miner_fee", &self.miner_fee)
+            .finish()
+    }
+}
+
+impl VerifiedUnminedTx {
+    /// Create a new verified unmined transaction from a transaction and its fee.
+    pub fn new(transaction: UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+        Self {
+            transaction,
+            miner_fee,
         }
     }
 }

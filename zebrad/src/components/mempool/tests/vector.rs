@@ -81,7 +81,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
     // Make sure the transaction from the blockchain test vector is the same as the
     // response of `Request::TransactionsById`
-    assert_eq!(genesis_transaction, transactions[0]);
+    assert_eq!(genesis_transaction.transaction, transactions[0]);
 
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
@@ -113,7 +113,7 @@ async fn mempool_service_basic() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![last_transaction.id.into()]))
+        .call(Request::Queue(vec![last_transaction.transaction.id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -167,7 +167,7 @@ async fn mempool_queue() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![new_tx.id.into()]))
+        .call(Request::Queue(vec![new_tx.transaction.id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -182,7 +182,7 @@ async fn mempool_queue() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![stored_tx.id.into()]))
+        .call(Request::Queue(vec![stored_tx.transaction.id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -197,7 +197,7 @@ async fn mempool_queue() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![rejected_tx.id.into()]))
+        .call(Request::Queue(vec![rejected_tx.transaction.id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -256,7 +256,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
 
     // Queue a transaction for download
     // Use the ID of the last transaction in the list
-    let txid = more_transactions.last().unwrap().id;
+    let txid = more_transactions.last().unwrap().transaction.id;
     let response = service
         .ready_and()
         .await
@@ -522,7 +522,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![rejected_tx.clone().into()]));
+        .call(Request::Queue(vec![rejected_tx.transaction.clone().into()]));
     // Make the mock verifier return that the transaction is invalid.
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         responder.respond(Err(TransactionError::BadBalance));
@@ -549,7 +549,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![rejected_tx.id.into()]))
+        .call(Request::Queue(vec![rejected_tx.transaction.id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -604,7 +604,10 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![rejected_valid_tx.id.into()]));
+        .call(Request::Queue(vec![rejected_valid_tx
+            .transaction
+            .id
+            .into()]));
     // Make the mock peer set return that the download failed.
     let verification = peer_set
         .expect_request_that(|r| matches!(r, zn::Request::TransactionsById(_)))
@@ -633,7 +636,10 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
         .ready_and()
         .await
         .unwrap()
-        .call(Request::Queue(vec![rejected_valid_tx.id.into()]))
+        .call(Request::Queue(vec![rejected_valid_tx
+            .transaction
+            .id
+            .into()]))
         .await
         .unwrap();
     let queued_responses = match response {
