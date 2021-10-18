@@ -733,6 +733,11 @@ where
                 tracing::debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
+            BlockDownloadVerifyError::CancelledDuringDownload
+            | BlockDownloadVerifyError::CancelledDuringVerification => {
+                tracing::debug!(error = ?e, "block verification was cancelled, continuing");
+                false
+            }
             _ => {
                 tracing::warn!(?e, "error downloading and verifying block");
                 true

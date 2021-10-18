@@ -47,8 +47,11 @@ pub enum BlockDownloadVerifyError {
     #[error("block did not pass consensus validation")]
     Invalid(#[from] zebra_consensus::chain::VerifyChainError),
 
-    #[error("block download / verification was cancelled")]
-    Cancelled,
+    #[error("block download / verification was cancelled during download")]
+    CancelledDuringDownload,
+
+    #[error("block download / verification was cancelled during verification")]
+    CancelledDuringVerification,
 }
 
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
@@ -182,7 +185,7 @@ where
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
-                        return Err(BlockDownloadVerifyError::Cancelled)
+                        return Err(BlockDownloadVerifyError::CancelledDuringDownload)
                     }
                     rsp = block_req => rsp.map_err(BlockDownloadVerifyError::DownloadFailed)?,
                 };
@@ -208,7 +211,7 @@ where
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
-                        return Err(BlockDownloadVerifyError::Cancelled)
+                        return Err(BlockDownloadVerifyError::CancelledDuringVerification)
                     }
                     verification = rsp => verification,
                 };
