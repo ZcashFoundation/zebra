@@ -6,7 +6,7 @@ use std::{
 
 use zebra_chain::{
     orchard, sapling, sprout,
-    transaction::{Transaction, UnminedTx, UnminedTxId},
+    transaction::{Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
 
@@ -24,7 +24,7 @@ use super::super::SameEffectsTipRejectionError;
 #[derive(Default)]
 pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
-    transactions: VecDeque<UnminedTx>,
+    transactions: VecDeque<VerifiedUnminedTx>,
 
     /// The total size of the transactions in the mempool if they were
     /// serialized.
@@ -53,7 +53,7 @@ impl Drop for VerifiedSet {
 impl VerifiedSet {
     /// Returns an iterator over the transactions in the set.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> + '_ {
-        self.transactions.iter()
+        self.transactions.iter().map(|tx| &tx.transaction)
     }
 
     /// Returns the number of verified transactions in the set.
@@ -64,7 +64,7 @@ impl VerifiedSet {
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified `id.
     pub fn contains(&self, id: &UnminedTxId) -> bool {
-        self.transactions.iter().any(|tx| &tx.id == id)
+        self.transactions.iter().any(|tx| &tx.transaction.id == id)
     }
 
     /// Clear the set of verified transactions.
@@ -87,13 +87,16 @@ impl VerifiedSet {
     ///
     /// Two transactions have a spend conflict if they spend the same UTXO or if they reveal the
     /// same nullifier.
-    pub fn insert(&mut self, transaction: UnminedTx) -> Result<(), SameEffectsTipRejectionError> {
-        if self.has_spend_conflicts(&transaction) {
+    pub fn insert(
+        &mut self,
+        transaction: VerifiedUnminedTx,
+    ) -> Result<(), SameEffectsTipRejectionError> {
+        if self.has_spend_conflicts(&transaction.transaction) {
             return Err(SameEffectsTipRejectionError::SpendConflict);
         }
 
-        self.cache_outputs_from(&transaction.transaction);
-        self.transactions_serialized_size += transaction.size;
+        self.cache_outputs_from(&transaction.transaction.transaction);
+        self.transactions_serialized_size += transaction.transaction.size;
         self.transactions.push_front(transaction);
 
         self.update_metrics();
@@ -102,7 +105,7 @@ impl VerifiedSet {
     }
 
     /// Evict one transaction from the set to open space for another transaction.
-    pub fn evict_one(&mut self) -> Option<UnminedTx> {
+    pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
             None
         } else {
@@ -116,7 +119,7 @@ impl VerifiedSet {
     /// Removes all transactions in the set that match the `predicate`.
     ///
     /// Returns the amount of transactions removed.
-    pub fn remove_all_that(&mut self, predicate: impl Fn(&UnminedTx) -> bool) -> usize {
+    pub fn remove_all_that(&mut self, predicate: impl Fn(&VerifiedUnminedTx) -> bool) -> usize {
         // Clippy suggests to remove the `collect` and the `into_iter` further down. However, it is
         // unable to detect that when that is done, there is a borrow conflict. What happens is the
         // iterator borrows `self.transactions` immutably, but it also need to be borrowed mutably
@@ -144,14 +147,14 @@ impl VerifiedSet {
     /// Removes a transaction from the set.
     ///
     /// Also removes its outputs from the internal caches.
-    fn remove(&mut self, transaction_index: usize) -> UnminedTx {
+    fn remove(&mut self, transaction_index: usize) -> VerifiedUnminedTx {
         let removed_tx = self
             .transactions
             .remove(transaction_index)
             .expect("invalid transaction index");
 
-        self.transactions_serialized_size -= removed_tx.size;
-        self.remove_outputs(&removed_tx);
+        self.transactions_serialized_size -= removed_tx.transaction.size;
+        self.remove_outputs(&removed_tx.transaction);
 
         self.update_metrics();
 

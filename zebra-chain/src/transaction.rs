@@ -25,7 +25,7 @@ pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
 pub use sighash::{HashType, SigHash};
-pub use unmined::{UnminedTx, UnminedTxId};
+pub use unmined::{UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
