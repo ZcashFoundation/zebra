@@ -7,7 +7,7 @@ use proptest_derive::Arbitrary;
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
-use zebra_chain::{parameters::Network, transaction::UnminedTx, transaction::VerifiedUnminedTx};
+use zebra_chain::{block, parameters::Network, transaction::VerifiedUnminedTx};
 use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
@@ -34,7 +34,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_chain_reset(
         network in any::<Network>(),
-        transaction in any::<UnminedTx>(),
+        transaction in any::<VerifiedUnminedTx>(),
         chain_tip in any::<ChainTipBlock>(),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -89,8 +89,8 @@ proptest! {
     fn storage_is_cleared_on_chain_resets(
         network in any::<Network>(),
         mut previous_chain_tip in any::<ChainTipBlock>(),
-        transactions in vec(any::<UnminedTx>(), 1..CHAIN_LENGTH),
-        fake_chain_tips in vec(any::<FakeChainTip>(), 1..10),
+        mut transactions in vec(any::<VerifiedUnminedTx>(), 0..CHAIN_LENGTH),
+        fake_chain_tips in vec(any::<FakeChainTip>(), 0..CHAIN_LENGTH),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -115,30 +115,26 @@ proptest! {
             // Set the initial chain tip.
             chain_tip_sender.set_best_non_finalized_tip(previous_chain_tip.clone());
 
-            // Call the mempool so that it is aware of the new chain tip.
+            // Call the mempool so that it is aware of the initial chain tip.
             mempool.dummy_call().await;
 
-            for (fake_chain_tip, mut transaction) in fake_chain_tips.iter().zip(transactions.iter()) {
+            for (fake_chain_tip, transaction) in fake_chain_tips.iter().zip(transactions.iter_mut()) {
                 // Obtain a new chain tip based on the previous one.
                 let chain_tip = fake_chain_tip.into_chain_tip_block(&previous_chain_tip);
 
                 // Adjust the transaction expiry height based on the new chain
                 // tip height so that the mempool does not evict the transaction
                 // when there is a chain growth.
-                let mut tmp_tx = (*transaction.transaction).clone();
-                if let Some(expiry_height) = transaction.transaction.expiry_height() {
+                if let Some(expiry_height) = transaction.transaction.transaction.expiry_height() {
                     if chain_tip.height >= expiry_height {
-                        // Obtain a height that is greater than the height of
-                        // the current chain tip.
-                        let new_tx_height = block::Height(chain_tip.height.0 + 1);
+                        let mut tmp_tx = (*transaction.transaction.transaction).clone();
 
-                        // Set the new expiry height.
-                        *tmp_tx.expiry_height_mut() = new_tx_height;
+                        // Set a new expiry height that is greater than the
+                        // height of the current chain tip.
+                        *tmp_tx.expiry_height_mut() = block::Height(chain_tip.height.0 + 1);
+                        transaction.transaction = tmp_tx.into();
                     }
                 }
-
-                let unmined_tmp_tx: UnminedTx = tmp_tx.into();
-                transaction = &unmined_tmp_tx;
 
                 // Insert the dummy transaction into the mempool.
                 mempool
