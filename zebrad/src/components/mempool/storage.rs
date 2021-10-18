@@ -1,11 +1,20 @@
+//! Mempool transaction storage.
+//!
+//! The main struct [`Storage`] holds verified and rejected transactions.
+//! [`Storage`] is effectively the data structure of the mempool. Convenient methods to
+//! manage it are included.
+//!
+//! [`Storage`] does not expose a service so it can only be used by other code directly.
+//! Only code inside the [`crate::components::mempool`] module has access to it.
+
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
 use self::verified_set::VerifiedSet;
-use super::MempoolError;
+use super::{downloads::TransactionDownloadVerifyError, MempoolError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -90,6 +99,7 @@ pub enum RejectionError {
     SameEffectsChain(#[from] SameEffectsChainRejectionError),
 }
 
+/// Hold mempool verified and rejected mempool transactions.
 #[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
@@ -117,7 +127,7 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Insert a [`UnminedTx`] into the mempool, caching any rejections.
+    /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
     /// Returns an error if the mempool's verified transactions or rejection caches
     /// prevent this transaction from being inserted.
@@ -125,14 +135,14 @@ impl Storage {
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`StorageRejectionError::RandomlyEvicted`].
-    pub fn insert(&mut self, tx: UnminedTx) -> Result<UnminedTxId, MempoolError> {
+    pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
         // This method must call `reject`, rather than modifying the rejection lists directly.
-        let tx_id = tx.id;
+        let tx_id = tx.transaction.id;
 
         // First, check if we have a cached rejection for this transaction.
-        if let Some(error) = self.rejection_error(&tx.id) {
+        if let Some(error) = self.rejection_error(&tx_id) {
             return Err(error);
         }
 
@@ -140,7 +150,7 @@ impl Storage {
         //
         // Security: transactions must not get refreshed by new queries,
         // because that allows malicious peers to keep transactions live forever.
-        if self.verified.contains(&tx.id) {
+        if self.verified.contains(&tx_id) {
             return Err(MempoolError::InMempool);
         }
 
@@ -160,13 +170,13 @@ impl Storage {
                 .expect("mempool is empty, but was expected to be full");
 
             self.reject(
-                evicted_tx.id,
+                evicted_tx.transaction.id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
             // If this transaction gets evicted, set its result to the same error
             // (we could return here, but we still want to check the mempool size)
-            if evicted_tx.id == tx_id {
+            if evicted_tx.transaction.id == tx_id {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
@@ -176,7 +186,7 @@ impl Storage {
         result
     }
 
-    /// Remove [`UnminedTx`]es from the mempool via exact [`UnminedTxId`].
+    /// Remove transactions from the mempool via exact [`UnminedTxId`].
     ///
     /// For v5 transactions, transactions are matched by WTXID, using both the:
     /// - non-malleable transaction ID, and
@@ -193,10 +203,10 @@ impl Storage {
     #[allow(dead_code)]
     pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
         self.verified
-            .remove_all_that(|tx| exact_wtxids.contains(&tx.id))
+            .remove_all_that(|tx| exact_wtxids.contains(&tx.transaction.id))
     }
 
-    /// Remove [`UnminedTx`]es from the mempool via non-malleable [`transaction::Hash`].
+    /// Remove transactions from the mempool via non-malleable [`transaction::Hash`].
     ///
     /// For v5 transactions, transactions are matched by TXID,
     /// using only the non-malleable transaction ID.
@@ -211,10 +221,11 @@ impl Storage {
     /// Does not add or remove from the 'rejected' tracking set.
     pub fn remove_same_effects(&mut self, mined_ids: &HashSet<transaction::Hash>) -> usize {
         self.verified
-            .remove_all_that(|tx| mined_ids.contains(&tx.id.mined_id()))
+            .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id()))
     }
 
     /// Clears the whole mempool storage.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.verified.clear();
         self.tip_rejected_exact.clear();
@@ -254,7 +265,7 @@ impl Storage {
         self.verified.transactions().map(|tx| tx.id)
     }
 
-    /// Returns the set of [`Transaction`][transaction::Transaction]s in the mempool.
+    /// Returns the set of [`UnminedTx`]es in the mempool.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
         self.verified.transactions()
     }
@@ -265,7 +276,7 @@ impl Storage {
         self.verified.transaction_count()
     }
 
-    /// Returns the set of [`Transaction`][transaction::Transaction]s with exactly matching
+    /// Returns the set of [`UnminedTx`]es with exactly matching
     /// `tx_ids` in the mempool.
     ///
     /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
@@ -278,7 +289,7 @@ impl Storage {
             .filter(move |tx| tx_ids.contains(&tx.id))
     }
 
-    /// Returns `true` if a [`UnminedTx`] exactly matching an [`UnminedTxId`] is in
+    /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
     /// the mempool.
     ///
     /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
@@ -319,7 +330,7 @@ impl Storage {
         self.limit_rejection_list_memory();
     }
 
-    /// Returns the rejection error if a [`UnminedTx`] matching an [`UnminedTxId`]
+    /// Returns the rejection error if a transaction matching an [`UnminedTxId`]
     /// is in any mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
@@ -355,11 +366,92 @@ impl Storage {
             .filter(move |txid| self.contains_rejected(txid))
     }
 
-    /// Returns `true` if a [`UnminedTx`] matching the supplied [`UnminedTxId`] is in
+    /// Returns `true` if a transaction matching the supplied [`UnminedTxId`] is in
     /// the mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
         self.rejection_error(txid).is_some()
+    }
+
+    /// Add a transaction that failed download and verification to the rejected list
+    /// if needed, depending on the reason for the failure.
+    pub fn reject_if_needed(&mut self, txid: UnminedTxId, e: TransactionDownloadVerifyError) {
+        match e {
+            // Rejecting a transaction already in state would speed up further
+            // download attempts without checking the state. However it would
+            // make the reject list grow forever.
+            //
+            // TODO: revisit after reviewing the rejected list cleanup criteria?
+            // TODO: if we decide to reject it, then we need to pass the block hash
+            // to State::Confirmed. This would require the zs::Response::Transaction
+            // to include the hash, which would need to be implemented.
+            TransactionDownloadVerifyError::InState |
+            // An unknown error in the state service, better do nothing
+            TransactionDownloadVerifyError::StateError(_) |
+            // Sync has just started. Mempool shouldn't even be enabled, so will not
+            // happen in practice.
+            TransactionDownloadVerifyError::NoTip |
+            // If download failed, do nothing; the crawler will end up trying to
+            // download it again.
+            TransactionDownloadVerifyError::DownloadFailed(_) |
+            // If it was cancelled then a block was mined, or there was a network
+            // upgrade, etc. No reason to reject it.
+            TransactionDownloadVerifyError::Cancelled => {}
+
+            // Consensus verification failed. Reject transaction to avoid
+            // having to download and verify it again just for it to fail again.
+            TransactionDownloadVerifyError::Invalid(e) => {
+                self.reject(txid, ExactTipRejectionError::FailedVerification(e).into())
+            }
+        }
+    }
+
+    /// Remove transactions from the mempool if they have not been mined after a
+    /// specified height.
+    ///
+    /// https://zips.z.cash/zip-0203#specification
+    pub fn remove_expired_transactions(
+        &mut self,
+        tip_height: zebra_chain::block::Height,
+    ) -> HashSet<UnminedTxId> {
+        let mut txid_set = HashSet::new();
+        // we need a separate set, since reject() takes the original unmined ID,
+        // then extracts the mined ID out of it
+        let mut unmined_id_set = HashSet::new();
+
+        for t in self.transactions() {
+            if let Some(expiry_height) = t.transaction.expiry_height() {
+                if tip_height >= expiry_height {
+                    txid_set.insert(t.id.mined_id());
+                    unmined_id_set.insert(t.id);
+                }
+            }
+        }
+
+        // expiry height is effecting data, so we match by non-malleable TXID
+        self.remove_same_effects(&txid_set);
+
+        // also reject it
+        for id in unmined_id_set.iter() {
+            self.reject(*id, SameEffectsChainRejectionError::Expired.into());
+        }
+
+        unmined_id_set
+    }
+
+    /// Check if transaction should be downloaded and/or verified.
+    ///
+    /// If it is already in the mempool (or in its rejected list)
+    /// then it shouldn't be downloaded/verified.
+    pub fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), MempoolError> {
+        // Check if the transaction is already in the mempool.
+        if self.contains_transaction_exact(&txid) {
+            return Err(MempoolError::InMempool);
+        }
+        if let Some(error) = self.rejection_error(&txid) {
+            return Err(error);
+        }
+        Ok(())
     }
 }

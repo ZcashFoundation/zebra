@@ -87,6 +87,15 @@ pub(super) struct MustUseOneshotSender<T: std::fmt::Debug> {
     pub tx: Option<oneshot::Sender<T>>,
 }
 
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // skip the channels, they don't tell us anything useful
+        f.debug_struct("Client")
+            .field("error_slot", &self.error_slot)
+            .finish()
+    }
+}
+
 impl From<ClientRequest> for InProgressClientRequest {
     fn from(client_request: ClientRequest) -> Self {
         let ClientRequest { request, tx, span } = client_request;

@@ -2,13 +2,13 @@
 //!
 //! The crawler periodically requests transactions from peers in order to populate the mempool.
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use futures::{future, pin_mut, stream::FuturesUnordered, StreamExt};
 use tokio::{sync::watch, task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, transaction::UnminedTxId};
 use zebra_network as zn;
 use zebra_state::ChainTipChange;
 
@@ -171,8 +171,8 @@ where
 
     /// Handle a peer's response to the crawler's request for transactions.
     async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
-        let transaction_ids: Vec<_> = match response {
-            zn::Response::TransactionIds(ids) => ids.into_iter().map(Gossip::Id).collect(),
+        let transaction_ids: HashSet<_> = match response {
+            zn::Response::TransactionIds(ids) => ids.into_iter().collect(),
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
         };
 
@@ -189,7 +189,12 @@ where
     }
 
     /// Forward the crawled transactions IDs to the mempool transaction downloader.
-    async fn queue_transactions(&mut self, transaction_ids: Vec<Gossip>) -> Result<(), BoxError> {
+    async fn queue_transactions(
+        &mut self,
+        transaction_ids: HashSet<UnminedTxId>,
+    ) -> Result<(), BoxError> {
+        let transaction_ids = transaction_ids.into_iter().map(Gossip::Id).collect();
+
         let call_result = self
             .mempool
             .ready_and()
