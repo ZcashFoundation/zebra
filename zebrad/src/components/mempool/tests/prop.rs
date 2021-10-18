@@ -1,5 +1,6 @@
 //! Randomised property tests for the mempool.
 
+use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
@@ -26,81 +27,14 @@ type MockState = MockService<zs::Request, zs::Response, PropTestAssertion>;
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier = MockService<tx::Request, tx::Response, PropTestAssertion, TransactionError>;
 
+const CHAIN_LENGTH: usize = 10;
+
 proptest! {
-    /// Test if the mempool storage is cleared on multiple chain resets.
-    #[test]
-    fn storage_is_cleared_on_chain_resets(
-        network in any::<Network>(),
-        transaction in any::<UnminedTx>(),
-        // fake_chain_tips in vec(any::<FakeChainTip>(), 1..2),
-        initial_chain_tip in any::<ChainTipBlock>(),
-        fake_chain_tip in any::<FakeChainTip>(),
-    ) {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
-        let _guard = runtime.enter();
-
-        runtime.block_on(async move {
-            let (
-                mut mempool,
-                mut peer_set,
-                mut state_service,
-                mut tx_verifier,
-                mut recent_syncs,
-                mut chain_tip_sender,
-            ) = setup(network);
-
-            time::pause();
-
-            mempool.enable(&mut recent_syncs).await;
-
-            // Set the initial chain tip.
-            chain_tip_sender.set_best_non_finalized_tip(initial_chain_tip.clone());
-
-            // Get a new chain tip.
-            let chain_tip = fake_chain_tip.into_chain_tip_block(&initial_chain_tip);
-
-            // Insert a dummy transaction into the mempool.
-            mempool
-                .storage()
-                .insert(transaction.clone())
-                .expect("Inserting a transaction should succeed");
-
-
-            // Set the new chain tip.
-            chain_tip_sender.set_best_non_finalized_tip(chain_tip.clone());
-
-            // Call the mempool so that it has a chance to clear.
-            mempool.dummy_call().await;
-
-            match fake_chain_tip {
-                FakeChainTip::Grow(_) => {
-                    // The mempool should not be empty if we had a regular chain tip grow.
-                    // TODO: This assertion does not hold. :(
-                    prop_assert!(!mempool.storage().tx_ids().is_empty());
-                }
-
-                FakeChainTip::Reset(_) => {
-                    // The mempool should be empty if we had a chain tip reset.
-                    prop_assert!(mempool.storage().tx_ids().is_empty());
-                },
-            }
-
-            peer_set.expect_no_requests().await?;
-            state_service.expect_no_requests().await?;
-            tx_verifier.expect_no_requests().await?;
-
-            Ok(())
-        })?;
-    }
-
     /// Test if the mempool storage is cleared on a chain reset.
     #[test]
     fn storage_is_cleared_on_chain_reset(
         network in any::<Network>(),
-        transaction in any::<VerifiedUnminedTx>(),
+        transaction in any::<UnminedTx>(),
         chain_tip in any::<ChainTipBlock>(),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -141,6 +75,98 @@ proptest! {
             mempool.dummy_call().await;
 
             prop_assert_eq!(mempool.storage().transaction_count(), 0);
+
+            peer_set.expect_no_requests().await?;
+            state_service.expect_no_requests().await?;
+            tx_verifier.expect_no_requests().await?;
+
+            Ok(())
+        })?;
+    }
+
+    /// Test if the mempool storage is cleared on multiple chain resets.
+    #[test]
+    fn storage_is_cleared_on_chain_resets(
+        network in any::<Network>(),
+        mut previous_chain_tip in any::<ChainTipBlock>(),
+        transactions in vec(any::<UnminedTx>(), 1..CHAIN_LENGTH),
+        fake_chain_tips in vec(any::<FakeChainTip>(), 1..10),
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
+        let _guard = runtime.enter();
+
+        runtime.block_on(async move {
+            let (
+                mut mempool,
+                mut peer_set,
+                mut state_service,
+                mut tx_verifier,
+                mut recent_syncs,
+                mut chain_tip_sender,
+            ) = setup(network);
+
+            time::pause();
+
+            mempool.enable(&mut recent_syncs).await;
+
+            // Set the initial chain tip.
+            chain_tip_sender.set_best_non_finalized_tip(previous_chain_tip.clone());
+
+            // Call the mempool so that it is aware of the new chain tip.
+            mempool.dummy_call().await;
+
+            for (fake_chain_tip, mut transaction) in fake_chain_tips.iter().zip(transactions.iter()) {
+                // Obtain a new chain tip based on the previous one.
+                let chain_tip = fake_chain_tip.into_chain_tip_block(&previous_chain_tip);
+
+                // Adjust the transaction expiry height based on the new chain
+                // tip height so that the mempool does not evict the transaction
+                // when there is a chain growth.
+                let mut tmp_tx = (*transaction.transaction).clone();
+                if let Some(expiry_height) = transaction.transaction.expiry_height() {
+                    if chain_tip.height >= expiry_height {
+                        // Obtain a height that is greater than the height of
+                        // the current chain tip.
+                        let new_tx_height = block::Height(chain_tip.height.0 + 1);
+
+                        // Set the new expiry height.
+                        *tmp_tx.expiry_height_mut() = new_tx_height;
+                    }
+                }
+
+                let unmined_tmp_tx: UnminedTx = tmp_tx.into();
+                transaction = &unmined_tmp_tx;
+
+                // Insert the dummy transaction into the mempool.
+                mempool
+                    .storage()
+                    .insert(transaction.clone())
+                    .expect("Inserting a transaction should succeed");
+
+                // Set the new chain tip.
+                chain_tip_sender.set_best_non_finalized_tip(chain_tip.clone());
+
+                // Call the mempool so that it is aware of the new chain tip.
+                mempool.dummy_call().await;
+
+                match fake_chain_tip {
+                    FakeChainTip::Grow(_) => {
+                        // The mempool should not be empty because we had a regular chain growth.
+                        prop_assert_ne!(mempool.storage().transaction_count(), 0);
+                    }
+
+                    FakeChainTip::Reset(_) => {
+                        // The mempool should be empty because we had a chain tip reset.
+                        prop_assert_eq!(mempool.storage().transaction_count(), 0);
+                    },
+                }
+
+                // Remember the current chain tip so that the next one can refer to it.
+                previous_chain_tip = chain_tip;
+            }
 
             peer_set.expect_no_requests().await?;
             state_service.expect_no_requests().await?;
