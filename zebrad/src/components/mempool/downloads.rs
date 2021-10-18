@@ -16,7 +16,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
@@ -144,7 +144,7 @@ where
     /// A list of pending transaction download and verify tasks.
     #[pin]
     pending: FuturesUnordered<
-        JoinHandle<Result<UnminedTx, (TransactionDownloadVerifyError, UnminedTxId)>>,
+        JoinHandle<Result<VerifiedUnminedTx, (TransactionDownloadVerifyError, UnminedTxId)>>,
     >,
 
     /// A list of channels that can be used to cancel pending transaction download and
@@ -161,7 +161,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<UnminedTx, (UnminedTxId, TransactionDownloadVerifyError)>;
+    type Item = Result<VerifiedUnminedTx, (UnminedTxId, TransactionDownloadVerifyError)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -177,7 +177,7 @@ where
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("transaction download and verify tasks must not panic") {
                 Ok(tx) => {
-                    this.cancel_handles.remove(&tx.id);
+                    this.cancel_handles.remove(&tx.transaction.id);
                     Poll::Ready(Some(Ok(tx)))
                 }
                 Err((e, hash)) => {
@@ -308,7 +308,10 @@ where
                     transaction: tx.clone(),
                     height,
                 })
-                .map_ok(|_hash| tx)
+                .map_ok(|rsp| {
+                    rsp.into_mempool_transaction()
+                        .expect("unexpected non-mempool response to mempool request")
+                })
                 .await;
 
             tracing::debug!(?txid, ?result, "verified transaction for the mempool");
@@ -319,7 +322,7 @@ where
             metrics::counter!(
                 "mempool.verified.transactions.total",
                 1,
-                "version" => format!("{}",tx.transaction.version()),
+                "version" => format!("{}", tx.transaction.transaction.version()),
             );
             tx
         })

@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
-use zebra_chain::{parameters::Network, transaction::UnminedTx};
+use zebra_chain::{parameters::Network, transaction::VerifiedUnminedTx};
 use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
@@ -29,7 +29,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_chain_reset(
         network in any::<Network>(),
-        transaction in any::<UnminedTx>(),
+        transaction in any::<VerifiedUnminedTx>(),
         chain_tip in any::<ChainTipBlock>(),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -83,7 +83,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_if_syncer_falls_behind(
         network in any::<Network>(),
-        transaction in any::<UnminedTx>(),
+        transaction in any::<VerifiedUnminedTx>(),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()

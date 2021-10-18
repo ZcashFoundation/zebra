@@ -8,10 +8,11 @@ use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, 
 use tracing::Span;
 
 use zebra_chain::{
+    amount::Amount,
     block::Block,
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::{UnminedTx, UnminedTxId},
+    transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{AddressBook, Request, Response};
@@ -40,6 +41,10 @@ async fn mempool_requests_for_transactions() {
         tx_gossip_task_handle,
     ) = setup(true).await;
 
+    let added_transactions: Vec<UnminedTx> = added_transactions
+        .iter()
+        .map(|t| t.transaction.clone())
+        .collect();
     let added_transaction_ids: Vec<UnminedTxId> = added_transactions.iter().map(|t| t.id).collect();
 
     // Test `Request::MempoolTransactionIds`
@@ -116,8 +121,17 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         .oneshot(Request::PushTransaction(tx.clone().into()));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        let txid = responder.request().tx_id();
-        responder.respond(txid);
+        let transaction = responder
+            .request()
+            .clone()
+            .into_mempool_transaction()
+            .expect("unexpected non-mempool request");
+
+        // Set a dummy fee.
+        responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
+            transaction,
+            Amount::zero(),
+        )));
     });
     let (response, _) = futures::join!(request, verification);
     match response {
@@ -204,8 +218,17 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             });
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        let txid = responder.request().tx_id();
-        responder.respond(txid);
+        let transaction = responder
+            .request()
+            .clone()
+            .into_mempool_transaction()
+            .expect("unexpected non-mempool request");
+
+        // Set a dummy fee.
+        responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
+            transaction,
+            Amount::zero(),
+        )));
     });
     let (response, _, _) = futures::join!(request, peer_set_responder, verification);
 
@@ -292,7 +315,17 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx1_id = responder.request().tx_id();
-        responder.respond(tx1_id);
+        let transaction = responder
+            .request()
+            .clone()
+            .into_mempool_transaction()
+            .expect("unexpected non-mempool request");
+
+        // Set a dummy fee.
+        responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
+            transaction,
+            Amount::zero(),
+        )));
     });
     let (response, _) = futures::join!(request, verification);
     match response {
@@ -381,7 +414,17 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx2_id = responder.request().tx_id();
-        responder.respond(tx2_id);
+        let transaction = responder
+            .request()
+            .clone()
+            .into_mempool_transaction()
+            .expect("unexpected non-mempool request");
+
+        // Set a dummy fee.
+        responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
+            transaction,
+            Amount::zero(),
+        )));
     });
     let (response, _) = futures::join!(request, verification);
     match response {
@@ -516,7 +559,7 @@ async fn setup(
     >,
     Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Vec<Arc<Block>>,
-    Vec<UnminedTx>,
+    Vec<VerifiedUnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     MockService<Request, Response, PanicAssertion>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
@@ -654,7 +697,10 @@ async fn setup(
 /// Manually add a transaction to the mempool storage.
 ///
 /// Skips some mempool functionality, like transaction verification and peer broadcasts.
-fn add_some_stuff_to_mempool(mempool_service: &mut Mempool, network: Network) -> Vec<UnminedTx> {
+fn add_some_stuff_to_mempool(
+    mempool_service: &mut Mempool,
+    network: Network,
+) -> Vec<VerifiedUnminedTx> {
     // get the genesis block coinbase transaction from the Zcash blockchain.
     let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, network)
         .take(1)
