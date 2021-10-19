@@ -3986,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4006,7 +4006,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "futures-core",
  "pin-project 0.4.28",
