@@ -130,7 +130,7 @@
         },
         {
           "exemplar": true,
-          "expr": "mempool_currently_queued_transactions_total{job=\"$job\"}",
+          "expr": "mempool_currently_queued_transactions{job=\"$job\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "queued transactions",
@@ -269,7 +269,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "mempool_rejected_transaction_ids_total{job=\"$job\"}",
+          "expr": "mempool_rejected_transaction_ids{job=\"$job\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "rejected transactions",

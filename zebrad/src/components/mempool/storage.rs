@@ -472,7 +472,7 @@ impl Storage {
     /// Must be called every time the rejected lists change.
     fn update_rejected_metrics(&self) {
         metrics::gauge!(
-            "mempool.rejected.transaction.ids.total",
+            "mempool.rejected.transaction.ids",
             self.rejected_transaction_count() as _
         );
         // This is just an approximation.

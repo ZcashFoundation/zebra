@@ -383,7 +383,7 @@ where
             "queued transaction hash for download"
         );
         metrics::gauge!(
-            "mempool.currently.queued.transactions.total",
+            "mempool.currently.queued.transactions",
             self.pending.len() as _
         );
         metrics::counter!("mempool.queued.transactions.total", 1);
@@ -424,7 +424,7 @@ where
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
         metrics::gauge!(
-            "mempool.currently.queued.transactions.total",
+            "mempool.currently.queued.transactions",
             self.pending.len() as _
         );
     }
@@ -470,6 +470,6 @@ where
     ZS::Future: Send,
 {
     fn drop(self: Pin<&mut Self>) {
-        metrics::gauge!("mempool.currently.queued.transactions.total", 0 as _);
+        metrics::gauge!("mempool.currently.queued.transactions", 0 as _);
     }
 }
