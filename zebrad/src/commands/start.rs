@@ -4,24 +4,49 @@
 //!
 //!  A zebra node consists of the following services and tasks:
 //!
+//! Peers:
 //!  * Network Service
-//!    * primary interface to the node
+//!    * primary external interface to the node
 //!    * handles all external network requests for the Zcash protocol
 //!      * via zebra_network::Message and zebra_network::Response
 //!    * provides an interface to the rest of the network for other services and
 //!      tasks running within this node
 //!      * via zebra_network::Request
+//!
+//! Blocks & Mempool Transactions:
 //!  * Consensus Service
 //!    * handles all validation logic for the node
-//!    * verifies blocks using zebra-chain and zebra-script, then stores verified
-//!      blocks in zebra-state
+//!    * verifies blocks using zebra-chain, then stores verified blocks in zebra-state
+//!    * verifies mempool and block transactions using zebra-chain and zebra-script,
+//!      and returns verified mempool transactions for mempool storage
+//!  * Inbound Service
+//!    * handles requests from peers for network data, chain data, and mempool transactions
+//!    * spawns download and verify tasks for each gossiped block
+//!    * sends gossiped transactions to the mempool service
+//!
+//! Blocks:
 //!  * Sync Task
 //!    * runs in the background and continuously queries the network for
 //!      new blocks to be verified and added to the local state
-//!  * Inbound Service
-//!    * handles requests from peers for network data and chain data
-//!    * performs transaction and block diffusion
-//!    * downloads and verifies gossiped blocks and transactions
+//!    * spawns download and verify tasks for each crawled block
+//!  * State Service
+//!    * contextually verifies blocks
+//!    * handles in-memory storage of multiple non-finalized chains
+//!    * handles permanent storage of the best finalized chain
+//!  * Block Gossip Task
+//!    * runs in the background and continuously queries the state for
+//!      newly committed blocks to be gossiped to peers
+//!
+//! Mempool Transactions:
+//!  * Mempool Service
+//!    * activates when the syncer is near the chain tip
+//!    * spawns download and verify tasks for each crawled or gossiped transaction
+//!    * handles in-memory storage of unmined transactions
+//!  * Queue Checker Task
+//!    * runs in the background, polling the mempool to store newly verified transactions
+//!  * Transaction Gossip Task
+//!    * runs in the background and gossips newly added mempool transactions
+//!      to peers
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
@@ -117,10 +142,12 @@ impl StartCmd {
         let mempool_crawler_task_handle = mempool::Crawler::spawn(
             &config.mempool,
             peer_set.clone(),
-            mempool,
+            mempool.clone(),
             sync_status,
             chain_tip_change,
         );
+
+        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool);
 
         let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
             mempool_transaction_receiver,
@@ -136,6 +163,10 @@ impl StartCmd {
 
             mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
                 .expect("unexpected panic in the mempool crawler")
+                .map_err(|e| eyre!(e)),
+
+            mempool_queue_result = mempool_queue_checker_task_handle.fuse() => mempool_queue_result
+                .expect("unexpected panic in the mempool queue checker")
                 .map_err(|e| eyre!(e)),
 
             tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result
