@@ -16,6 +16,7 @@ To check if any of the top-level crates need version increments, go to the zebra
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Use the `zebrad` crate version in the `zebra-network` user agent string
+      (currently the constant `USER_AGENT` in `zebra-network/src/constants.rs`)
 - [ ] Use the latest git tag in `README.md`
 
 ### How to Increment Versions
