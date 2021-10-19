@@ -6,44 +6,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-alpha.19](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.19) - 2021-10-19
 
-    Improve mempool::downloads documentation (#2879)
-    Add a queue checker task, to make sure mempool transactions propagate (#2888)
-    Improve logging for initial peer connections (#2896)
-    Cancel pending download tasks when the mempool is disabled (#2886)
-    Remove duplicate IDs in mempool requests and responses (#2887)
-    Add docs to storage and mempool gossip mods (#2884)
-    Store the transaction fee in the mempool storage (#2885)
-    Make some mempool functions associated with the mempool::Storage type (#2872)
-    Add some additional checks to the acceptance mempool test (#2880)
-    Return transaction fee (#2876)
-    Always zero the mempool metrics when the mempool is disabled (#2875)
-    Stop allowing some newly mined transactions into the mempool (#2874)
-    Add a debug config that enables the mempool (#2862)
-    Add a basic mempool storage Grafana dashboard (#2866)
-    Avoid broadcasting mempool rejected or expired transactions to peers (#2858)
-    Upgrade to ed25519-zebra 3.0.0 (#2864)
-    Revert "Compute serialized size on the fly" (#2865)
-    Add zcash.mempool.size.transactions and zcash.mempool.size.bytes metrics (#2860)
-    Pass the mempool config to the mempool (#2861)
-    Give more information to the user in the wrong port init warning (#2853)
-    Stop ignoring the mempool conflicting transaction reject list size limit (#2855)
-    Send looked up UTXOs to the transaction verifier (#2849)
-    Add expired transactions to the mempool rejected list (#2852)
-    Make some grafana labels shorter for graph readability (#2850)
-    Refactor mempool spend conflict checks to increase performance (#2826)
-    make INITIAL_MIN_NETWORK_PROTOCOL_VERSION suport testnet and mainnet (#2851)
-    Send AdvertiseTransactionIds to peers (#2823)
-    Add a mempool config section (#2845)
-    Add transactions that failed verification to the mempool rejected list (#2821)
-    Un-reject mempool transactions if the rejection depends on the current tip (#2844)
-    Rename mempool storage methods by match type (#2841)
-    Split storage errors by match type: TXID or WTXID (#2833)
-    Make block metrics more accurate (#2835)
-    Gossip recently verified block hashes to peers (#2729)
-    Stop panicking when pruning unused queued blocks (#2842)
-    Remove unused mempool errors (#2831)
-    Remove transactions in newly committed blocks from the mempool (#2827)
-    Add zcash_serialized_size() to ZcashSerialize trait (#2824)
+Zebra's latest alpha updates dependencies, improves metrics, and finishes the mempool-related implementation.
+
+### Added
+
+- Give more information to the user in the wrong port init warning (#2853)
+- Send looked up UTXOs to the transaction verifier (#2849)
+- Return the transaction fee from the transaction verifier (#2876)
+- Gossip recently verified block hashes to peers (#2729)
+- Compute the serialized transaction size of unmined transactions (#2824)
+
+#### Mempool
+
+- Add a queue checker task, to make sure mempool transactions propagate (#2888)
+- Store the transaction fee in the mempool storage (#2885)
+- Add a debug config that enables the mempool (#2862)
+- Pass the mempool config to the mempool (#2861)
+- Add expired transactions to the mempool rejected list (#2852)
+- Send AdvertiseTransactionIds to peers (#2823)
+- Add a mempool config section (#2845)
+- Add transactions that failed verification to the mempool rejected list (#2821)
+- Un-reject mempool transactions if the rejection depends on the current tip
+  (#2844)
+- Split storage errors by match type: TXID or WTXID (#2833)
+- Remove transactions in newly committed blocks from the mempool (#2827)
+
+#### Documentation
+
+- Improve the documentation for the mempool transaction downloader (#2879)
+- Add the documentation for the mempool storage and gossip modules (#2884)
+
+#### Network Upgrade 5
+
+- Set the minimum testnet network protocol version to NU5 (#2851)
+
+#### Testing and CI
+
+- Add some additional checks to the acceptance mempool test (#2880)
+
+#### Metrics
+
+- Improve logging for initial peer connections (#2896)
+- Always zero the mempool metrics when the mempool is disabled (#2875)
+- Add a basic mempool storage Grafana dashboard (#2866)
+- Add zcash.mempool.size.transactions and zcash.mempool.size.bytes metrics
+  (#2860)
+- Make some grafana labels shorter for graph readability (#2850)
+- Make block metrics more accurate (#2835)
+
+### Changed
+
+#### Mempool
+
+- Avoid broadcasting mempool rejected or expired transactions to peers (#2858)
+- Encapsulate some mempool functions with the Mempool type. (#2872)
+- Remove duplicate IDs in mempool requests and responses (#2887)
+- Refactor mempool spend conflict checks to increase performance (#2826)
+- Rename mempool storage methods by match type (#2841)
+- Remove unused mempool errors (#2831)
+
+### Fixed
+
+- Cancel pending download tasks when the mempool is disabled (#2886)
+- Stop allowing some newly mined transactions into the mempool (#2874)
+- Stop panicking when pruning unused queued blocks (#2842)
+
+### Security
+
+- Upgrade to ed25519-zebra 3.0.0 (#2864)
+- Revert "Compute serialized size on the fly" (#2865)
+- Stop ignoring the mempool conflicting transaction reject list size limit (#2855)
+
 
 ## [Zebra 1.0.0-alpha.18](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.18) - 2021-10-05
 
