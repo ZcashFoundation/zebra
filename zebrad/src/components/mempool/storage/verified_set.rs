@@ -188,8 +188,6 @@ impl VerifiedSet {
             .expect("invalid transaction index");
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
-        self.remove_outputs(&removed_tx.transaction);
-        self.transactions_serialized_size -= removed_tx.transaction.size;
         self.total_cost -= removed_tx.transaction.cost;
         self.remove_outputs(&removed_tx.transaction);
 
