@@ -733,12 +733,40 @@ where
                 tracing::debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
+                VerifyBlockError::Commit(ref source),
+            )) if format!("{:?}", source).contains("block is already committed to the state") => {
+                // TODO: improve this by checking the type
+                // https://github.com/ZcashFoundation/zebra/issues/2908
+                tracing::debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
+                false
+            }
             BlockDownloadVerifyError::CancelledDuringDownload
             | BlockDownloadVerifyError::CancelledDuringVerification => {
                 tracing::debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
             _ => {
+                // download_and_verify downcasts errors from the block verifier
+                // into VerifyChainError, and puts the result inside one of the
+                // BlockDownloadVerifyError enumerations. This downcast could
+                // become incorrect e.g. after some refactoring, and it is difficult
+                // to write a test to check it. The test below is a best-effort
+                // attempt to catch if that happens and log it.
+                // TODO: add a proper test and remove this
+                // https://github.com/ZcashFoundation/zebra/issues/2909
+                let err_str = format!("{:?}", e);
+                if err_str.contains("AlreadyVerified")
+                    || err_str.contains("AlreadyInChain")
+                    || err_str.contains("block is already committed to the state")
+                {
+                    tracing::error!(?e,
+                        "a BlockDownloadVerifyError that should have been filtered out was detected, \
+                        which possibly indicates a programming error in the downcast inside \
+                        zebrad::components::sync::downloads::Downloads::download_and_verify"
+                    )
+                }
+
                 tracing::warn!(?e, "error downloading and verifying block");
                 true
             }
