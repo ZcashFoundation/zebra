@@ -6,9 +6,12 @@ use super::types::Progress::*;
 use super::types::TargetHeight::*;
 
 use color_eyre::eyre::{eyre, Report};
-use futures::{future::TryFutureExt, stream::FuturesUnordered};
+use futures::{
+    future::TryFutureExt,
+    stream::{FuturesUnordered, StreamExt},
+};
 use std::{cmp::min, convert::TryInto, mem::drop, time::Duration};
-use tokio::{stream::StreamExt, time::timeout};
+use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
