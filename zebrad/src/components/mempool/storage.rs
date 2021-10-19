@@ -1,3 +1,12 @@
+//! Mempool transaction storage.
+//!
+//! The main struct [`Storage`] holds verified and rejected transactions.
+//! [`Storage`] is effectively the data structure of the mempool. Convenient methods to
+//! manage it are included.
+//!
+//! [`Storage`] does not expose a service so it can only be used by other code directly.
+//! Only code inside the [`crate::components::mempool`] module has access to it.
+
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
@@ -90,6 +99,7 @@ pub enum RejectionError {
     SameEffectsChain(#[from] SameEffectsChainRejectionError),
 }
 
+/// Hold mempool verified and rejected mempool transactions.
 #[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
@@ -215,6 +225,7 @@ impl Storage {
     }
 
     /// Clears the whole mempool storage.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.verified.clear();
         self.tip_rejected_exact.clear();
