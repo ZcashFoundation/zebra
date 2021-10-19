@@ -18,6 +18,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Instant},
 };
+use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -606,7 +607,8 @@ where
     handshakes.push(future::pending().boxed());
 
     let mut crawl_timer =
-        tokio::time::interval(config.crawl_new_peer_interval).map(|tick| TimerCrawl { tick });
+        IntervalStream::new(tokio::time::interval(config.crawl_new_peer_interval))
+            .map(|tick| TimerCrawl { tick });
 
     loop {
         metrics::gauge!(
