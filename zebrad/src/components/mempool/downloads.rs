@@ -33,7 +33,7 @@ use futures::{
     ready,
     stream::{FuturesUnordered, Stream},
 };
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
@@ -141,7 +141,7 @@ impl From<UnminedTx> for Gossip {
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
-#[pin_project]
+#[pin_project(PinnedDrop)]
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZS>
 where
@@ -312,11 +312,19 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
-                    metrics::counter!("gossip.downloaded.transaction.count", 1);
+                    metrics::counter!(
+                        "mempool.downloaded.transactions.total",
+                        1,
+                        "version" => format!("{}",tx.transaction.version()),
+                    );
                     tx
                 }
                 Gossip::Tx(tx) => {
-                    metrics::counter!("gossip.pushed.transaction.count", 1);
+                    metrics::counter!(
+                        "mempool.pushed.transactions.total",
+                        1,
+                        "version" => format!("{}",tx.transaction.version()),
+                    );
                     tx
                 }
             };
@@ -337,7 +345,11 @@ where
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
         .map_ok(|tx| {
-            metrics::counter!("gossip.verified.transaction.count", 1);
+            metrics::counter!(
+                "mempool.verified.transactions.total",
+                1,
+                "version" => format!("{}", tx.transaction.transaction.version()),
+            );
             tx
         })
         // Tack the hash onto the error so we can remove the cancel handle
@@ -351,7 +363,7 @@ where
             tokio::select! {
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
-                    metrics::counter!("gossip.cancelled.count", 1);
+                    metrics::counter!("mempool.cancelled.verify.tasks.total", 1);
                     Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
                 verification = fut => verification,
@@ -370,7 +382,11 @@ where
             ?MAX_INBOUND_CONCURRENCY,
             "queued transaction hash for download"
         );
-        metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
+        metrics::gauge!(
+            "mempool.currently.queued.transactions",
+            self.pending.len() as _
+        );
+        metrics::counter!("mempool.queued.transactions.total", 1);
 
         Ok(())
     }
@@ -407,6 +423,10 @@ where
         }
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
+        metrics::gauge!(
+            "mempool.currently.queued.transactions",
+            self.pending.len() as _
+        );
     }
 
     /// Get the number of currently in-flight download tasks.
@@ -436,5 +456,20 @@ where
         }?;
 
         Ok(())
+    }
+}
+
+#[pinned_drop]
+impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN::Future: Send,
+    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
+{
+    fn drop(self: Pin<&mut Self>) {
+        metrics::gauge!("mempool.currently.queued.transactions", 0 as _);
     }
 }
