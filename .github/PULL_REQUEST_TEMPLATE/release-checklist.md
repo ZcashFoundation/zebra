@@ -132,7 +132,7 @@ From "Keep a Changelog":
 ## Final Testing
 
 - [ ] After tagging the release, test that the exact `cargo install` command in
-      `README.org` works (`--git` behaves a bit differently to `--path`)
+      `README.md` works (`--git` behaves a bit differently to `--path`)
 
 If the build fails after tagging:
 1. fix the build
