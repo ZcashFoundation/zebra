@@ -10,11 +10,9 @@ use std::{
     time::Duration,
 };
 
-use futures::{Stream, StreamExt};
-use tokio::{
-    sync::broadcast,
-    time::{self, Interval},
-};
+use futures::{FutureExt, Stream, StreamExt};
+use tokio::{sync::broadcast, time};
+use tokio_stream::wrappers::IntervalStream;
 
 use crate::{protocol::external::InventoryHash, BoxError};
 
@@ -38,7 +36,7 @@ pub struct InventoryRegistry {
         >,
     >,
     /// Interval tracking how frequently we should rotate our maps
-    interval: Interval,
+    interval: IntervalStream,
 }
 
 impl std::fmt::Debug for InventoryRegistry {
@@ -57,7 +55,7 @@ impl InventoryRegistry {
             current: Default::default(),
             prev: Default::default(),
             inv_stream: inv_stream.into_stream().boxed(),
-            interval: time::interval(Duration::from_secs(75)),
+            interval: IntervalStream::new(time::interval(Duration::from_secs(75))),
         }
     }
 
