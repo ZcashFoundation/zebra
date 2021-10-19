@@ -196,8 +196,11 @@ where
             // - we're waiting on a handshake to complete so there are peers, or
             // - another task that handles or adds peers is waiting on this task
             //   to complete.
-            if let Ok(fanout_result) =
-                timeout(constants::REQUEST_TIMEOUT, self.update_fanout(fanout_limit)).await
+            if let Ok(fanout_result) = timeout(
+                constants::MIN_PEER_GET_ADDR_INTERVAL,
+                self.update_fanout(fanout_limit),
+            )
+            .await
             {
                 fanout_result?;
             } else {
