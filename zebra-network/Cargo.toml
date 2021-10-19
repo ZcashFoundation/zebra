@@ -25,6 +25,7 @@ thiserror = "1"
 
 futures = "0.3"
 tokio = { version = "0.3.6", features = ["net", "time", "stream", "tracing", "macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1.7", features = ["time"] }
 tokio-util = { version = "0.5", features = ["codec"] }
 tower = { version = "0.4", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
