@@ -110,7 +110,7 @@ impl VerifiedSet {
 
         self.cache_outputs_from(&transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
-        self.total_cost += transaction.transaction.cost;
+        self.total_cost += transaction.transaction.cost();
         self.transactions.push_front(transaction);
 
         self.update_metrics();
@@ -140,7 +140,7 @@ impl VerifiedSet {
                     } else {
                         0
                     };
-                    tx.transaction.cost + low_fee_penalty
+                    tx.transaction.cost() + low_fee_penalty
                 })
                 .collect();
 
@@ -188,7 +188,7 @@ impl VerifiedSet {
             .expect("invalid transaction index");
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
-        self.total_cost -= removed_tx.transaction.cost;
+        self.total_cost -= removed_tx.transaction.cost();
         self.remove_outputs(&removed_tx.transaction);
 
         self.update_metrics();

@@ -187,7 +187,9 @@ pub struct UnminedTx {
 
     /// The size in bytes of the serialized transaction data
     pub size: usize,
+}
 
+impl UnminedTx {
     /// The cost in bytes of the transaction, as defined in [ZIP-401].
     ///
     /// A reflection of the work done by the network in processing them (proof
@@ -195,7 +197,9 @@ pub struct UnminedTx {
     /// structures).
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
-    pub cost: u32,
+    pub fn cost(&self) -> u64 {
+        std::cmp::max(self.size as u64, MEMPOOL_TRANSACTION_COST_THRESHOLD)
+    }
 }
 
 impl fmt::Display for UnminedTx {
@@ -212,14 +216,13 @@ impl fmt::Display for UnminedTx {
 
 impl From<Transaction> for UnminedTx {
     fn from(transaction: Transaction) -> Self {
-        let size = transaction
-            .zcash_serialized_size()
-            .expect("all transactions have a size");
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
 
         Self {
             id: (&transaction).into(),
             size,
-            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
             transaction: Arc::new(transaction),
         }
     }
@@ -227,45 +230,42 @@ impl From<Transaction> for UnminedTx {
 
 impl From<&Transaction> for UnminedTx {
     fn from(transaction: &Transaction) -> Self {
-        let size = transaction
-            .zcash_serialized_size()
-            .expect("all transactions have a size");
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
 
         Self {
             id: transaction.into(),
             transaction: Arc::new(transaction.clone()),
             size,
-            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
         }
     }
 }
 
 impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
-        let size = transaction
-            .zcash_serialized_size()
-            .expect("all transactions have a size");
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
 
         Self {
             id: transaction.as_ref().into(),
             transaction,
             size,
-            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
         }
     }
 }
 
 impl From<&Arc<Transaction>> for UnminedTx {
     fn from(transaction: &Arc<Transaction>) -> Self {
-        let size = transaction
-            .zcash_serialized_size()
-            .expect("all transactions have a size");
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
 
         Self {
             id: transaction.as_ref().into(),
             transaction: transaction.clone(),
             size,
-            cost: std::cmp::max(size as u32, MEMPOOL_TRANSACTION_COST_THRESHOLD),
         }
     }
 }
