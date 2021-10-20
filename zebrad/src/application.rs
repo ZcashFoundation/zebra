@@ -1,19 +1,18 @@
 //! Zebrad Abscissa Application
 
-use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
+use std::{io::Write, process};
+
 use abscissa_core::{
-    application::{self, AppCell},
-    config,
-    config::Configurable,
-    terminal::component::Terminal,
-    terminal::ColorChoice,
+    application::{self, fatal_error, AppCell},
+    config::{self, Configurable},
+    terminal::{component::Terminal, stderr, stdout, ColorChoice},
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths, Version,
 };
-use application::fatal_error;
-use std::process;
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
+
+use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -411,6 +410,15 @@ impl Application for ZebradApp {
     }
 
     fn shutdown(&mut self, shutdown: Shutdown) -> ! {
+        // Some OSes require a flush to send all output to the terminal.
+        // zebrad's logging uses Abscissa, so we flush its streams.
+        //
+        // TODO:
+        // - if this doesn't work, send an empty line as well
+        // - move this code to the tracing component's `before_shutdown()`
+        let _ = stdout().lock().flush();
+        let _ = stderr().lock().flush();
+
         if let Err(e) = self.state().components.shutdown(self, shutdown) {
             fatal_error(self, &e)
         }
