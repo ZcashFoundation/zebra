@@ -306,14 +306,11 @@ impl Application for ZebradApp {
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
         #[cfg(feature = "enable-sentry")]
-        let guard = sentry::init(
-            sentry::ClientOptions {
-                debug: true,
-                release: Some(app_version().to_string().into()),
-                ..Default::default()
-            }
-            .add_integration(sentry_tracing::TracingIntegration::default()),
-        );
+        let guard = sentry::init(sentry::ClientOptions {
+            debug: true,
+            release: Some(app_version().to_string().into()),
+            ..Default::default()
+        });
 
         std::panic::set_hook(Box::new(move |panic_info| {
             let panic_report = panic_hook.panic_report(panic_info);
