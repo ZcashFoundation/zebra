@@ -6,7 +6,6 @@ use std::{
 use futures::future::TryFutureExt;
 use pin_project::pin_project;
 use tokio::{
-    stream::StreamExt,
     sync::mpsc,
     time::{sleep, Sleep},
 };
@@ -127,7 +126,7 @@ where
         let mut pending_items = 0usize;
         loop {
             match timer.as_mut() {
-                None => match self.rx.next().await {
+                None => match self.rx.recv().await {
                     // The first message in a new batch.
                     Some(msg) => {
                         let span = msg.span;
