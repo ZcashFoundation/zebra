@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 bitflags = "1.2"
 byteorder = "1.4"
-bytes = "0.6"
+bytes = "1.1.0"
 chrono = "0.4"
 hex = "0.4"
 # indexmap has rayon support for parallel iteration,
@@ -26,7 +26,7 @@ thiserror = "1"
 futures = "0.3"
 tokio = { version = "1.13.0", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.7", features = ["sync", "time"] }
-tokio-util = { version = "0.5", features = ["codec"] }
+tokio-util = { version = "0.6.9", features = ["codec"] }
 tower = { version = "0.4.9", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.13.0-alpha.8"
