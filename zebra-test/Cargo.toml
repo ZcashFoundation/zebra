@@ -15,7 +15,7 @@ proptest = "0.10.1"
 rand = "0.8"
 regex = "1.4.6"
 
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.4.9", features = ["util"] }
 tokio = { version = "0.3", features = ["full"] }
 futures = "0.3.17"
 
