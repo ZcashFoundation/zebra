@@ -100,7 +100,7 @@ proptest! {
 
                 let awoke = match timeout(EVENT_TIMEOUT, wake_events.acquire()).await {
                     Ok(permit) => {
-                        permit.forget();
+                        permit.expect("Sempahore closed prematurely").forget();
                         true
                     }
                     Err(_) => false,
@@ -127,7 +127,7 @@ proptest! {
             wake_events: Arc<Semaphore>,
         ) -> Result<(), TestCaseError> {
             loop {
-                update_events.acquire().await.forget();
+                update_events.acquire().await.expect("Sempahore closed prematurely").forget();
 
                 if status.wait_until_close_to_tip().await.is_err() {
                     return Ok(());
