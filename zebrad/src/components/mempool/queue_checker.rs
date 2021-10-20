@@ -69,7 +69,7 @@ where
         // So we propagate any unexpected errors to the task that spawned us.
         let response = self
             .mempool
-            .ready_and()
+            .ready()
             .await?
             .call(mempool::Request::CheckForVerifiedTransactions)
             .await?;
