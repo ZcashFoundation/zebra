@@ -27,19 +27,16 @@ impl MetricsEndpoint {
                     // We manually expand the metrics::increment!() macro because it only
                     // supports string literals for metrics names, preventing us from
                     // using concat!() to build the name.
-                    static METRIC_NAME: [metrics::SharedString; 2] = [
-                        metrics::SharedString::const_str(env!("CARGO_PKG_NAME")),
-                        metrics::SharedString::const_str("build.info"),
-                    ];
+                    static METRIC_NAME: &str = concat!(env!("CARGO_PKG_NAME"), ".build.info");
                     static METRIC_LABELS: [metrics::Label; 1] =
                         [metrics::Label::from_static_parts(
                             "version",
                             env!("CARGO_PKG_VERSION"),
                         )];
-                    static METRIC_KEY: metrics::KeyData =
-                        metrics::KeyData::from_static_parts(&METRIC_NAME, &METRIC_LABELS);
+                    static METRIC_KEY: metrics::Key =
+                        metrics::Key::from_static_parts(METRIC_NAME, &METRIC_LABELS);
                     if let Some(recorder) = metrics::try_recorder() {
-                        recorder.increment_counter(metrics::Key::Borrowed(&METRIC_KEY), 1);
+                        recorder.increment_counter(&METRIC_KEY, 1);
                     }
                 }
                 Err(e) => panic!(
