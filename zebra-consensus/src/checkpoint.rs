@@ -836,6 +836,7 @@ where
 }
 
 #[derive(Debug, Error)]
+#[allow(missing_docs)]
 pub enum VerifyCheckpointError {
     #[error("checkpoint request after the final checkpoint has been verified")]
     Finished,
