@@ -21,18 +21,18 @@ async fn wakes_pending_waiters_on_close() {
 
     // // keep the request in the worker
     handle.allow(0);
-    let service1 = service.ready_and().await.unwrap();
+    let service1 = service.ready().await.unwrap();
     let poll = worker.poll();
     assert_pending!(poll);
     let mut response = task::spawn(service1.call(()));
 
     let mut service1 = service.clone();
-    let mut ready1 = task::spawn(service1.ready_and());
+    let mut ready1 = task::spawn(service1.ready());
     assert_pending!(worker.poll());
     assert_pending!(ready1.poll(), "no capacity");
 
     let mut service1 = service.clone();
-    let mut ready2 = task::spawn(service1.ready_and());
+    let mut ready2 = task::spawn(service1.ready());
     assert_pending!(worker.poll());
     assert_pending!(ready2.poll(), "no capacity");
 
@@ -80,17 +80,17 @@ async fn wakes_pending_waiters_on_failure() {
 
     // keep the request in the worker
     handle.allow(0);
-    let service1 = service.ready_and().await.unwrap();
+    let service1 = service.ready().await.unwrap();
     assert_pending!(worker.poll());
     let mut response = task::spawn(service1.call("hello"));
 
     let mut service1 = service.clone();
-    let mut ready1 = task::spawn(service1.ready_and());
+    let mut ready1 = task::spawn(service1.ready());
     assert_pending!(worker.poll());
     assert_pending!(ready1.poll(), "no capacity");
 
     let mut service1 = service.clone();
-    let mut ready2 = task::spawn(service1.ready_and());
+    let mut ready2 = task::spawn(service1.ready());
     assert_pending!(worker.poll());
     assert_pending!(ready2.poll(), "no capacity");
 

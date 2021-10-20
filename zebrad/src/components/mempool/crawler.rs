@@ -197,7 +197,7 @@ where
         for _ in 0..FANOUT {
             let mut peer_set = peer_set.clone();
             // end the task on permanent peer set errors
-            let peer_set = peer_set.ready_and().await?;
+            let peer_set = peer_set.ready().await?;
 
             requests.push(peer_set.call(zn::Request::MempoolTransactionIds));
         }
@@ -242,7 +242,7 @@ where
 
         let call_result = self
             .mempool
-            .ready_and()
+            .ready()
             .await?
             .call(mempool::Request::Queue(transaction_ids))
             .await;

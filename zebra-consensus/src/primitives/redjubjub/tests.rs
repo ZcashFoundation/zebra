@@ -24,14 +24,14 @@ where
                 let sk = SigningKey::<SpendAuth>::new(&mut rng);
                 let vk = VerificationKey::from(&sk);
                 let sig = sk.sign(&mut rng, &msg[..]);
-                verifier.ready_and().await?;
+                verifier.ready().await?;
                 results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
             }
             1 => {
                 let sk = SigningKey::<Binding>::new(&mut rng);
                 let vk = VerificationKey::from(&sk);
                 let sig = sk.sign(&mut rng, &msg[..]);
-                verifier.ready_and().await?;
+                verifier.ready().await?;
                 results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
             }
             _ => panic!(),

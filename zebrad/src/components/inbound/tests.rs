@@ -609,7 +609,7 @@ async fn setup(
         .zcash_deserialize_into()
         .unwrap();
     state_service
-        .ready_and()
+        .ready()
         .await
         .unwrap()
         .call(zebra_state::Request::CommitFinalizedBlock(

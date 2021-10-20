@@ -477,7 +477,7 @@ where
             let _guard = accept_span.enter();
 
             debug!("got incoming connection");
-            handshaker.ready_and().await?;
+            handshaker.ready().await?;
             // TODO: distinguish between proxied listeners and direct listeners
             let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
 
@@ -750,7 +750,7 @@ where
 
     // the connector is always ready, so this can't hang
     let outbound_connector = outbound_connector
-        .ready_and()
+        .ready()
         .await
         .expect("outbound connector never errors");
 
