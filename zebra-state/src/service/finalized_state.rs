@@ -5,7 +5,14 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Borrow, collections::HashMap, convert::TryInto, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    convert::TryInto,
+    io::{stderr, stdout, Write},
+    path::Path,
+    sync::Arc,
+};
 
 use zebra_chain::{
     amount::NonNegative,
@@ -126,8 +133,8 @@ impl FinalizedState {
                 // So we want to drop it before we exit.
                 tracing::info!("closing cached state");
                 std::mem::drop(new_state);
-                tracing::info!("exiting Zebra");
-                std::process::exit(0);
+
+                Self::exit_process();
             }
         }
 
@@ -467,18 +474,34 @@ impl FinalizedState {
 
             // We'd like to drop the database here, because that closes the
             // column families and the database. But Rust's ownership rules
-            // make that difficult, so we just flush instead.
+            // make that difficult, so we just flush and delete ephemeral data instead.
 
             // TODO: remove these extra logs once bugs like #2905 are fixed
             self.db.flush().expect("flush is successful");
             tracing::info!("flushed database to disk");
 
             self.delete_ephemeral();
-            tracing::info!("exiting Zebra");
-            std::process::exit(0);
+
+            Self::exit_process();
         }
 
         result.map_err(Into::into)
+    }
+
+    /// Exit the host process.
+    ///
+    /// Designed for debugging and tests.
+    fn exit_process() -> ! {
+        tracing::info!("exiting Zebra");
+
+        // Some OSes require a flush to send all output to the terminal.
+        // Zebra's logging doesn't depend on `tokio`, so we flush the stdlib sync streams.
+        //
+        // TODO: if this doesn't work, send an empty line as well.
+        let _ = stdout().lock().flush();
+        let _ = stderr().lock().flush();
+
+        std::process::exit(0);
     }
 
     /// Commit a finalized block to the state.
