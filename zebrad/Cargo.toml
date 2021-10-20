@@ -43,8 +43,8 @@ dirs = "4.0.0"
 inferno = { version = "0.10.7", default-features = false }
 atty = "0.2.14"
 
-sentry = { version = "0.21.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
-sentry-tracing = { git = "https://github.com/kellpossible/sentry-tracing.git", rev = "f1a4a4a16b5ff1022ae60be779eb3fb928ce9b0f" }
+sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
+sentry-tracing = "0.23.0"
 
 rand = "0.8.4"
 
