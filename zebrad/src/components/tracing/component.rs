@@ -46,7 +46,10 @@ impl Tracing {
             None
         };
 
-        let subscriber = builder.finish().with(ErrorLayer::default());
+        let subscriber = builder
+            .finish()
+            .with(ErrorLayer::default())
+            .with(sentry_tracing::layer());
         match (flamelayer, journaldlayer) {
             (None, None) => subscriber.init(),
             (Some(layer1), None) => subscriber.with(layer1).init(),
