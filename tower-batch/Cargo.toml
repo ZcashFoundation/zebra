@@ -9,7 +9,7 @@ edition = "2018"
 futures = "0.3.17"
 futures-core = "0.3.13"
 pin-project = "1.0.7"
-tokio = { version = "0.3.6", features = ["time", "sync", "stream", "tracing", "macros"] }
+tokio = { version = "1.13.0", features = ["time", "sync", "tracing", "macros"] }
 tower = { version = "0.4", features = ["util", "buffer"] }
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
@@ -18,7 +18,7 @@ tracing-futures = "0.2.5"
 color-eyre = "0.5.11"
 ed25519-zebra = "3.0.0"
 rand = "0.8"
-tokio = { version = "0.3.6", features = ["full"]}
+tokio = { version = "1.13.0", features = ["full"]}
 tokio-test = "0.4.2"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"
