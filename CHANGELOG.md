@@ -74,7 +74,6 @@ Zebra's latest alpha updates dependencies, improves metrics, gossips verified bl
 ### Security
 
 - Upgrade to ed25519-zebra 3.0.0 (#2864)
-- Revert "Compute serialized size on the fly" (#2865)
 - Stop ignoring the mempool conflicting transaction reject list size limit (#2855)
 
 
