@@ -7,7 +7,10 @@
 //! [`Storage`] does not expose a service so it can only be used by other code directly.
 //! Only code inside the [`crate::components::mempool`] module has access to it.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    mem::size_of,
+};
 
 use thiserror::Error;
 
@@ -126,6 +129,12 @@ pub struct Storage {
         HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
 }
 
+impl Drop for Storage {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
 impl Storage {
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
@@ -231,12 +240,14 @@ impl Storage {
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
         self.chain_rejected_same_effects.clear();
+        self.update_rejected_metrics();
     }
 
     /// Clears rejections that only apply to the current tip.
     pub fn clear_tip_rejections(&mut self) {
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
+        self.update_rejected_metrics();
     }
 
     /// Clears rejections that only apply to the current tip.
@@ -258,6 +269,7 @@ impl Storage {
                 map.clear();
             }
         }
+        self.update_rejected_metrics();
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
@@ -453,5 +465,22 @@ impl Storage {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// Update metrics related to the rejected lists.
+    ///
+    /// Must be called every time the rejected lists change.
+    fn update_rejected_metrics(&self) {
+        metrics::gauge!(
+            "mempool.rejected.transaction.ids",
+            self.rejected_transaction_count() as _
+        );
+        // This is just an approximation.
+        // TODO: make it more accurate #2869
+        let item_size = size_of::<(transaction::Hash, SameEffectsTipRejectionError)>();
+        metrics::gauge!(
+            "mempool.rejected.transaction.ids.bytes",
+            (self.rejected_transaction_count() * item_size) as _
+        );
     }
 }

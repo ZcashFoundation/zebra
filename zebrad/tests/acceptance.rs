@@ -697,9 +697,17 @@ const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
-const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
-// usually it's much shorter than this
+/// The maximum amount of time Zebra should take to reload after shutting down.
+///
+/// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
+const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The maximum amount of time Zebra should take to sync a few hundred blocks.
+///
+/// Usually the small checkpoint is much shorter than this.
 const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The maximum amount of time Zebra should take to sync a thousand blocks.
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
