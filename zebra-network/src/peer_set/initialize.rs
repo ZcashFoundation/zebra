@@ -3,7 +3,8 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-use std::{net::SocketAddr, sync::Arc};
+use rand::seq::SliceRandom;
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 use futures::{
     channel::mpsc,
@@ -141,7 +142,13 @@ where
             let initial_peers = config.initial_peers().await;
             let _ = initial_peer_count_tx.send(initial_peers.len());
             // Connect the tx end to the 3 peer sources:
-            add_initial_peers(initial_peers, outbound_connector, peerset_tx).await
+            add_initial_peers(
+                initial_peers,
+                outbound_connector,
+                peerset_tx,
+                config.peerset_initial_target_size,
+            )
+            .await
         }
         .boxed()
     };
@@ -187,15 +194,27 @@ where
 /// the results over `tx`.
 #[instrument(skip(initial_peers, outbound_connector, tx))]
 async fn add_initial_peers<S>(
-    initial_peers: std::collections::HashSet<SocketAddr>,
+    mut initial_peers: HashSet<SocketAddr>,
     outbound_connector: S,
     mut tx: mpsc::Sender<PeerChange>,
+    peerset_initial_target_size: usize,
 ) -> Result<(), BoxError>
 where
     S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    let initial_peer_count = initial_peers.len();
+    let mut initial_peer_count = initial_peers.len();
+
+    // Limit the number of initial peers to `config.peerset_initial_target_size`
+    if initial_peer_count > peerset_initial_target_size {
+        info!(
+            "Limiting the initial peers list from {} to {}",
+            initial_peer_count, peerset_initial_target_size
+        );
+        initial_peer_count = peerset_initial_target_size;
+        initial_peers = limit_initial_peers(initial_peers, peerset_initial_target_size);
+    }
+
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
 
@@ -259,6 +278,20 @@ where
     );
 
     Ok(())
+}
+
+/// Limit the number of `initial_peers` addresses entries to `peerset_initial_target_size`.
+/// The result is random choosed entries from the provided set of addresses.
+fn limit_initial_peers(
+    initial_peers: HashSet<SocketAddr>,
+    peerset_initial_target_size: usize,
+) -> HashSet<SocketAddr> {
+    let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
+
+    initial_peers_vect
+        .choose_multiple(&mut rand::thread_rng(), peerset_initial_target_size)
+        .copied()
+        .collect()
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
