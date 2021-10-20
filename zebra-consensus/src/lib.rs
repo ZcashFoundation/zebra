@@ -53,9 +53,12 @@ pub mod chain;
 #[allow(missing_docs)]
 pub mod error;
 
+pub use block::VerifyBlockError;
+pub use checkpoint::VerifyCheckpointError;
 pub use checkpoint::MAX_CHECKPOINT_BYTE_COUNT;
 pub use checkpoint::MAX_CHECKPOINT_HEIGHT_GAP;
 pub use config::Config;
+pub use error::BlockError;
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

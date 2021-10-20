@@ -1,15 +1,19 @@
+//! Randomised property tests for the mempool.
+
 use proptest::prelude::*;
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
-use zebra_chain::{parameters::Network, transaction::UnminedTx};
+use zebra_chain::{parameters::Network, transaction::VerifiedUnminedTx};
 use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
-use super::super::Mempool;
-use crate::components::sync::{RecentSyncLengths, SyncStatus};
+use crate::components::{
+    mempool::{self, Mempool},
+    sync::{RecentSyncLengths, SyncStatus},
+};
 
 /// A [`MockService`] representing the network service.
 type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
@@ -25,7 +29,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_chain_reset(
         network in any::<Network>(),
-        transaction in any::<UnminedTx>(),
+        transaction in any::<VerifiedUnminedTx>(),
         chain_tip in any::<ChainTipBlock>(),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -57,7 +61,7 @@ proptest! {
             // The first call to `poll_ready` shouldn't clear the storage yet.
             mempool.dummy_call().await;
 
-            prop_assert_eq!(mempool.storage().tx_ids().len(), 1);
+            prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
             // Simulate a chain reset.
             chain_tip_sender.set_finalized_tip(chain_tip);
@@ -65,7 +69,7 @@ proptest! {
             // This time a call to `poll_ready` should clear the storage.
             mempool.dummy_call().await;
 
-            prop_assert!(mempool.storage().tx_ids().is_empty());
+            prop_assert_eq!(mempool.storage().transaction_count(), 0);
 
             peer_set.expect_no_requests().await?;
             state_service.expect_no_requests().await?;
@@ -79,7 +83,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_if_syncer_falls_behind(
         network in any::<Network>(),
-        transaction in any::<UnminedTx>(),
+        transaction in any::<VerifiedUnminedTx>(),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -110,7 +114,7 @@ proptest! {
             // The first call to `poll_ready` shouldn't clear the storage yet.
             mempool.dummy_call().await;
 
-            prop_assert_eq!(mempool.storage().tx_ids().len(), 1);
+            prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
             // Simulate the synchronizer catching up to the network chain tip.
             mempool.disable(&mut recent_syncs).await;
@@ -121,7 +125,7 @@ proptest! {
             // Enable the mempool again so the storage can be accessed.
             mempool.enable(&mut recent_syncs).await;
 
-            prop_assert!(mempool.storage().tx_ids().is_empty());
+            prop_assert_eq!(mempool.storage().transaction_count(), 0);
 
             peer_set.expect_no_requests().await?;
             state_service.expect_no_requests().await?;
@@ -150,8 +154,8 @@ fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
 
-    let mempool = Mempool::new(
-        network,
+    let (mempool, _transaction_receiver) = Mempool::new(
+        &mempool::Config::default(),
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         Buffer::new(BoxService::new(state_service.clone()), 1),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),

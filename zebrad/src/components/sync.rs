@@ -15,12 +15,18 @@ use zebra_chain::{
     block::{self, Block},
     parameters::genesis_hash,
 };
+use zebra_consensus::{
+    chain::VerifyChainError, BlockError, VerifyBlockError, VerifyCheckpointError,
+};
 use zebra_network as zn;
 use zebra_state as zs;
 
-use crate::{config::ZebradConfig, BoxError};
+use crate::{
+    components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
+};
 
 mod downloads;
+mod gossip;
 mod recent_sync_lengths;
 mod status;
 
@@ -28,6 +34,8 @@ mod status;
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
+
+pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
@@ -73,7 +81,7 @@ const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
+pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Controls how long we wait for a block download request to complete.
 ///
@@ -312,10 +320,7 @@ where
                             tracing::trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
-                            if format!("{:?}", e).contains("AlreadyVerified {") {
-                                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
-                            } else {
-                                tracing::warn!(?e, "error downloading and verifying block");
+                            if Self::should_restart_sync(e) {
                                 continue 'sync;
                             }
                         }
@@ -349,10 +354,7 @@ where
                         }
 
                         Err(e) => {
-                            if format!("{:?}", e).contains("AlreadyVerified {") {
-                                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
-                            } else {
-                                tracing::warn!(?e, "error downloading and verifying block");
+                            if Self::should_restart_sync(e) {
                                 continue 'sync;
                             }
                         }
@@ -711,5 +713,63 @@ where
             "sync.downloads.in_flight",
             self.downloads.in_flight() as f64
         );
+    }
+
+    /// Return if the sync should be restarted based on the given error
+    /// from the block downloader and verifier stream.
+    fn should_restart_sync(e: BlockDownloadVerifyError) -> bool {
+        match e {
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Checkpoint(
+                VerifyCheckpointError::AlreadyVerified { .. },
+            )) => {
+                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
+                VerifyBlockError::Block {
+                    source: BlockError::AlreadyInChain(_, _),
+                },
+            )) => {
+                tracing::debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
+                VerifyBlockError::Commit(ref source),
+            )) if format!("{:?}", source).contains("block is already committed to the state") => {
+                // TODO: improve this by checking the type
+                // https://github.com/ZcashFoundation/zebra/issues/2908
+                tracing::debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::CancelledDuringDownload
+            | BlockDownloadVerifyError::CancelledDuringVerification => {
+                tracing::debug!(error = ?e, "block verification was cancelled, continuing");
+                false
+            }
+            _ => {
+                // download_and_verify downcasts errors from the block verifier
+                // into VerifyChainError, and puts the result inside one of the
+                // BlockDownloadVerifyError enumerations. This downcast could
+                // become incorrect e.g. after some refactoring, and it is difficult
+                // to write a test to check it. The test below is a best-effort
+                // attempt to catch if that happens and log it.
+                // TODO: add a proper test and remove this
+                // https://github.com/ZcashFoundation/zebra/issues/2909
+                let err_str = format!("{:?}", e);
+                if err_str.contains("AlreadyVerified")
+                    || err_str.contains("AlreadyInChain")
+                    || err_str.contains("block is already committed to the state")
+                {
+                    tracing::error!(?e,
+                        "a BlockDownloadVerifyError that should have been filtered out was detected, \
+                        which possibly indicates a programming error in the downcast inside \
+                        zebrad::components::sync::downloads::Downloads::download_and_verify"
+                    )
+                }
+
+                tracing::warn!(?e, "error downloading and verifying block");
+                true
+            }
+        }
     }
 }

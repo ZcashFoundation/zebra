@@ -195,7 +195,16 @@ where
     S: Service<SocketAddr, Response = Change<SocketAddr, peer::Client>, Error = BoxError> + Clone,
     S::Future: Send + 'static,
 {
-    info!(?initial_peers, "connecting to initial peer set");
+    let initial_peer_count = initial_peers.len();
+    let mut handshake_success_total: usize = 0;
+    let mut handshake_error_total: usize = 0;
+
+    info!(
+        ?initial_peer_count,
+        ?initial_peers,
+        "connecting to initial peer set"
+    );
+
     // # Security
     //
     // TODO: rate-limit initial seed peer connections (#2326)
@@ -217,12 +226,37 @@ where
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
-        // this is verbose, but it's better than just hanging with no output
-        if let Err((addr, ref e)) = handshake_result {
-            info!(?addr, ?e, "an initial peer connection failed");
+        match handshake_result {
+            Ok(ref change) => {
+                handshake_success_total += 1;
+                debug!(
+                    ?handshake_success_total,
+                    ?handshake_error_total,
+                    ?change,
+                    "an initial peer handshake succeeded"
+                );
+            }
+            Err((addr, ref e)) => {
+                // this is verbose, but it's better than just hanging with no output when there are errors
+                handshake_error_total += 1;
+                info!(
+                    ?handshake_success_total,
+                    ?handshake_error_total,
+                    ?addr,
+                    ?e,
+                    "an initial peer connection failed"
+                );
+            }
         }
+
         tx.send(handshake_result.map_err(|(_addr, e)| e)).await?;
     }
+
+    info!(
+        ?handshake_success_total,
+        ?handshake_error_total,
+        "finished connecting to initial seed peers"
+    );
 
     Ok(())
 }
@@ -246,10 +280,12 @@ async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     };
     if config.listen_addr.port() == wrong_net.default_port() {
         warn!(
-            "We are configured with port {} for {:?}, but that port is the default port for {:?}",
+            "We are configured with port {} for {:?}, but that port is the default port for {:?}. The default port for {:?} is {}.",
             config.listen_addr.port(),
             config.network,
-            wrong_net
+            wrong_net,
+            config.network,
+            config.network.default_port(),
         );
     }
 

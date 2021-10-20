@@ -5,7 +5,14 @@ mod disk_format;
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Borrow, collections::HashMap, convert::TryInto, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    convert::TryInto,
+    io::{stderr, stdout, Write},
+    path::Path,
+    sync::Arc,
+};
 
 use zebra_chain::{
     amount::NonNegative,
@@ -93,12 +100,17 @@ impl FinalizedState {
             network,
         };
 
+        // TODO: remove these extra logs once bugs like #2905 are fixed
+        tracing::info!("reading cached tip height");
         if let Some(tip_height) = new_state.finalized_tip_height() {
+            tracing::info!(?tip_height, "loaded cached tip height");
+
             if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
                     .debug_stop_at_height
                     .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
 
+                tracing::info!("reading cached tip hash");
                 let tip_hash = new_state.finalized_tip_hash();
 
                 if tip_height > debug_stop_at_height {
@@ -119,10 +131,14 @@ impl FinalizedState {
 
                 // RocksDB can do a cleanup when column families are opened.
                 // So we want to drop it before we exit.
+                tracing::info!("closing cached state");
                 std::mem::drop(new_state);
-                std::process::exit(0);
+
+                Self::exit_process();
             }
         }
+
+        tracing::info!(tip = ?new_state.tip(), "loaded Zebra state cache");
 
         new_state
     }
@@ -180,9 +196,9 @@ impl FinalizedState {
             self.max_queued_height = height.0 as _;
         }
 
-        metrics::gauge!("state.finalized.queued.max.height", self.max_queued_height);
+        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
         metrics::gauge!(
-            "state.finalized.queued.block.count",
+            "state.checkpoint.queued.block.count",
             self.queued_by_prev_hash.len() as f64
         );
 
@@ -228,8 +244,6 @@ impl FinalizedState {
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        block_precommit_metrics(&finalized);
-
         let finalized_tip_height = self.finalized_tip_height();
 
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
@@ -443,22 +457,51 @@ impl FinalizedState {
         // In case of errors, propagate and do not write the batch.
         let batch = prepare_commit()?;
 
+        // The block has passed contextual validation, so update the metrics
+        block_precommit_metrics(&block, hash, height);
+
         let result = self.db.write(batch).map(|()| hash);
 
         tracing::trace!(?source, "committed block from");
 
         if result.is_ok() && self.is_at_stop_height(height) {
             tracing::info!(?source, "committed block from");
-            tracing::info!(?height, ?hash, "stopping at configured height");
+            tracing::info!(
+                ?height,
+                ?hash,
+                "stopping at configured height, flushing database to disk"
+            );
+
             // We'd like to drop the database here, because that closes the
             // column families and the database. But Rust's ownership rules
-            // make that difficult, so we just flush instead.
+            // make that difficult, so we just flush and delete ephemeral data instead.
+
+            // TODO: remove these extra logs once bugs like #2905 are fixed
             self.db.flush().expect("flush is successful");
+            tracing::info!("flushed database to disk");
+
             self.delete_ephemeral();
-            std::process::exit(0);
+
+            Self::exit_process();
         }
 
         result.map_err(Into::into)
+    }
+
+    /// Exit the host process.
+    ///
+    /// Designed for debugging and tests.
+    fn exit_process() -> ! {
+        tracing::info!("exiting Zebra");
+
+        // Some OSes require a flush to send all output to the terminal.
+        // Zebra's logging doesn't depend on `tokio`, so we flush the stdlib sync streams.
+        //
+        // TODO: if this doesn't work, send an empty line as well.
+        let _ = stdout().lock().flush();
+        let _ = stderr().lock().flush();
+
+        std::process::exit(0);
     }
 
     /// Commit a finalized block to the state.
@@ -473,17 +516,23 @@ impl FinalizedState {
 
         let block_result;
         if result.is_ok() {
-            metrics::counter!("state.finalized.committed.block.count", 1);
+            metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
-                "state.finalized.committed.block.height",
+                "state.checkpoint.finalized.block.height",
                 finalized.height.0 as _
             );
 
+            // This height gauge is updated for both fully verified and checkpoint blocks.
+            // These updates can't conflict, because the state makes sure that blocks
+            // are committed in order.
+            metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
+            metrics::counter!("zcash.chain.verified.block.total", 1);
+
             block_result = Ok(finalized);
         } else {
-            metrics::counter!("state.finalized.error.block.count", 1);
+            metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
-                "state.finalized.error.block.height",
+                "state.checkpoint.error.block.height",
                 finalized.height.0 as _
             );
 
@@ -625,7 +674,8 @@ impl FinalizedState {
     fn delete_ephemeral(&self) {
         if self.ephemeral {
             let path = self.db.path();
-            tracing::debug!("removing temporary database files {:?}", path);
+            tracing::info!(cache_path = ?path, "removing temporary database files");
+
             // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
             // but the Zcash blockchain might not fit in memory. So we just
             // delete the database files instead.
@@ -638,7 +688,11 @@ impl FinalizedState {
             // delete them using standard filesystem APIs. Deleting open files
             // might cause errors on non-Unix platforms, so we ignore the result.
             // (The OS will delete them eventually anyway.)
-            let _res = std::fs::remove_dir_all(path);
+            let res = std::fs::remove_dir_all(path);
+
+            // TODO: downgrade to debug once bugs like #2905 are fixed
+            //       but leave any errors at "info" level
+            tracing::info!(?res, "removed temporary database files");
         }
     }
 
@@ -677,9 +731,7 @@ impl Drop for FinalizedState {
     }
 }
 
-fn block_precommit_metrics(finalized: &FinalizedBlock) {
-    let (hash, height, block) = (finalized.hash, finalized.height, finalized.block.as_ref());
-
+fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
     let transaction_count = block.transactions.len();
     let transparent_prevout_count = block
         .transactions
@@ -723,6 +775,10 @@ fn block_precommit_metrics(finalized: &FinalizedBlock) {
         orchard_nullifier_count,
         "preparing to commit finalized block"
     );
+
+    metrics::counter!("state.finalized.block.count", 1);
+    metrics::gauge!("state.finalized.block.height", height.0 as _);
+
     metrics::counter!(
         "state.finalized.cumulative.transactions",
         transaction_count as u64

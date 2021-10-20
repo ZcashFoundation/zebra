@@ -74,6 +74,16 @@ pub enum PeerError {
 #[derive(Default, Clone)]
 pub(super) struct ErrorSlot(Arc<std::sync::Mutex<Option<SharedPeerError>>>);
 
+impl std::fmt::Debug for ErrorSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // don't hang if the mutex is locked
+        // show the panic if the mutex was poisoned
+        f.debug_struct("ErrorSlot")
+            .field("error", &self.0.try_lock())
+            .finish()
+    }
+}
+
 impl ErrorSlot {
     /// Read the current error in the slot.
     ///

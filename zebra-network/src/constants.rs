@@ -1,6 +1,6 @@
 //! Definitions of constants.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -8,7 +8,10 @@ use regex::Regex;
 // XXX should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
-use zebra_chain::{parameters::NetworkUpgrade, serialization::Duration32};
+use zebra_chain::{
+    parameters::{Network, NetworkUpgrade},
+    serialization::Duration32,
+};
 
 /// The buffer size for the peer set.
 ///
@@ -118,20 +121,6 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-alpha.18/";
 /// network upgrades.
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_015);
 
-/// The minimum network protocol version accepted by this crate for each network,
-/// represented as a network upgrade.
-///
-/// The minimum protocol version is used to check the protocol versions of our
-/// peers during the initial block download. After the intial block download,
-/// we use the current block height to select the minimum network protocol
-/// version.
-///
-/// If peer versions are too old, we will disconnect from them.
-///
-/// The minimum network protocol version typically changes after Mainnet network
-/// upgrades.
-pub const INITIAL_MIN_NETWORK_PROTOCOL_VERSION: NetworkUpgrade = NetworkUpgrade::Canopy;
-
 /// The default RTT estimate for peer responses.
 ///
 /// We choose a high value for the default RTT, so that new peers must prove they
@@ -149,6 +138,25 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(REQUEST_TIMEOUT.as_se
 pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
 
 lazy_static! {
+    /// The minimum network protocol version accepted by this crate for each network,
+    /// represented as a network upgrade.
+    ///
+    /// The minimum protocol version is used to check the protocol versions of our
+    /// peers during the initial block download. After the intial block download,
+    /// we use the current block height to select the minimum network protocol
+    /// version.
+    ///
+    /// If peer versions are too old, we will disconnect from them.
+    ///
+    /// The minimum network protocol version typically changes after Mainnet and/or
+    /// Testnet network upgrades.
+    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, NetworkUpgrade> = {
+        let mut hash_map = HashMap::new();
+        hash_map.insert(Network::Mainnet, NetworkUpgrade::Canopy);
+        hash_map.insert(Network::Testnet, NetworkUpgrade::Nu5);
+        hash_map
+    };
+
     /// OS-specific error when the port attempting to be opened is already in use.
     pub static ref PORT_IN_USE_ERROR: Regex = if cfg!(unix) {
         #[allow(clippy::trivial_regex)]

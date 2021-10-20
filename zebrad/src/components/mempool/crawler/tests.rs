@@ -1,19 +1,25 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
-use proptest::{collection::vec, prelude::*};
+use proptest::{
+    collection::{hash_set, vec},
+    prelude::*,
+};
 use tokio::time;
 
-use zebra_chain::transaction::UnminedTxId;
+use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 use zebra_network as zn;
+use zebra_state::ChainTipSender;
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
-use super::{
-    super::{
-        super::{mempool, sync::RecentSyncLengths},
+use crate::components::{
+    mempool::{
+        self,
+        crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
         downloads::Gossip,
         error::MempoolError,
+        Config,
     },
-    Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY,
+    sync::RecentSyncLengths,
 };
 
 /// The number of iterations to crawl while testing.
@@ -54,7 +60,8 @@ proptest! {
         sync_lengths.push(0);
 
         runtime.block_on(async move {
-            let (mut peer_set, _mempool, sync_status, mut recent_sync_lengths) = setup_crawler();
+            let (mut peer_set, _mempool, sync_status, mut recent_sync_lengths, _chain_tip_sender,
+ ) = setup_crawler();
 
             time::pause();
 
@@ -64,7 +71,7 @@ proptest! {
                 for _ in 0..CRAWL_ITERATIONS {
                     for _ in 0..FANOUT {
                         if mempool_is_enabled {
-                            respond_with_transaction_ids(&mut peer_set, vec![]).await?;
+                            respond_with_transaction_ids(&mut peer_set, HashSet::new()).await?;
                         } else {
                             peer_set.expect_no_requests().await?;
                         }
@@ -92,7 +99,7 @@ proptest! {
     /// the mempool.
     #[test]
     fn crawled_transactions_are_forwarded_to_downloader(
-        transaction_ids in vec(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
+        transaction_ids in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
     ) {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -103,7 +110,7 @@ proptest! {
         let transaction_id_count = transaction_ids.len();
 
         runtime.block_on(async move {
-            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths) =
+            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths, _chain_tip_sender) =
                 setup_crawler();
 
             time::pause();
@@ -132,11 +139,15 @@ proptest! {
     #[test]
     fn transaction_id_forwarding_errors_dont_stop_the_crawler(
         service_call_error in any::<MempoolError>(),
-        transaction_ids_for_call_failure in vec(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
+        transaction_ids_for_call_failure in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
         transaction_ids_and_responses in
             vec(any::<(UnminedTxId, Result<(), MempoolError>)>(), 1..MAX_CRAWLED_TX),
-        transaction_ids_for_return_to_normal in vec(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
+        transaction_ids_for_return_to_normal in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
     ) {
+        // Make transaction_ids_and_responses unique
+        let unique_transaction_ids_and_responses: HashSet<UnminedTxId> = transaction_ids_and_responses.iter().map(|(id, _result)| id).copied().collect();
+        let transaction_ids_and_responses: Vec<(UnminedTxId, Result<(), MempoolError>)> = unique_transaction_ids_and_responses.iter().map(|unique_id| transaction_ids_and_responses.iter().find(|(id, _result)| id == unique_id).unwrap()).cloned().collect();
+
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -144,7 +155,7 @@ proptest! {
         let _guard = runtime.enter();
 
         runtime.block_on(async move {
-            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths) =
+            let (mut peer_set, mut mempool, _sync_status, mut recent_sync_lengths, _chain_tip_sender) =
                 setup_crawler();
 
             time::pause();
@@ -154,11 +165,11 @@ proptest! {
 
             // Prepare to simulate download errors.
             let download_result_count = transaction_ids_and_responses.len();
-            let mut transaction_ids_for_download_errors = Vec::with_capacity(download_result_count);
+            let mut transaction_ids_for_download_errors = HashSet::with_capacity(download_result_count);
             let mut download_result_list = Vec::with_capacity(download_result_count);
 
             for (transaction_id, result) in transaction_ids_and_responses {
-                transaction_ids_for_download_errors.push(transaction_id);
+                transaction_ids_for_download_errors.insert(transaction_id);
                 download_result_list.push(result);
             }
 
@@ -218,25 +229,49 @@ proptest! {
 }
 
 /// Spawn a crawler instance using mock services.
-fn setup_crawler() -> (MockPeerSet, MockMempool, SyncStatus, RecentSyncLengths) {
+fn setup_crawler() -> (
+    MockPeerSet,
+    MockMempool,
+    SyncStatus,
+    RecentSyncLengths,
+    ChainTipSender,
+) {
     let peer_set = MockService::build().for_prop_tests();
     let mempool = MockService::build().for_prop_tests();
     let (sync_status, recent_sync_lengths) = SyncStatus::new();
 
-    Crawler::spawn(peer_set.clone(), mempool.clone(), sync_status.clone());
+    // the network should be irrelevant here
+    let (chain_tip_sender, _latest_chain_tip, chain_tip_change) =
+        ChainTipSender::new(None, Network::Mainnet);
 
-    (peer_set, mempool, sync_status, recent_sync_lengths)
+    Crawler::spawn(
+        &Config::default(),
+        peer_set.clone(),
+        mempool.clone(),
+        sync_status.clone(),
+        chain_tip_change,
+    );
+
+    (
+        peer_set,
+        mempool,
+        sync_status,
+        recent_sync_lengths,
+        chain_tip_sender,
+    )
 }
 
 /// Intercept a request for mempool transaction IDs and respond with the `transaction_ids` list.
 async fn respond_with_transaction_ids(
     peer_set: &mut MockPeerSet,
-    transaction_ids: Vec<UnminedTxId>,
+    transaction_ids: HashSet<UnminedTxId>,
 ) -> Result<(), TestCaseError> {
     peer_set
         .expect_request(zn::Request::MempoolTransactionIds)
         .await?
-        .respond(zn::Response::TransactionIds(transaction_ids));
+        .respond(zn::Response::TransactionIds(
+            transaction_ids.into_iter().collect(),
+        ));
 
     Ok(())
 }
@@ -254,7 +289,7 @@ async fn respond_with_transaction_ids(
 /// If `responses` contains more items than the [`FANOUT`] number.
 async fn crawler_iteration(
     peer_set: &mut MockPeerSet,
-    responses: Vec<Vec<UnminedTxId>>,
+    responses: Vec<HashSet<UnminedTxId>>,
 ) -> Result<(), TestCaseError> {
     let empty_responses = FANOUT
         .checked_sub(responses.len())
@@ -265,7 +300,7 @@ async fn crawler_iteration(
     }
 
     for _ in 0..empty_responses {
-        respond_with_transaction_ids(peer_set, vec![]).await?;
+        respond_with_transaction_ids(peer_set, HashSet::new()).await?;
     }
 
     peer_set.expect_no_requests().await?;
@@ -284,16 +319,27 @@ async fn crawler_iteration(
 /// If `response` and `expected_transaction_ids` have different sizes.
 async fn respond_to_queue_request(
     mempool: &mut MockMempool,
-    expected_transaction_ids: Vec<UnminedTxId>,
+    expected_transaction_ids: HashSet<UnminedTxId>,
     response: Vec<Result<(), MempoolError>>,
 ) -> Result<(), TestCaseError> {
-    let request_parameter = expected_transaction_ids
-        .into_iter()
-        .map(Gossip::Id)
-        .collect();
-
     mempool
-        .expect_request(mempool::Request::Queue(request_parameter))
+        .expect_request_that(|req| {
+            if let mempool::Request::Queue(req) = req {
+                let ids: HashSet<UnminedTxId> = req
+                    .iter()
+                    .filter_map(|gossip| {
+                        if let Gossip::Id(id) = gossip {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                ids == expected_transaction_ids
+            } else {
+                false
+            }
+        })
         .await?
         .respond(mempool::Response::Queued(response));
 
@@ -307,16 +353,27 @@ async fn respond_to_queue_request(
 /// from queuing the transactions for downloading.
 async fn respond_to_queue_request_with_error(
     mempool: &mut MockMempool,
-    expected_transaction_ids: Vec<UnminedTxId>,
+    expected_transaction_ids: HashSet<UnminedTxId>,
     error: MempoolError,
 ) -> Result<(), TestCaseError> {
-    let request_parameter = expected_transaction_ids
-        .into_iter()
-        .map(Gossip::Id)
-        .collect();
-
     mempool
-        .expect_request(mempool::Request::Queue(request_parameter))
+        .expect_request_that(|req| {
+            if let mempool::Request::Queue(req) = req {
+                let ids: HashSet<UnminedTxId> = req
+                    .iter()
+                    .filter_map(|gossip| {
+                        if let Gossip::Id(id) = gossip {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                ids == expected_transaction_ids
+            } else {
+                false
+            }
+        })
         .await?
         .respond(Err(error));
 

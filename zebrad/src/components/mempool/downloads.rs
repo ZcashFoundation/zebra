@@ -1,3 +1,26 @@
+//! Transaction downloader and verifier.
+//!
+//! The main struct [`Downloads`] allows downloading and verifying transactions.
+//! It is used by the mempool to get transactions into it. It is also able to
+//! just verify transactions that were directly pushed.
+//!
+//! The verification itself is done by the [`zebra_consensus`] crate.
+//!
+//! Verified transactions are returned to the caller in [`Downloads::poll_next`].
+//! This is in contrast to the block downloader and verifiers which don't
+//! return anything and forward the verified blocks to the state themselves.
+//!
+//! # Correctness
+//!
+//! The mempool downloader doesn't send verified transactions to the [`Mempool`] service.
+//! So Zebra must spawn a task that regularly polls the downloader for ready transactions.
+//! (To ensure that transactions propagate across the entire network in each 75s block interval,
+//! the polling interval should be around 5-10 seconds.)
+//!
+//! Polling the downloader from [`Mempool::poll_ready`] is not sufficient.
+//! [`Service::poll_ready`] is only called when there is a service request.
+//! But we want to download and gossip transactions,
+//! even when there are no other service requests.
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
@@ -5,18 +28,18 @@ use std::{
     time::Duration,
 };
 
-use color_eyre::eyre::eyre;
 use futures::{
     future::TryFutureExt,
     ready,
     stream::{FuturesUnordered, Stream},
 };
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
+use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_state as zs;
@@ -65,6 +88,29 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// Therefore, this attack can be carried out by a single malicious node.
 pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
 
+/// Errors that can occur while downloading and verifying a transaction.
+#[derive(Error, Debug)]
+#[allow(dead_code)]
+pub enum TransactionDownloadVerifyError {
+    #[error("transaction is already in state")]
+    InState,
+
+    #[error("error in state service")]
+    StateError(#[source] BoxError),
+
+    #[error("transaction not validated because the tip is empty")]
+    NoTip,
+
+    #[error("error downloading transaction")]
+    DownloadFailed(#[source] BoxError),
+
+    #[error("transaction download / verification was cancelled")]
+    Cancelled,
+
+    #[error("transaction did not pass consensus validation")]
+    Invalid(#[from] zebra_consensus::error::TransactionError),
+}
+
 /// A gossiped transaction, which can be the transaction itself or just its ID.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Gossip {
@@ -95,7 +141,7 @@ impl From<UnminedTx> for Gossip {
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
-#[pin_project]
+#[pin_project(PinnedDrop)]
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZS>
 where
@@ -120,7 +166,9 @@ where
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
     #[pin]
-    pending: FuturesUnordered<JoinHandle<Result<UnminedTx, (BoxError, UnminedTxId)>>>,
+    pending: FuturesUnordered<
+        JoinHandle<Result<VerifiedUnminedTx, (TransactionDownloadVerifyError, UnminedTxId)>>,
+    >,
 
     /// A list of channels that can be used to cancel pending transaction download and
     /// verify tasks.
@@ -136,7 +184,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<UnminedTx, BoxError>;
+    type Item = Result<VerifiedUnminedTx, (UnminedTxId, TransactionDownloadVerifyError)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -152,12 +200,12 @@ where
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("transaction download and verify tasks must not panic") {
                 Ok(tx) => {
-                    this.cancel_handles.remove(&tx.id);
+                    this.cancel_handles.remove(&tx.transaction.id);
                     Poll::Ready(Some(Ok(tx)))
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
+                    Poll::Ready(Some(Err((hash, e))))
                 }
             }
         } else {
@@ -179,8 +227,11 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    /// Initialize a new download stream with the provided `network` and
-    /// `verifier` services.
+    /// Initialize a new download stream with the provided services.
+    ///
+    /// `network` is used to download transactions.
+    /// `verifier` is used to verify transactions.
+    /// `state` is used to check if transactions are already in the state.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
@@ -237,29 +288,43 @@ where
             Self::transaction_in_state(&mut state, txid).await?;
 
             let height = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Err("no block at the tip".into()),
+                Ok(zs::Response::Tip(None)) => Err(TransactionDownloadVerifyError::NoTip),
                 Ok(zs::Response::Tip(Some((height, _hash)))) => Ok(height),
                 Ok(_) => unreachable!("wrong response"),
-                Err(e) => Err(e),
+                Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
             }?;
-            let height = (height + 1).ok_or_else(|| eyre!("no next height"))?;
+            let height = (height + 1).expect("must have next height");
 
             let tx = match gossiped_tx {
                 Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
-                    let tx = match network.oneshot(req).await? {
-                        zn::Response::Transactions(mut txs) => txs
-                            .pop()
-                            .expect("successful response has the transaction in it"),
+                    let tx = match network
+                        .oneshot(req)
+                        .await
+                        .map_err(|e| TransactionDownloadVerifyError::DownloadFailed(e))?
+                    {
+                        zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
+                            TransactionDownloadVerifyError::DownloadFailed(
+                                "no transactions returned".into(),
+                            )
+                        })?,
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
-                    metrics::counter!("gossip.downloaded.transaction.count", 1);
+                    metrics::counter!(
+                        "mempool.downloaded.transactions.total",
+                        1,
+                        "version" => format!("{}",tx.transaction.version()),
+                    );
                     tx
                 }
                 Gossip::Tx(tx) => {
-                    metrics::counter!("gossip.pushed.transaction.count", 1);
+                    metrics::counter!(
+                        "mempool.pushed.transactions.total",
+                        1,
+                        "version" => format!("{}",tx.transaction.version()),
+                    );
                     tx
                 }
             };
@@ -269,15 +334,22 @@ where
                     transaction: tx.clone(),
                     height,
                 })
-                .map_ok(|_hash| tx)
+                .map_ok(|rsp| {
+                    rsp.into_mempool_transaction()
+                        .expect("unexpected non-mempool response to mempool request")
+                })
                 .await;
 
             tracing::debug!(?txid, ?result, "verified transaction for the mempool");
 
-            result
+            result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
         .map_ok(|tx| {
-            metrics::counter!("gossip.verified.transaction.count", 1);
+            metrics::counter!(
+                "mempool.verified.transactions.total",
+                1,
+                "version" => format!("{}", tx.transaction.transaction.version()),
+            );
             tx
         })
         // Tack the hash onto the error so we can remove the cancel handle
@@ -291,8 +363,8 @@ where
             tokio::select! {
                 _ = &mut cancel_rx => {
                     tracing::trace!("task cancelled prior to completion");
-                    metrics::counter!("gossip.cancelled.count", 1);
-                    Err(("canceled".into(), txid))
+                    metrics::counter!("mempool.cancelled.verify.tasks.total", 1);
+                    Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
                 verification = fut => verification,
             }
@@ -310,14 +382,18 @@ where
             ?MAX_INBOUND_CONCURRENCY,
             "queued transaction hash for download"
         );
-        metrics::gauge!("gossip.queued.transaction.count", self.pending.len() as _);
+        metrics::gauge!(
+            "mempool.currently.queued.transactions",
+            self.pending.len() as _
+        );
+        metrics::counter!("mempool.queued.transactions.total", 1);
 
         Ok(())
     }
 
     /// Cancel download/verification tasks of transactions with the
     /// given transaction hash (see [`UnminedTxId::mined_id`]).
-    pub fn cancel(&mut self, mined_ids: HashSet<&transaction::Hash>) {
+    pub fn cancel(&mut self, mined_ids: &HashSet<transaction::Hash>) {
         // TODO: this can be simplified with [`HashMap::drain_filter`] which
         // is currently nightly-only experimental API.
         let removed_txids: Vec<UnminedTxId> = self
@@ -347,6 +423,10 @@ where
         }
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
+        metrics::gauge!(
+            "mempool.currently.queued.transactions",
+            self.pending.len() as _
+        );
     }
 
     /// Get the number of currently in-flight download tasks.
@@ -357,20 +437,39 @@ where
     }
 
     /// Check if transaction is already in the state.
-    async fn transaction_in_state(state: &mut ZS, txid: UnminedTxId) -> Result<(), BoxError> {
+    async fn transaction_in_state(
+        state: &mut ZS,
+        txid: UnminedTxId,
+    ) -> Result<(), TransactionDownloadVerifyError> {
         // Check if the transaction is already in the state.
         match state
             .ready_and()
-            .await?
+            .await
+            .map_err(|e| TransactionDownloadVerifyError::StateError(e))?
             .call(zs::Request::Transaction(txid.mined_id()))
             .await
         {
             Ok(zs::Response::Transaction(None)) => Ok(()),
-            Ok(zs::Response::Transaction(Some(_))) => Err("already present in state".into()),
+            Ok(zs::Response::Transaction(Some(_))) => Err(TransactionDownloadVerifyError::InState),
             Ok(_) => unreachable!("wrong response"),
-            Err(e) => Err(e),
+            Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
         }?;
 
         Ok(())
+    }
+}
+
+#[pinned_drop]
+impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN::Future: Send,
+    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
+{
+    fn drop(self: Pin<&mut Self>) {
+        metrics::gauge!("mempool.currently.queued.transactions", 0 as _);
     }
 }

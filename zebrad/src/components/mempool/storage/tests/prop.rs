@@ -1,17 +1,191 @@
-use std::fmt::Debug;
+use std::{collections::HashSet, convert::TryFrom, env, fmt::Debug};
 
-use proptest::prelude::*;
+use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use zebra_chain::{
-    at_least_one, orchard,
-    primitives::Groth16Proof,
+    amount::Amount,
+    at_least_one,
+    fmt::{DisplayToDebug, SummaryDebug},
+    orchard,
+    primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
-    transaction::{self, Transaction, UnminedTx},
+    serialization::AtLeastOne,
+    sprout,
+    transaction::{self, JoinSplitData, Transaction, UnminedTxId, VerifiedUnminedTx},
     transparent, LedgerState,
 };
 
-use super::super::{MempoolError, Storage};
+use crate::components::mempool::{
+    storage::{
+        MempoolError, RejectionError, SameEffectsTipRejectionError, Storage,
+        MAX_EVICTION_MEMORY_ENTRIES, MEMPOOL_SIZE,
+    },
+    SameEffectsChainRejectionError,
+};
+
+use MultipleTransactionRemovalTestInput::*;
+
+/// The mempool list limit tests can run for a long time.
+///
+/// We reduce the number of cases for those tests,
+/// so individual tests take less than 10 seconds on most machines.
+const DEFAULT_MEMPOOL_LIST_PROPTEST_CASES: u32 = 64;
+
+proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MEMPOOL_LIST_PROPTEST_CASES))
+    )]
+
+    /// Test that the reject list length limits are applied when inserting conflicting transactions.
+    #[test]
+    fn reject_lists_are_limited_insert_conflict(
+        input in any::<SpendConflictTestInput>(),
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::default();
+
+        let (first_transaction, second_transaction) = input.conflicting_transactions();
+        let input_permutations = vec![
+            (first_transaction.clone(), second_transaction.clone()),
+            (second_transaction, first_transaction),
+        ];
+
+        for (transaction_to_accept, transaction_to_reject) in input_permutations {
+            let id_to_accept = transaction_to_accept.transaction.id;
+
+            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+
+            // Make unique IDs by converting the index to bytes, and writing it to each ID
+            let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
+                let index = index.to_le_bytes();
+                rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+                if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                    auth_digest.0[0..4].copy_from_slice(&index);
+                }
+
+                rejection_template
+            });
+
+            for rejection in unique_ids {
+                storage.reject(rejection, SameEffectsTipRejectionError::SpendConflict.into());
+            }
+
+            // Make sure there were no duplicates
+            prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+
+            // The transaction_to_reject will conflict with at least one of:
+            // - transaction_to_accept, or
+            // - a rejection from rejections
+            prop_assert_eq!(
+                storage.insert(transaction_to_reject),
+                Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
+            );
+
+            // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
+            // the storage should have cleared the reject list
+            prop_assert_eq!(storage.rejected_transaction_count(), 0);
+
+            storage.clear();
+        }
+    }
+
+    /// Test that the reject list length limits are applied when evicting transactions.
+    #[test]
+    fn reject_lists_are_limited_insert_eviction(
+        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::default();
+
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        });
+
+        for rejection in unique_ids {
+            storage.reject(rejection, SameEffectsChainRejectionError::RandomlyEvicted.into());
+        }
+
+        // Make sure there were no duplicates
+        prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+
+        for transaction in transactions {
+            let tx_id = transaction.transaction.id;
+
+            if storage.transaction_count() < MEMPOOL_SIZE {
+                // The initial transactions should be successful
+                prop_assert_eq!(
+                    storage.insert(transaction),
+                    Ok(tx_id)
+                );
+            } else {
+                // The final transaction will cause a random eviction,
+                // which might return an error if this transaction is chosen
+                let result = storage.insert(transaction);
+
+                if result.is_ok() {
+                    prop_assert_eq!(
+                        result,
+                        Ok(tx_id)
+                    );
+                } else {
+                    prop_assert_eq!(
+                        result,
+                        Err(MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::RandomlyEvicted))
+                    );
+                }
+            }
+        }
+
+        // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
+        // the storage should have cleared the reject list
+        prop_assert_eq!(storage.rejected_transaction_count(), 0);
+    }
+
+    /// Test that the reject list length limits are applied when directly rejecting transactions.
+    #[test]
+    fn reject_lists_are_limited_reject(
+        rejection_error in any::<RejectionError>(),
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::default();
+
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let unique_ids = (0..(MAX_EVICTION_MEMORY_ENTRIES + 1) as u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        });
+
+        for (index, rejection) in unique_ids.enumerate() {
+            storage.reject(rejection, rejection_error.clone());
+
+            if index == MAX_EVICTION_MEMORY_ENTRIES - 1 {
+                // Make sure there were no duplicates
+                prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+            } else if index == MAX_EVICTION_MEMORY_ENTRIES {
+                // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
+                // all with the same error,
+                // the storage should have cleared the reject list
+                prop_assert_eq!(storage.rejected_transaction_count(), 0);
+            }
+        }
+    }
+}
 
 proptest! {
     /// Test if a transaction that has a spend conflict with a transaction already in the mempool
@@ -30,22 +204,114 @@ proptest! {
         ];
 
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
-            let id_to_accept = transaction_to_accept.id;
-            let id_to_reject = transaction_to_reject.id;
+            let id_to_accept = transaction_to_accept.transaction.id;
+            let id_to_reject = transaction_to_reject.transaction.id;
 
-            assert_eq!(
-                storage.insert(transaction_to_accept),
-                Ok(id_to_accept)
-            );
+            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
 
-            assert_eq!(
+            prop_assert_eq!(
                 storage.insert(transaction_to_reject),
-                Err(MempoolError::Rejected)
+                Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
-            assert!(storage.contains_rejected(&id_to_reject));
+            prop_assert!(storage.contains_rejected(&id_to_reject));
 
             storage.clear();
+        }
+    }
+
+    /// Test if a rejected transaction is properly rolled back.
+    ///
+    /// When a transaction is rejected, it should not leave anything in the cache that could lead
+    /// to false detection of spend conflicts.
+    #[test]
+    fn rejected_transactions_are_properly_rolled_back(input in any::<SpendConflictTestInput>())
+    {
+        let mut storage = Storage::default();
+
+        let (first_unconflicting_transaction, second_unconflicting_transaction) =
+            input.clone().unconflicting_transactions();
+        let (first_transaction, second_transaction) = input.conflicting_transactions();
+
+        let input_permutations = vec![
+            (
+                first_transaction.clone(),
+                second_transaction.clone(),
+                second_unconflicting_transaction,
+            ),
+            (
+                second_transaction,
+                first_transaction,
+                first_unconflicting_transaction,
+            ),
+        ];
+
+        for (first_transaction_to_accept, transaction_to_reject, second_transaction_to_accept) in
+            input_permutations
+        {
+            let first_id_to_accept = first_transaction_to_accept.transaction.id;
+            let second_id_to_accept = second_transaction_to_accept.transaction.id;
+            let id_to_reject = transaction_to_reject.transaction.id;
+
+            prop_assert_eq!(
+                storage.insert(first_transaction_to_accept),
+                Ok(first_id_to_accept)
+            );
+
+            prop_assert_eq!(
+                storage.insert(transaction_to_reject),
+                Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
+            );
+
+            prop_assert!(storage.contains_rejected(&id_to_reject));
+
+            prop_assert_eq!(
+                storage.insert(second_transaction_to_accept),
+                Ok(second_id_to_accept)
+            );
+
+            storage.clear();
+        }
+    }
+
+    /// Test if multiple transactions are properly removed.
+    ///
+    /// Attempting to remove multiple transactions must remove all of them and leave all of the
+    /// others.
+    #[test]
+    fn removal_of_multiple_transactions(input in any::<MultipleTransactionRemovalTestInput>()) {
+        let mut storage = Storage::default();
+
+        // Insert all input transactions, and keep track of the IDs of the one that were actually
+        // inserted.
+        let inserted_transactions: HashSet<_> = input.transactions().filter_map(|transaction| {
+            let id = transaction.transaction.id;
+
+            storage.insert(transaction.clone()).ok().map(|_| id)}).collect();
+
+        // Check that the inserted transactions are still there.
+        for transaction_id in &inserted_transactions {
+            prop_assert!(storage.contains_transaction_exact(transaction_id));
+        }
+
+        // Remove some transactions.
+        match &input {
+            RemoveExact { wtx_ids_to_remove, .. } => storage.remove_exact(wtx_ids_to_remove),
+            RemoveSameEffects { mined_ids_to_remove, .. } => storage.remove_same_effects(mined_ids_to_remove),
+        };
+
+        // Check that the removed transactions are not in the storage.
+        let removed_transactions = input.removed_transaction_ids();
+
+        for removed_transaction_id in &removed_transactions {
+            prop_assert!(!storage.contains_transaction_exact(removed_transaction_id));
+        }
+
+        // Check that the remaining transactions are still in the storage.
+        let remaining_transactions = inserted_transactions.difference(&removed_transactions);
+
+        for remaining_transaction_id in remaining_transactions {
+            prop_assert!(storage.contains_transaction_exact(remaining_transaction_id));
         }
     }
 }
@@ -54,26 +320,34 @@ proptest! {
 ///
 /// When the conflict is applied, both transactions will have a shared spend (either a UTXO used as
 /// an input, or a nullifier revealed by both transactions).
-#[derive(Arbitrary, Debug)]
+#[derive(Arbitrary, Clone, Debug)]
 enum SpendConflictTestInput {
     /// Test V4 transactions to include Sprout nullifier conflicts.
     V4 {
-        #[proptest(strategy = "Transaction::v4_strategy(LedgerState::default())")]
-        first: Transaction,
+        #[proptest(
+            strategy = "Transaction::v4_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        first: DisplayToDebug<Transaction>,
 
-        #[proptest(strategy = "Transaction::v4_strategy(LedgerState::default())")]
-        second: Transaction,
+        #[proptest(
+            strategy = "Transaction::v4_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        second: DisplayToDebug<Transaction>,
 
         conflict: SpendConflictForTransactionV4,
     },
 
     /// Test V5 transactions to include Orchard nullifier conflicts.
     V5 {
-        #[proptest(strategy = "Transaction::v5_strategy(LedgerState::default())")]
-        first: Transaction,
+        #[proptest(
+            strategy = "Transaction::v5_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        first: DisplayToDebug<Transaction>,
 
-        #[proptest(strategy = "Transaction::v5_strategy(LedgerState::default())")]
-        second: Transaction,
+        #[proptest(
+            strategy = "Transaction::v5_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        second: DisplayToDebug<Transaction>,
 
         conflict: SpendConflictForTransactionV5,
     },
@@ -81,7 +355,7 @@ enum SpendConflictTestInput {
 
 impl SpendConflictTestInput {
     /// Return two transactions that have a spend conflict.
-    pub fn conflicting_transactions(self) -> (UnminedTx, UnminedTx) {
+    pub fn conflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
         let (first, second) = match self {
             SpendConflictTestInput::V4 {
                 mut first,
@@ -105,7 +379,249 @@ impl SpendConflictTestInput {
             }
         };
 
-        (first.into(), second.into())
+        (
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero()),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero()),
+        )
+    }
+
+    /// Return two transactions that have no spend conflicts.
+    pub fn unconflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
+        let (mut first, mut second) = match self {
+            SpendConflictTestInput::V4 { first, second, .. } => (first, second),
+            SpendConflictTestInput::V5 { first, second, .. } => (first, second),
+        };
+
+        Self::remove_transparent_conflicts(&mut first, &mut second);
+        Self::remove_sprout_conflicts(&mut first, &mut second);
+        Self::remove_sapling_conflicts(&mut first, &mut second);
+        Self::remove_orchard_conflicts(&mut first, &mut second);
+
+        (
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero()),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero()),
+        )
+    }
+
+    /// Find transparent outpoint spends shared by two transactions, then remove them from the
+    /// transactions.
+    fn remove_transparent_conflicts(first: &mut Transaction, second: &mut Transaction) {
+        let first_spent_outpoints: HashSet<_> = first.spent_outpoints().collect();
+        let second_spent_outpoints: HashSet<_> = second.spent_outpoints().collect();
+
+        let conflicts: HashSet<_> = first_spent_outpoints
+            .intersection(&second_spent_outpoints)
+            .collect();
+
+        for transaction in [first, second] {
+            transaction.inputs_mut().retain(|input| {
+                input
+                    .outpoint()
+                    .as_ref()
+                    .map(|outpoint| !conflicts.contains(outpoint))
+                    .unwrap_or(true)
+            });
+        }
+    }
+
+    /// Find identical Sprout nullifiers revealed by both transactions, then remove the joinsplits
+    /// that contain them from both transactions.
+    fn remove_sprout_conflicts(first: &mut Transaction, second: &mut Transaction) {
+        let first_nullifiers: HashSet<_> = first.sprout_nullifiers().copied().collect();
+        let second_nullifiers: HashSet<_> = second.sprout_nullifiers().copied().collect();
+
+        let conflicts: HashSet<_> = first_nullifiers
+            .intersection(&second_nullifiers)
+            .copied()
+            .collect();
+
+        for transaction in [first, second] {
+            match transaction {
+                // JoinSplits with Bctv14 Proofs
+                Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
+                    Self::remove_joinsplits_with_conflicts(joinsplit_data, &conflicts)
+                }
+
+                // JoinSplits with Groth Proofs
+                Transaction::V4 { joinsplit_data, .. } => {
+                    Self::remove_joinsplits_with_conflicts(joinsplit_data, &conflicts)
+                }
+
+                // No JoinSplits
+                Transaction::V1 { .. } | Transaction::V5 { .. } => {}
+            }
+        }
+    }
+
+    /// Remove from a transaction's [`JoinSplitData`] the joinsplits that contain nullifiers
+    /// present in the `conflicts` set.
+    ///
+    /// This may clear the entire Sprout joinsplit data.
+    fn remove_joinsplits_with_conflicts<P: ZkSnarkProof>(
+        maybe_joinsplit_data: &mut Option<JoinSplitData<P>>,
+        conflicts: &HashSet<sprout::Nullifier>,
+    ) {
+        let mut should_clear_joinsplit_data = false;
+
+        if let Some(joinsplit_data) = maybe_joinsplit_data.as_mut() {
+            joinsplit_data.rest.retain(|joinsplit| {
+                !joinsplit
+                    .nullifiers
+                    .iter()
+                    .any(|nullifier| conflicts.contains(nullifier))
+            });
+
+            let first_joinsplit_should_be_removed = joinsplit_data
+                .first
+                .nullifiers
+                .iter()
+                .any(|nullifier| conflicts.contains(nullifier));
+
+            if first_joinsplit_should_be_removed {
+                if joinsplit_data.rest.is_empty() {
+                    should_clear_joinsplit_data = true;
+                } else {
+                    joinsplit_data.first = joinsplit_data.rest.remove(0);
+                }
+            }
+        }
+
+        if should_clear_joinsplit_data {
+            *maybe_joinsplit_data = None;
+        }
+    }
+
+    /// Find identical Sapling nullifiers revealed by both transactions, then remove the spends
+    /// that contain them from both transactions.
+    fn remove_sapling_conflicts(first: &mut Transaction, second: &mut Transaction) {
+        let first_nullifiers: HashSet<_> = first.sapling_nullifiers().copied().collect();
+        let second_nullifiers: HashSet<_> = second.sapling_nullifiers().copied().collect();
+
+        let conflicts: HashSet<_> = first_nullifiers
+            .intersection(&second_nullifiers)
+            .copied()
+            .collect();
+
+        for transaction in [first, second] {
+            match transaction {
+                // Spends with Groth Proofs
+                Transaction::V4 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
+                }
+
+                Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
+                }
+
+                // No Spends
+                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {}
+            }
+        }
+    }
+
+    /// Remove from a transaction's [`sapling::ShieldedData`] the spends that contain nullifiers
+    /// present in the `conflicts` set.
+    ///
+    /// This may clear the entire shielded data.
+    fn remove_sapling_transfers_with_conflicts<A>(
+        maybe_shielded_data: &mut Option<sapling::ShieldedData<A>>,
+        conflicts: &HashSet<sapling::Nullifier>,
+    ) where
+        A: sapling::AnchorVariant + Clone,
+    {
+        if let Some(shielded_data) = maybe_shielded_data.take() {
+            match shielded_data.transfers {
+                sapling::TransferData::JustOutputs { .. } => {
+                    *maybe_shielded_data = Some(shielded_data)
+                }
+
+                sapling::TransferData::SpendsAndMaybeOutputs {
+                    shared_anchor,
+                    spends,
+                    maybe_outputs,
+                } => {
+                    let updated_spends: Vec<_> = spends
+                        .into_vec()
+                        .into_iter()
+                        .filter(|spend| !conflicts.contains(&spend.nullifier))
+                        .collect();
+
+                    if let Ok(spends) = AtLeastOne::try_from(updated_spends) {
+                        *maybe_shielded_data = Some(sapling::ShieldedData {
+                            transfers: sapling::TransferData::SpendsAndMaybeOutputs {
+                                shared_anchor,
+                                spends,
+                                maybe_outputs,
+                            },
+                            ..shielded_data
+                        });
+                    } else if let Ok(outputs) = AtLeastOne::try_from(maybe_outputs) {
+                        *maybe_shielded_data = Some(sapling::ShieldedData {
+                            transfers: sapling::TransferData::JustOutputs { outputs },
+                            ..shielded_data
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Find identical Orchard nullifiers revealed by both transactions, then remove the actions
+    /// that contain them from both transactions.
+    fn remove_orchard_conflicts(first: &mut Transaction, second: &mut Transaction) {
+        let first_nullifiers: HashSet<_> = first.orchard_nullifiers().copied().collect();
+        let second_nullifiers: HashSet<_> = second.orchard_nullifiers().copied().collect();
+
+        let conflicts: HashSet<_> = first_nullifiers
+            .intersection(&second_nullifiers)
+            .copied()
+            .collect();
+
+        for transaction in [first, second] {
+            match transaction {
+                Transaction::V5 {
+                    orchard_shielded_data,
+                    ..
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+
+                // No Spends
+                Transaction::V1 { .. }
+                | Transaction::V2 { .. }
+                | Transaction::V3 { .. }
+                | Transaction::V4 { .. } => {}
+            }
+        }
+    }
+
+    /// Remove from a transaction's [`orchard::ShieldedData`] the actions that contain nullifiers
+    /// present in the `conflicts` set.
+    ///
+    /// This may clear the entire shielded data.
+    fn remove_orchard_actions_with_conflicts(
+        maybe_shielded_data: &mut Option<orchard::ShieldedData>,
+        conflicts: &HashSet<orchard::Nullifier>,
+    ) {
+        if let Some(shielded_data) = maybe_shielded_data.take() {
+            let updated_actions: Vec<_> = shielded_data
+                .actions
+                .into_vec()
+                .into_iter()
+                .filter(|action| !conflicts.contains(&action.action.nullifier))
+                .collect();
+
+            if let Ok(actions) = AtLeastOne::try_from(updated_actions) {
+                *maybe_shielded_data = Some(orchard::ShieldedData {
+                    actions,
+                    ..shielded_data
+                });
+            }
+        }
     }
 }
 
@@ -128,27 +644,27 @@ enum SpendConflictForTransactionV5 {
 /// A conflict caused by spending the same UTXO.
 #[derive(Arbitrary, Clone, Debug)]
 struct TransparentSpendConflict {
-    new_input: transparent::Input,
+    new_input: DisplayToDebug<transparent::Input>,
 }
 
 /// A conflict caused by revealing the same Sprout nullifier.
 #[derive(Arbitrary, Clone, Debug)]
 struct SproutSpendConflict {
-    new_joinsplit_data: transaction::JoinSplitData<Groth16Proof>,
+    new_joinsplit_data: DisplayToDebug<transaction::JoinSplitData<Groth16Proof>>,
 }
 
 /// A conflict caused by revealing the same Sapling nullifier.
 #[derive(Clone, Debug)]
 struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
-    new_spend: sapling::Spend<A>,
+    new_spend: DisplayToDebug<sapling::Spend<A>>,
     new_shared_anchor: A::Shared,
-    fallback_shielded_data: sapling::ShieldedData<A>,
+    fallback_shielded_data: DisplayToDebug<sapling::ShieldedData<A>>,
 }
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
 struct OrchardSpendConflict {
-    new_shielded_data: orchard::ShieldedData,
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -205,7 +721,7 @@ impl TransparentSpendConflict {
     /// Adds a new input to a transaction's list of transparent `inputs`. The transaction will then
     /// conflict with any other transaction that also has that same new input.
     pub fn apply_to(self, inputs: &mut Vec<transparent::Input>) {
-        inputs.push(self.new_input);
+        inputs.push(self.new_input.0);
     }
 }
 
@@ -223,7 +739,7 @@ impl SproutSpendConflict {
             existing_joinsplit_data.first.nullifiers[0] =
                 self.new_joinsplit_data.first.nullifiers[0];
         } else {
-            *joinsplit_data = Some(self.new_joinsplit_data);
+            *joinsplit_data = Some(self.new_joinsplit_data.0);
         }
     }
 }
@@ -245,9 +761,9 @@ where
         any::<(sapling::Spend<A>, A::Shared, sapling::ShieldedData<A>)>()
             .prop_map(|(new_spend, new_shared_anchor, fallback_shielded_data)| {
                 SaplingSpendConflict {
-                    new_spend,
+                    new_spend: new_spend.into(),
                     new_shared_anchor,
-                    fallback_shielded_data,
+                    fallback_shielded_data: fallback_shielded_data.into(),
                 }
             })
             .boxed()
@@ -268,16 +784,16 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     pub fn apply_to(self, sapling_shielded_data: &mut Option<sapling::ShieldedData<A>>) {
         use sapling::TransferData::*;
 
-        let shielded_data = sapling_shielded_data.get_or_insert(self.fallback_shielded_data);
+        let shielded_data = sapling_shielded_data.get_or_insert(self.fallback_shielded_data.0);
 
         match &mut shielded_data.transfers {
-            SpendsAndMaybeOutputs { ref mut spends, .. } => spends.push(self.new_spend),
+            SpendsAndMaybeOutputs { ref mut spends, .. } => spends.push(self.new_spend.0),
             JustOutputs { ref mut outputs } => {
                 let new_outputs = outputs.clone();
 
                 shielded_data.transfers = SpendsAndMaybeOutputs {
                     shared_anchor: self.new_shared_anchor,
-                    spends: at_least_one![self.new_spend],
+                    spends: at_least_one![self.new_spend.0],
                     maybe_outputs: new_outputs.into_vec(),
                 };
             }
@@ -299,7 +815,99 @@ impl OrchardSpendConflict {
             shielded_data.actions.first_mut().action.nullifier =
                 self.new_shielded_data.actions.first().action.nullifier;
         } else {
-            *orchard_shielded_data = Some(self.new_shielded_data);
+            *orchard_shielded_data = Some(self.new_shielded_data.0);
+        }
+    }
+}
+
+/// A series of transactions and a sub-set of them to remove.
+///
+/// The set of transactions to remove can either be exact WTX IDs to remove exact transactions or
+/// mined IDs to remove transactions that have the same effects specified by the ID.
+#[derive(Clone, Debug)]
+pub enum MultipleTransactionRemovalTestInput {
+    RemoveExact {
+        transactions: SummaryDebug<Vec<VerifiedUnminedTx>>,
+        wtx_ids_to_remove: SummaryDebug<HashSet<UnminedTxId>>,
+    },
+
+    RemoveSameEffects {
+        transactions: SummaryDebug<Vec<VerifiedUnminedTx>>,
+        mined_ids_to_remove: SummaryDebug<HashSet<transaction::Hash>>,
+    },
+}
+
+impl Arbitrary for MultipleTransactionRemovalTestInput {
+    type Parameters = ();
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_SIZE)
+            .prop_flat_map(|transactions| {
+                let indices_to_remove =
+                    vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {
+                        removal_markers
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, should_remove)| *should_remove)
+                            .map(|(index, _)| index)
+                            .collect::<HashSet<usize>>()
+                    });
+
+                (Just(transactions), indices_to_remove)
+            })
+            .prop_flat_map(|(transactions, indices_to_remove)| {
+                let wtx_ids_to_remove: HashSet<_> = indices_to_remove
+                    .iter()
+                    .map(|&index| transactions[index].transaction.id)
+                    .collect();
+
+                let mined_ids_to_remove: HashSet<transaction::Hash> = wtx_ids_to_remove
+                    .iter()
+                    .map(|unmined_id| unmined_id.mined_id())
+                    .collect();
+
+                prop_oneof![
+                    Just(RemoveSameEffects {
+                        transactions: transactions.clone().into(),
+                        mined_ids_to_remove: mined_ids_to_remove.into(),
+                    }),
+                    Just(RemoveExact {
+                        transactions: transactions.into(),
+                        wtx_ids_to_remove: wtx_ids_to_remove.into(),
+                    }),
+                ]
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl MultipleTransactionRemovalTestInput {
+    /// Iterate over all transactions generated as input.
+    pub fn transactions(&self) -> impl Iterator<Item = &VerifiedUnminedTx> + '_ {
+        match self {
+            RemoveExact { transactions, .. } | RemoveSameEffects { transactions, .. } => {
+                transactions.iter()
+            }
+        }
+    }
+
+    /// Return a [`HashSet`] of [`UnminedTxId`]s of the transactions to be removed.
+    pub fn removed_transaction_ids(&self) -> HashSet<UnminedTxId> {
+        match self {
+            RemoveExact {
+                wtx_ids_to_remove, ..
+            } => wtx_ids_to_remove.0.clone(),
+
+            RemoveSameEffects {
+                transactions,
+                mined_ids_to_remove,
+            } => transactions
+                .iter()
+                .map(|transaction| transaction.transaction.id)
+                .filter(|id| mined_ids_to_remove.contains(&id.mined_id()))
+                .collect(),
         }
     }
 }

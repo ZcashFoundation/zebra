@@ -356,7 +356,7 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// #     let mut service = mock_service.clone();
     /// #
     /// let call = tokio::spawn(mock_service.clone().oneshot(1));
-    ///  
+    ///
     /// mock_service.expect_request_that(|request| *request > 0).await.respond("response");
     ///
     /// assert!(matches!(call.await, Ok(Ok("response"))));

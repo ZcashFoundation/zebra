@@ -25,7 +25,7 @@ pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
 pub use sighash::{HashType, SigHash};
-pub use unmined::{UnminedTx, UnminedTxId};
+pub use unmined::{UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
@@ -40,7 +40,7 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-use std::{collections::HashMap, iter};
+use std::{collections::HashMap, fmt, iter};
 
 /// A Zcash transaction.
 ///
@@ -129,6 +129,28 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },
+}
+
+impl fmt::Display for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f.debug_struct("Transaction");
+
+        fmter.field("version", &self.version());
+        if let Some(network_upgrade) = self.network_upgrade() {
+            fmter.field("network_upgrade", &network_upgrade);
+        }
+
+        fmter.field("transparent_inputs", &self.inputs().len());
+        fmter.field("transparent_outputs", &self.outputs().len());
+        fmter.field("sprout_joinsplits", &self.joinsplit_count());
+        fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
+        fmter.field("sapling_outputs", &self.sapling_outputs().count());
+        fmter.field("orchard_actions", &self.orchard_actions().count());
+
+        fmter.field("unmined_id", &self.unmined_id());
+
+        fmter.finish()
+    }
 }
 
 impl Transaction {

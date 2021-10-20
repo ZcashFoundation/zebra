@@ -27,6 +27,29 @@ pub trait ZcashSerialize: Sized {
         self.zcash_serialize(&mut data)?;
         Ok(data)
     }
+
+    /// Get the size of `self` by using a fake writer.
+    fn zcash_serialized_size(&self) -> Result<usize, io::Error> {
+        let mut writer = FakeWriter(0);
+        self.zcash_serialize(&mut writer)
+            .expect("writer should never fail");
+        Ok(writer.0)
+    }
+}
+
+/// A fake writer helper used to get object lengths without allocating RAM.
+pub struct FakeWriter(pub usize);
+
+impl std::io::Write for FakeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Serialize a `Vec` as a compactsize number of items, then the items. This is
