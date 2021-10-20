@@ -22,7 +22,7 @@ where
         let sk = SigningKey::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let sig = sk.sign(&msg[..]);
-        verifier.ready_and().await?;
+        verifier.ready().await?;
         results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
     }
 

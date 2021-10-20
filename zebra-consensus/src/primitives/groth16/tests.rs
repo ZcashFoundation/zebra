@@ -32,7 +32,7 @@ where
             tracing::trace!(?spend);
 
             let spend_rsp = spend_verifier
-                .ready_and()
+                .ready()
                 .await?
                 .call(groth16::ItemWrapper::from(&spend).into());
 
@@ -43,7 +43,7 @@ where
             tracing::trace!(?output);
 
             let output_rsp = output_verifier
-                .ready_and()
+                .ready()
                 .await?
                 .call(groth16::ItemWrapper::from(output).into());
 
@@ -131,7 +131,7 @@ where
             tracing::trace!(?modified_output);
 
             let output_rsp = output_verifier
-                .ready_and()
+                .ready()
                 .await?
                 .call(groth16::ItemWrapper::from(&modified_output).into());
 
