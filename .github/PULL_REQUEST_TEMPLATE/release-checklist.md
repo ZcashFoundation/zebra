@@ -16,6 +16,7 @@ To check if any of the top-level crates need version increments, go to the zebra
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Use the `zebrad` crate version in the `zebra-network` user agent string
+      (currently the constant `USER_AGENT` in `zebra-network/src/constants.rs`)
 - [ ] Use the latest git tag in `README.md`
 
 ### How to Increment Versions
@@ -89,7 +90,8 @@ Also check for crates that depend on crates that have changed. They should get a
 
 ## Initial Testing
 
-- [ ] After any changes, test that the `cargo install` command in `README.md` works (use `--path` instead of `--git` locally)
+- [ ] After any changes, test that the `cargo install` command in works. Use
+      e.g. `cargo install --locked --path zebrad`.
 
 ## Change Log
 
@@ -129,8 +131,8 @@ From "Keep a Changelog":
 
 ## Final Testing
 
-- [ ] After tagging the release, test that the exact `cargo install` command works
-      (`--git` behaves a bit differently to `--path`)
+- [ ] After tagging the release, test that the exact `cargo install` command in
+      `README.md` works (`--git` behaves a bit differently to `--path`)
 
 If the build fails after tagging:
 1. fix the build
