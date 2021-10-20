@@ -59,7 +59,7 @@ Zebra's latest alpha updates dependencies, improves metrics, gossips verified bl
 #### Mempool
 
 - Avoid broadcasting mempool rejected or expired transactions to peers (#2858)
-- Encapsulate some mempool functions with the Mempool type. (#2872)
+- Encapsulate some mempool functions with the Mempool type (#2872)
 - Remove duplicate IDs in mempool requests and responses (#2887)
 - Refactor mempool spend conflict checks to increase performance (#2826)
 - Rename mempool storage methods by match type (#2841)
