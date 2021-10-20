@@ -11,14 +11,11 @@ mod error;
 /// Performs peer handshakes.
 mod handshake;
 
-use client::ClientRequest;
-use client::ClientRequestReceiver;
-use client::InProgressClientRequest;
-use client::MustUseOneshotSender;
+use client::{ClientRequest, ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 use error::ErrorSlot;
 
 pub use client::Client;
 pub use connection::Connection;
-pub use connector::Connector;
+pub use connector::{Connector, OutboundConnectorRequest};
 pub use error::{HandshakeError, PeerError, SharedPeerError};
 pub use handshake::{ConnectedAddr, Handshake, HandshakeRequest};
