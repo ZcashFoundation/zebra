@@ -16,7 +16,8 @@ use tower::{
 use zebra_chain::chain_tip::NoChainTip;
 
 use crate::{
-    peer::{self, ConnectedAddr},
+    peer::{self, ConnectedAddr, HandshakeRequest},
+    peer_set::ActiveConnectionCounter,
     BoxError, Config, Request, Response,
 };
 
@@ -62,11 +63,19 @@ pub fn connect_isolated(
         .finish()
         .expect("provided mandatory builder parameters");
 
-    // Don't send any metadata about the connection
+    // Don't send or track any metadata about the connection
     let connected_addr = ConnectedAddr::new_isolated();
+    let connection_tracker = ActiveConnectionCounter::new_counter().track_connection();
 
-    Oneshot::new(handshake, (conn, connected_addr))
-        .map_ok(|client| BoxService::new(Wrapper(client)))
+    Oneshot::new(
+        handshake,
+        HandshakeRequest {
+            tcp_stream: conn,
+            connected_addr,
+            connection_tracker,
+        },
+    )
+    .map_ok(|client| BoxService::new(Wrapper(client)))
 }
 
 // This can be deleted when a new version of Tower with map_err is released.
