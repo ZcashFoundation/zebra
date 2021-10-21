@@ -10,6 +10,7 @@ Zebra's latest alpha updates dependencies, improves metrics, gossips verified bl
 
 ### Added
 
+- Ignore `AlreadyInChain` error in the syncer (#2890)
 - Give more information to the user in the wrong port init warning (#2853)
 - Send looked up UTXOs to the transaction verifier (#2849)
 - Return the transaction fee from the transaction verifier (#2876)
@@ -33,6 +34,7 @@ Zebra's latest alpha updates dependencies, improves metrics, gossips verified bl
 
 #### Documentation
 
+- Improve the template for release versioning (#2906)
 - Improve the documentation for the mempool transaction downloader (#2879)
 - Add the documentation for the mempool storage and gossip modules (#2884)
 
@@ -46,6 +48,7 @@ Zebra's latest alpha updates dependencies, improves metrics, gossips verified bl
 
 #### Metrics
 
+- Refactor and add some new mempool metrics (#2878)
 - Improve logging for initial peer connections (#2896)
 - Always zero the mempool metrics when the mempool is disabled (#2875)
 - Add a basic mempool storage Grafana dashboard (#2866)
@@ -67,6 +70,10 @@ Zebra's latest alpha updates dependencies, improves metrics, gossips verified bl
 
 ### Fixed
 
+- Fix synchronization delay issue (#2921)
+- Fix test failures by flushing output streams before exiting Zebra (#2911, #2923)
+- Increase Zebra's restart acceptance test timeout (#2910)
+- Avoid spurious acceptance test failures by decreasing the peer crawler timeout (#2905)
 - Cancel pending download tasks when the mempool is disabled (#2886)
 - Stop allowing some newly mined transactions into the mempool (#2874)
 - Stop panicking when pruning unused queued blocks (#2842)
