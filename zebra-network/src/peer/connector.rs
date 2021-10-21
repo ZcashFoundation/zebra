@@ -12,9 +12,11 @@ use tracing_futures::Instrument;
 
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
 
-use crate::{BoxError, Request, Response};
-
-use super::{Client, ConnectedAddr, Handshake};
+use crate::{
+    peer::{Client, ConnectedAddr, Handshake, HandshakeRequest},
+    peer_set::ConnectionTracker,
+    BoxError, Request, Response,
+};
 
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
@@ -37,7 +39,19 @@ impl<S, C> Connector<S, C> {
     }
 }
 
-impl<S, C> Service<SocketAddr> for Connector<S, C>
+/// A connector request.
+/// Contains the information needed to make an outbound connection to the peer.
+pub struct OutboundConnectorRequest {
+    /// The Zcash listener address of the peer.
+    pub addr: SocketAddr,
+
+    /// A connection tracker that reduces the open connection count when dropped.
+    ///
+    /// Used to limit the number of open connections in Zebra.
+    pub connection_tracker: ConnectionTracker,
+}
+
+impl<S, C> Service<OutboundConnectorRequest> for Connector<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
@@ -52,14 +66,26 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, addr: SocketAddr) -> Self::Future {
+    fn call(&mut self, req: OutboundConnectorRequest) -> Self::Future {
+        let OutboundConnectorRequest {
+            addr,
+            connection_tracker,
+        }: OutboundConnectorRequest = req;
+
         let mut hs = self.handshaker.clone();
         let connected_addr = ConnectedAddr::new_outbound_direct(addr);
         let connector_span = info_span!("connector", peer = ?connected_addr);
+
         async move {
             let stream = TcpStream::connect(addr).await?;
             hs.ready_and().await?;
-            let client = hs.call((stream, connected_addr)).await?;
+            let client = hs
+                .call(HandshakeRequest {
+                    tcp_stream: stream,
+                    connected_addr,
+                    connection_tracker,
+                })
+                .await?;
             Ok(Change::Insert(addr, client))
         }
         .instrument(connector_span)
