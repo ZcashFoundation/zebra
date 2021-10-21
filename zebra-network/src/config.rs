@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use rand::seq::SliceRandom;
 use serde::{de, Deserialize, Deserializer};
 
 use zebra_chain::{parameters::Network, serialization::canonical_socket_addr};
@@ -116,11 +117,31 @@ impl Config {
     }
 
     /// Get the initial seed peers based on the configured network.
+    /// Limits the number of initial peer addresses to the configured
+    /// `peerset_initial_target_size`.
+    ///
+    /// The result is randomly chosen entries from the provided set of addresses.
     pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
-        match self.network {
+        let initial_peers = match self.network {
             Network::Mainnet => Config::resolve_peers(&self.initial_mainnet_peers).await,
             Network::Testnet => Config::resolve_peers(&self.initial_testnet_peers).await,
+        };
+        let initial_peer_count = initial_peers.len();
+
+        // Limit the number of initial peers to `peerset_initial_target_size`
+        if initial_peer_count > self.peerset_initial_target_size {
+            info!(
+                "Limiting the initial peers list from {} to {}",
+                initial_peer_count, self.peerset_initial_target_size
+            );
         }
+
+        let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
+
+        initial_peers_vect
+            .choose_multiple(&mut rand::thread_rng(), self.peerset_initial_target_size)
+            .copied()
+            .collect()
     }
 
     /// Resolves `host` into zero or more IP addresses, retrying up to
