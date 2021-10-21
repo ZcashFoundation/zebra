@@ -2,7 +2,7 @@
 //!
 //! # Implementation
 //!
-//! The [`PeerSet`] implementation is adapted from the one in `tower-balance`, and as
+//! The [`PeerSet`] implementation is adapted from the one in the [Tower Balance][tower-balance] crate, and as
 //! described in that crate's documentation, it
 //!
 //! > Distributes requests across inner services using the [Power of Two Choices][p2c].
@@ -40,6 +40,7 @@
 //!
 //! [finagle]: https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded
 //! [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
+//! [tower-balance]: https://crates.io/crates/tower-balance
 
 use std::{
     collections::HashMap,
