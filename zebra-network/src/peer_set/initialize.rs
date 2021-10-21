@@ -3,7 +3,6 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-use rand::seq::SliceRandom;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 use futures::{
@@ -13,6 +12,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     TryFutureExt,
 };
+use rand::seq::SliceRandom;
 use tokio::{net::TcpListener, sync::broadcast, time::Instant};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
@@ -302,6 +302,8 @@ async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
 
     let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
 
+    // TODO: add unused peers to the AddressBook (#2931)
+    //       https://docs.rs/rand/0.8.4/rand/seq/trait.SliceRandom.html#tymethod.partial_shuffle
     initial_peers_vect
         .choose_multiple(&mut rand::thread_rng(), config.peerset_initial_target_size)
         .copied()
