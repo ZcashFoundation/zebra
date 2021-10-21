@@ -141,10 +141,9 @@ impl Drop for Storage {
 
 impl Storage {
     pub(crate) fn new(config: &config::Config) -> Self {
-        Storage {
-            tx_cost_limit: config.tx_cost_limit,
-            ..Default::default()
-        }
+        let mut default: Storage = Default::default();
+        default.tx_cost_limit = config.tx_cost_limit;
+        default
     }
 
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.

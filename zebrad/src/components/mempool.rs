@@ -299,10 +299,7 @@ impl Mempool {
                 self.state.clone(),
             ));
             self.active_state = ActiveState::Enabled {
-                storage: storage::Storage {
-                    tx_cost_limit: self.config.tx_cost_limit,
-                    ..Default::default()
-                },
+                storage: storage::Storage::new(&self.config),
                 tx_downloads,
             };
         } else {
