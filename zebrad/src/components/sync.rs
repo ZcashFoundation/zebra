@@ -1,10 +1,7 @@
 use std::{collections::HashSet, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::{
-    future::FutureExt,
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
@@ -22,7 +19,8 @@ use zebra_network as zn;
 use zebra_state as zs;
 
 use crate::{
-    components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
+    async_ext::NowOrLater, components::sync::downloads::BlockDownloadVerifyError,
+    config::ZebradConfig, BoxError,
 };
 
 mod downloads;
@@ -314,7 +312,7 @@ where
 
             while !self.prospective_tips.is_empty() {
                 // Check whether any block tasks are currently ready:
-                while let Some(Some(rsp)) = self.downloads.next().now_or_never() {
+                while let Some(Some(rsp)) = NowOrLater(self.downloads.next()).await {
                     match rsp {
                         Ok(hash) => {
                             tracing::trace!(?hash, "verified and committed block to state");
