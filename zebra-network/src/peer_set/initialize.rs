@@ -142,11 +142,7 @@ where
         let config = config.clone();
         let outbound_connector = outbound_connector.clone();
         let peerset_tx = peerset_tx.clone();
-        async move {
-            let initial_peers = config.initial_peers().await;
-            add_initial_peers(&config, initial_peers, outbound_connector, peerset_tx).await
-        }
-        .boxed()
+        async move { add_initial_peers(&config, outbound_connector, peerset_tx).await }.boxed()
     };
 
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
@@ -193,12 +189,11 @@ where
     (peer_set, address_book)
 }
 
-/// Use the provided `outbound_connector` to connect to `initial_peers`, then send
-/// the resulting peer connections over `peerset_tx`.
-#[instrument(skip(initial_peers, outbound_connector, peerset_tx))]
+/// Use the provided `outbound_connector` to connect to the configured initial peers,
+/// then send the resulting peer connections over `peerset_tx`.
+#[instrument(skip(config, outbound_connector, peerset_tx))]
 async fn add_initial_peers<S>(
     config: &Config,
-    mut initial_peers: HashSet<SocketAddr>,
     outbound_connector: S,
     mut peerset_tx: mpsc::Sender<PeerChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
@@ -210,17 +205,7 @@ where
         > + Clone,
     S::Future: Send + 'static,
 {
-    let mut initial_peer_count = initial_peers.len();
-
-    // Limit the number of initial peers to `config.peerset_initial_target_size`
-    if initial_peer_count > config.peerset_initial_target_size {
-        info!(
-            "Limiting the initial peers list from {} to {}",
-            initial_peer_count, config.peerset_initial_target_size
-        );
-        initial_peer_count = config.peerset_initial_target_size;
-        initial_peers = limit_initial_peers(initial_peers, config.peerset_initial_target_size);
-    }
+    let initial_peers = limit_initial_peers(config).await;
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
@@ -228,7 +213,7 @@ where
     let mut active_outbound_connections = ActiveConnectionCounter::new_counter();
 
     info!(
-        ?initial_peer_count,
+        initial_peer_count = ?initial_peers.len(),
         ?initial_peers,
         "connecting to initial peer set"
     );
@@ -299,16 +284,26 @@ where
     Ok(active_outbound_connections)
 }
 
-/// Limit the number of `initial_peers` addresses entries to `peerset_initial_target_size`.
-/// The result is random choosed entries from the provided set of addresses.
-fn limit_initial_peers(
-    initial_peers: HashSet<SocketAddr>,
-    peerset_initial_target_size: usize,
-) -> HashSet<SocketAddr> {
+/// Limit the number of `initial_peers` addresses entries to the configured
+/// `peerset_initial_target_size`.
+///
+/// The result is randomly chosen entries from the provided set of addresses.
+async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
+    let initial_peers = config.initial_peers().await;
+    let initial_peer_count = initial_peers.len();
+
+    // Limit the number of initial peers to `config.peerset_initial_target_size`
+    if initial_peer_count > config.peerset_initial_target_size {
+        info!(
+            "Limiting the initial peers list from {} to {}",
+            initial_peer_count, config.peerset_initial_target_size
+        );
+    }
+
     let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
 
     initial_peers_vect
-        .choose_multiple(&mut rand::thread_rng(), peerset_initial_target_size)
+        .choose_multiple(&mut rand::thread_rng(), config.peerset_initial_target_size)
         .copied()
         .collect()
 }
