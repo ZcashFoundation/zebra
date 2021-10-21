@@ -39,6 +39,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 mod components;
 
 pub mod application;
+pub mod async_ext;
 pub mod commands;
 pub mod config;
 pub mod prelude;
