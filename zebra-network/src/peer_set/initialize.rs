@@ -350,6 +350,9 @@ where
                 }
                 .instrument(handshaker_span),
             );
+
+            // Only one sucesful connection per `MIN_PEER_CONNECTION_INTERVAL` is allowed.
+            tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
         }
     }
 }
