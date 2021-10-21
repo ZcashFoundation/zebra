@@ -351,7 +351,11 @@ where
                 .instrument(handshaker_span),
             );
 
-            // Only one sucesful connection per `MIN_PEER_CONNECTION_INTERVAL` is allowed.
+            // Only spawn one inbound connection handshake per `MIN_PEER_CONNECTION_INTERVAL`.
+            // But clear failed connections as fast as possible.
+            //
+            // If there is a flood of connections, this stops Zebra overloading the network with handshake data.
+            // Most OSes also limit the number of queued inbound connections on a listener port.
             tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
         }
     }
