@@ -121,6 +121,22 @@ pub fn init() {
     })
 }
 
+/// Initialize globals for tests that need a separate Tokio runtime instance.
+///
+/// This is generally used in proptests, which don't support the `#[tokio::test]` attribute.
+///
+/// If a runtime needs to be shared between tests, use the [`RUNTIME`] instance instead.
+///
+/// See also the [`init`] function, which is called by this function.
+pub fn init_async() -> tokio::runtime::Runtime {
+    init();
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime")
+}
+
 struct SkipTestReturnedErrPanicMessages;
 
 impl PanicMessage for SkipTestReturnedErrPanicMessages {
