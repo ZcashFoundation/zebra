@@ -6,6 +6,7 @@ use std::{
     iter,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{future::FutureExt, stream::Stream};
@@ -22,7 +23,7 @@ use zebra_network as zn;
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-use crate::components::sync::SyncStatus;
+use crate::components::{mempool::storage::Storage, sync::SyncStatus};
 
 mod config;
 mod crawler;
@@ -210,6 +211,10 @@ pub struct Mempool {
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+
+    /// The mempool transaction eviction age limit.
+    /// Same as [`Config::eviction_memory_time`].
+    eviction_memory_time: Duration,
 }
 
 impl Mempool {
@@ -235,6 +240,7 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            eviction_memory_time: config.eviction_memory_time,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -295,7 +301,7 @@ impl Mempool {
                 self.state.clone(),
             ));
             self.active_state = ActiveState::Enabled {
-                storage: Default::default(),
+                storage: Storage::new(self.eviction_memory_time),
                 tx_downloads,
             };
         } else {

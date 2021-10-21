@@ -10,13 +10,14 @@
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
+    time::Duration,
 };
 
 use thiserror::Error;
 
 use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
-use self::verified_set::VerifiedSet;
+use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{downloads::TransactionDownloadVerifyError, MempoolError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -25,6 +26,7 @@ use proptest_derive::Arbitrary;
 #[cfg(test)]
 pub mod tests;
 
+mod eviction_list;
 mod verified_set;
 
 /// The maximum number of verified transactions to store in the mempool.
@@ -103,7 +105,6 @@ pub enum RejectionError {
 }
 
 /// Hold mempool verified and rejected mempool transactions.
-#[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
     /// cache of size [`MEMPOOL_SIZE`].
@@ -125,8 +126,11 @@ pub struct Storage {
     /// These rejections apply until a rollback or network upgrade.
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
-    chain_rejected_same_effects:
-        HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
+    chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
+
+    /// The mempool transaction eviction age limit.
+    /// Same as [`Config::eviction_memory_time`].
+    eviction_memory_time: Duration,
 }
 
 impl Drop for Storage {
@@ -136,6 +140,15 @@ impl Drop for Storage {
 }
 
 impl Storage {
+    pub fn new(eviction_memory_time: Duration) -> Self {
+        Self {
+            eviction_memory_time,
+            verified: Default::default(),
+            tip_rejected_exact: Default::default(),
+            tip_rejected_same_effects: Default::default(),
+            chain_rejected_same_effects: Default::default(),
+        }
+    }
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
     /// Returns an error if the mempool's verified transactions or rejection caches
@@ -333,9 +346,12 @@ impl Storage {
                 self.tip_rejected_same_effects.insert(txid.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
+                let eviction_memory_time = self.eviction_memory_time;
                 self.chain_rejected_same_effects
                     .entry(e)
-                    .or_default()
+                    .or_insert_with(|| {
+                        EvictionList::new(MAX_EVICTION_MEMORY_ENTRIES, eviction_memory_time)
+                    })
                     .insert(txid.mined_id());
             }
         }
@@ -358,7 +374,7 @@ impl Storage {
         }
 
         for (error, set) in self.chain_rejected_same_effects.iter() {
-            if set.contains(&txid.mined_id()) {
+            if set.contains_key(&txid.mined_id()) {
                 return Some(error.clone().into());
             }
         }

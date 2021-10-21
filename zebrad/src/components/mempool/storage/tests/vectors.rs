@@ -14,6 +14,10 @@ use crate::components::mempool::{
     storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
 };
 
+/// Eviction memory time used for tests. Most tests won't care about this
+/// so we use a large enough value that will never be reached in the tests.
+const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
+
 #[test]
 fn mempool_storage_crud_exact_mainnet() {
     zebra_test::init();
@@ -21,7 +25,7 @@ fn mempool_storage_crud_exact_mainnet() {
     let network = Network::Mainnet;
 
     // Create an empty storage instance
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(EVICTION_MEMORY_TIME);
 
     // Get one (1) unmined transaction
     let unmined_tx = unmined_transactions_in_blocks(.., network)
@@ -49,7 +53,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     let network = Network::Mainnet;
 
     // Create an empty storage instance
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(EVICTION_MEMORY_TIME);
 
     // Get one (1) unmined transaction
     let unmined_tx = unmined_transactions_in_blocks(.., network)
@@ -83,7 +87,7 @@ fn mempool_storage_basic() -> Result<()> {
 
 fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(EVICTION_MEMORY_TIME);
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
     let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, network).collect();
@@ -156,7 +160,7 @@ fn mempool_expired_basic() -> Result<()> {
 
 fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(EVICTION_MEMORY_TIME);
 
     let block: Block = match network {
         Network::Mainnet => {

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, convert::TryFrom, env, fmt::Debug};
+use std::{collections::HashSet, convert::TryFrom, env, fmt::Debug, thread, time::Duration};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
@@ -18,8 +18,8 @@ use zebra_chain::{
 
 use crate::components::mempool::{
     storage::{
-        MempoolError, RejectionError, SameEffectsTipRejectionError, Storage,
-        MAX_EVICTION_MEMORY_ENTRIES, MEMPOOL_SIZE,
+        eviction_list::EvictionList, MempoolError, RejectionError, SameEffectsTipRejectionError,
+        Storage, MAX_EVICTION_MEMORY_ENTRIES, MEMPOOL_SIZE,
     },
     SameEffectsChainRejectionError,
 };
@@ -31,6 +31,10 @@ use MultipleTransactionRemovalTestInput::*;
 /// We reduce the number of cases for those tests,
 /// so individual tests take less than 10 seconds on most machines.
 const DEFAULT_MEMPOOL_LIST_PROPTEST_CASES: u32 = 64;
+
+/// Eviction memory time used for tests. Most tests won't care about this
+/// so we use a large enough value that will never be reached in the tests.
+const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
 
 proptest! {
     #![proptest_config(
@@ -46,7 +50,7 @@ proptest! {
         input in any::<SpendConflictTestInput>(),
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(EVICTION_MEMORY_TIME);
 
         let (first_transaction, second_transaction) = input.conflicting_transactions();
         let input_permutations = vec![
@@ -99,7 +103,7 @@ proptest! {
         transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(EVICTION_MEMORY_TIME);
 
         // Make unique IDs by converting the index to bytes, and writing it to each ID
         let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
@@ -158,7 +162,7 @@ proptest! {
         rejection_error in any::<RejectionError>(),
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(EVICTION_MEMORY_TIME);
 
         // Make unique IDs by converting the index to bytes, and writing it to each ID
         let unique_ids = (0..(MAX_EVICTION_MEMORY_ENTRIES + 1) as u32).map(move |index| {
@@ -185,6 +189,32 @@ proptest! {
             }
         }
     }
+
+    /// Test that the reject list length time limits are applied
+    /// when directly rejecting transactions.
+    #[test]
+    fn reject_lists_are_time_pruned(
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        let mut storage = Storage::new(Duration::from_millis(10));
+
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let unique_ids: Vec<UnminedTxId> = (0..2_u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        }).collect();
+
+        storage.reject(unique_ids[0], SameEffectsChainRejectionError::RandomlyEvicted.into());
+        thread::sleep(Duration::from_millis(11));
+        storage.reject(unique_ids[1], SameEffectsChainRejectionError::RandomlyEvicted.into());
+
+        prop_assert_eq!(storage.rejected_transaction_count(), 1);
+    }
 }
 
 proptest! {
@@ -195,7 +225,7 @@ proptest! {
     /// same nullifier.
     #[test]
     fn conflicting_transactions_are_rejected(input in any::<SpendConflictTestInput>()) {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(EVICTION_MEMORY_TIME);
 
         let (first_transaction, second_transaction) = input.conflicting_transactions();
         let input_permutations = vec![
@@ -227,7 +257,7 @@ proptest! {
     #[test]
     fn rejected_transactions_are_properly_rolled_back(input in any::<SpendConflictTestInput>())
     {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(EVICTION_MEMORY_TIME);
 
         let (first_unconflicting_transaction, second_unconflicting_transaction) =
             input.clone().unconflicting_transactions();
@@ -280,7 +310,7 @@ proptest! {
     /// others.
     #[test]
     fn removal_of_multiple_transactions(input in any::<MultipleTransactionRemovalTestInput>()) {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(EVICTION_MEMORY_TIME);
 
         // Insert all input transactions, and keep track of the IDs of the one that were actually
         // inserted.
@@ -909,5 +939,82 @@ impl MultipleTransactionRemovalTestInput {
                 .filter(|id| mined_ids_to_remove.contains(&id.mined_id()))
                 .collect(),
         }
+    }
+}
+
+proptest! {
+
+    // Some tests need to sleep which makes tests slow, so use a single
+    // case. We also don't need multiple cases since proptest is just used
+    // to generate random TXIDs.
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(1)
+    )]
+
+    /// Check if EvictionList limits the number of entries.
+    #[test]
+    fn eviction_list_size(
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let txids: Vec<UnminedTxId> = (0..4_u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        }).collect();
+
+        let mut e = EvictionList::new(2, EVICTION_MEMORY_TIME);
+        for txid in txids.iter() {
+            e.insert(txid.mined_id());
+        }
+        prop_assert_eq!(e.len(), 2);
+        prop_assert!(!e.contains_key(&txids[0].mined_id()));
+        prop_assert!(!e.contains_key(&txids[1].mined_id()));
+        prop_assert!(e.contains_key(&txids[2].mined_id()));
+        prop_assert!(e.contains_key(&txids[3].mined_id()));
+    }
+
+    /// Check if EvictionList removes old entries.
+    #[test]
+    fn eviction_list_time(
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let txids: Vec<UnminedTxId> = (0..2_u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        }).collect();
+
+        let mut e = EvictionList::new(2, Duration::from_millis(10));
+        e.insert(txids[0].mined_id());
+        thread::sleep(Duration::from_millis(11));
+        e.insert(txids[1].mined_id());
+        prop_assert_eq!(e.len(), 1);
+        prop_assert!(!e.contains_key(&txids[0].mined_id()));
+        prop_assert!(e.contains_key(&txids[1].mined_id()));
+    }
+
+    /// Check if EvictionList refreshes entries added multiple times.
+    #[test]
+    fn eviction_list_refresh(
+        txid in any::<UnminedTxId>()
+    ) {
+        let mut e = EvictionList::new(2, Duration::from_millis(10));
+        e.insert(txid.mined_id());
+        thread::sleep(Duration::from_millis(11));
+        // Refresh entry.
+        e.insert(txid.mined_id());
+        e.prune_old();
+        prop_assert_eq!(e.len(), 1);
+        prop_assert!(e.contains_key(&txid.mined_id()));
     }
 }
