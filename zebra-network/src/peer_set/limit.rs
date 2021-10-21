@@ -18,7 +18,7 @@ pub struct ConnectionClosed;
 /// Creates a [`ConnectionTracker`] to track each active connection.
 /// When these trackers are dropped, the counter gets notified.
 pub struct ActiveConnectionCounter {
-    /// The number of peers active peers tracked using this counter.
+    /// The number of active peers tracked using this counter.
     count: usize,
 
     /// The channel used to send closed connection notifications.
