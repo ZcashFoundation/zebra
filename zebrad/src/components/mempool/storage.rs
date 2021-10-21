@@ -130,7 +130,7 @@ pub struct Storage {
 
     /// Max total cost of the verified mempool set, beyond which transactions
     /// are evicted to make room.
-    tx_cost_limit: u32,
+    tx_cost_limit: u64,
 }
 
 impl Drop for Storage {

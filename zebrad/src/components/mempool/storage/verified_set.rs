@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{HashSet, VecDeque},
-    convert::{TryFrom, TryInto},
+    convert::TryInto,
     hash::Hash,
 };
 
@@ -33,7 +33,7 @@ pub struct VerifiedSet {
     transactions_serialized_size: usize,
 
     /// The total cost of the verified transactons in the set.
-    total_cost: u32,
+    total_cost: u64,
 
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
@@ -69,7 +69,7 @@ impl VerifiedSet {
     /// Returns the total cost of the verified transactions in the set.
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
-    pub fn total_cost(&self) -> u32 {
+    pub fn total_cost(&self) -> u64 {
         self.total_cost
     }
 
@@ -131,20 +131,18 @@ impl VerifiedSet {
             use rand::distributions::{Distribution, WeightedIndex};
             use rand::prelude::thread_rng;
 
-            let weights = self
-                .transactions
-                .iter()
-                .map(|tx| {
-                    let low_fee_penalty = if tx.miner_fee < Amount::try_from(1_000)? {
-                        16_000
-                    } else {
-                        0
-                    };
-                    tx.transaction.cost() + low_fee_penalty
-                })
-                .collect();
+            let conventional_fee: Amount = 1_000.try_into().unwrap();
 
-            let dist = WeightedIndex::new(&weights).unwrap();
+            let weights = self.transactions.iter().map(|tx| {
+                let low_fee_penalty = if tx.miner_fee < conventional_fee {
+                    16_000
+                } else {
+                    0
+                };
+                tx.transaction.cost() + low_fee_penalty
+            });
+
+            let dist = WeightedIndex::new(weights).unwrap();
 
             Some(self.remove(dist.sample(&mut thread_rng())))
         }
