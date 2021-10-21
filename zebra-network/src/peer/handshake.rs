@@ -29,6 +29,8 @@ use zebra_chain::{
 use crate::{
     constants,
     meta_addr::MetaAddrChange,
+    peer::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerError},
+    peer_set::ConnectionTracker,
     protocol::{
         external::{types::*, Codec, InventoryHash, Message},
         internal::{Request, Response},
@@ -36,8 +38,6 @@ use crate::{
     types::MetaAddr,
     BoxError, Config,
 };
-
-use super::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerError};
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
@@ -658,7 +658,20 @@ pub async fn negotiate_version(
     Ok((remote_version, remote_services, remote_canonical_addr))
 }
 
-pub type HandshakeRequest = (TcpStream, ConnectedAddr);
+/// A handshake request.
+/// Contains the information needed to handshake with the peer.
+pub struct HandshakeRequest {
+    /// The TCP connection to the peer.
+    pub tcp_stream: TcpStream,
+
+    /// The address of the peer, and other related information.
+    pub connected_addr: ConnectedAddr,
+
+    /// A connection tracker that reduces the open connection count when dropped.
+    ///
+    /// Used to limit the number of open connections in Zebra.
+    pub connection_tracker: ConnectionTracker,
+}
 
 impl<S, C> Service<HandshakeRequest> for Handshake<S, C>
 where
@@ -676,7 +689,11 @@ where
     }
 
     fn call(&mut self, req: HandshakeRequest) -> Self::Future {
-        let (tcp_stream, connected_addr) = req;
+        let HandshakeRequest {
+            tcp_stream,
+            connected_addr,
+            connection_tracker,
+        } = req;
 
         let negotiator_span = debug_span!("negotiator", peer = ?connected_addr);
         // set the peer connection span's parent to the global span, as it
@@ -892,11 +909,12 @@ where
             use super::connection;
             let server = Connection {
                 state: connection::State::AwaitingRequest,
+                request_timer: None,
                 svc: inbound_service,
                 client_rx: server_rx.into(),
                 error_slot: slot,
                 peer_tx,
-                request_timer: None,
+                connection_tracker,
             };
 
             tokio::spawn(
