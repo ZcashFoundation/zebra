@@ -34,8 +34,18 @@ use UnminedTxId::*;
 /// Contributes to the randomized, weighted eviction of transactions from the
 /// mempool when it reaches a max size, also based on the total cost.
 ///
+/// > Each transaction has a cost, which is an integer defined as:
+/// >
+/// >     max(serialized transaction size in bytes, 4000)
+/// >
+/// > The threshold 4000 for the cost function is chosen so that the size in bytes
+/// > of a typical fully shielded Sapling transaction (with, say, 2 shielded outputs
+/// > and up to 5 shielded inputs) will fall below the threshold. This has the effect
+/// > of ensuring that such transactions are not evicted preferentially to typical
+/// > transparent transactions because of their size.
+///
 /// [ZIP-401]: https://zips.z.cash/zip-0401
-const MEMPOOL_TRANSACTION_COST_THRESHOLD: u32 = 4000;
+const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
 
 /// A unique identifier for an unmined transaction, regardless of version.
 ///
@@ -195,6 +205,10 @@ impl UnminedTx {
     /// A reflection of the work done by the network in processing them (proof
     /// and signature verification; networking overheads; size of in-memory data
     /// structures).
+    ///
+    /// > Each transaction has a cost, which is an integer defined as:
+    /// >
+    /// >     max(serialized transaction size in bytes, 4000)
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn cost(&self) -> u64 {
