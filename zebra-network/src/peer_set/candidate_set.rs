@@ -1,7 +1,7 @@
-use std::{cmp::min, mem, sync::Arc, time::Duration};
+use std::{cmp::min, sync::Arc};
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tokio::time::{sleep, timeout, Instant, Sleep};
+use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::serialization::DateTime32;
@@ -114,7 +114,7 @@ mod tests;
 pub(crate) struct CandidateSet<S> {
     pub(super) address_book: Arc<std::sync::Mutex<AddressBook>>,
     pub(super) peer_service: S,
-    wait_next_handshake: Sleep,
+    min_next_handshake: Instant,
     min_next_crawl: Instant,
 }
 
@@ -131,7 +131,7 @@ where
         CandidateSet {
             address_book,
             peer_service,
-            wait_next_handshake: sleep(Duration::from_secs(0)),
+            min_next_handshake: Instant::now(),
             min_next_crawl: Instant::now(),
         }
     }
@@ -321,9 +321,8 @@ where
         };
 
         // SECURITY: rate-limit new outbound peer connections
-        (&mut self.wait_next_handshake).await;
-        let mut sleep = sleep(constants::MIN_PEER_CONNECTION_INTERVAL);
-        mem::swap(&mut self.wait_next_handshake, &mut sleep);
+        sleep_until(self.min_next_handshake).await;
+        self.min_next_handshake = Instant::now() + constants::MIN_PEER_CONNECTION_INTERVAL;
 
         Some(reconnect)
     }
