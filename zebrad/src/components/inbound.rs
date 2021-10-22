@@ -372,7 +372,8 @@ impl Service<zn::Request> for Inbound {
                         .map_ok(|_resp| zn::Response::Nil)
                         .boxed()
                 } else {
-                    info!(
+                    // Peers send a lot of these when we first connect to them.
+                    debug!(
                         "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
                     );
                     async { Ok(zn::Response::Nil) }.boxed()
@@ -385,7 +386,8 @@ impl Service<zn::Request> for Inbound {
                 {
                     block_downloads.download_and_verify(hash);
                 } else {
-                    info!(
+                    // Peers send a lot of these when we first connect to them.
+                    debug!(
                         ?hash,
                         "ignoring `AdvertiseBlock` request from remote peer during network setup"
                     );
