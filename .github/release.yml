@@ -1,0 +1,26 @@
+# release.yml
+
+changelog:
+  exclude:
+    authors:
+      - dependabot
+  categories:
+    - title: Added
+      labels:
+        - "C-enhancement"
+    - title: Changed
+      labels: 
+        - "C-cleanup"
+    - title: Deprecated
+      labels:
+        - ""
+    - title: Removed
+      labels:
+        - ""
+    - title: Fixed
+      labels:
+        - "C-bug"
+        - "C-enhancement"
+    - title: Security
+      labels:
+        - "C-security"
