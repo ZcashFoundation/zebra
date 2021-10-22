@@ -8,11 +8,11 @@ use tracing::instrument;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
+
 use std::{
     convert::Infallible as NoDir,
     fmt::{self, Write as _},
-    io::BufRead,
-    io::{BufReader, Lines, Read},
+    io::{BufRead, BufReader, Lines, Read, Write as _},
     path::Path,
     process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
@@ -286,10 +286,17 @@ impl<T> TestChild<T> {
         L: Iterator<Item = std::io::Result<String>>,
     {
         let re = regex::Regex::new(regex).expect("regex must be valid");
-        while !self.past_deadline() && self.is_running() {
+
+        // We don't check `is_running` here,
+        // because we want to read to the end of the buffered output,
+        // even if the child process has exited.
+        while !self.past_deadline() {
             let line = if let Some(line) = lines.next() {
                 line?
             } else {
+                // When the child process closes its output,
+                // and we've read all of the buffered output,
+                // stop checking for any more output.
                 break;
             };
 
@@ -297,14 +304,15 @@ impl<T> TestChild<T> {
             // can be preserved. May cause weird reordering for stdout / stderr.
             // Uses stdout even if the original lines were from stderr.
             if self.bypass_test_capture {
-                // send lines to the terminal (or process stdout file redirect)
-                use std::io::Write;
+                // Send lines directly to the terminal (or process stdout file redirect).
                 #[allow(clippy::explicit_write)]
                 writeln!(std::io::stdout(), "{}", line).unwrap();
             } else {
-                // if the test fails, the test runner captures and displays it
+                // If the test fails, the test runner captures and displays this output.
                 println!("{}", line);
             }
+            // Some OSes require a flush to send all output to the terminal.
+            std::io::stdout().lock().flush()?;
 
             if re.is_match(&line) {
                 return Ok(());
