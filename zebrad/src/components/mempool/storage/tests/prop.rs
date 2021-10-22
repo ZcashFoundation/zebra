@@ -152,8 +152,8 @@ proptest! {
         }
 
         // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
-        // the storage should have cleared the reject list
-        prop_assert_eq!(storage.rejected_transaction_count(), 0);
+        // the storage should have removed the older entries and kept its size
+        prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
     }
 
     /// Test that the reject list length limits are applied when directly rejecting transactions.
@@ -184,8 +184,18 @@ proptest! {
             } else if index == MAX_EVICTION_MEMORY_ENTRIES {
                 // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
                 // all with the same error,
-                // the storage should have cleared the reject list
-                prop_assert_eq!(storage.rejected_transaction_count(), 0);
+                // the storage should have either cleared the reject list
+                // or removed the oldest ones, depending on the structure
+                // used.
+                match rejection_error {
+                    RejectionError::ExactTip(_) |
+                    RejectionError::SameEffectsTip(_) => {
+                        prop_assert_eq!(storage.rejected_transaction_count(), 0);
+                    },
+                    RejectionError::SameEffectsChain(_) => {
+                        prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
+                    },
+                }
             }
         }
     }
