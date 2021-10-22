@@ -1,4 +1,7 @@
-//! Errors that can occur when manipulating transactions in the mempool.
+//! Errors that can occur when interacting with the mempool.
+//!
+//! Most of the mempool errors are related to manipulating transactions in the
+//! mempool.
 
 use thiserror::Error;
 
