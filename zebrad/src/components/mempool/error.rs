@@ -11,7 +11,6 @@ use super::storage::{
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-#[allow(dead_code)]
 pub enum MempoolError {
     #[error("mempool storage has a cached tip rejection for this exact transaction")]
     StorageExactTip(#[from] ExactTipRejectionError),
@@ -28,12 +27,6 @@ pub enum MempoolError {
 
     #[error("transaction already exists in mempool")]
     InMempool,
-
-    #[error("transaction is committed in block {0:?}")]
-    InBlock(zebra_chain::block::Hash),
-
-    #[error("transaction was not found in mempool")]
-    NotInMempool,
 
     /// The transaction hash is already queued, so this request was ignored.
     ///
@@ -52,7 +45,4 @@ pub enum MempoolError {
 
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
-
-    #[error("error calling a service")]
-    ServiceError,
 }
