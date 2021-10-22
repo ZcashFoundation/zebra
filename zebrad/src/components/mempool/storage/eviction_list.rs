@@ -21,18 +21,18 @@ pub struct EvictionList {
     max_size: usize,
     /// The mempool transaction eviction age limit.
     /// Same as [`Config::eviction_memory_time`].
-    eviction_time: Duration,
+    eviction_memory_time: Duration,
 }
 
 impl EvictionList {
     /// Create a new [`EvictionList`] with the given maximum size and
     /// eviction time.
-    pub fn new(max_size: usize, eviction_time: Duration) -> Self {
+    pub fn new(max_size: usize, eviction_memory_time: Duration) -> Self {
         Self {
             unique_entries: Default::default(),
             ordered_entries: Default::default(),
-            size,
-            eviction_time,
+            max_size,
+            eviction_memory_time,
         }
     }
 
@@ -42,8 +42,16 @@ impl EvictionList {
     ///
     /// All entries older than [`EvictionList::eviction_time`] will be removed.
     pub fn insert(&mut self, key: transaction::Hash) {
+        // From https://zips.z.cash/zip-0401#specification:
+        // > Nodes SHOULD remove transactions from RecentlyEvicted that were evicted more than
+        // > mempoolevictionmemoryminutes minutes ago. This MAY be done periodically,
+        // > and/or just before RecentlyEvicted is accessed when receiving a transaction.
         self.prune_old();
-        while self.len() >= self.size {
+        // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry
+        // > in RecentlyEvicted if necessary to keep it to at most eviction_memory_entries entries.
+        // Use a `while` because it is possible that more than one item is removed
+        // (if an entry is refreshed, it leaves the old value in the list).
+        while self.len() >= self.max_size {
             self.pop_front();
         }
         let value = Instant::now();
@@ -55,12 +63,26 @@ impl EvictionList {
 
     /// Checks if the given TXID is in the list.
     pub fn contains_key(&self, txid: &transaction::Hash) -> bool {
-        self.unique_entries.contains_key(txid)
+        if let Some(evicted_at) = self.unique_entries.get(txid) {
+            // Since the list is pruned only in mutable functions, make sure
+            // we take expired items into account.
+            if !self.has_expired(evicted_at) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Get the size of the list.
     pub fn len(&self) -> usize {
-        self.unique_entries.len()
+        // Since the list is pruned only in mutable functions, make sure
+        // we take expired items into account.
+        let expired = self
+            .unique_entries
+            .iter()
+            .take_while(|(_txid, evicted_at)| self.has_expired(*evicted_at))
+            .count();
+        self.unique_entries.len() - expired
     }
 
     /// Clear the list.
@@ -70,10 +92,12 @@ impl EvictionList {
     }
 
     /// Prune TXIDs that are older than `eviction_time` ago.
+    ///
+    // This method is public because ZIP-401 states about pruning:
+    // > This MAY be done periodically,
     pub fn prune_old(&mut self) {
-        let now = Instant::now();
         while let Some((_txid, evicted_at)) = self.front() {
-            if (now - *evicted_at) > self.eviction_time {
+            if self.has_expired(evicted_at) {
                 self.pop_front();
             } else {
                 break;
@@ -103,5 +127,12 @@ impl EvictionList {
             }
         }
         entry
+    }
+
+    /// Returns if `evicted_at` is considered expired considering the current
+    /// time and the configured eviction time.
+    fn has_expired(&self, evicted_at: &Instant) -> bool {
+        let now = Instant::now();
+        (now - *evicted_at) > self.eviction_memory_time
     }
 }

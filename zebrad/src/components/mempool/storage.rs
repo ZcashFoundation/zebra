@@ -126,6 +126,13 @@ pub struct Storage {
     /// These rejections apply until a rollback or network upgrade.
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
+    ///
+    /// An [`EvictionList`] is used for both randomly evicted and expired transactions,
+    /// even if it is only needed for the evicted ones. This was done just to simplify
+    /// the existing code; there is no harm in having a timeout for expired transactions
+    /// too since re-checking expired transactions is cheap. If this code is ever refactored
+    /// and the lists are split in different fields, then we can use an `EvictionList` just for
+    /// the evicted list.
     chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
 
     /// The mempool transaction eviction age limit.

@@ -997,6 +997,12 @@ proptest! {
         let mut e = EvictionList::new(2, Duration::from_millis(10));
         e.insert(txids[0].mined_id());
         thread::sleep(Duration::from_millis(11));
+
+        // First txid has expired, but list wasn't pruned yet.
+        // Make sure len() and contains_key() take that into account.
+        prop_assert_eq!(e.len(), 0);
+        prop_assert!(!e.contains_key(&txids[0].mined_id()));
+
         e.insert(txids[1].mined_id());
         prop_assert_eq!(e.len(), 1);
         prop_assert!(!e.contains_key(&txids[0].mined_id()));
@@ -1013,6 +1019,8 @@ proptest! {
         thread::sleep(Duration::from_millis(11));
         // Refresh entry.
         e.insert(txid.mined_id());
+        // The list is pruned in the insertion, but call prune_old() anyway
+        // to make sure we're testing the post-pruned state.
         e.prune_old();
         prop_assert_eq!(e.len(), 1);
         prop_assert!(e.contains_key(&txid.mined_id()));
