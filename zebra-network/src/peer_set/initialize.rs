@@ -260,14 +260,34 @@ where
             }
             Err((addr, ref e)) => {
                 handshake_error_total += 1;
+
                 // this is verbose, but it's better than just hanging with no output when there are errors
-                info!(
-                    ?handshake_success_total,
-                    ?handshake_error_total,
-                    ?addr,
-                    ?e,
-                    "an initial peer connection failed"
-                );
+                let mut expected_error = false;
+                if let Some(io_error) = e.downcast_ref::<tokio::io::Error>() {
+                    // Some systems only have IPv4, or only have IPv6,
+                    // so these errors are not particularly interesting.
+                    if io_error.kind() == tokio::io::ErrorKind::AddrNotAvailable {
+                        expected_error = true;
+                    }
+                }
+
+                if expected_error {
+                    debug!(
+                        successes = ?handshake_success_total,
+                        errors = ?handshake_error_total,
+                        ?addr,
+                        ?e,
+                        "an initial peer connection failed"
+                    );
+                } else {
+                    info!(
+                        successes = ?handshake_success_total,
+                        errors = ?handshake_error_total,
+                        ?addr,
+                        %e,
+                        "an initial peer connection failed"
+                    );
+                }
             }
         }
 

@@ -445,7 +445,7 @@ impl StateService {
         let chain_tip_height = if let Some((height, _)) = self.best_tip() {
             height
         } else {
-            tracing::info!(
+            tracing::debug!(
                 response_len = ?0,
                 "responding to peer GetBlocks or GetHeaders with empty state",
             );

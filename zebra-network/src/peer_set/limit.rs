@@ -105,7 +105,7 @@ impl ConnectionTracker {
     fn new(counter: &mut ActiveConnectionCounter) -> Self {
         counter.count += 1;
 
-        info!(open_connections = ?counter.count, "opening a new peer connection");
+        debug!(open_connections = ?counter.count, "opening a new peer connection");
 
         Self {
             close_notification_tx: counter.close_notification_tx.clone(),
