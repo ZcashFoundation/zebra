@@ -10,6 +10,8 @@ use std::{
 use futures::{channel::oneshot, ready};
 use tower::Service;
 
+use crate::peer_set::set::CancelClientWork;
+
 /// A Future that becomes satisfied when an `S`-typed service is ready.
 ///
 /// May fail due to cancelation, i.e. if the service is removed from discovery.
@@ -18,7 +20,7 @@ use tower::Service;
 pub(super) struct UnreadyService<K, S, Req> {
     pub(super) key: Option<K>,
     #[pin]
-    pub(super) cancel: oneshot::Receiver<()>,
+    pub(super) cancel: oneshot::Receiver<CancelClientWork>,
     pub(super) service: Option<S>,
 
     pub(super) _req: PhantomData<Req>,
@@ -35,7 +37,7 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        if let Poll::Ready(Ok(())) = this.cancel.poll(cx) {
+        if let Poll::Ready(Ok(CancelClientWork)) = this.cancel.poll(cx) {
             let key = this.key.take().expect("polled after ready");
             return Poll::Ready(Err((key, Error::Canceled)));
         }

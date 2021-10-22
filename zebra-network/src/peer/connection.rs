@@ -26,16 +26,16 @@ use zebra_chain::{
 
 use crate::{
     constants,
+    peer::{
+        ClientRequestReceiver, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
+        SharedPeerError,
+    },
+    peer_set::ConnectionTracker,
     protocol::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{Request, Response},
     },
     BoxError,
-};
-
-use super::{
-    ClientRequestReceiver, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
-    SharedPeerError,
 };
 
 #[derive(Debug)]
@@ -314,19 +314,41 @@ pub(super) enum State {
 
 /// The state associated with a peer connection.
 pub struct Connection<S, Tx> {
+    /// The state of this connection's current request or response.
     pub(super) state: State,
+
     /// A timeout for a client request. This is stored separately from
     /// State so that we can move the future out of it independently of
     /// other state handling.
     pub(super) request_timer: Option<Sleep>,
+
+    /// The `inbound` service, used to answer requests from this connection's peer.
     pub(super) svc: S,
-    /// A `mpsc::Receiver<ClientRequest>` that converts its results to
-    /// `InProgressClientRequest`
+
+    /// A channel that receives network requests from the rest of Zebra.
+    ///
+    /// This channel produces `InProgressClientRequest`s.
     pub(super) client_rx: ClientRequestReceiver,
+
     /// A slot for an error shared between the Connection and the Client that uses it.
     pub(super) error_slot: ErrorSlot,
-    //pub(super) peer_rx: Rx,
+
+    /// A channel for sending requests to the connected peer.
     pub(super) peer_tx: Tx,
+
+    /// A connection tracker that reduces the open connection count when dropped.
+    /// Used to limit the number of open connections in Zebra.
+    ///
+    /// This field does nothing until it is dropped.
+    ///
+    /// # Security
+    ///
+    /// If this connection tracker or `Connection`s are leaked,
+    /// the number of active connections will appear higher than it actually is.
+    ///
+    /// Eventually, Zebra could stop making connections entirely.
+    #[allow(dead_code)]
+    pub(super) connection_tracker: ConnectionTracker,
 }
 
 impl<S, Tx> Connection<S, Tx>
