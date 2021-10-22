@@ -10,7 +10,7 @@ use zebra_chain::transaction;
 /// An eviction list that allows to efficiently add entries, get entries,
 /// and remove older entries in the order they were inserted.
 pub struct EvictionList {
-    // Maps each TXID In the list to the instant they were added.
+    // Maps each TXID in the list to the most recent instant they were added.
     unique_entries: HashMap<transaction::Hash, Instant>,
     // The entries in the order they were inserted.
     // This can be larger than `unique_entries` if a same txid is added
@@ -18,7 +18,7 @@ pub struct EvictionList {
     // `unique_entries` but all entries will kept in `unique_entries`.
     ordered_entries: VecDeque<(transaction::Hash, Instant)>,
     // The maximum size of `unique_entries`.
-    size: usize,
+    max_size: usize,
     /// The mempool transaction eviction age limit.
     /// Same as [`Config::eviction_memory_time`].
     eviction_time: Duration,
@@ -27,7 +27,7 @@ pub struct EvictionList {
 impl EvictionList {
     /// Create a new [`EvictionList`] with the given maximum size and
     /// eviction time.
-    pub fn new(size: usize, eviction_time: Duration) -> Self {
+    pub fn new(max_size: usize, eviction_time: Duration) -> Self {
         Self {
             unique_entries: Default::default(),
             ordered_entries: Default::default(),
