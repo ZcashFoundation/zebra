@@ -3,7 +3,7 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 use futures::{
     channel::mpsc,
@@ -12,6 +12,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     TryFutureExt,
 };
+use rand::seq::SliceRandom;
 use tokio::{net::TcpListener, sync::broadcast, time::Instant};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
@@ -26,7 +27,7 @@ use crate::{
     constants,
     meta_addr::MetaAddr,
     peer::{self, HandshakeRequest, OutboundConnectorRequest},
-    peer_set::{ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -108,7 +109,9 @@ where
     // Create an mpsc channel for peer changes, with a generous buffer.
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
     // Create an mpsc channel for peerset demand signaling.
-    let (mut demand_tx, demand_rx) = mpsc::channel::<()>(100);
+    let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(100);
+
+    // Create a oneshot to send background task JoinHandles to the peer set
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
@@ -141,11 +144,7 @@ where
         let config = config.clone();
         let outbound_connector = outbound_connector.clone();
         let peerset_tx = peerset_tx.clone();
-        async move {
-            let initial_peers = config.initial_peers().await;
-            add_initial_peers(initial_peers, outbound_connector, peerset_tx).await
-        }
-        .boxed()
+        async move { add_initial_peers(&config, outbound_connector, peerset_tx).await }.boxed()
     };
 
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
@@ -170,8 +169,9 @@ where
     );
     let _ = candidates.update_initial(active_initial_peer_count).await;
 
+    // TODO: reduce demand by `active_outbound_connections.update_count()` (#2902)
     for _ in 0..config.peerset_initial_target_size {
-        let _ = demand_tx.try_send(());
+        let _ = demand_tx.try_send(MorePeers);
     }
 
     let crawl_guard = tokio::spawn(
@@ -192,11 +192,11 @@ where
     (peer_set, address_book)
 }
 
-/// Use the provided `handshaker` to connect to `initial_peers`, then send
-/// the results over `peerset_tx`.
-#[instrument(skip(initial_peers, outbound_connector, peerset_tx))]
+/// Use the provided `outbound_connector` to connect to the configured initial peers,
+/// then send the resulting peer connections over `peerset_tx`.
+#[instrument(skip(config, outbound_connector, peerset_tx))]
 async fn add_initial_peers<S>(
-    initial_peers: std::collections::HashSet<SocketAddr>,
+    config: &Config,
     outbound_connector: S,
     mut peerset_tx: mpsc::Sender<PeerChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
@@ -208,14 +208,15 @@ where
         > + Clone,
     S::Future: Send + 'static,
 {
-    let initial_peer_count = initial_peers.len();
+    let initial_peers = limit_initial_peers(config).await;
+
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
 
     let mut active_outbound_connections = ActiveConnectionCounter::new_counter();
 
     info!(
-        ?initial_peer_count,
+        initial_peer_count = ?initial_peers.len(),
         ?initial_peers,
         "connecting to initial peer set"
     );
@@ -284,6 +285,32 @@ where
     );
 
     Ok(active_outbound_connections)
+}
+
+/// Limit the number of `initial_peers` addresses entries to the configured
+/// `peerset_initial_target_size`.
+///
+/// The result is randomly chosen entries from the provided set of addresses.
+async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
+    let initial_peers = config.initial_peers().await;
+    let initial_peer_count = initial_peers.len();
+
+    // Limit the number of initial peers to `config.peerset_initial_target_size`
+    if initial_peer_count > config.peerset_initial_target_size {
+        info!(
+            "Limiting the initial peers list from {} to {}",
+            initial_peer_count, config.peerset_initial_target_size
+        );
+    }
+
+    let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
+
+    // TODO: add unused peers to the AddressBook (#2931)
+    //       https://docs.rs/rand/0.8.4/rand/seq/trait.SliceRandom.html#tymethod.partial_shuffle
+    initial_peers_vect
+        .choose_multiple(&mut rand::thread_rng(), config.peerset_initial_target_size)
+        .copied()
+        .collect()
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
@@ -391,6 +418,16 @@ where
                     .instrument(handshaker_span),
                 );
             }
+
+            // Only spawn one inbound connection handshake per `MIN_PEER_CONNECTION_INTERVAL`.
+            // But clear out failed connections as fast as possible.
+            //
+            // If there is a flood of connections,
+            // this stops Zebra overloading the network with handshake data.
+            //
+            // Zebra can't control how many queued connections are waiting,
+            // but most OSes also limit the number of queued inbound connections on a listener port.
+            tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
         }
     }
 }
@@ -435,8 +472,8 @@ enum CrawlerAction {
 #[instrument(skip(demand_tx, demand_rx, candidates, outbound_connector, peerset_tx,))]
 async fn crawl_and_dial<C, S>(
     crawl_new_peer_interval: std::time::Duration,
-    mut demand_tx: mpsc::Sender<()>,
-    mut demand_rx: mpsc::Receiver<()>,
+    mut demand_tx: mpsc::Sender<MorePeers>,
+    mut demand_rx: mpsc::Receiver<MorePeers>,
     mut candidates: CandidateSet<S>,
     outbound_connector: C,
     mut peerset_tx: mpsc::Sender<PeerChange>,
@@ -545,7 +582,7 @@ where
                 //       spawn independent tasks to avoid deadlocks
                 candidates.update().await?;
                 // Try to connect to a new peer.
-                let _ = demand_tx.try_send(());
+                let _ = demand_tx.try_send(MorePeers);
             }
             TimerCrawl { tick } => {
                 debug!(
@@ -555,7 +592,7 @@ where
                 // TODO: spawn independent tasks to avoid deadlocks
                 candidates.update().await?;
                 // Try to connect to a new peer.
-                let _ = demand_tx.try_send(());
+                let _ = demand_tx.try_send(MorePeers);
             }
             HandshakeConnected { peer_set_change } => {
                 if let Change::Insert(ref addr, _) = peer_set_change {
@@ -575,7 +612,7 @@ where
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
-                let _ = demand_tx.try_send(());
+                let _ = demand_tx.try_send(MorePeers);
             }
         }
     }
