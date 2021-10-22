@@ -13,7 +13,11 @@ use futures::{
     TryFutureExt,
 };
 use rand::seq::SliceRandom;
-use tokio::{net::TcpListener, sync::broadcast, time::Instant};
+use tokio::{
+    net::TcpListener,
+    sync::{broadcast, oneshot},
+    time::{sleep, Instant},
+};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -223,7 +227,10 @@ where
 
     // # Security
     //
-    // TODO: rate-limit initial seed peer connections (#2326)
+    // Resists distributed denial of service attacks by making sure that
+    // new peer connections are initiated at least
+    // [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL]
+    // apart.
     //
     // # Correctness
     //
@@ -231,6 +238,7 @@ where
     // an indefinite period. We can use `FuturesUnordered` without filling
     // the underlying network buffers, because we immediately drive this
     // single `FuturesUnordered` to completion, and handshakes have a short timeout.
+    let mut channels = Vec::new();
     let mut handshakes: FuturesUnordered<_> = initial_peers
         .into_iter()
         .map(|addr| {
@@ -240,12 +248,30 @@ where
                 connection_tracker,
             };
 
-            outbound_connector
-                .clone()
-                .oneshot(req)
-                .map_err(move |e| (addr, e))
+            let (tx, rx) = oneshot::channel();
+            channels.push(tx);
+
+            let outbound_connector = outbound_connector.clone();
+
+            async move {
+                // Wait until the rate-limiter allows initiating the connection
+                let _ = rx.await;
+                outbound_connector
+                    .oneshot(req)
+                    .map_err(move |e| (addr, e))
+                    .await
+            }
         })
         .collect();
+
+    // Spawn a rate-limiter task that initiates each connection
+    // MIN_PEER_CONNECTION_INTERVAL apart
+    tokio::spawn(async move {
+        for tx in channels {
+            let _ = tx.send(());
+            sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
+        }
+    });
 
     while let Some(handshake_result) = handshakes.next().await {
         match handshake_result {
