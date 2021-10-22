@@ -1,4 +1,7 @@
-//! Errors that can occur when manipulating transactions in the mempool.
+//! Errors that can occur when interacting with the mempool.
+//!
+//! Most of the mempool errors are related to manipulating transactions in the
+//! mempool.
 
 use thiserror::Error;
 
@@ -25,6 +28,7 @@ pub enum MempoolError {
     )]
     StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
+    /// The mempool does not store duplicate transactions.
     #[error("transaction already exists in mempool")]
     InMempool,
 
@@ -43,6 +47,9 @@ pub enum MempoolError {
     #[error("transaction dropped because the queue is full")]
     FullQueue,
 
+    /// The mempool is not enabled yet.
+    ///
+    /// Zebra enables the mempool once it reaches the chain tip.
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
 }
