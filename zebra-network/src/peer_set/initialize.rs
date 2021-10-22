@@ -27,7 +27,7 @@ use crate::{
     constants,
     meta_addr::MetaAddr,
     peer::{self, HandshakeRequest, OutboundConnectorRequest},
-    peer_set::{ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     timestamp_collector::TimestampCollector,
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -109,7 +109,9 @@ where
     // Create an mpsc channel for peer changes, with a generous buffer.
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
     // Create an mpsc channel for peerset demand signaling.
-    let (mut demand_tx, demand_rx) = mpsc::channel::<()>(100);
+    let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(100);
+
+    // Create a oneshot to send background task JoinHandles to the peer set
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
@@ -167,8 +169,9 @@ where
     );
     let _ = candidates.update_initial(active_initial_peer_count).await;
 
+    // TODO: reduce demand by `active_outbound_connections.update_count()` (#2902)
     for _ in 0..config.peerset_initial_target_size {
-        let _ = demand_tx.try_send(());
+        let _ = demand_tx.try_send(MorePeers);
     }
 
     let crawl_guard = tokio::spawn(
@@ -469,8 +472,8 @@ enum CrawlerAction {
 #[instrument(skip(demand_tx, demand_rx, candidates, outbound_connector, peerset_tx,))]
 async fn crawl_and_dial<C, S>(
     crawl_new_peer_interval: std::time::Duration,
-    mut demand_tx: mpsc::Sender<()>,
-    mut demand_rx: mpsc::Receiver<()>,
+    mut demand_tx: mpsc::Sender<MorePeers>,
+    mut demand_rx: mpsc::Receiver<MorePeers>,
     mut candidates: CandidateSet<S>,
     outbound_connector: C,
     mut peerset_tx: mpsc::Sender<PeerChange>,
@@ -579,7 +582,7 @@ where
                 //       spawn independent tasks to avoid deadlocks
                 candidates.update().await?;
                 // Try to connect to a new peer.
-                let _ = demand_tx.try_send(());
+                let _ = demand_tx.try_send(MorePeers);
             }
             TimerCrawl { tick } => {
                 debug!(
@@ -589,7 +592,7 @@ where
                 // TODO: spawn independent tasks to avoid deadlocks
                 candidates.update().await?;
                 // Try to connect to a new peer.
-                let _ = demand_tx.try_send(());
+                let _ = demand_tx.try_send(MorePeers);
             }
             HandshakeConnected { peer_set_change } => {
                 if let Change::Insert(ref addr, _) = peer_set_change {
@@ -609,7 +612,7 @@ where
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
-                let _ = demand_tx.try_send(());
+                let _ = demand_tx.try_send(MorePeers);
             }
         }
     }
