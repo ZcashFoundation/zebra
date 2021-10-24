@@ -79,7 +79,9 @@ where
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     let (address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
-    let (inv_sender, inv_receiver) = broadcast::channel(100);
+    // Create a broadcast channel for peer inventory advertisements,
+    // with a buffer that's significantly higher than the peer connection limits.
+    let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_initial_target_size * 3);
 
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
@@ -106,10 +108,14 @@ where
         )
     };
 
-    // Create an mpsc channel for peer changes, with a generous buffer.
-    let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(100);
-    // Create an mpsc channel for peerset demand signaling.
-    let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(100);
+    // Create an mpsc channel for peer changes,
+    // with a buffer that's significantly higher than the peer connection limits.
+    let (peerset_tx, peerset_rx) =
+        mpsc::channel::<PeerChange>(config.peerset_initial_target_size * 3);
+    // Create an mpsc channel for peerset demand signaling,
+    // with a buffer that's significantly higher than the outbound peer connection limit.
+    let (mut demand_tx, demand_rx) =
+        mpsc::channel::<MorePeers>(config.peerset_initial_target_size * 2);
 
     // Create a oneshot to send background task JoinHandles to the peer set
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
