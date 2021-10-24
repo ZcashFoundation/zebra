@@ -174,9 +174,10 @@ where
         let _ = demand_tx.try_send(MorePeers);
     }
 
-    let crawl_guard = tokio::spawn(
+    let crawl_fut = {
+        let config = config.clone();
         crawl_and_dial(
-            config.crawl_new_peer_interval,
+            config,
             demand_tx,
             demand_rx,
             candidates,
@@ -184,8 +185,9 @@ where
             peerset_tx,
             active_outbound_connections,
         )
-        .instrument(Span::current()),
-    );
+    };
+
+    let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
 
     handle_tx.send(vec![listen_guard, crawl_guard]).unwrap();
 
@@ -476,9 +478,9 @@ enum CrawlerAction {
 /// and connect to new peers, and send the resulting `peer::Client`s through the
 /// `peerset_tx` channel.
 ///
-/// Crawl for new peers every `crawl_new_peer_interval`, and whenever there is
-/// demand, but no new peers in `candidates`. After crawling, try to connect to
-/// one new peer using `outbound_connector`.
+/// Crawl for new peers every `config.crawl_new_peer_interval`.
+/// Also crawl whenever there is demand, but no new peers in `candidates`.
+/// After crawling, try to connect to one new peer using `outbound_connector`.
 ///
 /// If a handshake fails, restore the unused demand signal by sending it to
 /// `demand_tx`.
@@ -487,11 +489,11 @@ enum CrawlerAction {
 /// permanent internal error. Transient errors and individual peer errors should
 /// be handled within the crawler.
 ///
-/// Uses `active_outbound_connections` to track active outbound connections
+/// Uses `active_outbound_connections` to track the number of active outbound connections
 /// in both the initial peers and crawler.
 #[instrument(skip(demand_tx, demand_rx, candidates, outbound_connector, peerset_tx,))]
 async fn crawl_and_dial<C, S>(
-    crawl_new_peer_interval: std::time::Duration,
+    config: Config,
     mut demand_tx: mpsc::Sender<MorePeers>,
     mut demand_rx: mpsc::Receiver<MorePeers>,
     mut candidates: CandidateSet<S>,
@@ -530,7 +532,7 @@ where
     handshakes.push(future::pending().boxed());
 
     let mut crawl_timer =
-        tokio::time::interval(crawl_new_peer_interval).map(|tick| TimerCrawl { tick });
+        tokio::time::interval(config.crawl_new_peer_interval).map(|tick| TimerCrawl { tick });
 
     loop {
         metrics::gauge!(
@@ -548,8 +550,8 @@ where
             next_timer = crawl_timer.next() => next_timer.expect("timers never terminate"),
             // turn the demand into an action, based on the crawler's current state
             _ = demand_rx.next() => {
-                if handshakes.len() > 50 {
-                    // Too many pending handshakes already
+                if active_outbound_connections.update_count() >= config.peerset_initial_target_size {
+                    // Too many open connections or pending handshakes already
                     DemandDrop
                 } else if let Some(candidate) = candidates.next().await {
                     // candidates.next has a short delay, and briefly holds the address
@@ -566,7 +568,7 @@ where
                 // This is set to trace level because when the peerset is
                 // congested it can generate a lot of demand signal very
                 // rapidly.
-                trace!("too many in-flight handshakes, dropping demand signal");
+                trace!("too many open connections or in-flight handshakes, dropping demand signal");
                 continue;
             }
             DemandHandshake { candidate } => {
