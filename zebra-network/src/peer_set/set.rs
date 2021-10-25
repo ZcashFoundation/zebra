@@ -80,7 +80,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    AddressBook, BoxError,
+    AddressBook, BoxError, Config,
 };
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
@@ -134,6 +134,8 @@ where
     ///
     /// Used for logging diagnostics.
     address_book: Arc<std::sync::Mutex<AddressBook>>,
+    /// The configured limit for inbound and outbound connections.
+    peerset_total_connection_limit: usize,
 }
 
 impl<D> PeerSet<D>
@@ -147,6 +149,7 @@ where
 {
     /// Construct a peerset which uses `discover` internally.
     pub fn new(
+        config: &Config,
         discover: D,
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
@@ -165,6 +168,7 @@ where
             inventory_registry: InventoryRegistry::new(inv_stream),
             last_peer_log: None,
             address_book,
+            peerset_total_connection_limit: config.peerset_total_connection_limit(),
         }
     }
 
@@ -432,6 +436,17 @@ where
         metrics::gauge!("pool.num_ready", num_ready as f64);
         metrics::gauge!("pool.num_unready", num_unready as f64);
         metrics::gauge!("zcash.net.peers", num_peers as f64);
+
+        // Security: make sure we haven't exceeded the connection limit
+        if num_peers > self.peerset_total_connection_limit {
+            let address_metrics = self.address_book.lock().unwrap().address_metrics();
+            panic!(
+                "unexpectedly exceeded configured peer set connection limit: \n\
+                 peers: {:?}, ready: {:?}, unready: {:?}, \n\
+                 address_metrics: {:?}",
+                num_peers, num_ready, num_unready, address_metrics,
+            );
+        }
     }
 }
 
