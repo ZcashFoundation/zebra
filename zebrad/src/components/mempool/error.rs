@@ -12,23 +12,47 @@ use super::storage::{
     ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
 };
 
+/// Mempool errors.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum MempoolError {
+    /// Transaction rejected based on its authorizing data (scripts, proofs,
+    /// signatures),
+    ///
+    /// See [`ExactTipRejectionError`] for more details.
+    ///
+    /// Note that the mempool caches this error. See [`super::storage::Storage`]
+    /// for more details.
     #[error("mempool storage has a cached tip rejection for this exact transaction")]
     StorageExactTip(#[from] ExactTipRejectionError),
 
+    /// Transaction rejected based on its effects (spends, outputs, transaction
+    /// header). The rejection is valid for the current chain tip.
+    ///
+    /// See [`SameEffectsTipRejectionError`] for more details.
+    ///
+    /// Note that the mempool caches this error. See [`super::storage::Storage`]
+    /// for more details.
     #[error(
         "mempool storage has a cached tip rejection for any transaction with the same effects"
     )]
     StorageEffectsTip(#[from] SameEffectsTipRejectionError),
 
+    /// Transaction rejected based on its effects (spends, outputs, transaction
+    /// header). The rejection is valid while the current chain continues to
+    /// grow.
+    ///
+    /// See [`SameEffectsChainRejectionError`] for more details.
+    ///
+    /// Note that the mempool caches this error. See [`super::storage::Storage`]
+    /// for more details.
     #[error(
         "mempool storage has a cached chain rejection for any transaction with the same effects"
     )]
     StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
-    /// The mempool does not store duplicate transactions.
+    /// Transaction rejected because the mempool already contains another
+    /// transaction with the same hash.
     #[error("transaction already exists in mempool")]
     InMempool,
 
