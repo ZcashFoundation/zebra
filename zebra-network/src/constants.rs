@@ -13,6 +13,24 @@ use zebra_chain::{
     serialization::Duration32,
 };
 
+/// The fractional bias towards outbound peers in the peer set,
+/// if connection limits have been reached.
+///
+/// Inbound and outbound connections are limited based on
+/// [`Config.peerset_initial_target_size`].
+///
+/// The outbound limit is larger than the inbound limit by:
+/// `Config.peerset_initial_target_size / OUTBOUND_PEER_BIAS_FRACTION`.
+///
+/// # Security
+///
+/// This bias helps make sure that Zebra is connected to a majority of peers
+/// that it has chosen from its [`AddressBook`].
+///
+/// Inbound peer connections are initiated by the remote peer,
+/// so inbound peer selection is not controlled by the local node.
+pub const OUTBOUND_PEER_BIAS_FRACTION: usize = 2;
+
 /// The buffer size for the peer set.
 ///
 /// This should be greater than 1 to avoid sender contention, but also reasonably

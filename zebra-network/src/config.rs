@@ -9,7 +9,7 @@ use serde::{de, Deserialize, Deserializer};
 
 use zebra_chain::{parameters::Network, serialization::canonical_socket_addr};
 
-use crate::BoxError;
+use crate::{constants, BoxError};
 
 /// The number of times Zebra will retry each initial peer's DNS resolution,
 /// before checking if any other initial peers have returned addresses.
@@ -53,6 +53,8 @@ pub struct Config {
 
     /// The initial target size for the peer set.
     ///
+    /// Also used to limit the number of inbound and outbound connections made by Zebra.
+    ///
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
     /// set size to reduce Zebra's bandwidth usage.
@@ -72,6 +74,36 @@ pub struct Config {
 }
 
 impl Config {
+    /// The maximum number of outbound connections that Zebra will make.
+    ///
+    /// # Security
+    ///
+    /// This is larger than the inbound connection limit,
+    /// so Zebra is more likely to be connected to peers that it has selected.
+    pub fn peerset_outbound_connection_limit(&self) -> usize {
+        let inbound_limit = self.peerset_inbound_connection_limit();
+
+        inbound_limit + inbound_limit / constants::OUTBOUND_PEER_BIAS_FRACTION
+    }
+
+    /// The maximum number of inbound connections that Zebra will make.
+    pub fn peerset_inbound_connection_limit(&self) -> usize {
+        self.peerset_initial_target_size
+    }
+
+    /// The maximum total number of inbound and outbound connections that Zebra will make.
+    pub fn peerset_total_connection_limit(&self) -> usize {
+        self.peerset_outbound_connection_limit() + self.peerset_inbound_connection_limit()
+    }
+
+    /// Get the initial seed peers based on the configured network.
+    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
+        match self.network {
+            Network::Mainnet => Config::resolve_peers(&self.initial_mainnet_peers).await,
+            Network::Testnet => Config::resolve_peers(&self.initial_testnet_peers).await,
+        }
+    }
+
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
     /// timeout of a few seconds on each DNS request.
     ///
@@ -112,14 +144,6 @@ impl Config {
             } else {
                 return peer_addresses;
             }
-        }
-    }
-
-    /// Get the initial seed peers based on the configured network.
-    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
-        match self.network {
-            Network::Mainnet => Config::resolve_peers(&self.initial_mainnet_peers).await,
-            Network::Testnet => Config::resolve_peers(&self.initial_testnet_peers).await,
         }
     }
 

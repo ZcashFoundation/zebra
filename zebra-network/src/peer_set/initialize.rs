@@ -80,8 +80,8 @@ where
 
     let (address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
     // Create a broadcast channel for peer inventory advertisements,
-    // with a buffer that's significantly higher than the peer connection limits.
-    let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_initial_target_size * 3);
+    // based on the maximum number of inbound and outbound peers.
+    let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_total_connection_limit());
 
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
@@ -109,13 +109,13 @@ where
     };
 
     // Create an mpsc channel for peer changes,
-    // with a buffer that's significantly higher than the peer connection limits.
+    // based on the maximum number of inbound and outbound peers.
     let (peerset_tx, peerset_rx) =
-        mpsc::channel::<PeerChange>(config.peerset_initial_target_size * 3);
+        mpsc::channel::<PeerChange>(config.peerset_total_connection_limit());
     // Create an mpsc channel for peerset demand signaling,
-    // with a buffer that's significantly higher than the outbound peer connection limit.
+    // based on the maximum number of outbound peers.
     let (mut demand_tx, demand_rx) =
-        mpsc::channel::<MorePeers>(config.peerset_initial_target_size * 2);
+        mpsc::channel::<MorePeers>(config.peerset_outbound_connection_limit());
 
     // Create a oneshot to send background task JoinHandles to the peer set
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
@@ -192,7 +192,6 @@ where
             active_outbound_connections,
         )
     };
-
     let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
 
     handle_tx.send(vec![listen_guard, crawl_guard]).unwrap();
@@ -556,7 +555,7 @@ where
             next_timer = crawl_timer.next() => next_timer.expect("timers never terminate"),
             // turn the demand into an action, based on the crawler's current state
             _ = demand_rx.next() => {
-                if active_outbound_connections.update_count() >= config.peerset_initial_target_size {
+                if active_outbound_connections.update_count() >= config.peerset_outbound_connection_limit() {
                     // Too many open connections or pending handshakes already
                     DemandDrop
                 } else if let Some(candidate) = candidates.next().await {
