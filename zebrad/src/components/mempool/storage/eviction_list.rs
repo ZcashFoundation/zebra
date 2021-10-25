@@ -7,7 +7,7 @@ use std::{
 
 use zebra_chain::transaction;
 
-/// An eviction list that allows to efficiently add entries, get entries,
+/// An eviction list that allows Zebra to efficiently add entries, get entries,
 /// and remove older entries in the order they were inserted.
 pub struct EvictionList {
     // Maps each TXID in the list to the most recent instant they were added.
@@ -15,7 +15,7 @@ pub struct EvictionList {
     // The entries in the order they were inserted.
     // This can be larger than `unique_entries` if a same txid is added
     // multiple times. Its instant will be overwritten in
-    // `unique_entries` but all entries will kept in `unique_entries`.
+    // `unique_entries` but all entries will kept in `ordered_entries`.
     ordered_entries: VecDeque<(transaction::Hash, Instant)>,
     // The maximum size of `unique_entries`.
     max_size: usize,
@@ -40,7 +40,7 @@ impl EvictionList {
     ///
     /// If the TXID is already in the list, its insertion time will be updated.
     ///
-    /// All entries older than [`EvictionList::eviction_time`] will be removed.
+    /// All entries older than [`EvictionList::eviction_memory_time`] will be removed.
     pub fn insert(&mut self, key: transaction::Hash) {
         // From https://zips.z.cash/zip-0401#specification:
         // > Nodes SHOULD remove transactions from RecentlyEvicted that were evicted more than
