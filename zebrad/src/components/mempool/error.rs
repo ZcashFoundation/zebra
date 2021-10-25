@@ -49,7 +49,7 @@ pub enum MempoolError {
 
     /// The mempool is not enabled yet.
     ///
-    /// Zebra enables the mempool once it reaches the chain tip.
+    /// Zebra enables the mempool when it is at the chain tip.
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
 }
