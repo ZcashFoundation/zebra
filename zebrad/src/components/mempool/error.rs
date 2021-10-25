@@ -1,4 +1,7 @@
-//! Errors that can occur when manipulating transactions in the mempool.
+//! Errors that can occur when interacting with the mempool.
+//!
+//! Most of the mempool errors are related to manipulating transactions in the
+//! mempool.
 
 use thiserror::Error;
 
@@ -9,22 +12,47 @@ use super::storage::{
     ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
 };
 
+/// Mempool errors.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum MempoolError {
+    /// Transaction rejected based on its authorizing data (scripts, proofs,
+    /// signatures). The rejection is valid for the current chain tip.
+    ///
+    /// See [`ExactTipRejectionError`] for more details.
+    ///
+    /// Note that the mempool caches this error. See [`super::storage::Storage`]
+    /// for more details.
     #[error("mempool storage has a cached tip rejection for this exact transaction")]
     StorageExactTip(#[from] ExactTipRejectionError),
 
+    /// Transaction rejected based on its effects (spends, outputs, transaction
+    /// header). The rejection is valid for the current chain tip.
+    ///
+    /// See [`SameEffectsTipRejectionError`] for more details.
+    ///
+    /// Note that the mempool caches this error. See [`super::storage::Storage`]
+    /// for more details.
     #[error(
         "mempool storage has a cached tip rejection for any transaction with the same effects"
     )]
     StorageEffectsTip(#[from] SameEffectsTipRejectionError),
 
+    /// Transaction rejected based on its effects (spends, outputs, transaction
+    /// header). The rejection is valid while the current chain continues to
+    /// grow.
+    ///
+    /// See [`SameEffectsChainRejectionError`] for more details.
+    ///
+    /// Note that the mempool caches this error. See [`super::storage::Storage`]
+    /// for more details.
     #[error(
         "mempool storage has a cached chain rejection for any transaction with the same effects"
     )]
     StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
+    /// Transaction rejected because the mempool already contains another
+    /// transaction with the same hash.
     #[error("transaction already exists in mempool")]
     InMempool,
 
@@ -43,6 +71,9 @@ pub enum MempoolError {
     #[error("transaction dropped because the queue is full")]
     FullQueue,
 
+    /// The mempool is not enabled yet.
+    ///
+    /// Zebra enables the mempool when it is at the chain tip.
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
 }
