@@ -78,9 +78,12 @@ impl EvictionList {
         // Since the list is pruned only in mutable functions, make sure
         // we take expired items into account.
         let expired = self
-            .unique_entries
+            .ordered_entries
             .iter()
-            .take_while(|(_txid, evicted_at)| self.has_expired(*evicted_at))
+            // Take all expired entries
+            .take_while(|(_txid, evicted_at)| self.has_expired(evicted_at))
+            // Count only those that correspond to entries in `unique_entries`
+            .filter(|(txid, evicted_at)| self.unique_entries.get(txid) == Some(evicted_at))
             .count();
         self.unique_entries.len() - expired
     }

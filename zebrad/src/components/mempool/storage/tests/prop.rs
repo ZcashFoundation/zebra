@@ -1019,6 +1019,66 @@ proptest! {
         prop_assert!(e.contains_key(&txids[1].mined_id()));
     }
 
+    /// Check if EvictionList removes old entries and computes length correctly
+    /// when the list becomes mixed with expired and non-expired entries.
+    #[test]
+    fn eviction_list_time_mixed(
+        mut rejection_template in any::<UnminedTxId>()
+    ) {
+        // Eviction time (in ms) used in this test. If the value is too low it may cause
+        // this test to fail in slower systems.
+        const EVICTION_TIME: u64 = 100;
+        // Time to wait (in ms) before adding transactions that should not expire
+        // after EVICTION_TIME.
+        // If should be a bit smaller than EVICTION_TIME, but with enough time to
+        // add 10 transactions to the list and still have time to spare before EVICTION_TIME.
+        const BEFORE_EVICTION_TIME: u64 = 50;
+
+        // Make unique IDs by converting the index to bytes, and writing it to each ID
+        let txids: Vec<UnminedTxId> = (0..20_u32).map(move |index| {
+            let index = index.to_le_bytes();
+            rejection_template.mined_id_mut().0[0..4].copy_from_slice(&index);
+            if let Some(auth_digest) = rejection_template.auth_digest_mut() {
+                auth_digest.0[0..4].copy_from_slice(&index);
+            }
+
+            rejection_template
+        }).collect();
+
+        let mut e = EvictionList::new(20, Duration::from_millis(EVICTION_TIME));
+        for txid in txids.iter().take(10) {
+            e.insert(txid.mined_id());
+        }
+        thread::sleep(Duration::from_millis(BEFORE_EVICTION_TIME));
+        // Add the next 10 before the eviction time to avoid a prune from
+        // happening.
+        for txid in txids.iter().skip(10) {
+            e.insert(txid.mined_id());
+        }
+        thread::sleep(Duration::from_millis(EVICTION_TIME - BEFORE_EVICTION_TIME + 1));
+
+        // At this point, the first 10 entries should be expired
+        // and the next 10 should not, and the list hasn't been pruned yet.
+        // Make sure len() and contains_key() take that into account.
+        // Note: if this fails, you may need to adjust EVICTION_TIME and/or
+        // BEFORE_EVICTION_TIME, see above.
+        prop_assert_eq!(e.len(), 10);
+        for txid in txids.iter().take(10) {
+            prop_assert!(!e.contains_key(&txid.mined_id()));
+        }
+        for txid in txids.iter().skip(10) {
+            prop_assert!(e.contains_key(&txid.mined_id()));
+        }
+
+        // Make sure all of them are expired
+        thread::sleep(Duration::from_millis(EVICTION_TIME + 1));
+
+        prop_assert_eq!(e.len(), 0);
+        for txid in txids.iter() {
+            prop_assert!(!e.contains_key(&txid.mined_id()));
+        }
+    }
+
     /// Check if EvictionList refreshes entries added multiple times.
     #[test]
     fn eviction_list_refresh(
