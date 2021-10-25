@@ -57,6 +57,14 @@ impl EvictionList {
         let value = Instant::now();
         let old_value = self.unique_entries.insert(key, value);
         if old_value != Some(value) {
+            // Also limit the size of `ordered_entries`
+            if self.ordered_entries.len() >= self.max_size {
+                if let Some((removed_key, removed_value)) = self.ordered_entries.pop_front() {
+                    if self.unique_entries.get(&removed_key) == Some(&removed_value) {
+                        self.unique_entries.remove(&removed_key);
+                    }
+                }
+            }
             self.ordered_entries.push_back((key, value))
         }
     }
@@ -129,5 +137,17 @@ impl EvictionList {
     fn has_expired(&self, evicted_at: &Instant) -> bool {
         let now = Instant::now();
         (now - *evicted_at) > self.eviction_memory_time
+    }
+
+    /// Test-only getter
+    #[cfg(test)]
+    pub(crate) fn unique_entries(&self) -> &HashMap<transaction::Hash, Instant> {
+        &self.unique_entries
+    }
+
+    /// Test-only getter
+    #[cfg(test)]
+    pub(crate) fn ordered_entries(&self) -> &VecDeque<(transaction::Hash, Instant)> {
+        &self.ordered_entries
     }
 }
