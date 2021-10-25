@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
@@ -198,6 +199,60 @@ fn zip243_deserialize_and_round_trip() {
         .expect("tx should serialize");
 
     assert_eq!(&zebra_test::vectors::ZIP243_3[..], &data3[..]);
+}
+
+#[test]
+fn deserialize_large_transaction() {
+    zebra_test::init();
+
+    // Create a dummy input and output.
+    let input =
+        transparent::Input::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
+    let output =
+        transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
+
+    // Create a lock time.
+    let lock_time = LockTime::Time(DateTime::<Utc>::from_utc(
+        NaiveDateTime::from_timestamp(61, 0),
+        Utc,
+    ));
+
+    // Serialize the input so that we can determine its serialized size.
+    let mut input_data = Vec::new();
+    input
+        .zcash_serialize(&mut input_data)
+        .expect("input should serialize");
+
+    // Calculate the number of inputs that fit into the transaction size limit.
+    let tx_inputs_num = MAX_BLOCK_BYTES as usize / input_data.len();
+
+    // Set the precalculated amount of inputs and a single output.
+    let inputs = std::iter::repeat(input)
+        .take(tx_inputs_num)
+        .collect::<Vec<_>>();
+
+    let outputs = vec![output];
+
+    // Create an oversized transaction. Adding the output and lock time causes
+    // the transaction to overflow the threshold.
+    let oversized_tx = Transaction::V1 {
+        inputs,
+        outputs,
+        lock_time,
+    };
+
+    // Serialize the transaction.
+    let mut tx_data = Vec::new();
+    oversized_tx
+        .zcash_serialize(&mut tx_data)
+        .expect("transaction should serialize");
+
+    // Check that the transaction is oversized.
+    assert!(tx_data.len() > MAX_BLOCK_BYTES as usize);
+
+    // The deserialization should fail because the transaction is too big.
+    Transaction::zcash_deserialize(&tx_data[..])
+        .expect_err("transaction should not deserialize due to its size");
 }
 
 // Transaction V5 test vectors
