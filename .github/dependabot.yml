@@ -6,10 +6,6 @@ updates:
     interval: daily
     timezone: America/New_York
   open-pull-requests-limit: 10
-  reviewers:
-  - dconnolly
-  assignees:
-  - dconnolly
   labels:
   - "A-infrastructure"
   - "A-dependencies"
@@ -24,10 +20,6 @@ updates:
     interval: daily
     timezone: America/New_York
   open-pull-requests-limit: 10
-  reviewers:
-  - dconnolly
-  assignees:
-  - dconnolly
   labels:
   - "A-infrastructure"
   - "A-dependencies"
