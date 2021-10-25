@@ -199,23 +199,6 @@ pub struct UnminedTx {
     pub size: usize,
 }
 
-impl UnminedTx {
-    /// The cost in bytes of the transaction, as defined in [ZIP-401].
-    ///
-    /// A reflection of the work done by the network in processing them (proof
-    /// and signature verification; networking overheads; size of in-memory data
-    /// structures).
-    ///
-    /// > Each transaction has a cost, which is an integer defined as:
-    /// >
-    /// >     max(serialized transaction size in bytes, 4000)
-    ///
-    /// [ZIP-401]: https://zips.z.cash/zip-0401
-    pub fn cost(&self) -> u64 {
-        std::cmp::max(self.size as u64, MEMPOOL_TRANSACTION_COST_THRESHOLD)
-    }
-}
-
 impl fmt::Display for UnminedTx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UnminedTx")
@@ -313,5 +296,46 @@ impl VerifiedUnminedTx {
             transaction,
             miner_fee,
         }
+    }
+
+    /// The cost in bytes of the transaction, as defined in [ZIP-401].
+    ///
+    /// A reflection of the work done by the network in processing them (proof
+    /// and signature verification; networking overheads; size of in-memory data
+    /// structures).
+    ///
+    /// > Each transaction has a cost, which is an integer defined as:
+    /// >
+    /// >     max(serialized transaction size in bytes, 4000)
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub fn cost(&self) -> u64 {
+        std::cmp::max(
+            self.transaction.size as u64,
+            MEMPOOL_TRANSACTION_COST_THRESHOLD,
+        )
+    }
+
+    /// The computed _eviction weight_ of a verified unmined transaction as part
+    /// of the mempool set.
+    ///
+    /// Consensus rule:
+    ///
+    /// > Each transaction also has an eviction weight, which is cost +
+    /// > low_fee_penalty, where low_fee_penalty is 16000 if the transaction pays
+    /// > a fee less than the conventional fee, otherwise 0. The conventional fee
+    /// > is currently defined as 1000 zatoshis
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub fn eviction_weight(self) -> u64 {
+        let conventional_fee = 1000;
+
+        let low_fee_penalty = if u64::from(self.miner_fee) < conventional_fee {
+            16_000
+        } else {
+            0
+        };
+
+        self.cost() + low_fee_penalty
     }
 }

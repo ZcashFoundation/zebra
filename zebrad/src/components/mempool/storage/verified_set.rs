@@ -1,12 +1,10 @@
 use std::{
     borrow::Cow,
     collections::{HashSet, VecDeque},
-    convert::TryInto,
     hash::Hash,
 };
 
 use zebra_chain::{
-    amount::Amount,
     orchard, sapling, sprout,
     transaction::{Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
@@ -110,7 +108,7 @@ impl VerifiedSet {
 
         self.cache_outputs_from(&transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
-        self.total_cost += transaction.transaction.cost();
+        self.total_cost += transaction.cost();
         self.transactions.push_front(transaction);
 
         self.update_metrics();
@@ -138,16 +136,11 @@ impl VerifiedSet {
             use rand::distributions::{Distribution, WeightedIndex};
             use rand::prelude::thread_rng;
 
-            let conventional_fee: Amount = 1_000.try_into().unwrap();
-
-            let weights = self.transactions.iter().map(|tx| {
-                let low_fee_penalty = if tx.miner_fee < conventional_fee {
-                    16_000
-                } else {
-                    0
-                };
-                tx.transaction.cost() + low_fee_penalty
-            });
+            let weights: Vec<u64> = self
+                .transactions
+                .iter()
+                .map(|tx| tx.clone().eviction_weight().into())
+                .collect();
 
             let dist = WeightedIndex::new(weights).unwrap();
 
@@ -193,7 +186,7 @@ impl VerifiedSet {
             .expect("invalid transaction index");
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
-        self.total_cost -= removed_tx.transaction.cost();
+        self.total_cost -= removed_tx.cost();
         self.remove_outputs(&removed_tx.transaction);
 
         self.update_metrics();
@@ -268,6 +261,6 @@ impl VerifiedSet {
             "zcash.mempool.size.bytes",
             self.transactions_serialized_size as _
         );
-        metrics::gauge!("zcash.mempool.cost.bytes", self.total_cost as _);
+        metrics::gauge!("zcash.mempool.cost.bytes", u64::from(self.total_cost) as _);
     }
 }
