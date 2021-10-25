@@ -13,7 +13,11 @@ use futures::{
     TryFutureExt,
 };
 use rand::seq::SliceRandom;
-use tokio::{net::TcpListener, sync::broadcast, time::Instant};
+use tokio::{
+    net::TcpListener,
+    sync::broadcast,
+    time::{sleep, Instant},
+};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -233,17 +237,24 @@ where
     // single `FuturesUnordered` to completion, and handshakes have a short timeout.
     let mut handshakes: FuturesUnordered<_> = initial_peers
         .into_iter()
-        .map(|addr| {
+        .enumerate()
+        .map(|(i, addr)| {
             let connection_tracker = active_outbound_connections.track_connection();
             let req = OutboundConnectorRequest {
                 addr,
                 connection_tracker,
             };
 
-            outbound_connector
-                .clone()
-                .oneshot(req)
-                .map_err(move |e| (addr, e))
+            let outbound_connector = outbound_connector.clone();
+            async move {
+                // Rate-limit the connection, sleeping for an interval according
+                // to its index in the list.
+                sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
+                outbound_connector
+                    .oneshot(req)
+                    .map_err(move |e| (addr, e))
+                    .await
+            }
         })
         .collect();
 
