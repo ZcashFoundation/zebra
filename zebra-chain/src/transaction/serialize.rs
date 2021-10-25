@@ -522,10 +522,13 @@ impl ZcashSerialize for Transaction {
 }
 
 impl ZcashDeserialize for Transaction {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // If the limit is reached, we'll get an UnexpectedEof error.
+        let mut limited_reader = reader.take(MAX_BLOCK_BYTES);
+
         let (version, overwintered) = {
             const LOW_31_BITS: u32 = (1 << 31) - 1;
-            let header = reader.read_u32::<LittleEndian>()?;
+            let header = limited_reader.read_u32::<LittleEndian>()?;
             (header & LOW_31_BITS, header >> 31 != 0)
         };
 
@@ -537,22 +540,22 @@ impl ZcashDeserialize for Transaction {
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         match (version, overwintered) {
             (1, false) => Ok(Transaction::V1 {
-                inputs: Vec::zcash_deserialize(&mut reader)?,
-                outputs: Vec::zcash_deserialize(&mut reader)?,
-                lock_time: LockTime::zcash_deserialize(&mut reader)?,
+                inputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
             }),
             (2, false) => {
                 // Version 2 transactions use Sprout-on-BCTV14.
                 type OptV2Jsd = Option<JoinSplitData<Bctv14Proof>>;
                 Ok(Transaction::V2 {
-                    inputs: Vec::zcash_deserialize(&mut reader)?,
-                    outputs: Vec::zcash_deserialize(&mut reader)?,
-                    lock_time: LockTime::zcash_deserialize(&mut reader)?,
-                    joinsplit_data: OptV2Jsd::zcash_deserialize(&mut reader)?,
+                    inputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
+                    joinsplit_data: OptV2Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
             (3, true) => {
-                let id = reader.read_u32::<LittleEndian>()?;
+                let id = limited_reader.read_u32::<LittleEndian>()?;
                 // Consensus rule:
                 // > [Overwinter only, pre-Sapling] The transaction version number MUST be 3, and the version group ID MUST be 0x03C48270.
                 //
@@ -565,15 +568,15 @@ impl ZcashDeserialize for Transaction {
                 // Version 3 transactions use Sprout-on-BCTV14.
                 type OptV3Jsd = Option<JoinSplitData<Bctv14Proof>>;
                 Ok(Transaction::V3 {
-                    inputs: Vec::zcash_deserialize(&mut reader)?,
-                    outputs: Vec::zcash_deserialize(&mut reader)?,
-                    lock_time: LockTime::zcash_deserialize(&mut reader)?,
-                    expiry_height: block::Height(reader.read_u32::<LittleEndian>()?),
-                    joinsplit_data: OptV3Jsd::zcash_deserialize(&mut reader)?,
+                    inputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
+                    expiry_height: block::Height(limited_reader.read_u32::<LittleEndian>()?),
+                    joinsplit_data: OptV3Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
             (4, true) => {
-                let id = reader.read_u32::<LittleEndian>()?;
+                let id = limited_reader.read_u32::<LittleEndian>()?;
                 // Consensus rules:
                 // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, and the version group ID MUST be 0x892F2085.
                 // >
@@ -597,20 +600,20 @@ impl ZcashDeserialize for Transaction {
                 // instead we have to pull the component parts out manually and
                 // then assemble them.
 
-                let inputs = Vec::zcash_deserialize(&mut reader)?;
-                let outputs = Vec::zcash_deserialize(&mut reader)?;
-                let lock_time = LockTime::zcash_deserialize(&mut reader)?;
-                let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
+                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
+                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
-                let value_balance = (&mut reader).zcash_deserialize_into()?;
-                let shielded_spends = Vec::zcash_deserialize(&mut reader)?;
+                let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
+                let shielded_spends = Vec::zcash_deserialize(&mut limited_reader)?;
                 let shielded_outputs =
-                    Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut reader)?
+                    Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut limited_reader)?
                         .into_iter()
                         .map(Output::from_v4)
                         .collect();
 
-                let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut reader)?;
+                let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut limited_reader)?;
 
                 let sapling_transfers = if !shielded_spends.is_empty() {
                     Some(sapling::TransferData::SpendsAndMaybeOutputs {
@@ -636,7 +639,7 @@ impl ZcashDeserialize for Transaction {
                     Some(transfers) => Some(sapling::ShieldedData {
                         value_balance,
                         transfers,
-                        binding_sig: reader.read_64_bytes()?.into(),
+                        binding_sig: limited_reader.read_64_bytes()?.into(),
                     }),
                     None => None,
                 };
@@ -658,31 +661,30 @@ impl ZcashDeserialize for Transaction {
                 // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
                 //
                 // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-                let id = reader.read_u32::<LittleEndian>()?;
+                let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
                 // convert the nConsensusBranchId to a NetworkUpgrade
-                let network_upgrade = NetworkUpgrade::from_branch_id(
-                    reader.read_u32::<LittleEndian>()?,
-                )
-                .ok_or(SerializationError::Parse(
-                    "expected a valid network upgrade from the consensus branch id",
-                ))?;
+                let network_upgrade =
+                    NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
+                        .ok_or(SerializationError::Parse(
+                            "expected a valid network upgrade from the consensus branch id",
+                        ))?;
 
                 // transaction validity time and height limits
-                let lock_time = LockTime::zcash_deserialize(&mut reader)?;
-                let expiry_height = block::Height(reader.read_u32::<LittleEndian>()?);
+                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
+                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 // transparent
-                let inputs = Vec::zcash_deserialize(&mut reader)?;
-                let outputs = Vec::zcash_deserialize(&mut reader)?;
+                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
 
                 // sapling
-                let sapling_shielded_data = (&mut reader).zcash_deserialize_into()?;
+                let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
                 // orchard
-                let orchard_shielded_data = (&mut reader).zcash_deserialize_into()?;
+                let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
                 Ok(Transaction::V5 {
                     network_upgrade,
