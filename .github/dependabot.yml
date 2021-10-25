@@ -7,9 +7,9 @@ updates:
     timezone: America/New_York
   open-pull-requests-limit: 10
   labels:
-  - "A-infrastructure"
   - "A-dependencies"
   - "A-rust"
+  - "P-Low"
   ignore:
   - dependency-name: tokio-util
     versions:
@@ -23,3 +23,4 @@ updates:
   labels:
   - "A-infrastructure"
   - "A-dependencies"
+  - "P-Low"
