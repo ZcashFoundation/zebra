@@ -1027,12 +1027,12 @@ proptest! {
     ) {
         // Eviction time (in ms) used in this test. If the value is too low it may cause
         // this test to fail in slower systems.
-        const EVICTION_TIME: u64 = 100;
+        const EVICTION_TIME: u64 = 500;
         // Time to wait (in ms) before adding transactions that should not expire
         // after EVICTION_TIME.
         // If should be a bit smaller than EVICTION_TIME, but with enough time to
         // add 10 transactions to the list and still have time to spare before EVICTION_TIME.
-        const BEFORE_EVICTION_TIME: u64 = 50;
+        const BEFORE_EVICTION_TIME: u64 = 250;
 
         // Make unique IDs by converting the index to bytes, and writing it to each ID
         let txids: Vec<UnminedTxId> = (0..20_u32).map(move |index| {
