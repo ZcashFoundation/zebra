@@ -20,7 +20,7 @@ use zebra_chain::{
 /// [`Config.peerset_initial_target_size`].
 ///
 /// The outbound limit is larger than the inbound limit by:
-/// `Config.peerset_initial_target_size / OUTBOUND_PEER_BIAS_FRACTION`.
+/// `Config.peerset_initial_target_size / OUTBOUND_PEER_BIAS_DENOMINATOR`.
 ///
 /// # Security
 ///
@@ -29,7 +29,7 @@ use zebra_chain::{
 ///
 /// Inbound peer connections are initiated by the remote peer,
 /// so inbound peer selection is not controlled by the local node.
-pub const OUTBOUND_PEER_BIAS_FRACTION: usize = 2;
+pub const OUTBOUND_PEER_BIAS_DENOMINATOR: usize = 2;
 
 /// The buffer size for the peer set.
 ///

@@ -74,7 +74,8 @@ pub struct Config {
 }
 
 impl Config {
-    /// The maximum number of outbound connections that Zebra will make.
+    /// The maximum number of outbound connections that Zebra will open at the same time.
+    /// When this limit is reached, Zebra stops opening outbound connections.
     ///
     /// # Security
     ///
@@ -83,15 +84,16 @@ impl Config {
     pub fn peerset_outbound_connection_limit(&self) -> usize {
         let inbound_limit = self.peerset_inbound_connection_limit();
 
-        inbound_limit + inbound_limit / constants::OUTBOUND_PEER_BIAS_FRACTION
+        inbound_limit + inbound_limit / constants::OUTBOUND_PEER_BIAS_DENOMINATOR
     }
 
-    /// The maximum number of inbound connections that Zebra will make.
+    /// The maximum number of inbound connections that Zebra will accept at the same time.
+    /// When this limit is reached, Zebra drops new inbound connections without handshaking on them.
     pub fn peerset_inbound_connection_limit(&self) -> usize {
         self.peerset_initial_target_size
     }
 
-    /// The maximum total number of inbound and outbound connections that Zebra will make.
+    /// The maximum number of inbound and outbound connections that Zebra will have at the same time.
     pub fn peerset_total_connection_limit(&self) -> usize {
         self.peerset_outbound_connection_limit() + self.peerset_inbound_connection_limit()
     }
