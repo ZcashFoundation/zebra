@@ -128,6 +128,12 @@ impl VerifiedSet {
     /// > a fee less than the conventional fee, otherwise 0. The conventional fee
     /// > is currently defined as 1000 zatoshis
     ///
+    /// # Note
+    ///
+    /// Collecting and calculating weights is O(n). But in practice n is limited
+    /// to 20,000 (mempooltxcostlimit/min(cost)), so the actual cost shouldn't
+    /// be too bad.
+    ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
