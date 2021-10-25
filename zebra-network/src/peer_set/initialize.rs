@@ -496,7 +496,15 @@ enum CrawlerAction {
 ///
 /// Uses `active_outbound_connections` to track the number of active outbound connections
 /// in both the initial peers and crawler.
-#[instrument(skip(demand_tx, demand_rx, candidates, outbound_connector, peerset_tx,))]
+#[instrument(skip(
+    config,
+    demand_tx,
+    demand_rx,
+    candidates,
+    outbound_connector,
+    peerset_tx,
+    active_outbound_connections,
+))]
 async fn crawl_and_dial<C, S>(
     config: Config,
     mut demand_tx: mpsc::Sender<MorePeers>,
