@@ -413,7 +413,7 @@ where
         if let Ok((tcp_stream, addr)) = listener.accept().await {
             // The peer already opened a connection, so increment the connection count immediately.
             let connection_tracker = active_inbound_connections.track_connection();
-            info!(
+            debug!(
                 inbound_connections = ?active_inbound_connections.update_count(),
                 "handshaking on an open inbound peer connection"
             );
@@ -579,7 +579,7 @@ where
             DemandHandshake { candidate } => {
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
-                info!(
+                debug!(
                     outbound_connections = ?active_outbound_connections.update_count(),
                     "opening an outbound peer connection"
                 );
