@@ -189,12 +189,10 @@ pub fn merkle_root_validity(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
-    if block
+    // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
+    block
         .check_transaction_network_upgrade_consistency(network)
-        .is_err()
-    {
-        return Err(BlockError::WrongTransactionConsensusBranchId);
-    }
+        .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
 
     let merkle_root = transaction_hashes.iter().cloned().collect();
 
