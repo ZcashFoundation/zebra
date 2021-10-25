@@ -981,11 +981,11 @@ proptest! {
         for txid in txids.iter() {
             e.insert(txid.mined_id());
         }
-        prop_assert_eq!(e.len(), 2);
         prop_assert!(!e.contains_key(&txids[0].mined_id()));
         prop_assert!(!e.contains_key(&txids[1].mined_id()));
         prop_assert!(e.contains_key(&txids[2].mined_id()));
         prop_assert!(e.contains_key(&txids[3].mined_id()));
+        prop_assert_eq!(e.len(), 2);
     }
 
     /// Check if EvictionList removes old entries.
@@ -1010,13 +1010,13 @@ proptest! {
 
         // First txid has expired, but list wasn't pruned yet.
         // Make sure len() and contains_key() take that into account.
-        prop_assert_eq!(e.len(), 0);
         prop_assert!(!e.contains_key(&txids[0].mined_id()));
+        prop_assert_eq!(e.len(), 0);
 
         e.insert(txids[1].mined_id());
-        prop_assert_eq!(e.len(), 1);
         prop_assert!(!e.contains_key(&txids[0].mined_id()));
         prop_assert!(e.contains_key(&txids[1].mined_id()));
+        prop_assert_eq!(e.len(), 1);
     }
 
     /// Check if EvictionList removes old entries and computes length correctly
@@ -1060,23 +1060,23 @@ proptest! {
         // At this point, the first 10 entries should be expired
         // and the next 10 should not, and the list hasn't been pruned yet.
         // Make sure len() and contains_key() take that into account.
-        // Note: if this fails, you may need to adjust EVICTION_TIME and/or
+        // Note: if one of these fails, you may need to adjust EVICTION_TIME and/or
         // BEFORE_EVICTION_TIME, see above.
-        prop_assert_eq!(e.len(), 10);
         for txid in txids.iter().take(10) {
             prop_assert!(!e.contains_key(&txid.mined_id()));
         }
         for txid in txids.iter().skip(10) {
             prop_assert!(e.contains_key(&txid.mined_id()));
         }
+        prop_assert_eq!(e.len(), 10);
 
         // Make sure all of them are expired
         thread::sleep(Duration::from_millis(EVICTION_TIME + 1));
 
-        prop_assert_eq!(e.len(), 0);
         for txid in txids.iter() {
             prop_assert!(!e.contains_key(&txid.mined_id()));
         }
+        prop_assert_eq!(e.len(), 0);
     }
 
     /// Check if EvictionList refreshes entries added multiple times.
@@ -1092,7 +1092,7 @@ proptest! {
         // The list is pruned in the insertion, but call prune_old() anyway
         // to make sure we're testing the post-pruned state.
         e.prune_old();
-        prop_assert_eq!(e.len(), 1);
         prop_assert!(e.contains_key(&txid.mined_id()));
+        prop_assert_eq!(e.len(), 1);
     }
 }

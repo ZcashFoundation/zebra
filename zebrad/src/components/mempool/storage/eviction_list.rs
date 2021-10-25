@@ -74,21 +74,13 @@ impl EvictionList {
     }
 
     /// Get the size of the list.
-    pub fn len(&self) -> usize {
-        // Since the list is pruned only in mutable functions, make sure
-        // we take expired items into account.
-        let expired = self
-            .ordered_entries
-            .iter()
-            // Take all expired entries
-            .take_while(|(_txid, evicted_at)| self.has_expired(evicted_at))
-            // Count only those that correspond to entries in `unique_entries`
-            .filter(|(txid, evicted_at)| self.unique_entries.get(txid) == Some(evicted_at))
-            .count();
-        self.unique_entries.len() - expired
+    pub fn len(&mut self) -> usize {
+        self.prune_old();
+        self.unique_entries.len()
     }
 
     /// Clear the list.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.unique_entries.clear();
         self.ordered_entries.clear();

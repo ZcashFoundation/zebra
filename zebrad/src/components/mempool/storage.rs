@@ -284,11 +284,7 @@ impl Storage {
         if self.tip_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
             self.tip_rejected_same_effects.clear();
         }
-        for (_, map) in self.chain_rejected_same_effects.iter_mut() {
-            if map.len() > MAX_EVICTION_MEMORY_ENTRIES {
-                map.clear();
-            }
-        }
+        // `chain_rejected_same_effects` limits its size by itself
         self.update_rejected_metrics();
     }
 
@@ -333,12 +329,12 @@ impl Storage {
     ///
     /// Transactions on multiple rejected lists are counted multiple times.
     #[allow(dead_code)]
-    pub fn rejected_transaction_count(&self) -> usize {
+    pub fn rejected_transaction_count(&mut self) -> usize {
         self.tip_rejected_exact.len()
             + self.tip_rejected_same_effects.len()
             + self
                 .chain_rejected_same_effects
-                .iter()
+                .iter_mut()
                 .map(|(_, map)| map.len())
                 .sum::<usize>()
     }
@@ -493,7 +489,7 @@ impl Storage {
     /// Update metrics related to the rejected lists.
     ///
     /// Must be called every time the rejected lists change.
-    fn update_rejected_metrics(&self) {
+    fn update_rejected_metrics(&mut self) {
         metrics::gauge!(
             "mempool.rejected.transaction.ids",
             self.rejected_transaction_count() as _
