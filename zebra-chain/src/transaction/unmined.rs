@@ -36,7 +36,7 @@ use UnminedTxId::*;
 ///
 /// > Each transaction has a cost, which is an integer defined as:
 /// >
-/// >     max(serialized transaction size in bytes, 4000)
+/// > max(serialized transaction size in bytes, 4000)
 /// >
 /// > The threshold 4000 for the cost function is chosen so that the size in bytes
 /// > of a typical fully shielded Sapling transaction (with, say, 2 shielded outputs
@@ -306,7 +306,7 @@ impl VerifiedUnminedTx {
     ///
     /// > Each transaction has a cost, which is an integer defined as:
     /// >
-    /// >     max(serialized transaction size in bytes, 4000)
+    /// > max(serialized transaction size in bytes, 4000)
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn cost(&self) -> u64 {
