@@ -148,7 +148,7 @@ where
         let config = config.clone();
         let outbound_connector = outbound_connector.clone();
         let peerset_tx = peerset_tx.clone();
-        async move { add_initial_peers(&config, outbound_connector, peerset_tx).await }.boxed()
+        add_initial_peers(config, outbound_connector, peerset_tx)
     };
 
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
@@ -200,7 +200,7 @@ where
 /// then send the resulting peer connections over `peerset_tx`.
 #[instrument(skip(config, outbound_connector, peerset_tx))]
 async fn add_initial_peers<S>(
-    config: &Config,
+    config: Config,
     outbound_connector: S,
     mut peerset_tx: mpsc::Sender<PeerChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
@@ -212,7 +212,7 @@ where
         > + Clone,
     S::Future: Send + 'static,
 {
-    let initial_peers = limit_initial_peers(config).await;
+    let initial_peers = limit_initial_peers(&config).await;
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
