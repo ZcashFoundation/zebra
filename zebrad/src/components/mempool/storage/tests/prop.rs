@@ -1079,54 +1079,14 @@ proptest! {
         prop_assert_eq!(e.len(), 0);
     }
 
-    /// Check if EvictionList refreshes entries added multiple times.
+    /// Check if EvictionList panics if entries are added multiple times.
     #[test]
+    #[should_panic]
     fn eviction_list_refresh(
         txid in any::<UnminedTxId>()
     ) {
-        let mut e = EvictionList::new(2, Duration::from_millis(10));
+        let mut e = EvictionList::new(2, EVICTION_MEMORY_TIME);
         e.insert(txid.mined_id());
-        thread::sleep(Duration::from_millis(11));
-        // Refresh entry.
         e.insert(txid.mined_id());
-        // The list is pruned in the insertion, but call prune_old() anyway
-        // to make sure we're testing the post-pruned state.
-        e.prune_old();
-        prop_assert!(e.contains_key(&txid.mined_id()));
-        prop_assert_eq!(e.len(), 1);
-    }
-
-    /// Check if EvictionList keeps both internal lists from growing.
-    #[test]
-    fn eviction_list_limit(
-        txid in any::<UnminedTxId>(),
-        txid2 in any::<UnminedTxId>()
-    ) {
-        let mut e = EvictionList::new(2, Duration::from_millis(10));
-
-        // Add tx and refresh twice
-        e.insert(txid.mined_id());
-        thread::sleep(Duration::from_millis(1));
-        e.insert(txid.mined_id());
-        thread::sleep(Duration::from_millis(1));
-        e.insert(txid.mined_id());
-        thread::sleep(Duration::from_millis(1));
-        // There should be only one effective ID in the list
-        prop_assert_eq!(e.unique_entries().len(), 1);
-        // One entry should have been removed to keep the limit.
-        prop_assert_eq!(e.ordered_entries().len(), 2);
-
-        e.clear();
-
-        // Add txid, add txid2, refresh txid2
-        e.insert(txid.mined_id());
-        e.insert(txid2.mined_id());
-        thread::sleep(Duration::from_millis(1));
-        e.insert(txid2.mined_id());
-        // That should trigger txid to be removed from the ordered_list,
-        // which also removes it from the unique_list (since it's a non-
-        // refreshed entry).
-        prop_assert_eq!(e.unique_entries().len(), 1);
-        prop_assert_eq!(e.ordered_entries().len(), 2);
     }
 }
