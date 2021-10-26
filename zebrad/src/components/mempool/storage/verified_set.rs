@@ -145,7 +145,7 @@ impl VerifiedSet {
             let weights: Vec<u64> = self
                 .transactions
                 .iter()
-                .map(|tx| tx.clone().eviction_weight().into())
+                .map(|tx| tx.clone().eviction_weight())
                 .collect();
 
             let dist = WeightedIndex::new(weights).unwrap();
