@@ -473,6 +473,11 @@ where
             // Zebra can't control how many queued connections are waiting,
             // but most OSes also limit the number of queued inbound connections on a listener port.
             tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
+        } else {
+            // Security: Let other tasks run after each errored connection is processed.
+            //
+            // Avoids remote peers starving other Zebra tasks using inbound connection errors.
+            tokio::task::yield_now().await;
         }
     }
 }
@@ -668,6 +673,11 @@ where
                 let _ = demand_tx.try_send(MorePeers);
             }
         }
+
+        // Security: Let other tasks run after each crawler action is processed.
+        //
+        // Avoids remote peers starving other Zebra tasks using outbound connection errors.
+        tokio::task::yield_now().await;
     }
 }
 
