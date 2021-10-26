@@ -43,10 +43,14 @@ use crate::{
 
 use Network::*;
 
-/// The amount of time we run the crawler before testing it.
+/// The amount of time to run the crawler, before testing what it has done.
+///
+/// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(5);
 
 /// The number of fake crawler peers in the testing [`AddressBook`].
+///
+/// Using a large number of peers can make the tests time out.
 const CRAWLER_FAKE_PEER_COUNT: usize = 2;
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
@@ -123,9 +127,7 @@ async fn local_listener_fixed_port_localhost_addr() {
 
 /// Test zebra-network with a peer limit of zero peers on mainnet.
 /// (Zebra does not support this mode of operation.)
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[should_panic]
 async fn peer_limit_zero_mainnet() {
     zebra_test::init();
@@ -146,9 +148,7 @@ async fn peer_limit_zero_mainnet() {
 
 /// Test zebra-network with a peer limit of zero peers on testnet.
 /// (Zebra does not support this mode of operation.)
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[should_panic]
 async fn peer_limit_zero_testnet() {
     zebra_test::init();
@@ -168,9 +168,7 @@ async fn peer_limit_zero_testnet() {
 }
 
 /// Test zebra-network with a peer limit of one inbound and one outbound peer on mainnet.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn peer_limit_one_mainnet() {
     zebra_test::init();
 
@@ -189,9 +187,7 @@ async fn peer_limit_one_mainnet() {
 }
 
 /// Test zebra-network with a peer limit of one inbound and one outbound peer on testnet.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn peer_limit_one_testnet() {
     zebra_test::init();
 
@@ -210,9 +206,7 @@ async fn peer_limit_one_testnet() {
 }
 
 /// Test zebra-network with a peer limit of two inbound and three outbound peers on mainnet.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn peer_limit_two_mainnet() {
     zebra_test::init();
 
@@ -231,9 +225,7 @@ async fn peer_limit_two_mainnet() {
 }
 
 /// Test zebra-network with a peer limit of two inbound and three outbound peers on testnet.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn peer_limit_two_testnet() {
     zebra_test::init();
 
@@ -252,9 +244,7 @@ async fn peer_limit_two_testnet() {
 }
 
 /// Test the crawler with an outbound peer limit of zero.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn crawler_peer_limit_zero() {
     zebra_test::init();
 
@@ -291,9 +281,7 @@ async fn crawler_peer_limit_zero() {
 }
 
 /// Test the crawler with an outbound peer limit of one.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn crawler_peer_limit_one() {
     zebra_test::init();
 
@@ -329,9 +317,7 @@ async fn crawler_peer_limit_one() {
 }
 
 /// Test the crawler with an outbound peer limit of three peers.
-///
-/// This test doesn't require the multi-threaded executor, but it's a lot faster with it.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn crawler_peer_limit_two() {
     zebra_test::init();
 
