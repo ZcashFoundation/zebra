@@ -99,6 +99,16 @@ pub enum Request {
     /// but we can't rely on peers to send queries regularly,
     /// and crawler queue requests depend on peer responses.
     /// Also, crawler requests aren't frequent enough for transaction propagation.
+    ///
+    /// # Correctness
+    ///
+    /// This request is required to avoid hangs in the mempool.
+    ///
+    /// The queue checker task can't call `poll_ready` directly on the [`Mempool`] service,
+    /// because the mempool service is wrapped in a `Buffer`.
+    /// Calling [`Buffer::poll_ready`] reserves a buffer slot, which can cause hangs when
+    /// too many slots are reserved but unused:
+    /// https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
     CheckForVerifiedTransactions,
 }
 
