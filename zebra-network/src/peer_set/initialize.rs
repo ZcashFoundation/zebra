@@ -79,8 +79,14 @@ where
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     let (address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
-    // Create a broadcast channel for peer inventory advertisements,
-    // based on the maximum number of inbound and outbound peers.
+
+    // Create a broadcast channel for peer inventory advertisements.
+    // If it reaches capacity, this channel drops older inventory advertisements.
+    //
+    // When Zebra is at the chain tip with an up-to-date mempool,
+    // we expect to have at most 1 new transaction per connected peer,
+    // and 1-2 new blocks across the entire network.
+    // (The block syncer and mempool crawler handle bulk fetches of blocks and transactions.)
     let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_total_connection_limit());
 
     // Construct services that handle inbound handshakes and perform outbound
