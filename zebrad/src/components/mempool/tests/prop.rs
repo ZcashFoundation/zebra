@@ -14,7 +14,7 @@ use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
 use crate::components::{
-    mempool::{self, Mempool},
+    mempool::{config::Config, Mempool},
     sync::{RecentSyncLengths, SyncStatus},
 };
 
@@ -248,7 +248,10 @@ fn setup(
     let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
 
     let (mempool, _transaction_receiver) = Mempool::new(
-        &mempool::Config::default(),
+        &Config {
+            tx_cost_limit: 160_000_000,
+            ..Default::default()
+        },
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         Buffer::new(BoxService::new(state_service.clone()), 1),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),

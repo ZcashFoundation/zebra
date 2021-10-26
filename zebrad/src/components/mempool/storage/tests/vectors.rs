@@ -11,7 +11,7 @@ use zebra_chain::{
 };
 
 use crate::components::mempool::{
-    storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
+    config, storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
 };
 
 #[test]
@@ -21,7 +21,10 @@ fn mempool_storage_crud_exact_mainnet() {
     let network = Network::Mainnet;
 
     // Create an empty storage instance
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: 160_000_000,
+        ..Default::default()
+    });
 
     // Get one (1) unmined transaction
     let unmined_tx = unmined_transactions_in_blocks(.., network)
@@ -49,7 +52,10 @@ fn mempool_storage_crud_same_effects_mainnet() {
     let network = Network::Mainnet;
 
     // Create an empty storage instance
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: 160_000_000,
+        ..Default::default()
+    });
 
     // Get one (1) unmined transaction
     let unmined_tx = unmined_transactions_in_blocks(.., network)
@@ -83,7 +89,10 @@ fn mempool_storage_basic() -> Result<()> {
 
 fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: 160_000_000,
+        ..Default::default()
+    });
 
     // Get transactions from the first 10 blocks of the Zcash blockchain
     let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, network).collect();
@@ -156,7 +165,10 @@ fn mempool_expired_basic() -> Result<()> {
 
 fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
-    let mut storage: Storage = Default::default();
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: 160_000_000,
+        ..Default::default()
+    });
 
     let block: Block = match network {
         Network::Mainnet => {
