@@ -604,6 +604,7 @@ pub async fn negotiate_version(
             "remote_ip" => their_addr.to_string(),
             "remote_version" => remote_version.to_string(),
             "min_version" => min_version.to_string(),
+            "user_agent" => user_agent,
         );
 
         // the value is the remote version of the most recent rejected handshake from each peer
