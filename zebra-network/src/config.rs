@@ -11,6 +11,9 @@ use zebra_chain::{parameters::Network, serialization::canonical_socket_addr};
 
 use crate::{constants, BoxError};
 
+#[cfg(test)]
+mod tests;
+
 /// The number of times Zebra will retry each initial peer's DNS resolution,
 /// before checking if any other initial peers have returned addresses.
 const MAX_SINGLE_PEER_RETRIES: usize = 2;
@@ -291,6 +294,7 @@ impl<'de> Deserialize<'de> for Config {
         }
 
         let config = DConfig::deserialize(deserializer)?;
+
         // TODO: perform listener DNS lookups asynchronously with a timeout (#1631)
         let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),
@@ -313,6 +317,3 @@ impl<'de> Deserialize<'de> for Config {
         })
     }
 }
-
-#[cfg(test)]
-mod tests;

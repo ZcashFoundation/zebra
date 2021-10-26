@@ -63,6 +63,11 @@ type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
 /// In addition to returning a service for outbound requests, this method
 /// returns a shared [`AddressBook`] updated with last-seen timestamps for
 /// connected peers.
+///
+/// # Panics
+///
+/// If `config.config.peerset_initial_target_size` is zero.
+/// (zebra-network expects to be able to connect to at least one peer.)
 pub async fn init<S, C>(
     config: Config,
     inbound_service: S,
@@ -76,6 +81,13 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + 'static,
 {
+    // If we want Zebra to operate with no network,
+    // we should implement a `zebrad` command that doesn't use `zebra-network`.
+    assert!(
+        config.peerset_initial_target_size > 0,
+        "Zebra must be allowed to connect to at least one peer"
+    );
+
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     let (address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
