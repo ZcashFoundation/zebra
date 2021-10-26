@@ -12,7 +12,7 @@ jobs:
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
-    timeout-minutes: 60
+    timeout-minutes: 75
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
