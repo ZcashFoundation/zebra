@@ -673,7 +673,10 @@ async fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
 
     let (mempool, _mempool_transaction_receiver) = Mempool::new(
-        &mempool::Config::default(),
+        &mempool::Config {
+            tx_cost_limit: u64::MAX,
+            ..Default::default()
+        },
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),

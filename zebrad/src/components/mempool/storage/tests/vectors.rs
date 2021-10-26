@@ -22,7 +22,7 @@ fn mempool_storage_crud_exact_mainnet() {
 
     // Create an empty storage instance
     let mut storage: Storage = Storage::new(&config::Config {
-        tx_cost_limit: 160_000_000,
+        tx_cost_limit: u64::MAX,
         ..Default::default()
     });
 
@@ -90,7 +90,7 @@ fn mempool_storage_basic() -> Result<()> {
 fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
     let mut storage: Storage = Storage::new(&config::Config {
-        tx_cost_limit: 160_000_000,
+        tx_cost_limit: u64::MAX,
         ..Default::default()
     });
 
