@@ -140,6 +140,7 @@ impl Drop for Storage {
 }
 
 impl Storage {
+    #[allow(clippy::field_reassign_with_default)]
     pub(crate) fn new(config: &config::Config) -> Self {
         let mut default: Storage = Default::default();
         default.tx_cost_limit = config.tx_cost_limit;
