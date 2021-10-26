@@ -227,7 +227,10 @@ where
 
     // # Security
     //
-    // TODO: rate-limit initial seed peer connections (#2326)
+    // Resists distributed denial of service attacks by making sure that
+    // new peer connections are initiated at least
+    // [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL]
+    // apart.
     //
     // # Correctness
     //
