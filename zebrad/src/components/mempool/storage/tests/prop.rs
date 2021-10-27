@@ -17,6 +17,7 @@ use zebra_chain::{
 };
 
 use crate::components::mempool::{
+    config::Config,
     storage::{
         MempoolError, RejectionError, SameEffectsTipRejectionError, Storage,
         MAX_EVICTION_MEMORY_ENTRIES, MEMPOOL_SIZE,
@@ -46,7 +47,11 @@ proptest! {
         input in any::<SpendConflictTestInput>(),
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        let mut storage = Storage::default();
+        let mut storage = Storage::new(
+            &Config {
+                tx_cost_limit: 160_000_000,
+                ..Default::default()
+            });
 
         let (first_transaction, second_transaction) = input.conflicting_transactions();
         let input_permutations = vec![
@@ -99,7 +104,10 @@ proptest! {
         transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        let mut storage = Storage::default();
+        let mut storage: Storage = Storage::new(&Config {
+            tx_cost_limit: 160_000_000,
+            ..Default::default()
+        });
 
         // Make unique IDs by converting the index to bytes, and writing it to each ID
         let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
@@ -158,7 +166,10 @@ proptest! {
         rejection_error in any::<RejectionError>(),
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        let mut storage = Storage::default();
+        let mut storage: Storage = Storage::new(&Config {
+            tx_cost_limit: 160_000_000,
+            ..Default::default()
+        });
 
         // Make unique IDs by converting the index to bytes, and writing it to each ID
         let unique_ids = (0..(MAX_EVICTION_MEMORY_ENTRIES + 1) as u32).map(move |index| {
@@ -195,7 +206,10 @@ proptest! {
     /// same nullifier.
     #[test]
     fn conflicting_transactions_are_rejected(input in any::<SpendConflictTestInput>()) {
-        let mut storage = Storage::default();
+        let mut storage: Storage = Storage::new(&Config {
+            tx_cost_limit: 160_000_000,
+            ..Default::default()
+        });
 
         let (first_transaction, second_transaction) = input.conflicting_transactions();
         let input_permutations = vec![
@@ -227,7 +241,10 @@ proptest! {
     #[test]
     fn rejected_transactions_are_properly_rolled_back(input in any::<SpendConflictTestInput>())
     {
-        let mut storage = Storage::default();
+        let mut storage: Storage = Storage::new(&Config {
+            tx_cost_limit: 160_000_000,
+            ..Default::default()
+        });
 
         let (first_unconflicting_transaction, second_unconflicting_transaction) =
             input.clone().unconflicting_transactions();
@@ -280,7 +297,10 @@ proptest! {
     /// others.
     #[test]
     fn removal_of_multiple_transactions(input in any::<MultipleTransactionRemovalTestInput>()) {
-        let mut storage = Storage::default();
+        let mut storage: Storage = Storage::new(&Config {
+            tx_cost_limit: 160_000_000,
+            ..Default::default()
+        });
 
         // Insert all input transactions, and keep track of the IDs of the one that were actually
         // inserted.

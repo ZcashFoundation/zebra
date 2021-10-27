@@ -189,6 +189,9 @@ impl ActiveState {
 /// of that have yet to be confirmed by the Zcash network. A transaction is
 /// confirmed when it has been included in a block ('mined').
 pub struct Mempool {
+    /// The configurable options for the mempool, persisted between states.
+    config: Config,
+
     /// The state of the mempool.
     active_state: ActiveState,
 
@@ -236,6 +239,7 @@ impl Mempool {
             tokio::sync::watch::channel(HashSet::new());
 
         let mut service = Mempool {
+            config: config.clone(),
             active_state: ActiveState::Disabled,
             sync_status,
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
@@ -305,7 +309,7 @@ impl Mempool {
                 self.state.clone(),
             ));
             self.active_state = ActiveState::Enabled {
-                storage: Default::default(),
+                storage: storage::Storage::new(&self.config),
                 tx_downloads,
             };
         } else {

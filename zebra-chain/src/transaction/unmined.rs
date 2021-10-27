@@ -29,6 +29,24 @@ use crate::{
 
 use UnminedTxId::*;
 
+/// The minimum cost value for a transaction in the mempool.
+///
+/// Contributes to the randomized, weighted eviction of transactions from the
+/// mempool when it reaches a max size, also based on the total cost.
+///
+/// > Each transaction has a cost, which is an integer defined as:
+/// >
+/// > max(serialized transaction size in bytes, 4000)
+/// >
+/// > The threshold 4000 for the cost function is chosen so that the size in bytes
+/// > of a typical fully shielded Sapling transaction (with, say, 2 shielded outputs
+/// > and up to 5 shielded inputs) will fall below the threshold. This has the effect
+/// > of ensuring that such transactions are not evicted preferentially to typical
+/// > transparent transactions because of their size.
+///
+/// [ZIP-401]: https://zips.z.cash/zip-0401
+const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
+
 /// A unique identifier for an unmined transaction, regardless of version.
 ///
 /// "The transaction ID of a version 4 or earlier transaction is the SHA-256d hash
@@ -195,11 +213,13 @@ impl fmt::Display for UnminedTx {
 
 impl From<Transaction> for UnminedTx {
     fn from(transaction: Transaction) -> Self {
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
+
         Self {
             id: (&transaction).into(),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
+            size,
             transaction: Arc::new(transaction),
         }
     }
@@ -207,36 +227,42 @@ impl From<Transaction> for UnminedTx {
 
 impl From<&Transaction> for UnminedTx {
     fn from(transaction: &Transaction) -> Self {
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
+
         Self {
             id: transaction.into(),
             transaction: Arc::new(transaction.clone()),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
+            size,
         }
     }
 }
 
 impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
+
         Self {
             id: transaction.as_ref().into(),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
             transaction,
+            size,
         }
     }
 }
 
 impl From<&Arc<Transaction>> for UnminedTx {
     fn from(transaction: &Arc<Transaction>) -> Self {
+        let size = transaction.zcash_serialized_size().expect(
+            "unexpected serialization failure: all structurally valid transactions have a size",
+        );
+
         Self {
             id: transaction.as_ref().into(),
             transaction: transaction.clone(),
-            size: transaction
-                .zcash_serialized_size()
-                .expect("all transactions have a size"),
+            size,
         }
     }
 }
@@ -270,5 +296,46 @@ impl VerifiedUnminedTx {
             transaction,
             miner_fee,
         }
+    }
+
+    /// The cost in bytes of the transaction, as defined in [ZIP-401].
+    ///
+    /// A reflection of the work done by the network in processing them (proof
+    /// and signature verification; networking overheads; size of in-memory data
+    /// structures).
+    ///
+    /// > Each transaction has a cost, which is an integer defined as:
+    /// >
+    /// > max(serialized transaction size in bytes, 4000)
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub fn cost(&self) -> u64 {
+        std::cmp::max(
+            self.transaction.size as u64,
+            MEMPOOL_TRANSACTION_COST_THRESHOLD,
+        )
+    }
+
+    /// The computed _eviction weight_ of a verified unmined transaction as part
+    /// of the mempool set.
+    ///
+    /// Consensus rule:
+    ///
+    /// > Each transaction also has an eviction weight, which is cost +
+    /// > low_fee_penalty, where low_fee_penalty is 16000 if the transaction pays
+    /// > a fee less than the conventional fee, otherwise 0. The conventional fee
+    /// > is currently defined as 1000 zatoshis
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub fn eviction_weight(self) -> u64 {
+        let conventional_fee = 1000;
+
+        let low_fee_penalty = if u64::from(self.miner_fee) < conventional_fee {
+            16_000
+        } else {
+            0
+        };
+
+        self.cost() + low_fee_penalty
     }
 }
