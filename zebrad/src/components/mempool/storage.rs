@@ -29,14 +29,14 @@ pub mod tests;
 mod eviction_list;
 mod verified_set;
 
-/// The size limit for mempool transaction rejection lists.
+/// The size limit for mempool transaction rejection lists per [ZIP-401].
 ///
-/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries` entries,
-/// > which is the constant 40000.
-///
-/// https://zips.z.cash/zip-0401#specification
+/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries`
+/// > entries, which is the constant 40000.
 ///
 /// We use the specified value for all lists for consistency.
+///
+/// [ZIP-401]: https://zips.z.cash/zip-0401#specification
 pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
@@ -78,12 +78,13 @@ pub enum SameEffectsChainRejectionError {
     #[error("best chain tip has reached transaction expiry height")]
     Expired,
 
-    /// Otherwise valid transaction removed from mempool due to ZIP-401 random eviction.
+    /// Otherwise valid transaction removed from mempool due to [ZIP-401] random
+    /// eviction.
     ///
     /// Consensus rule:
     /// > The txid (rather than the wtxid ...) is used even for version 5 transactions
     ///
-    /// https://zips.z.cash/zip-0401#specification
+    /// [ZIP-401]: https://zips.z.cash/zip-0401#specification
     #[error("transaction evicted from the mempool due to ZIP-401 denial of service limits")]
     RandomlyEvicted,
 }
@@ -457,9 +458,14 @@ impl Storage {
     }
 
     /// Remove transactions from the mempool if they have not been mined after a
-    /// specified height.
+    /// specified height, per [ZIP-203].
     ///
-    /// https://zips.z.cash/zip-0203#specification
+    /// > Transactions will have a new field, nExpiryHeight, which will set the
+    /// > block height after which transactions will be removed from the mempool
+    /// > if they have not been mined.
+    ///
+    ///
+    /// [ZIP-203]: https://zips.z.cash/zip-0203#specification
     pub fn remove_expired_transactions(
         &mut self,
         tip_height: zebra_chain::block::Height,
