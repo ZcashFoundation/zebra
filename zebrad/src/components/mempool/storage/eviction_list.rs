@@ -58,8 +58,9 @@ impl EvictionList {
         // again since transactions are not added to the mempool if they are evicted,
         // and the mempool doesn't allow inserting two transactions with the same
         // hash (they would conflict).
-        assert!(
-            old_value.is_none(),
+        assert_eq!(
+            old_value,
+            None,
             "an already-evicted transaction should not be evicted again"
         );
         self.ordered_entries.push_back(key)
@@ -80,7 +81,10 @@ impl EvictionList {
     /// Get the size of the list.
     //
     // Note: if this method being mutable becomes an issue, it's possible
-    // to compute the number of expired transactions and subtract.
+    // to compute the number of expired transactions and subtract,
+    // at the cost of `O(len + expired)` performance each time the method is called.
+    //
+    // Currently the performance is `O(expired)` for the first call, then `O(1)` until the next expiry.
     pub fn len(&mut self) -> usize {
         self.prune_old();
         self.unique_entries.len()
@@ -102,7 +106,7 @@ impl EvictionList {
             let evicted_at = self
                 .unique_entries
                 .get(txid)
-                .expect("all entries should exist in both ordered_entries and unique_entries");
+                .unwrap_or_else(|_| panic!("all entries should exist in both ordered_entries and unique_entries, missing {:?} in unique_entries", txid));
             if self.has_expired(evicted_at) {
                 self.pop_front();
             } else {
@@ -121,8 +125,9 @@ impl EvictionList {
     fn pop_front(&mut self) -> Option<transaction::Hash> {
         if let Some(key) = self.ordered_entries.pop_front() {
             let removed = self.unique_entries.remove(&key);
-            assert!(
-                removed.is_some(),
+            assert_eq!(
+                removed,
+                Some(key),
                 "all entries should exist in both ordered_entries and unique_entries"
             );
             Some(key)
