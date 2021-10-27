@@ -159,7 +159,8 @@ async fn add_initial_peers_is_rate_limited() {
 
     let before = Instant::now();
 
-    let (crawl_task_handle, peerset_rx) = spawn_add_initial_peers(PEER_COUNT, outbound_connector);
+    let (initial_peers_task_handle, peerset_rx) =
+        spawn_add_initial_peers(PEER_COUNT, outbound_connector);
     let connections = peerset_rx.take(PEER_COUNT).collect::<Vec<_>>().await;
 
     let elapsed = Instant::now() - before;
@@ -172,7 +173,12 @@ async fn add_initial_peers_is_rate_limited() {
         elapsed
     );
 
-    let _ = crawl_task_handle.await;
+    let initial_peers_result = initial_peers_task_handle.await;
+    assert!(
+        matches!(initial_peers_result, Ok(Ok(_))),
+        "unexpected error or panic in add_initial_peers task: {:?}",
+        initial_peers_result,
+    );
 }
 
 /// Initialize a task that connects to `peer_count` initial peers using the
