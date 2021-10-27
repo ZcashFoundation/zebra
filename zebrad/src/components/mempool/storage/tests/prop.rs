@@ -20,7 +20,7 @@ use crate::components::mempool::{
     config::Config,
     storage::{
         eviction_list::EvictionList, MempoolError, RejectionError, SameEffectsTipRejectionError,
-        Storage, MAX_EVICTION_MEMORY_ENTRIES, MEMPOOL_SIZE,
+        Storage, MAX_EVICTION_MEMORY_ENTRIES,
     },
     SameEffectsChainRejectionError,
 };
@@ -36,6 +36,9 @@ const DEFAULT_MEMPOOL_LIST_PROPTEST_CASES: u32 = 64;
 /// Eviction memory time used for tests. Most tests won't care about this
 /// so we use a large enough value that will never be reached in the tests.
 const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
+
+/// Transaction count used in some tests to derive the mempool test size.
+const MEMPOOL_TX_COUNT: usize = 4;
 
 proptest! {
     #![proptest_config(
@@ -106,11 +109,14 @@ proptest! {
     /// Test that the reject list length limits are applied when evicting transactions.
     #[test]
     fn reject_lists_are_limited_insert_eviction(
-        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_SIZE + 1).prop_map(SummaryDebug),
+        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_TX_COUNT + 1).prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
+        // Use as cost limit the costs of all transactions except one
+        let cost_limit = transactions.iter().take(MEMPOOL_TX_COUNT).map(|tx| tx.cost()).sum();
+
         let mut storage: Storage = Storage::new(&Config {
-            tx_cost_limit: 160_000_000,
+            tx_cost_limit: cost_limit,
             eviction_memory_time: EVICTION_MEMORY_TIME,
             ..Default::default()
         });
@@ -133,19 +139,19 @@ proptest! {
         // Make sure there were no duplicates
         prop_assert_eq!(storage.rejected_transaction_count(), MAX_EVICTION_MEMORY_ENTRIES);
 
-        for transaction in transactions {
+        for (i, transaction) in transactions.iter().enumerate() {
             let tx_id = transaction.transaction.id;
 
-            if storage.transaction_count() < MEMPOOL_SIZE {
+            if i < transactions.len() - 1 {
                 // The initial transactions should be successful
                 prop_assert_eq!(
-                    storage.insert(transaction),
+                    storage.insert(transaction.clone()),
                     Ok(tx_id)
                 );
             } else {
                 // The final transaction will cause a random eviction,
                 // which might return an error if this transaction is chosen
-                let result = storage.insert(transaction);
+                let result = storage.insert(transaction.clone());
 
                 if result.is_ok() {
                     prop_assert_eq!(
@@ -160,6 +166,10 @@ proptest! {
                 }
             }
         }
+
+        // Check if at least one transaction was evicted.
+        // (More than one an be evicted to meet the limit.)
+        prop_assert!(storage.transaction_count() <= MEMPOOL_TX_COUNT);
 
         // Since we inserted more than MAX_EVICTION_MEMORY_ENTRIES,
         // the storage should have removed the older entries and kept its size
@@ -911,7 +921,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_SIZE)
+        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_TX_COUNT)
             .prop_flat_map(|transactions| {
                 let indices_to_remove =
                     vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {

@@ -29,9 +29,6 @@ pub mod tests;
 mod eviction_list;
 mod verified_set;
 
-/// The maximum number of verified transactions to store in the mempool.
-const MEMPOOL_SIZE: usize = 4;
-
 /// The size limit for mempool transaction rejection lists.
 ///
 /// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries` entries,
@@ -198,15 +195,26 @@ impl Storage {
             result = Err(rejection_error.into());
         }
 
-        // Once inserted, we evict transactions over the pool size limit.
-        while self.verified.transaction_count() > MEMPOOL_SIZE
-            || self.verified.total_cost() > self.tx_cost_limit
-        {
+        // Once inserted, we evict transactions over the pool size limit per [ZIP-401];
+        //
+        // > On receiving a transaction: (...)
+        // > Calculate its cost. If the total cost of transactions in the mempool including this
+        // > one would `exceed mempooltxcostlimit`, then the node MUST repeatedly call
+        // > EvictTransaction (with the new transaction included as a candidate to evict) until the
+        // > total cost does not exceed `mempooltxcostlimit`.
+        //
+        // [ZIP-401]: https://zips.z.cash/zip-0401
+        while self.verified.total_cost() > self.tx_cost_limit {
+            // > EvictTransaction MUST do the following:
+            // > Select a random transaction to evict, with probability in direct proportion to
+            // > eviction weight. (...) Remove it from the mempool.
             let victim_tx = self
                 .verified
                 .evict_one()
                 .expect("mempool is empty, but was expected to be full");
 
+            // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
+            // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
             self.reject(
                 victim_tx.transaction.id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
@@ -218,8 +226,6 @@ impl Storage {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
-
-        assert!(self.verified.transaction_count() <= MEMPOOL_SIZE);
 
         result
     }
