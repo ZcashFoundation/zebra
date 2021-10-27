@@ -17,21 +17,29 @@ use super::{ErrorSlot, PeerError, SharedPeerError};
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
-    // Used to shut down the corresponding heartbeat.
-    // This is always Some except when we take it on drop.
-    pub(super) shutdown_tx: Option<oneshot::Sender<()>>,
-    pub(super) server_tx: mpsc::Sender<ClientRequest>,
-    pub(super) error_slot: ErrorSlot,
+    /// Used to shut down the corresponding heartbeat.
+    /// This is always Some except when we take it on drop.
+    pub(crate) shutdown_tx: Option<oneshot::Sender<()>>,
+
+    /// Used to send [`Request`]s to the remote peer.
+    pub(crate) server_tx: mpsc::Sender<ClientRequest>,
+
+    /// A slot for an error shared between the Connection and the Client that uses it.
+    ///
+    /// `None` unless the connection or client have errored.
+    pub(crate) error_slot: ErrorSlot,
 }
 
 /// A message from the `peer::Client` to the `peer::Server`.
 #[derive(Debug)]
-pub(super) struct ClientRequest {
-    /// The actual request.
+pub(crate) struct ClientRequest {
+    /// The actual network request for the peer.
     pub request: Request,
-    /// The return message channel, included because `peer::Client::call` returns a
+
+    /// The response [`Message`] channel, included because `peer::Client::call` returns a
     /// future that may be moved around before it resolves.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
