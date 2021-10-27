@@ -14,7 +14,6 @@
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
-    cmp::min,
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -50,9 +49,6 @@ use Network::*;
 ///
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
-
-/// The number of fake crawler peers in the testing [`AddressBook`].
-const CRAWLER_FAKE_PEER_COUNT: usize = 100;
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
@@ -244,9 +240,9 @@ async fn peer_limit_two_testnet() {
     // Any number of address book peers is valid here, because some peers might have failed.
 }
 
-/// Test the crawler with an outbound peer limit of zero peers, and a connector that always errors.
+/// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
 #[tokio::test]
-async fn crawler_peer_limit_zero_connect_error() {
+async fn crawler_peer_limit_zero_connect_panic() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
@@ -264,7 +260,7 @@ async fn crawler_peer_limit_zero_connect_error() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when peer limit is zero: {:?}",
+        "unexpected peer when outbound limit is zero: {:?}",
         peer_result,
     );
 }
@@ -293,35 +289,10 @@ async fn crawler_peer_limit_one_connect_error() {
     );
 }
 
-/// Test the crawler with an outbound peer limit of three peers, and a connector that always errors.
-#[tokio::test]
-async fn crawler_peer_limit_three_connect_error() {
-    zebra_test::init();
-
-    // This test does not require network access, because the outbound connector
-    // and peer set are fake.
-
-    let error_outbound_connector =
-        service_fn(|_| async { Err("test outbound connector always returns errors".into()) });
-
-    // The initial target size is multiplied by 1.5 to give the actual limit of 3 peers.
-    let (_config, mut peerset_tx) =
-        spawn_crawler_with_peer_limit(2, error_outbound_connector).await;
-
-    let peer_result = peerset_tx.try_next();
-    assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when all connections error: {:?}",
-        peer_result,
-    );
-}
-
-/// Test the crawler with an outbound peer limit of three peers,
+/// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then disconnects the peer.
 #[tokio::test]
-async fn crawler_peer_limit_three_connect_ok_then_drop() {
+async fn crawler_peer_limit_one_connect_ok_then_drop() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
@@ -347,12 +318,14 @@ async fn crawler_peer_limit_three_connect_ok_then_drop() {
             // Fake the connection closing.
             std::mem::drop(connection_tracker);
 
+            // Give the crawler time to get the message.
+            tokio::task::yield_now().await;
+
             Ok(Change::Insert(addr, fake_client))
         });
 
-    // The initial target size is multiplied by 1.5 to give the actual limit of 3 peers.
     let (config, mut peerset_tx) =
-        spawn_crawler_with_peer_limit(2, success_disconnect_outbound_connector).await;
+        spawn_crawler_with_peer_limit(1, success_disconnect_outbound_connector).await;
 
     let mut peer_count: usize = 0;
     loop {
@@ -377,29 +350,24 @@ async fn crawler_peer_limit_three_connect_ok_then_drop() {
         }
     }
 
-    // We can't guarantee that we'll be over the limit, because the crawler runs other tasks
-    // with large timeouts.
-    //
-    // TODO: work around the `CandidateSet.update()` timeouts,
-    //       then check that we get a lot of connections.
     assert!(
-        peer_count >= config.peerset_outbound_connection_limit(),
+        peer_count > config.peerset_outbound_connection_limit(),
         "unexpected number of peer connections {}, should be at least the limit of {}",
         peer_count,
         config.peerset_outbound_connection_limit(),
     );
 }
 
-/// Test the crawler with an outbound peer limit of three peers,
+/// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then holds the peer open.
 #[tokio::test]
-async fn crawler_peer_limit_three_connect_ok_stay_open() {
+async fn crawler_peer_limit_one_connect_ok_stay_open() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
 
-    let success_disconnect_outbound_connector =
+    let success_stay_open_outbound_connector =
         service_fn(|req: OutboundConnectorRequest| async move {
             let OutboundConnectorRequest {
                 addr,
@@ -422,9 +390,8 @@ async fn crawler_peer_limit_three_connect_ok_stay_open() {
             Ok(Change::Insert(addr, fake_client))
         });
 
-    // The initial target size is multiplied by 1.5 to give the actual limit of 3 peers.
     let (config, mut peerset_tx) =
-        spawn_crawler_with_peer_limit(2, success_disconnect_outbound_connector).await;
+        spawn_crawler_with_peer_limit(1, success_stay_open_outbound_connector).await;
 
     let mut peer_count: usize = 0;
     loop {
@@ -457,10 +424,34 @@ async fn crawler_peer_limit_three_connect_ok_stay_open() {
     );
 }
 
-/// Test the crawler with the default outbound peer limit,
-/// and a connector that returns success then holds the peer open.
+/// Test the crawler with the default outbound peer limit, and a connector that always errors.
 #[tokio::test]
-async fn crawler_peer_limit_default_connect_ok_stay_open() {
+async fn crawler_peer_limit_default_connect_error() {
+    zebra_test::init();
+
+    // This test does not require network access, because the outbound connector
+    // and peer set are fake.
+
+    let error_outbound_connector =
+        service_fn(|_| async { Err("test outbound connector always returns errors".into()) });
+
+    let (_config, mut peerset_tx) =
+        spawn_crawler_with_peer_limit(None, error_outbound_connector).await;
+
+    let peer_result = peerset_tx.try_next();
+    assert!(
+        // `Err(_)` means that no peers are available, and the sender has not been dropped.
+        // `Ok(None)` means that no peers are available, and the sender has been dropped.
+        matches!(peer_result, Err(_) | Ok(None)),
+        "unexpected peer when all connections error: {:?}",
+        peer_result,
+    );
+}
+
+/// Test the crawler with the default outbound peer limit,
+/// and a connector that returns success then disconnects the peer.
+#[tokio::test]
+async fn crawler_peer_limit_default_connect_ok_then_drop() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
@@ -483,13 +474,15 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 error_slot,
             };
 
-            // Fake the connection being open forever.
-            std::mem::forget(connection_tracker);
+            // Fake the connection closing.
+            std::mem::drop(connection_tracker);
+
+            // Give the crawler time to get the message.
+            tokio::task::yield_now().await;
 
             Ok(Change::Insert(addr, fake_client))
         });
 
-    // The initial target size is multiplied by 1.5 to give the actual limit.
     let (config, mut peerset_tx) =
         spawn_crawler_with_peer_limit(None, success_disconnect_outbound_connector).await;
 
@@ -516,15 +509,81 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
         }
     }
 
-    let peer_limit = min(
-        config.peerset_outbound_connection_limit(),
-        CRAWLER_FAKE_PEER_COUNT,
-    );
+    // TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit
+    //       (currently, getting over the limit can take 30 seconds or more)
+    let lower_limit = config.peerset_outbound_connection_limit() / 3;
     assert!(
-        peer_count <= peer_limit,
+        peer_count > lower_limit,
+        "unexpected number of peer connections {}, should be over the limit of {}",
+        peer_count,
+        lower_limit,
+    );
+}
+
+/// Test the crawler with the default outbound peer limit,
+/// and a connector that returns success then holds the peer open.
+#[tokio::test]
+async fn crawler_peer_limit_default_connect_ok_stay_open() {
+    zebra_test::init();
+
+    // This test does not require network access, because the outbound connector
+    // and peer set are fake.
+
+    let success_stay_open_outbound_connector =
+        service_fn(|req: OutboundConnectorRequest| async move {
+            let OutboundConnectorRequest {
+                addr,
+                connection_tracker,
+            } = req;
+
+            let (server_tx, _server_rx) = mpsc::channel(0);
+            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+            let error_slot = ErrorSlot::default();
+
+            let fake_client = peer::Client {
+                shutdown_tx: Some(shutdown_tx),
+                server_tx,
+                error_slot,
+            };
+
+            // Fake the connection being open forever.
+            std::mem::forget(connection_tracker);
+
+            Ok(Change::Insert(addr, fake_client))
+        });
+
+    // The initial target size is multiplied by 1.5 to give the actual limit.
+    let (config, mut peerset_tx) =
+        spawn_crawler_with_peer_limit(None, success_stay_open_outbound_connector).await;
+
+    let mut peer_count: usize = 0;
+    loop {
+        let peer_result = peerset_tx.try_next();
+        match peer_result {
+            // A peer handshake succeeded.
+            Ok(Some(peer_result)) => {
+                assert!(
+                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    "unexpected connection error: {:?}\n\
+                     {} previous peers succeeded",
+                    peer_result,
+                    peer_count,
+                );
+                peer_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    assert!(
+        peer_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer connections {}, over limit of {}",
         peer_count,
-        peer_limit,
+        config.peerset_outbound_connection_limit(),
     );
 }
 
@@ -614,6 +673,7 @@ where
         + 'static,
     C::Future: Send + 'static,
 {
+    // Create a test config.
     let mut config = Config::default();
     if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
         config.peerset_initial_target_size = peerset_initial_target_size;
@@ -622,9 +682,10 @@ where
     // Manually initialize an address book without a timestamp tracker.
     let mut address_book = AddressBook::new(config.listen_addr, Span::current());
 
-    // Add fake peers.
+    // Add enough fake peers to go over the limit, even if the limit is zero.
+    let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
     let mut fake_peer = None;
-    for address_number in 0..CRAWLER_FAKE_PEER_COUNT {
+    for address_number in 0..over_limit_peers {
         let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
         let addr =
             MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now());
@@ -634,6 +695,7 @@ where
         address_book.update(addr);
     }
 
+    // Create a fake peer set.
     let nil_peer_set = service_fn(move |req| async move {
         let rsp = match req {
             // Return the correct response variant for Peers requests,
@@ -647,11 +709,9 @@ where
 
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
-    // Use the standard channel sizes, plus one, so the initializers never panic
-    let (peerset_tx, peerset_rx) =
-        mpsc::channel::<PeerChange>(config.peerset_total_connection_limit() + 1);
-    let (mut demand_tx, demand_rx) =
-        mpsc::channel::<MorePeers>(config.peerset_outbound_connection_limit() + 1);
+    // Make the channels large enough to hold all the peers.
+    let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(over_limit_peers);
+    let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(over_limit_peers);
 
     let candidates = CandidateSet::new(address_book.clone(), nil_peer_set);
 
@@ -659,11 +719,12 @@ where
     // but in this test we start with an empty counter.
     let active_outbound_connections = ActiveConnectionCounter::new_counter();
 
-    // Add initial demand.
-    for _ in 0..config.peerset_initial_target_size {
+    // Add fake demand over the limit.
+    for _ in 0..over_limit_peers {
         let _ = demand_tx.try_send(MorePeers);
     }
 
+    // Start the crawler.
     let crawl_fut = crawl_and_dial(
         config.clone(),
         demand_tx,
@@ -694,9 +755,9 @@ where
     // Check the final address book contents.
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
-        CRAWLER_FAKE_PEER_COUNT,
+        over_limit_peers,
         "expected {} peers in Mainnet address book, but got: {:?}",
-        CRAWLER_FAKE_PEER_COUNT,
+        over_limit_peers,
         address_book.lock().unwrap().address_metrics()
     );
 
