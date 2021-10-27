@@ -1240,7 +1240,6 @@ where
             }
         };
 
-        // TODO: Abort all the tasks.
         let outbound_task_handle = tokio::spawn(outbound_fut);
         outbound_task_handles.push(outbound_task_handle);
     }
