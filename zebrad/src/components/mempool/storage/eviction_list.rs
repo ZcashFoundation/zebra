@@ -59,8 +59,7 @@ impl EvictionList {
         // and the mempool doesn't allow inserting two transactions with the same
         // hash (they would conflict).
         assert_eq!(
-            old_value,
-            None,
+            old_value, None,
             "an already-evicted transaction should not be evicted again"
         );
         self.ordered_entries.push_back(key)
@@ -106,7 +105,7 @@ impl EvictionList {
             let evicted_at = self
                 .unique_entries
                 .get(txid)
-                .unwrap_or_else(|_| panic!("all entries should exist in both ordered_entries and unique_entries, missing {:?} in unique_entries", txid));
+                .unwrap_or_else(|| panic!("all entries should exist in both ordered_entries and unique_entries, missing {:?} in unique_entries", txid));
             if self.has_expired(evicted_at) {
                 self.pop_front();
             } else {
@@ -125,10 +124,10 @@ impl EvictionList {
     fn pop_front(&mut self) -> Option<transaction::Hash> {
         if let Some(key) = self.ordered_entries.pop_front() {
             let removed = self.unique_entries.remove(&key);
-            assert_eq!(
-                removed,
-                Some(key),
-                "all entries should exist in both ordered_entries and unique_entries"
+            assert!(
+                removed.is_some(),
+                "all entries should exist in both ordered_entries and unique_entries, missing {:?} in unique_entries",
+                key
             );
             Some(key)
         } else {
