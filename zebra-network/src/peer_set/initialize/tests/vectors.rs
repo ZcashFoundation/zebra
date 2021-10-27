@@ -20,7 +20,10 @@ use std::{
     time::Duration,
 };
 
-use futures::{channel::mpsc, FutureExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    FutureExt,
+};
 use tokio::task::JoinHandle;
 use tower::{discover::Change, service_fn, Service};
 
@@ -31,7 +34,7 @@ use zebra_test::net::random_known_port;
 use crate::{
     init,
     meta_addr::MetaAddr,
-    peer::{self, OutboundConnectorRequest},
+    peer::{self, ErrorSlot, OutboundConnectorRequest},
     peer_set::{
         initialize::{crawl_and_dial, PeerChange},
         set::MorePeers,
@@ -51,7 +54,7 @@ const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(5);
 /// The number of fake crawler peers in the testing [`AddressBook`].
 ///
 /// Using a large number of peers can make the tests time out.
-const CRAWLER_FAKE_PEER_COUNT: usize = 2;
+const CRAWLER_FAKE_PEER_COUNT: usize = 10;
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
@@ -243,9 +246,9 @@ async fn peer_limit_two_testnet() {
     // Any number of address book peers is valid here, because some peers might have failed.
 }
 
-/// Test the crawler with an outbound peer limit of zero.
+/// Test the crawler with an outbound peer limit of zero peers, and a connector that always errors.
 #[tokio::test]
-async fn crawler_peer_limit_zero() {
+async fn crawler_peer_limit_zero_connection_error() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
@@ -280,9 +283,9 @@ async fn crawler_peer_limit_zero() {
     );
 }
 
-/// Test the crawler with an outbound peer limit of one.
+/// Test the crawler with an outbound peer limit of one peer, and a connector that always errors.
 #[tokio::test]
-async fn crawler_peer_limit_one() {
+async fn crawler_peer_limit_one_connection_error() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
@@ -316,9 +319,9 @@ async fn crawler_peer_limit_one() {
     );
 }
 
-/// Test the crawler with an outbound peer limit of three peers.
+/// Test the crawler with an outbound peer limit of three peers, and a connector that always errors.
 #[tokio::test]
-async fn crawler_peer_limit_two() {
+async fn crawler_peer_limit_three_connection_error() {
     zebra_test::init();
 
     // This test does not require network access, because the outbound connector
@@ -327,6 +330,7 @@ async fn crawler_peer_limit_two() {
     let error_outbound_connector =
         service_fn(|_| async { Err("test outbound connector always returns errors".into()) });
 
+    // The initial target size is multiplied by 1.5 to give the actual limit of 3 peers.
     let (crawl_task_handle, mut peerset_tx) =
         spawn_crawler_with_peer_limit(2, error_outbound_connector);
 
@@ -340,6 +344,56 @@ async fn crawler_peer_limit_two() {
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
         "unexpected peer when all connections error: {:?}",
+        peer_result,
+    );
+
+    let crawl_result = crawl_task_handle.now_or_never();
+    assert!(
+        matches!(crawl_result, None)
+            || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
+        "unexpected error or panic in peer crawler task: {:?}",
+        crawl_result,
+    );
+}
+
+/// Test the crawler with an outbound peer limit of three peers,
+/// and a connector that returns success then disconnects the peer.
+#[tokio::test]
+async fn crawler_peer_limit_three_connection_ok_then_drop() {
+    zebra_test::init();
+
+    // This test does not require network access, because the outbound connector
+    // and peer set are fake.
+
+    let success_disconnect_outbound_connector =
+        service_fn(|req: OutboundConnectorRequest| async move {
+            let (server_tx, _server_rx) = mpsc::channel(0);
+            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+            let error_slot = ErrorSlot::default();
+
+            let fake_client = peer::Client {
+                shutdown_tx: Some(shutdown_tx),
+                server_tx,
+                error_slot,
+            };
+
+            Ok(Change::Insert(req.addr, fake_client))
+        });
+
+    // The initial target size is multiplied by 1.5 to give the actual limit of 3 peers.
+    let (crawl_task_handle, mut peerset_tx) =
+        spawn_crawler_with_peer_limit(2, success_disconnect_outbound_connector);
+
+    // Let the crawler run for a while.
+    tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+    crawl_task_handle.abort();
+
+    let peer_result = peerset_tx.try_next();
+    assert!(
+        // `Ok(Some(_))` means that a peer handshake succeeded.
+        // (And that the channel's sender has not been dropped.)
+        matches!(peer_result, Ok(Some(Ok(Change::Insert(_, _))))),
+        "unexpected missing peer, connection error, or dropped channel when all peers succeed: {:?}",
         peer_result,
     );
 

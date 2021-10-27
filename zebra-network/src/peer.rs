@@ -12,10 +12,9 @@ mod error;
 mod handshake;
 
 use client::{ClientRequest, ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
-use error::ErrorSlot;
 
 pub use client::Client;
 pub use connection::Connection;
 pub use connector::{Connector, OutboundConnectorRequest};
-pub use error::{HandshakeError, PeerError, SharedPeerError};
+pub use error::{ErrorSlot, HandshakeError, PeerError, SharedPeerError};
 pub use handshake::{ConnectedAddr, Handshake, HandshakeRequest};
