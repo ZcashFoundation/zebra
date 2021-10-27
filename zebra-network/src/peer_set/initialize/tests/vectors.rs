@@ -261,10 +261,10 @@ async fn crawler_peer_limit_zero_connect_panic() {
         unreachable!("outbound connector should never be called with a zero peer limit")
     });
 
-    let (_config, mut peerset_tx) =
+    let (_config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(0, unreachable_outbound_connector).await;
 
-    let peer_result = peerset_tx.try_next();
+    let peer_result = peerset_rx.try_next();
     assert!(
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
@@ -285,10 +285,10 @@ async fn crawler_peer_limit_one_connect_error() {
     let error_outbound_connector =
         service_fn(|_| async { Err("test outbound connector always returns errors".into()) });
 
-    let (_config, mut peerset_tx) =
+    let (_config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(1, error_outbound_connector).await;
 
-    let peer_result = peerset_tx.try_next();
+    let peer_result = peerset_rx.try_next();
     assert!(
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
@@ -333,12 +333,12 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
             Ok(Change::Insert(addr, fake_client))
         });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(1, success_disconnect_outbound_connector).await;
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
+        let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
@@ -376,8 +376,11 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
 
-    let success_stay_open_outbound_connector =
-        service_fn(|req: OutboundConnectorRequest| async move {
+    let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
+
+    let success_stay_open_outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+        let peer_tracker_tx = peer_tracker_tx.clone();
+        async move {
             let OutboundConnectorRequest {
                 addr,
                 connection_tracker,
@@ -393,29 +396,49 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
                 error_slot,
             };
 
-            // Fake the connection being open forever.
-            std::mem::forget(connection_tracker);
+            // Make the connection staying open.
+            peer_tracker_tx
+                .unbounded_send(connection_tracker)
+                .expect("unexpected error sending to unbounded channel");
 
             Ok(Change::Insert(addr, fake_client))
-        });
+        }
+    });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(1, success_stay_open_outbound_connector).await;
 
-    let mut peer_count: usize = 0;
+    let mut peer_change_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
-        match peer_result {
+        let peer_change_result = peerset_rx.try_next();
+        match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
+            Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    peer_change_result,
+                    peer_change_count,
                 );
-                peer_count += 1;
+                peer_change_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    let mut peer_tracker_count: usize = 0;
+    loop {
+        let peer_tracker_result = peer_tracker_rx.try_next();
+        match peer_tracker_result {
+            // We held this peer tracker open until now.
+            Ok(Some(peer_tracker)) => {
+                std::mem::drop(peer_tracker);
+                peer_tracker_count += 1;
             }
 
             // The channel is closed and there are no messages left in the channel.
@@ -426,10 +449,19 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
     }
 
     assert!(
-        peer_count <= config.peerset_outbound_connection_limit(),
-        "unexpected number of peer connections {}, over limit of {}",
-        peer_count,
+        peer_change_count <= config.peerset_outbound_connection_limit(),
+        "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
+        peer_change_count,
         config.peerset_outbound_connection_limit(),
+        peer_tracker_count,
+    );
+
+    assert!(
+        peer_tracker_count <= config.peerset_outbound_connection_limit(),
+        "unexpected number of peer trackers {}, over limit of {}, had {} peer changes",
+        peer_tracker_count,
+        config.peerset_outbound_connection_limit(),
+        peer_change_count,
     );
 }
 
@@ -444,10 +476,10 @@ async fn crawler_peer_limit_default_connect_error() {
     let error_outbound_connector =
         service_fn(|_| async { Err("test outbound connector always returns errors".into()) });
 
-    let (_config, mut peerset_tx) =
+    let (_config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(None, error_outbound_connector).await;
 
-    let peer_result = peerset_tx.try_next();
+    let peer_result = peerset_rx.try_next();
     assert!(
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
@@ -492,12 +524,12 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
             Ok(Change::Insert(addr, fake_client))
         });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(None, success_disconnect_outbound_connector).await;
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
+        let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
@@ -538,8 +570,11 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
 
-    let success_stay_open_outbound_connector =
-        service_fn(|req: OutboundConnectorRequest| async move {
+    let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
+
+    let success_stay_open_outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+        let peer_tracker_tx = peer_tracker_tx.clone();
+        async move {
             let OutboundConnectorRequest {
                 addr,
                 connection_tracker,
@@ -555,30 +590,50 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 error_slot,
             };
 
-            // Fake the connection being open forever.
-            std::mem::forget(connection_tracker);
+            // Make the connection staying open.
+            peer_tracker_tx
+                .unbounded_send(connection_tracker)
+                .expect("unexpected error sending to unbounded channel");
 
             Ok(Change::Insert(addr, fake_client))
-        });
+        }
+    });
 
     // The initial target size is multiplied by 1.5 to give the actual limit.
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(None, success_stay_open_outbound_connector).await;
 
-    let mut peer_count: usize = 0;
+    let mut peer_change_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
-        match peer_result {
+        let peer_change_result = peerset_rx.try_next();
+        match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
+            Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    peer_change_result,
+                    peer_change_count,
                 );
-                peer_count += 1;
+                peer_change_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    let mut peer_tracker_count: usize = 0;
+    loop {
+        let peer_tracker_result = peer_tracker_rx.try_next();
+        match peer_tracker_result {
+            // We held this peer tracker open until now.
+            Ok(Some(peer_tracker)) => {
+                std::mem::drop(peer_tracker);
+                peer_tracker_count += 1;
             }
 
             // The channel is closed and there are no messages left in the channel.
@@ -589,10 +644,19 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     }
 
     assert!(
-        peer_count <= config.peerset_outbound_connection_limit(),
-        "unexpected number of peer connections {}, over limit of {}",
-        peer_count,
+        peer_change_count <= config.peerset_outbound_connection_limit(),
+        "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
+        peer_change_count,
         config.peerset_outbound_connection_limit(),
+        peer_tracker_count,
+    );
+
+    assert!(
+        peer_tracker_count <= config.peerset_outbound_connection_limit(),
+        "unexpected number of peer trackers {}, over limit of {}, had {} peer changes",
+        peer_tracker_count,
+        config.peerset_outbound_connection_limit(),
+        peer_change_count,
     );
 }
 
@@ -610,10 +674,10 @@ async fn listener_peer_limit_zero_handshake_panic() {
         unreachable!("inbound handshaker should never be called with a zero peer limit")
     });
 
-    let (_config, mut peerset_tx) =
+    let (_config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(0, unreachable_inbound_handshaker).await;
 
-    let peer_result = peerset_tx.try_next();
+    let peer_result = peerset_rx.try_next();
     assert!(
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
@@ -636,10 +700,10 @@ async fn listener_peer_limit_one_handshake_error() {
     let error_inbound_handshaker =
         service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
 
-    let (_config, mut peerset_tx) =
+    let (_config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(1, error_inbound_handshaker).await;
 
-    let peer_result = peerset_tx.try_next();
+    let peer_result = peerset_rx.try_next();
     assert!(
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
@@ -687,12 +751,12 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
         Ok(fake_client)
     });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(1, success_disconnect_inbound_handshaker).await;
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
+        let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
@@ -732,47 +796,71 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
         return;
     }
 
-    let success_stay_open_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
-        let HandshakeRequest {
-            tcp_stream,
-            connected_addr: _,
-            connection_tracker,
-        } = req;
+    let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
 
-        let (server_tx, _server_rx) = mpsc::channel(0);
-        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-        let error_slot = ErrorSlot::default();
+    let success_stay_open_inbound_handshaker = service_fn(move |req: HandshakeRequest| {
+        let peer_tracker_tx = peer_tracker_tx.clone();
+        async move {
+            let HandshakeRequest {
+                tcp_stream,
+                connected_addr: _,
+                connection_tracker,
+            } = req;
 
-        let fake_client = peer::Client {
-            shutdown_tx: Some(shutdown_tx),
-            server_tx,
-            error_slot,
-        };
+            let (server_tx, _server_rx) = mpsc::channel(0);
+            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+            let error_slot = ErrorSlot::default();
 
-        // Fake the connection being open forever.
-        std::mem::forget(connection_tracker);
-        std::mem::forget(tcp_stream);
+            let fake_client = peer::Client {
+                shutdown_tx: Some(shutdown_tx),
+                server_tx,
+                error_slot,
+            };
 
-        Ok(fake_client)
+            // Make the connection staying open.
+            peer_tracker_tx
+                .unbounded_send((tcp_stream, connection_tracker))
+                .expect("unexpected error sending to unbounded channel");
+
+            Ok(fake_client)
+        }
     });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(1, success_stay_open_inbound_handshaker).await;
 
-    let mut peer_count: usize = 0;
+    let mut peer_change_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
-        match peer_result {
+        let peer_change_result = peerset_rx.try_next();
+        match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
+            Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    peer_change_result,
+                    peer_change_count,
                 );
-                peer_count += 1;
+                peer_change_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    let mut peer_tracker_count: usize = 0;
+    loop {
+        let peer_tracker_result = peer_tracker_rx.try_next();
+        match peer_tracker_result {
+            // We held this peer connection and tracker open until now.
+            Ok(Some((peer_connection, peer_tracker))) => {
+                std::mem::drop(peer_connection);
+                std::mem::drop(peer_tracker);
+                peer_tracker_count += 1;
             }
 
             // The channel is closed and there are no messages left in the channel.
@@ -783,10 +871,19 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
     }
 
     assert!(
-        peer_count <= config.peerset_inbound_connection_limit(),
-        "unexpected number of peer connections {}, over limit of {}",
-        peer_count,
+        peer_change_count <= config.peerset_inbound_connection_limit(),
+        "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
+        peer_change_count,
         config.peerset_inbound_connection_limit(),
+        peer_tracker_count,
+    );
+
+    assert!(
+        peer_tracker_count <= config.peerset_inbound_connection_limit(),
+        "unexpected number of peer trackers {}, over limit of {}, had {} peer changes",
+        peer_tracker_count,
+        config.peerset_inbound_connection_limit(),
+        peer_change_count,
     );
 }
 
@@ -803,10 +900,10 @@ async fn listener_peer_limit_default_handshake_error() {
     let error_inbound_handshaker =
         service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
 
-    let (_config, mut peerset_tx) =
+    let (_config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(None, error_inbound_handshaker).await;
 
-    let peer_result = peerset_tx.try_next();
+    let peer_result = peerset_rx.try_next();
     assert!(
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
@@ -854,12 +951,12 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
         Ok(fake_client)
     });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(None, success_disconnect_inbound_handshaker).await;
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
+        let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
@@ -899,47 +996,71 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
         return;
     }
 
-    let success_stay_open_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
-        let HandshakeRequest {
-            tcp_stream,
-            connected_addr: _,
-            connection_tracker,
-        } = req;
+    let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
 
-        let (server_tx, _server_rx) = mpsc::channel(0);
-        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-        let error_slot = ErrorSlot::default();
+    let success_stay_open_inbound_handshaker = service_fn(move |req: HandshakeRequest| {
+        let peer_tracker_tx = peer_tracker_tx.clone();
+        async move {
+            let HandshakeRequest {
+                tcp_stream,
+                connected_addr: _,
+                connection_tracker,
+            } = req;
 
-        let fake_client = peer::Client {
-            shutdown_tx: Some(shutdown_tx),
-            server_tx,
-            error_slot,
-        };
+            let (server_tx, _server_rx) = mpsc::channel(0);
+            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+            let error_slot = ErrorSlot::default();
 
-        // Fake the connection being open forever.
-        std::mem::forget(connection_tracker);
-        std::mem::forget(tcp_stream);
+            let fake_client = peer::Client {
+                shutdown_tx: Some(shutdown_tx),
+                server_tx,
+                error_slot,
+            };
 
-        Ok(fake_client)
+            // Make the connection staying open.
+            peer_tracker_tx
+                .unbounded_send((tcp_stream, connection_tracker))
+                .expect("unexpected error sending to unbounded channel");
+
+            Ok(fake_client)
+        }
     });
 
-    let (config, mut peerset_tx) =
+    let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(None, success_stay_open_inbound_handshaker).await;
 
-    let mut peer_count: usize = 0;
+    let mut peer_change_count: usize = 0;
     loop {
-        let peer_result = peerset_tx.try_next();
-        match peer_result {
+        let peer_change_result = peerset_rx.try_next();
+        match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
+            Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    peer_change_result,
+                    peer_change_count,
                 );
-                peer_count += 1;
+                peer_change_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    let mut peer_tracker_count: usize = 0;
+    loop {
+        let peer_tracker_result = peer_tracker_rx.try_next();
+        match peer_tracker_result {
+            // We held this peer connection and tracker open until now.
+            Ok(Some((peer_connection, peer_tracker))) => {
+                std::mem::drop(peer_connection);
+                std::mem::drop(peer_tracker);
+                peer_tracker_count += 1;
             }
 
             // The channel is closed and there are no messages left in the channel.
@@ -950,10 +1071,19 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
     }
 
     assert!(
-        peer_count <= config.peerset_inbound_connection_limit(),
-        "unexpected number of peer connections {}, over limit of {}",
-        peer_count,
+        peer_change_count <= config.peerset_inbound_connection_limit(),
+        "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
+        peer_change_count,
         config.peerset_inbound_connection_limit(),
+        peer_tracker_count,
+    );
+
+    assert!(
+        peer_tracker_count <= config.peerset_inbound_connection_limit(),
+        "unexpected number of peer trackers {}, over limit of {}, had {} peer changes",
+        peer_tracker_count,
+        config.peerset_inbound_connection_limit(),
+        peer_change_count,
     );
 }
 
