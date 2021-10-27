@@ -1206,11 +1206,12 @@ where
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(over_limit_connections);
 
     // Start listening for connections.
-    let listen_fut = {
-        let config = config.clone();
-        let peerset_tx = peerset_tx.clone();
-        accept_inbound_connections(config, tcp_listener, listen_handshaker, peerset_tx)
-    };
+    let listen_fut = accept_inbound_connections(
+        config.clone(),
+        tcp_listener,
+        listen_handshaker,
+        peerset_tx.clone(),
+    );
     let listen_task_handle = tokio::spawn(listen_fut);
 
     // Open inbound connections.

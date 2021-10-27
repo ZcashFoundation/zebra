@@ -162,21 +162,20 @@ where
     // Connect peerset_tx to the 3 peer sources:
     //
     // 1. Incoming peer connections, via a listener.
-    let listen_fut = {
-        let config = config.clone();
-        let peerset_tx = peerset_tx.clone();
-        accept_inbound_connections(config, tcp_listener, listen_handshaker, peerset_tx)
-    };
+    let listen_fut = accept_inbound_connections(
+        config.clone(),
+        tcp_listener,
+        listen_handshaker,
+        peerset_tx.clone(),
+    );
     let listen_guard = tokio::spawn(listen_fut.instrument(Span::current()));
 
     // 2. Initial peers, specified in the config.
-    let initial_peers_fut = {
-        let config = config.clone();
-        let outbound_connector = outbound_connector.clone();
-        let peerset_tx = peerset_tx.clone();
-        add_initial_peers(config, outbound_connector, peerset_tx)
-    };
-
+    let initial_peers_fut = add_initial_peers(
+        config.clone(),
+        outbound_connector.clone(),
+        peerset_tx.clone(),
+    );
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
 
     // 3. Outgoing peers we connect to in response to load.
@@ -204,18 +203,15 @@ where
         let _ = demand_tx.try_send(MorePeers);
     }
 
-    let crawl_fut = {
-        let config = config.clone();
-        crawl_and_dial(
-            config,
-            demand_tx,
-            demand_rx,
-            candidates,
-            outbound_connector,
-            peerset_tx,
-            active_outbound_connections,
-        )
-    };
+    let crawl_fut = crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        candidates,
+        outbound_connector,
+        peerset_tx,
+        active_outbound_connections,
+    );
     let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
 
     handle_tx.send(vec![listen_guard, crawl_guard]).unwrap();
