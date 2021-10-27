@@ -452,7 +452,8 @@ where
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
 
     loop {
-        if let Ok((tcp_stream, addr)) = listener.accept().await {
+        let inbound_result = listener.accept().await;
+        if let Ok((tcp_stream, addr)) = inbound_result {
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()
             {
@@ -507,6 +508,8 @@ where
             // Zebra can't control how many queued connections are waiting,
             // but most OSes also limit the number of queued inbound connections on a listener port.
             tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
+        } else {
+            debug!(?inbound_result, "error accepting inbound connection");
         }
 
         // Security: Let other tasks run after each connection is processed.
