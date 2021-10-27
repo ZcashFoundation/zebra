@@ -4984,6 +4984,7 @@ dependencies = [
  "pin-project 1.0.7",
  "proptest",
  "proptest-derive",
+ "rand 0.8.4",
  "regex",
  "semver 1.0.3",
  "sentry",
