@@ -14,6 +14,10 @@ use crate::components::mempool::{
     config, storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
 };
 
+/// Eviction memory time used for tests. Most tests won't care about this
+/// so we use a large enough value that will never be reached in the tests.
+const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
+
 #[test]
 fn mempool_storage_crud_exact_mainnet() {
     zebra_test::init();
@@ -23,6 +27,7 @@ fn mempool_storage_crud_exact_mainnet() {
     // Create an empty storage instance
     let mut storage: Storage = Storage::new(&config::Config {
         tx_cost_limit: u64::MAX,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
         ..Default::default()
     });
 
@@ -54,6 +59,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     // Create an empty storage instance
     let mut storage: Storage = Storage::new(&config::Config {
         tx_cost_limit: 160_000_000,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
         ..Default::default()
     });
 
@@ -91,6 +97,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     // Create an empty storage
     let mut storage: Storage = Storage::new(&config::Config {
         tx_cost_limit: 160_000_000,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
         ..Default::default()
     });
 

@@ -10,13 +10,14 @@
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
+    time::Duration,
 };
 
 use thiserror::Error;
 
 use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
-use self::verified_set::VerifiedSet;
+use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -25,10 +26,8 @@ use proptest_derive::Arbitrary;
 #[cfg(test)]
 pub mod tests;
 
+mod eviction_list;
 mod verified_set;
-
-/// The maximum number of verified transactions to store in the mempool.
-const MEMPOOL_SIZE: usize = 4;
 
 /// The size limit for mempool transaction rejection lists.
 ///
@@ -103,7 +102,6 @@ pub enum RejectionError {
 }
 
 /// Hold mempool verified and rejected mempool transactions.
-#[derive(Default)]
 pub struct Storage {
     /// The set of verified transactions in the mempool. This is a
     /// cache of size [`MEMPOOL_SIZE`].
@@ -125,8 +123,18 @@ pub struct Storage {
     /// These rejections apply until a rollback or network upgrade.
     ///
     /// Any transaction with the same `transaction::Hash` is invalid.
-    chain_rejected_same_effects:
-        HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
+    ///
+    /// An [`EvictionList`] is used for both randomly evicted and expired transactions,
+    /// even if it is only needed for the evicted ones. This was done just to simplify
+    /// the existing code; there is no harm in having a timeout for expired transactions
+    /// too since re-checking expired transactions is cheap.
+    // If this code is ever refactored and the lists are split in different fields,
+    // then we can use an `EvictionList` just for the evicted list.
+    chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
+
+    /// The mempool transaction eviction age limit.
+    /// Same as [`Config::eviction_memory_time`].
+    eviction_memory_time: Duration,
 
     /// Max total cost of the verified mempool set, beyond which transactions
     /// are evicted to make room.
@@ -142,9 +150,14 @@ impl Drop for Storage {
 impl Storage {
     #[allow(clippy::field_reassign_with_default)]
     pub(crate) fn new(config: &config::Config) -> Self {
-        let mut default: Storage = Default::default();
-        default.tx_cost_limit = config.tx_cost_limit;
-        default
+        Self {
+            tx_cost_limit: config.tx_cost_limit,
+            eviction_memory_time: config.eviction_memory_time,
+            verified: Default::default(),
+            tip_rejected_exact: Default::default(),
+            tip_rejected_same_effects: Default::default(),
+            chain_rejected_same_effects: Default::default(),
+        }
     }
 
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
@@ -182,15 +195,26 @@ impl Storage {
             result = Err(rejection_error.into());
         }
 
-        // Once inserted, we evict transactions over the pool size limit.
-        while self.verified.transaction_count() > MEMPOOL_SIZE
-            || self.verified.total_cost() > self.tx_cost_limit
-        {
+        // Once inserted, we evict transactions over the pool size limit per [ZIP-401];
+        //
+        // > On receiving a transaction: (...)
+        // > Calculate its cost. If the total cost of transactions in the mempool including this
+        // > one would `exceed mempooltxcostlimit`, then the node MUST repeatedly call
+        // > EvictTransaction (with the new transaction included as a candidate to evict) until the
+        // > total cost does not exceed `mempooltxcostlimit`.
+        //
+        // [ZIP-401]: https://zips.z.cash/zip-0401
+        while self.verified.total_cost() > self.tx_cost_limit {
+            // > EvictTransaction MUST do the following:
+            // > Select a random transaction to evict, with probability in direct proportion to
+            // > eviction weight. (...) Remove it from the mempool.
             let victim_tx = self
                 .verified
                 .evict_one()
                 .expect("mempool is empty, but was expected to be full");
 
+            // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
+            // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
             self.reject(
                 victim_tx.transaction.id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
@@ -202,8 +226,6 @@ impl Storage {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
-
-        assert!(self.verified.transaction_count() <= MEMPOOL_SIZE);
 
         result
     }
@@ -277,11 +299,7 @@ impl Storage {
         if self.tip_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
             self.tip_rejected_same_effects.clear();
         }
-        for (_, map) in self.chain_rejected_same_effects.iter_mut() {
-            if map.len() > MAX_EVICTION_MEMORY_ENTRIES {
-                map.clear();
-            }
-        }
+        // `chain_rejected_same_effects` limits its size by itself
         self.update_rejected_metrics();
     }
 
@@ -326,12 +344,12 @@ impl Storage {
     ///
     /// Transactions on multiple rejected lists are counted multiple times.
     #[allow(dead_code)]
-    pub fn rejected_transaction_count(&self) -> usize {
+    pub fn rejected_transaction_count(&mut self) -> usize {
         self.tip_rejected_exact.len()
             + self.tip_rejected_same_effects.len()
             + self
                 .chain_rejected_same_effects
-                .iter()
+                .iter_mut()
                 .map(|(_, map)| map.len())
                 .sum::<usize>()
     }
@@ -346,12 +364,12 @@ impl Storage {
                 self.tip_rejected_same_effects.insert(txid.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
-                // TODO: track evicted victims times, removing those older than
-                // config.eviction_memory_time, as well as FIFO more than
-                // MAX_EVICTION_MEMORY_ENTRIES
+                let eviction_memory_time = self.eviction_memory_time;
                 self.chain_rejected_same_effects
                     .entry(e)
-                    .or_default()
+                    .or_insert_with(|| {
+                        EvictionList::new(MAX_EVICTION_MEMORY_ENTRIES, eviction_memory_time)
+                    })
                     .insert(txid.mined_id());
             }
         }
@@ -374,7 +392,7 @@ impl Storage {
         }
 
         for (error, set) in self.chain_rejected_same_effects.iter() {
-            if set.contains(&txid.mined_id()) {
+            if set.contains_key(&txid.mined_id()) {
                 return Some(error.clone().into());
             }
         }
@@ -486,7 +504,7 @@ impl Storage {
     /// Update metrics related to the rejected lists.
     ///
     /// Must be called every time the rejected lists change.
-    fn update_rejected_metrics(&self) {
+    fn update_rejected_metrics(&mut self) {
         metrics::gauge!(
             "mempool.rejected.transaction.ids",
             self.rejected_transaction_count() as _
