@@ -18,6 +18,9 @@ use crate::components::mempool::{
 /// so we use a large enough value that will never be reached in the tests.
 const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
 
+/// Transaction count used in some tests to derive the mempool test size.
+const MEMPOOL_TX_COUNT: usize = 4;
+
 #[test]
 fn mempool_storage_crud_exact_mainnet() {
     zebra_test::init();
@@ -48,6 +51,83 @@ fn mempool_storage_crud_exact_mainnet() {
     // Check that it is /not/ in the mempool.
     assert_eq!(removal_count, 1);
     assert!(!storage.contains_transaction_exact(&unmined_tx.transaction.id));
+}
+
+#[test]
+fn mempool_storage_basic() -> Result<()> {
+    zebra_test::init();
+
+    mempool_storage_basic_for_network(Network::Mainnet)?;
+    mempool_storage_basic_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
+    // Get transactions from the first 10 blocks of the Zcash blockchain
+    let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, network).collect();
+
+    let tx_cost_limit = unmined_transactions
+        .iter()
+        .take(MEMPOOL_TX_COUNT)
+        .map(|tx| tx.cost())
+        .sum();
+
+    // Create an empty storage
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit,
+        ..Default::default()
+    });
+
+    // Insert them all to the storage
+    let mut maybe_inserted_transactions = Vec::new();
+    let mut some_rejected_transactions = Vec::new();
+    for unmined_transaction in unmined_transactions.clone() {
+        let result = storage.insert(unmined_transaction.clone());
+        match result {
+            Ok(_) => {
+                // While the transaction was inserted here, it can be rejected later.
+                maybe_inserted_transactions.push(unmined_transaction);
+            }
+            Err(_) => {
+                // Other transactions can be rejected on a successful insert,
+                // so not all rejected transactions will be added.
+                some_rejected_transactions.push(unmined_transaction);
+            }
+        }
+    }
+    // Since transactions are rejected randomly we can't test exact numbers.
+    // We know the first MEMPOOL_TX_COUNT must have been inserted successfully.
+    assert!(maybe_inserted_transactions.len() >= MEMPOOL_TX_COUNT);
+    // We know that at least the transaction after the MEMPOOL_TX_COUNT
+    // must be rejected.
+    assert!(!some_rejected_transactions.is_empty());
+
+    assert!(storage.verified.transaction_count() <= maybe_inserted_transactions.len());
+    assert!(storage.rejected_transaction_count() >= some_rejected_transactions.len());
+
+    for tx in some_rejected_transactions.iter() {
+        assert!(!storage.contains_transaction_exact(&tx.transaction.id));
+    }
+
+    // Query all the ids we have for rejected, get back `total - MEMPOOL_SIZE`
+    let all_ids: HashSet<UnminedTxId> = unmined_transactions
+        .iter()
+        .map(|tx| tx.transaction.id)
+        .collect();
+
+    // Convert response to a `HashSet`, because the order of the response doesn't matter.
+    let rejected_response: HashSet<UnminedTxId> =
+        storage.rejected_transactions(all_ids).into_iter().collect();
+
+    let rejected_ids = some_rejected_transactions
+        .iter()
+        .map(|tx| tx.transaction.id)
+        .collect();
+
+    assert!(rejected_response.is_superset(&rejected_ids));
+
+    Ok(())
 }
 
 #[test]
