@@ -544,6 +544,77 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
     });
 }
 
+/// Test if V4 transaction with duplicate nullifiers across joinsplits is rejected.
+#[test]
+fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejected() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+        let network_upgrade = NetworkUpgrade::Canopy;
+
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(network)
+            .expect("Canopy activation height is specified");
+
+        let transaction_block_height =
+            (canopy_activation_height + 10).expect("transaction block height is too large");
+
+        // Create a fake Sprout join split
+        let (mut joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        // Duplicate a nullifier from the created joinsplit
+        let duplicate_nullifier = joinsplit_data.first.nullifiers[1];
+
+        // Add a new joinsplit with the duplicate nullifier
+        let mut new_joinsplit = joinsplit_data.first.clone();
+        new_joinsplit.nullifiers[0] = duplicate_nullifier;
+        new_joinsplit.nullifiers[1] = sprout::note::Nullifier([2u8; 32]);
+
+        joinsplit_data.rest.push(new_joinsplit);
+
+        // Create a V4 transaction
+        let mut transaction = Transaction::V4 {
+            inputs: vec![],
+            outputs: vec![],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+            joinsplit_data: Some(joinsplit_data),
+            sapling_shielded_data: None,
+        };
+
+        // Sign the transaction
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+
+        match &mut transaction {
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
+            _ => unreachable!("Mock transaction was created incorrectly"),
+        }
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: transaction_block_height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSproutNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
 /// Test if V5 transaction with transparent funds is accepted.
 #[tokio::test]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
