@@ -10,8 +10,8 @@
 
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
 consensus-compatible implementation of a Zcash node, currently under
-development. It can be used to join the Zcash peer-to-peer network and help
-keep Zcash working by validating and broadcasting transactions, and maintaining
+development. It can be used to join the Zcash peer-to-peer network, which helps
+keeping Zcash working by validating and broadcasting transactions, and maintaining
 the Zcash blockchain state in a distributed manner.
 Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
 like to find out more or get involved!
@@ -39,21 +39,25 @@ functionality.) You would want to run Zebra if you want to contribute to the
 Zcash network: the more nodes are run, the more reliable the network will be
 in terms of speed and resistance to denial of service attacks, for example.
 
-These are some of advantages of Zebra:
+These are some of advantages or benefits of Zebra:
 
-- As an alternative implementation, it can protect the Zcash network
-  from bugs that affect only one implementation.
-- It helps keeping the Zcash network decentralized, by preventing a single node
-  implementation from dictating the network behavior.
-- Implementing Zebra allows the validation of the Zcash specification, to make
-  it sure that the specification is written in sufficient detail to allow
-  anyone else to develop their own node if desired.
-- Since it was implemented from scratch, it was able to be implemented
-  in a manner that is currently faster than `zcashd`.
-- Since it was developed in a memory-safe language (Rust), it is less likely
-  that it can be affected by security bugs that could compromise the environment
-  where it is run.
-
+- Better performance: since it was implemented from scratch, Zebra was able to be
+  implemented in a manner that is currently faster than `zcashd`.
+- Better security: since it is developed in a memory-safe language (Rust), Zebra
+  is less likely to be affected by security bugs that could compromise the
+  environment where it is run.
+- Better governance: with a new node deployment, there will be more developers
+  who can implement different features.
+- Dev accessibility: there will be more developers which gives new developers
+  options for contributing to protocol development.
+- Runtime safety: the detection of consensus bugs can happen quicker, preventing
+  the likelihood of black swan events.
+- Spec safety: with several node implementations, it is much easier to notice
+  bugs and ambiguity in protocol specification.
+- User options: different nodes present different features and tradeoffs for
+  users to decide on their preferred options.
+- Additional contexts: wider target deployments for people to use a consensus
+  node in more contexts e.g. mobile, wasm, etc.
 
 ## Alpha Releases
 
