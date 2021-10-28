@@ -1177,6 +1177,68 @@ fn v5_with_duplicate_sapling_spends() {
     });
 }
 
+/// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
+#[test]
+fn v5_with_duplicate_orchard_action() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        // Find a transaction with no inputs or outputs to use as base
+        let mut transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+                .rev()
+                .find(|transaction| {
+                    transaction.inputs().is_empty()
+                        && transaction.outputs().is_empty()
+                        && transaction.sapling_spends_per_anchor().next().is_none()
+                        && transaction.sapling_outputs().next().is_none()
+                        && transaction.joinsplit_count() == 0
+                })
+                .expect("At least one fake V5 transaction with no inputs and no outputs");
+
+        let height = transaction
+            .expiry_height()
+            .expect("Transaction is missing expiry height");
+
+        // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
+        // guaranteed structurally by `orchard::ShieldedData`)
+        let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+
+        // Enable spends
+        shielded_data.flags = orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS;
+
+        // Duplicate the first action
+        let duplicate_action = shielded_data.actions.first().clone();
+        let duplicate_nullifier = duplicate_action.action.nullifier;
+
+        shielded_data.actions.push(duplicate_action);
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateOrchardNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
 // Utility functions
 
 /// Create a mock transparent transfer to be included in a transaction.
