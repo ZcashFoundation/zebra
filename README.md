@@ -179,13 +179,15 @@ Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 ### Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
+- [When Zebra receives an unexpected network message from a peer, it disconnects from that peer](https://github.com/ZcashFoundation/zebra/issues/2107)
+- [A Zebra instance could be used to pollute the peer addresses of other nodes](https://github.com/ZcashFoundation/zebra/issues/1889)
+- [Zebra's address book can use all available memory](https://github.com/ZcashFoundation/zebra/issues/1873)
+- [Zebra's address book can be flooded or taken over](https://github.com/ZcashFoundation/zebra/issues/1869)
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
-- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-  - These errors can be ignored, unless they happen frequently
 
 Zebra's state commits changes using database transactions.
 If you forcibly terminate it, or it panics, any incomplete changes will be rolled back the next time it starts.
