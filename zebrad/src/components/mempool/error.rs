@@ -23,7 +23,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("the authorizing data of the transaction conflicts with the current chain tip")]
+    #[error("the transaction will be rejected from the mempool until the next chain tip block")]
     StorageExactTip(#[from] ExactTipRejectionError),
 
     /// Transaction rejected based on its effects (spends, outputs, transaction
@@ -33,7 +33,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("the effects of the transaction conflict with the current chain tip")]
+    #[error("any transaction with the same effects will be rejected from the mempool until the next chain tip block")]
     StorageEffectsTip(#[from] SameEffectsTipRejectionError),
 
     /// Transaction rejected based on its effects (spends, outputs, transaction
@@ -44,7 +44,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("the effects of the transaction conflict with the current chain")]
+    #[error("any transaction with the same effects will be rejected from the mempool until a chain reset")]
     StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
     /// Transaction rejected because the mempool already contains another
