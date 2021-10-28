@@ -64,7 +64,7 @@ const LISTENER_TEST_DURATION: Duration = Duration::from_secs(10);
 ///
 /// Note: This test doesn't cover local interface or public IP address discovery.
 #[tokio::test]
-async fn local_listener_unspecified_port_unspecified_addr() {
+async fn local_listener_unspecified_port_unspecified_addr_v4() {
     zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
@@ -75,6 +75,19 @@ async fn local_listener_unspecified_port_unspecified_addr() {
     // (localhost should be enough)
     local_listener_port_with("0.0.0.0:0".parse().unwrap(), Mainnet).await;
     local_listener_port_with("0.0.0.0:0".parse().unwrap(), Testnet).await;
+}
+
+/// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
+/// and sends them to the `AddressBook`.
+///
+/// Note: This test doesn't cover local interface or public IP address discovery.
+#[tokio::test]
+async fn local_listener_unspecified_port_unspecified_addr_v6() {
+    zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
 
     if zebra_test::net::zebra_skip_ipv6_tests() {
         return;
@@ -88,7 +101,7 @@ async fn local_listener_unspecified_port_unspecified_addr() {
 /// Test that zebra-network discovers dynamic localhost listener ports,
 /// and sends them to the `AddressBook`.
 #[tokio::test]
-async fn local_listener_unspecified_port_localhost_addr() {
+async fn local_listener_unspecified_port_localhost_addr_v4() {
     zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
@@ -98,6 +111,17 @@ async fn local_listener_unspecified_port_localhost_addr() {
     // these tests might fail on machines with unusual IPv4 localhost configs
     local_listener_port_with("127.0.0.1:0".parse().unwrap(), Mainnet).await;
     local_listener_port_with("127.0.0.1:0".parse().unwrap(), Testnet).await;
+}
+
+/// Test that zebra-network discovers dynamic localhost listener ports,
+/// and sends them to the `AddressBook`.
+#[tokio::test]
+async fn local_listener_unspecified_port_localhost_addr_v6() {
+    zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
 
     if zebra_test::net::zebra_skip_ipv6_tests() {
         return;
@@ -110,11 +134,10 @@ async fn local_listener_unspecified_port_localhost_addr() {
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
-async fn local_listener_fixed_port_localhost_addr() {
+async fn local_listener_fixed_port_localhost_addr_v4() {
     zebra_test::init();
 
     let localhost_v4 = "127.0.0.1".parse().unwrap();
-    let localhost_v6 = "::1".parse().unwrap();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -122,6 +145,18 @@ async fn local_listener_fixed_port_localhost_addr() {
 
     local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), Mainnet).await;
     local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), Testnet).await;
+}
+
+/// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
+#[tokio::test]
+async fn local_listener_fixed_port_localhost_addr_v6() {
+    zebra_test::init();
+
+    let localhost_v6 = "::1".parse().unwrap();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
 
     if zebra_test::net::zebra_skip_ipv6_tests() {
         return;
