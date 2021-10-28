@@ -7,6 +7,8 @@
 
 use thiserror::Error;
 
+use zebra_chain::{orchard, sapling, sprout, transparent};
+
 use crate::BoxError;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -102,6 +104,18 @@ pub enum TransactionError {
 
     #[error("could not calculate the transaction fee")]
     IncorrectFee,
+
+    #[error("transparent double-spend: {_0:?} is spent twice")]
+    DuplicateTransparentSpend(transparent::OutPoint),
+
+    #[error("sprout double-spend: duplicate nullifier: {_0:?}")]
+    DuplicateSproutNullifier(sprout::Nullifier),
+
+    #[error("sapling double-spend: duplicate nullifier: {_0:?}")]
+    DuplicateSaplingNullifier(sapling::Nullifier),
+
+    #[error("orchard double-spend: duplicate nullifier: {_0:?}")]
+    DuplicateOrchardNullifier(orchard::Nullifier),
 }
 
 impl From<BoxError> for TransactionError {

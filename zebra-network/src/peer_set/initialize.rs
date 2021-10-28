@@ -13,7 +13,11 @@ use futures::{
     TryFutureExt,
 };
 use rand::seq::SliceRandom;
-use tokio::{net::TcpListener, sync::broadcast, time::Instant};
+use tokio::{
+    net::TcpListener,
+    sync::broadcast,
+    time::{sleep, Instant},
+};
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -140,6 +144,7 @@ where
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
+        &config,
         PeakEwmaDiscover::new(
             // Discover interprets an error as stream termination,
             // so discard any errored connections...
@@ -158,19 +163,20 @@ where
     // Connect peerset_tx to the 3 peer sources:
     //
     // 1. Incoming peer connections, via a listener.
-    let listen_guard = tokio::spawn(
-        accept_inbound_connections(tcp_listener, listen_handshaker, peerset_tx.clone())
-            .instrument(Span::current()),
+    let listen_fut = accept_inbound_connections(
+        config.clone(),
+        tcp_listener,
+        listen_handshaker,
+        peerset_tx.clone(),
     );
+    let listen_guard = tokio::spawn(listen_fut.instrument(Span::current()));
 
     // 2. Initial peers, specified in the config.
-    let initial_peers_fut = {
-        let config = config.clone();
-        let outbound_connector = outbound_connector.clone();
-        let peerset_tx = peerset_tx.clone();
-        add_initial_peers(config, outbound_connector, peerset_tx)
-    };
-
+    let initial_peers_fut = add_initial_peers(
+        config.clone(),
+        outbound_connector.clone(),
+        peerset_tx.clone(),
+    );
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
 
     // 3. Outgoing peers we connect to in response to load.
@@ -198,18 +204,15 @@ where
         let _ = demand_tx.try_send(MorePeers);
     }
 
-    let crawl_fut = {
-        let config = config.clone();
-        crawl_and_dial(
-            config,
-            demand_tx,
-            demand_rx,
-            candidates,
-            outbound_connector,
-            peerset_tx,
-            active_outbound_connections,
-        )
-    };
+    let crawl_fut = crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        candidates,
+        outbound_connector,
+        peerset_tx,
+        active_outbound_connections,
+    );
     let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
 
     handle_tx.send(vec![listen_guard, crawl_guard]).unwrap();
@@ -248,7 +251,10 @@ where
 
     // # Security
     //
-    // TODO: rate-limit initial seed peer connections (#2326)
+    // Resists distributed denial of service attacks by making sure that
+    // new peer connections are initiated at least
+    // [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL]
+    // apart.
     //
     // # Correctness
     //
@@ -258,17 +264,24 @@ where
     // single `FuturesUnordered` to completion, and handshakes have a short timeout.
     let mut handshakes: FuturesUnordered<_> = initial_peers
         .into_iter()
-        .map(|addr| {
+        .enumerate()
+        .map(|(i, addr)| {
             let connection_tracker = active_outbound_connections.track_connection();
             let req = OutboundConnectorRequest {
                 addr,
                 connection_tracker,
             };
 
-            outbound_connector
-                .clone()
-                .oneshot(req)
-                .map_err(move |e| (addr, e))
+            let outbound_connector = outbound_connector.clone();
+            async move {
+                // Rate-limit the connection, sleeping for an interval according
+                // to its index in the list.
+                sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
+                outbound_connector
+                    .oneshot(req)
+                    .map_err(move |e| (addr, e))
+                    .await
+            }
         })
         .collect();
 
@@ -420,8 +433,11 @@ async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
 ///
 /// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
 /// the [`peer::Client`] result over `peerset_tx`.
-#[instrument(skip(listener, handshaker, peerset_tx), fields(listener_addr = ?listener.local_addr()))]
+///
+/// Limit the number of active inbound connections based on `config`.
+#[instrument(skip(config, listener, handshaker, peerset_tx), fields(listener_addr = ?listener.local_addr()))]
 async fn accept_inbound_connections<S>(
+    config: Config,
     listener: TcpListener,
     mut handshaker: S,
     peerset_tx: mpsc::Sender<PeerChange>,
@@ -433,8 +449,19 @@ where
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
 
     loop {
-        if let Ok((tcp_stream, addr)) = listener.accept().await {
-            // The peer already opened a connection, so increment the connection count immediately.
+        let inbound_result = listener.accept().await;
+        if let Ok((tcp_stream, addr)) = inbound_result {
+            if active_inbound_connections.update_count()
+                >= config.peerset_inbound_connection_limit()
+            {
+                // Too many open inbound connections or pending handshakes already.
+                // Close the connection.
+                std::mem::drop(tcp_stream);
+                continue;
+            }
+
+            // The peer already opened a connection to us.
+            // So we want to increment the connection count as soon as possible.
             let connection_tracker = active_inbound_connections.track_connection();
             debug!(
                 inbound_connections = ?active_inbound_connections.update_count(),
@@ -478,6 +505,8 @@ where
             // Zebra can't control how many queued connections are waiting,
             // but most OSes also limit the number of queued inbound connections on a listener port.
             tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
+        } else {
+            debug!(?inbound_result, "error accepting inbound connection");
         }
 
         // Security: Let other tasks run after each connection is processed.
@@ -522,8 +551,8 @@ enum CrawlerAction {
 /// permanent internal error. Transient errors and individual peer errors should
 /// be handled within the crawler.
 ///
-/// Uses `active_outbound_connections` to track the number of active outbound connections
-/// in both the initial peers and crawler.
+/// Uses `active_outbound_connections` to limit the number of active outbound connections
+/// across both the initial peers and crawler. The limit is based on `config`.
 #[instrument(skip(
     config,
     demand_tx,
@@ -592,7 +621,7 @@ where
             // turn the demand into an action, based on the crawler's current state
             _ = demand_rx.next() => {
                 if active_outbound_connections.update_count() >= config.peerset_outbound_connection_limit() {
-                    // Too many open connections or pending handshakes already
+                    // Too many open outbound connections or pending handshakes already
                     DemandDrop
                 } else if let Some(candidate) = candidates.next().await {
                     // candidates.next has a short delay, and briefly holds the address
