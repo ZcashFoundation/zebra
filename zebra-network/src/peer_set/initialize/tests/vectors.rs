@@ -524,8 +524,10 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
             Ok(Change::Insert(addr, fake_client))
         });
 
+    // TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit
+    //       (currently, getting over the limit can take 30 seconds or more)
     let (config, mut peerset_rx) =
-        spawn_crawler_with_peer_limit(None, success_disconnect_outbound_connector).await;
+        spawn_crawler_with_peer_limit(15, success_disconnect_outbound_connector).await;
 
     let mut peer_count: usize = 0;
     loop {
@@ -550,14 +552,11 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
         }
     }
 
-    // TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit
-    //       (currently, getting over the limit can take 30 seconds or more)
-    let lower_limit = config.peerset_outbound_connection_limit() / 3;
     assert!(
-        peer_count > lower_limit,
+        peer_count > config.peerset_outbound_connection_limit(),
         "unexpected number of peer connections {}, should be over the limit of {}",
         peer_count,
-        lower_limit,
+        config.peerset_outbound_connection_limit(),
     );
 }
 
