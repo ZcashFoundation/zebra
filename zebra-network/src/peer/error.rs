@@ -72,7 +72,7 @@ pub enum PeerError {
 /// mutex should be held for as short a time as possible. This avoids blocking
 /// the async task thread on acquiring the mutex.
 #[derive(Default, Clone)]
-pub(super) struct ErrorSlot(Arc<std::sync::Mutex<Option<SharedPeerError>>>);
+pub struct ErrorSlot(Arc<std::sync::Mutex<Option<SharedPeerError>>>);
 
 impl std::fmt::Debug for ErrorSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

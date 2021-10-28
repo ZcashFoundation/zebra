@@ -331,6 +331,8 @@ pub struct Connection<S, Tx> {
     pub(super) client_rx: ClientRequestReceiver,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
+    //
+    /// `None` unless the connection or client have errored.
     pub(super) error_slot: ErrorSlot,
 
     /// A channel for sending requests to the connected peer.
