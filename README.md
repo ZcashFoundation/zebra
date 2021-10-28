@@ -176,6 +176,9 @@ There are a few bugs in Zebra that we're still working on fixing:
 - [A Zebra instance could be used to pollute the peer addresses of other nodes #1889](https://github.com/ZcashFoundation/zebra/issues/1889)
 - [Zebra's address book can use all available memory #1873](https://github.com/ZcashFoundation/zebra/issues/1873)
 - [Zebra's address book can be flooded or taken over #1869](https://github.com/ZcashFoundation/zebra/issues/1869)
+- [Zebra does not evict pre-upgrade peers from the peer set across a network upgrade #706](https://github.com/ZcashFoundation/zebra/issues/706)
+- [Zebra accepts non-minimal height encodings #2226](https://github.com/ZcashFoundation/zebra/issues/2226)
+-  [Zebra nodes continually try to contact peers that always fail #1865](https://github.com/ZcashFoundation/zebra/issues/1865)
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently
