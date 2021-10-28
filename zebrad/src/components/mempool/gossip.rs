@@ -1,4 +1,7 @@
-//! A task that gossips [`transaction::UnminedTxId`] that enter the mempool to peers.
+//! A task that gossips any [`zebra_chain::transaction::UnminedTxId`] that enters the mempool to peers.
+//!
+//! This module is just a function [`gossip_mempool_transaction_id`] that waits for mempool
+//! insertion events received in a channel and broadcasts the transactions to peers.
 
 use tower::{timeout::Timeout, Service, ServiceExt};
 
@@ -13,7 +16,7 @@ use crate::BoxError;
 
 use crate::components::sync::TIPS_RESPONSE_TIMEOUT;
 
-/// Run continuously, gossiping new [`transaction::UnminedTxId`] to peers.
+/// Run continuously, gossiping new [`zebra_chain::transaction::UnminedTxId`] to peers.
 ///
 /// Broadcast any [`transaction::UnminedTxId`] that gets stored in the mempool to all ready peers.
 pub async fn gossip_mempool_transaction_id<ZN>(
@@ -35,11 +38,14 @@ where
         receiver.changed().await?;
 
         let txs = receiver.borrow().clone();
+        let txs_len = txs.len();
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
         info!(?request, "sending mempool transaction broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready_and().await?.call(request).await;
+
+        metrics::counter!("mempool.gossiped.transactions.total", txs_len as _);
     }
 }

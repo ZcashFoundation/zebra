@@ -11,7 +11,7 @@ use std::{
 };
 
 use proptest::{collection::vec, prelude::*};
-use tokio::{runtime::Runtime, time::Instant};
+use tokio::{runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
 
@@ -332,7 +332,10 @@ proptest! {
             "there are enough changes for good test coverage",
         );
 
-        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let runtime = runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
         let _guard = runtime.enter();
 
         // Only put valid addresses in the address book.
@@ -424,7 +427,10 @@ proptest! {
             "there are enough changes for good test coverage",
         );
 
-        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let runtime = runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
         let _guard = runtime.enter();
 
         let attempt_counts = runtime.block_on(async move {

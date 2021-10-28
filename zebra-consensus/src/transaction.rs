@@ -23,7 +23,9 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
-    transaction::{self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId},
+    transaction::{
+        self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
+    },
     transparent,
 };
 
@@ -97,13 +99,46 @@ pub enum Request {
 
 /// The response type for the transaction verifier service.
 /// Responses identify the transaction that was verified.
-///
-/// [`Block`] requests can be uniquely identified by [`UnminedTxId::mined_id`],
-/// because the block's authorizing data root will be checked during contextual validation.
-///
-/// [`Mempool`] requests are uniquely identified by the [`UnminedTxId`]
-/// variant for their transaction version.
-pub type Response = (zebra_chain::transaction::UnminedTxId, Amount<NonNegative>);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Response {
+    /// A response to a block transaction verification request.
+    Block {
+        /// The witnessed transaction ID for this transaction.
+        ///
+        /// [`Block`] responses can be uniquely identified by [`UnminedTxId::mined_id`],
+        /// because the block's authorizing data root will be checked during contextual validation.
+        tx_id: UnminedTxId,
+
+        /// The miner fee for this transaction.
+        /// `None` for coinbase transactions.
+        ///
+        /// Consensus rule:
+        /// > The remaining value in the transparent transaction value pool
+        /// > of a coinbase transaction is destroyed.
+        ///
+        /// https://zips.z.cash/protocol/protocol.pdf#transactions
+        miner_fee: Option<Amount<NonNegative>>,
+    },
+
+    /// A response to a mempool transaction verification request.
+    Mempool {
+        /// The full content of the verified mempool transaction.
+        /// Also contains the transaction fee and other associated fields.
+        ///
+        /// Mempool transactions always have a transaction fee,
+        /// because coinbase transactions are rejected from the mempool.
+        ///
+        /// [`Mempool`] responses are uniquely identified by the [`UnminedTxId`]
+        /// variant for their transaction version.
+        transaction: VerifiedUnminedTx,
+    },
+}
+
+impl From<VerifiedUnminedTx> for Response {
+    fn from(transaction: VerifiedUnminedTx) -> Self {
+        Response::Mempool { transaction }
+    }
+}
 
 impl Request {
     /// The transaction to verify that's in this request.
@@ -111,6 +146,14 @@ impl Request {
         match self {
             Request::Block { transaction, .. } => transaction.clone(),
             Request::Mempool { transaction, .. } => transaction.transaction.clone(),
+        }
+    }
+
+    /// The unverified mempool transaction, if this is a mempool request.
+    pub fn into_mempool_transaction(self) -> Option<UnminedTx> {
+        match self {
+            Request::Block { .. } => None,
+            Request::Mempool { transaction, .. } => Some(transaction),
         }
     }
 
@@ -154,6 +197,42 @@ impl Request {
     }
 }
 
+impl Response {
+    /// The verified mempool transaction, if this is a mempool response.
+    pub fn into_mempool_transaction(self) -> Option<VerifiedUnminedTx> {
+        match self {
+            Response::Block { .. } => None,
+            Response::Mempool { transaction, .. } => Some(transaction),
+        }
+    }
+
+    /// The unmined transaction ID for the transaction in this response.
+    pub fn tx_id(&self) -> UnminedTxId {
+        match self {
+            Response::Block { tx_id, .. } => *tx_id,
+            Response::Mempool { transaction, .. } => transaction.transaction.id,
+        }
+    }
+
+    /// The miner fee for the transaction in this response.
+    ///
+    /// Coinbase transactions do not have a miner fee.
+    pub fn miner_fee(&self) -> Option<Amount<NonNegative>> {
+        match self {
+            Response::Block { miner_fee, .. } => *miner_fee,
+            Response::Mempool { transaction, .. } => Some(transaction.miner_fee),
+        }
+    }
+
+    /// Returns true if the request is a mempool request.
+    pub fn is_mempool(&self) -> bool {
+        match self {
+            Response::Block { .. } => false,
+            Response::Mempool { .. } => true,
+        }
+    }
+}
+
 impl<ZS> Service<Request> for Verifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -174,8 +253,8 @@ where
         let network = self.network;
 
         let tx = req.transaction();
-        let id = req.tx_id();
-        let span = tracing::debug_span!("tx", ?id);
+        let tx_id = req.tx_id();
+        let span = tracing::debug_span!("tx", ?tx_id);
 
         async move {
             tracing::trace!(?req);
@@ -197,6 +276,8 @@ where
             // [Canopy onward]: `vpub_old` MUST be zero.
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::disabled_add_to_sprout_pool(&tx, req.height(), network)?;
+
+            check::spend_conflicts(&tx)?;
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
@@ -221,7 +302,7 @@ where
                     sapling_shielded_data,
                     ..
                 } => Self::verify_v4_transaction(
-                    req,
+                    &req,
                     network,
                     script_verifier,
                     inputs,
@@ -235,7 +316,7 @@ where
                     orchard_shielded_data,
                     ..
                 } => Self::verify_v5_transaction(
-                    req,
+                    &req,
                     network,
                     script_verifier,
                     inputs,
@@ -255,21 +336,32 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
-            // Initialize the transaction fee to zero.
-            let mut tx_fee = Amount::<NonNegative>::zero();
-
             // Calculate the fee only for non-coinbase transactions.
+            let mut miner_fee = None;
             if !tx.has_valid_coinbase_transaction_inputs() {
-                tx_fee = match value_balance {
+                // TODO: deduplicate this code with remaining_transaction_value (#TODO: open ticket)
+                miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => tx_rtv,
+                        Ok(tx_rtv) => Some(tx_rtv),
                         Err(_) => return Err(TransactionError::IncorrectFee),
                     },
                     Err(_) => return Err(TransactionError::IncorrectFee),
                 };
             }
 
-            Ok((id, tx_fee))
+            let rsp = match req {
+                Request::Block { .. } => Response::Block { tx_id, miner_fee },
+                Request::Mempool { transaction, .. } => Response::Mempool {
+                    transaction: VerifiedUnminedTx::new(
+                        transaction,
+                        miner_fee.expect(
+                            "unexpected mempool coinbase transaction: should have already rejected",
+                        ),
+                    ),
+                },
+            };
+
+            Ok(rsp)
         }
         .instrument(span)
         .boxed()
@@ -300,7 +392,7 @@ where
     /// - the Sprout `joinsplit_data` shielded data in the transaction
     /// - the `sapling_shielded_data` in the transaction
     fn verify_v4_transaction(
-        request: Request,
+        request: &Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
@@ -316,7 +408,7 @@ where
         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
-            &request,
+            request,
             network,
             script_verifier,
             inputs,
@@ -382,7 +474,7 @@ where
     /// - the sapling shielded data of the transaction, if any
     /// - the orchard shielded data of the transaction, if any
     fn verify_v5_transaction(
-        request: Request,
+        request: &Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
         inputs: &[transparent::Input],
@@ -398,7 +490,7 @@ where
         let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
-            &request,
+            request,
             network,
             script_verifier,
             inputs,

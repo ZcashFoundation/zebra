@@ -12,7 +12,7 @@ jobs:
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate Windows builds
-    timeout-minutes: 60
+    timeout-minutes: 75
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -24,7 +24,7 @@ jobs:
       RUST_BACKTRACE: full
 
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@v2.3.5
         with:
           persist-credentials: false
 
@@ -76,7 +76,8 @@ jobs:
           TEST_FAKE_ACTIVATION_HEIGHTS:
         with:
           command: test
-          args: --verbose --all -- with_fake_activation_heights
+          # Note: this only runs the zebra-state crate tests, because re-running all the test binaries is slow on Windows
+          args: --verbose --package zebra-state --lib -- with_fake_activation_heights
 
       # Explicitly run any tests that are usually #[ignored]
 
@@ -86,7 +87,8 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --verbose --manifest-path zebrad/Cargo.toml sync_large_checkpoints_ -- --ignored
+          # Note: this only runs the zebrad acceptance tests, because re-running all the test binaries is slow on Windows
+          args: --verbose --package zebrad --test acceptance sync_large_checkpoints_ -- --ignored
 
   build-chain-no-features:
     name: Build (+${{ matrix.rust }}) zebra-chain w/o features on ubuntu-latest
@@ -101,7 +103,7 @@ jobs:
 
 
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@v2.3.5
         with:
           persist-credentials: false
 
@@ -138,7 +140,7 @@ jobs:
       RUST_BACKTRACE: full
 
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@v2.3.5
         with:
           persist-credentials: false
 
@@ -176,7 +178,7 @@ jobs:
       RUST_BACKTRACE: full
 
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@v2.3.5
         with:
           persist-credentials: false
 
@@ -211,7 +213,7 @@ jobs:
       RUST_BACKTRACE: full
 
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@v2.3.5
         with:
           persist-credentials: false
 

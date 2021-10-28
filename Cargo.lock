@@ -3645,9 +3645,9 @@ checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
 
 [[package]]
 name = "structopt"
-version = "0.3.23"
+version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf9d950ef167e25e0bdb073cf1d68e9ad2795ac826f2f3f59647817cf23c0bfa"
+checksum = "40b9788f4202aa75c240ecc9c15c65185e6a39ccdeb0fd5d008b98825464c87c"
 dependencies = [
  "clap",
  "lazy_static",
@@ -3656,9 +3656,9 @@ dependencies = [
 
 [[package]]
 name = "structopt-derive"
-version = "0.4.16"
+version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134d838a2c9943ac3125cf6df165eda53493451b719f3255b2a26b85f772d0ba"
+checksum = "dcb5ae327f9cc13b68763b5749770cb9e048a99bd9dfdfa58d0cf05d5f64afe0"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -3986,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4006,7 +4006,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "futures-core",
  "pin-project 0.4.28",
@@ -4324,9 +4324,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.12"
+version = "5.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f710158a7c9449f400cf734e97cb417a09a7b5f0cf54b133718b6b2951c9f79"
+checksum = "7b62d4fc8fc9c81d139c8106b9f4e583e7c1eb36e320dc28d5c03aab86729495"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -4753,7 +4753,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-alpha.18"
+version = "1.0.0-alpha.19"
 dependencies = [
  "aes 0.6.0",
  "bech32",
@@ -4808,7 +4808,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-alpha.18"
+version = "1.0.0-alpha.19"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4846,7 +4846,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-alpha.18"
+version = "1.0.0-alpha.19"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4881,7 +4881,7 @@ version = "1.0.0-alpha.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-alpha.19"
+version = "1.0.0-alpha.20"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4894,7 +4894,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-alpha.18"
+version = "1.0.0-alpha.19"
 dependencies = [
  "bincode",
  "chrono",
@@ -4928,7 +4928,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-alpha.15"
+version = "1.0.0-alpha.16"
 dependencies = [
  "color-eyre",
  "futures 0.3.17",
@@ -4952,7 +4952,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-alpha.18"
+version = "1.0.0-alpha.19"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4967,7 +4967,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-alpha.18"
+version = "1.0.0-alpha.19"
 dependencies = [
  "abscissa_core",
  "atty",
@@ -4984,6 +4984,7 @@ dependencies = [
  "pin-project 1.0.7",
  "proptest",
  "proptest-derive",
+ "rand 0.8.4",
  "regex",
  "semver 1.0.3",
  "sentry",

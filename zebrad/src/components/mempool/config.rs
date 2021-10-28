@@ -23,8 +23,11 @@ pub struct Config {
     ///
     /// This limits the total serialized byte size of all transactions in the mempool.
     ///
+    /// Consensus rule:
+    /// > There MUST be a configuration option mempooltxcostlimit, which SHOULD default to 80000000.
+    ///
     /// This corresponds to `mempooltxcostlimit` from [ZIP-401](https://zips.z.cash/zip-0401#specification).
-    pub tx_cost_limit: u32,
+    pub tx_cost_limit: u64,
 
     /// The mempool transaction eviction age limit.
     ///

@@ -1,9 +1,53 @@
-use std::net::SocketAddr;
+//! Abstractions that represent "the rest of the network".
+//!
+//! # Implementation
+//!
+//! The [`PeerSet`] implementation is adapted from the one in the [Tower Balance][tower-balance] crate, and as
+//! described in that crate's documentation, it
+//!
+//! > Distributes requests across inner services using the [Power of Two Choices][p2c].
+//! >
+//! > As described in the [Finagle Guide][finagle]:
+//! >
+//! > > The algorithm randomly picks two services from the set of ready endpoints and
+//! > > selects the least loaded of the two. By repeatedly using this strategy, we can
+//! > > expect a manageable upper bound on the maximum load of any server.
+//! > >
+//! > > The maximum load variance between any two servers is bound by `ln(ln(n))` where
+//! > > `n` is the number of servers in the cluster.
+//!
+//! This should work well for many network requests, but not all of them: some
+//! requests, e.g., a request for some particular inventory item, can only be
+//! made to a subset of connected peers, e.g., the ones that have recently
+//! advertised that inventory hash, and other requests require specialized logic
+//! (e.g., transaction diffusion).
+//!
+//! Implementing this specialized routing logic inside the `PeerSet` -- so that
+//! it continues to abstract away "the rest of the network" into one endpoint --
+//! is not a problem, as the `PeerSet` can simply maintain more information on
+//! its peers and route requests appropriately. However, there is a problem with
+//! maintaining accurate backpressure information, because the `Service` trait
+//! requires that service readiness is independent of the data in the request.
+//!
+//! For this reason, in the future, this code will probably be refactored to
+//! address this backpressure mismatch. One possibility is to refactor the code
+//! so that one entity holds and maintains the peer set and metadata on the
+//! peers, and each "backpressure category" of request is assigned to different
+//! `Service` impls with specialized `poll_ready()` implementations. Another
+//! less-elegant solution (which might be useful as an intermediate step for the
+//! inventory case) is to provide a way to borrow a particular backing service,
+//! say by address.
+//!
+//! [finagle]: https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded
+//! [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
+//! [tower-balance]: https://crates.io/crates/tower-balance
+
 use std::{
     collections::HashMap,
     fmt::Debug,
     future::Future,
     marker::PhantomData,
+    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -17,8 +61,10 @@ use futures::{
     stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
-use tokio::sync::{broadcast, oneshot::error::TryRecvError};
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{broadcast, oneshot::error::TryRecvError},
+    task::JoinHandle,
+};
 use tower::{
     discover::{Change, Discover},
     load::Load,
@@ -26,17 +72,28 @@ use tower::{
 };
 
 use crate::{
+    peer_set::{
+        unready_service::{Error as UnreadyError, UnreadyService},
+        InventoryRegistry,
+    },
     protocol::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    AddressBook, BoxError,
+    AddressBook, BoxError, Config,
 };
 
-use super::{
-    unready_service::{Error as UnreadyError, UnreadyService},
-    InventoryRegistry,
-};
+/// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
+///
+/// In response to this signal, the crawler tries to open more peer connections.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MorePeers;
+
+/// A signal sent by the [`PeerSet`] to cancel a [`Client`]'s current request or response.
+///
+/// When it receives this signal, the [`Client`] stops processing and exits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CancelClientWork;
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
@@ -48,47 +105,6 @@ use super::{
 /// connections have an ephemeral local or proxy port.)
 ///
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
-///
-/// # Implementation
-///
-/// This implementation is adapted from the one in `tower-balance`, and as
-/// described in that crate's documentation, it
-///
-/// > Distributes requests across inner services using the [Power of Two Choices][p2c].
-/// >
-/// > As described in the [Finagle Guide][finagle]:
-/// >
-/// > > The algorithm randomly picks two services from the set of ready endpoints and
-/// > > selects the least loaded of the two. By repeatedly using this strategy, we can
-/// > > expect a manageable upper bound on the maximum load of any server.
-/// > >
-/// > > The maximum load variance between any two servers is bound by `ln(ln(n))` where
-/// > > `n` is the number of servers in the cluster.
-///
-/// This should work well for many network requests, but not all of them: some
-/// requests, e.g., a request for some particular inventory item, can only be
-/// made to a subset of connected peers, e.g., the ones that have recently
-/// advertised that inventory hash, and other requests require specialized logic
-/// (e.g., transaction diffusion).
-///
-/// Implementing this specialized routing logic inside the `PeerSet` -- so that
-/// it continues to abstract away "the rest of the network" into one endpoint --
-/// is not a problem, as the `PeerSet` can simply maintain more information on
-/// its peers and route requests appropriately. However, there is a problem with
-/// maintaining accurate backpressure information, because the `Service` trait
-/// requires that service readiness is independent of the data in the request.
-///
-/// For this reason, in the future, this code will probably be refactored to
-/// address this backpressure mismatch. One possibility is to refactor the code
-/// so that one entity holds and maintains the peer set and metadata on the
-/// peers, and each "backpressure category" of request is assigned to different
-/// `Service` impls with specialized `poll_ready()` implementations. Another
-/// less-elegant solution (which might be useful as an intermediate step for the
-/// inventory case) is to provide a way to borrow a particular backing service,
-/// say by address.
-///
-/// [finagle]: https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded
-/// [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
 pub struct PeerSet<D>
 where
     D: Discover<Key = SocketAddr>,
@@ -99,9 +115,9 @@ where
     /// This means that every change to `ready_services` must invalidate or correct it.
     preselected_p2c_index: Option<usize>,
     ready_services: IndexMap<D::Key, D::Service>,
-    cancel_handles: HashMap<D::Key, oneshot::Sender<()>>,
+    cancel_handles: HashMap<D::Key, oneshot::Sender<CancelClientWork>>,
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
-    demand_signal: mpsc::Sender<()>,
+    demand_signal: mpsc::Sender<MorePeers>,
     /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
     ///
     /// The join handles passed into the PeerSet are used populate the `guards` member
@@ -118,6 +134,8 @@ where
     ///
     /// Used for logging diagnostics.
     address_book: Arc<std::sync::Mutex<AddressBook>>,
+    /// The configured limit for inbound and outbound connections.
+    peerset_total_connection_limit: usize,
 }
 
 impl<D> PeerSet<D>
@@ -131,8 +149,9 @@ where
 {
     /// Construct a peerset which uses `discover` internally.
     pub fn new(
+        config: &Config,
         discover: D,
-        demand_signal: mpsc::Sender<()>,
+        demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
         address_book: Arc<std::sync::Mutex<AddressBook>>,
@@ -149,6 +168,7 @@ where
             inventory_registry: InventoryRegistry::new(inv_stream),
             last_peer_log: None,
             address_book,
+            peerset_total_connection_limit: config.peerset_total_connection_limit(),
         }
     }
 
@@ -252,7 +272,7 @@ where
     fn remove(&mut self, key: &D::Key) {
         if self.take_ready_service(key).is_some() {
         } else if let Some(handle) = self.cancel_handles.remove(key) {
-            let _ = handle.send(());
+            let _ = handle.send(CancelClientWork);
         }
     }
 
@@ -416,6 +436,17 @@ where
         metrics::gauge!("pool.num_ready", num_ready as f64);
         metrics::gauge!("pool.num_unready", num_unready as f64);
         metrics::gauge!("zcash.net.peers", num_peers as f64);
+
+        // Security: make sure we haven't exceeded the connection limit
+        if num_peers > self.peerset_total_connection_limit {
+            let address_metrics = self.address_book.lock().unwrap().address_metrics();
+            panic!(
+                "unexpectedly exceeded configured peer set connection limit: \n\
+                 peers: {:?}, ready: {:?}, unready: {:?}, \n\
+                 address_metrics: {:?}",
+                num_peers, num_ready, num_unready, address_metrics,
+            );
+        }
     }
 }
 
@@ -484,7 +515,7 @@ where
                 // If we waited here, the crawler could deadlock sending a request to
                 // fetch more peers, because it also empties the channel.
                 trace!("no ready services, sending demand signal");
-                let _ = self.demand_signal.try_send(());
+                let _ = self.demand_signal.try_send(MorePeers);
 
                 // CORRECTNESS
                 //
