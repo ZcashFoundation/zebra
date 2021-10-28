@@ -187,7 +187,7 @@ If you forcibly terminate it, or it panics, any incomplete changes will be rolle
 
 ## Future Work
 
-In 2021, we intend to finish validation, add RPC support, and add wallet integration.
+In 2021, we intend to finish NU5 validation, start adding RPC support and start adding wallet integrations.
 This phased approach allows us to test Zebra's independent implementation of the
 consensus rules, before asking users to entrust it with their funds.
 
