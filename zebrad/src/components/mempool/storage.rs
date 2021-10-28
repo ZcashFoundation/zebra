@@ -134,7 +134,7 @@ pub struct Storage {
     chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
 
     /// The mempool transaction eviction age limit.
-    /// Same as [`Config::eviction_memory_time`].
+    /// Same as [`config::Config::eviction_memory_time`].
     eviction_memory_time: Duration,
 
     /// Max total cost of the verified mempool set, beyond which transactions
