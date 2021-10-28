@@ -104,33 +104,34 @@ pub enum RejectionError {
 
 /// Hold mempool verified and rejected mempool transactions.
 pub struct Storage {
-    /// The set of verified transactions in the mempool. This is a
-    /// cache of size [`MEMPOOL_SIZE`].
+    /// The set of verified transactions in the mempool.
     verified: VerifiedSet,
 
-    /// The set of transactions rejected due to bad authorizations, or for other reasons,
-    /// and their rejection reasons. These rejections only apply to the current tip.
+    /// The set of transactions rejected due to bad authorizations, or for other
+    /// reasons, and their rejection reasons. These rejections only apply to the
+    /// current tip.
     ///
-    /// Only transactions with the exact `UnminedTxId` are invalid.
+    /// Only transactions with the exact [`UnminedTxId`] are invalid.
     tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
 
-    /// A set of transactions rejected for their effects, and their rejection reasons.
-    /// These rejections only apply to the current tip.
+    /// A set of transactions rejected for their effects, and their rejection
+    /// reasons.  These rejections only apply to the current tip.
     ///
-    /// Any transaction with the same `transaction::Hash` is invalid.
+    /// Any transaction with the same [`transaction::Hash`] is invalid.
     tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
 
     /// Sets of transactions rejected for their effects, keyed by rejection reason.
     /// These rejections apply until a rollback or network upgrade.
     ///
-    /// Any transaction with the same `transaction::Hash` is invalid.
+    /// Any transaction with the same [`transaction::Hash`] is invalid.
     ///
-    /// An [`EvictionList`] is used for both randomly evicted and expired transactions,
-    /// even if it is only needed for the evicted ones. This was done just to simplify
-    /// the existing code; there is no harm in having a timeout for expired transactions
-    /// too since re-checking expired transactions is cheap.
-    // If this code is ever refactored and the lists are split in different fields,
-    // then we can use an `EvictionList` just for the evicted list.
+    /// An [`EvictionList`] is used for both randomly evicted and expired
+    /// transactions, even if it is only needed for the evicted ones. This was
+    /// done just to simplify the existing code; there is no harm in having a
+    /// timeout for expired transactions too since re-checking expired
+    /// transactions is cheap.
+    // If this code is ever refactored and the lists are split in different
+    // fields, then we can use an `EvictionList` just for the evicted list.
     chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
 
     /// The mempool transaction eviction age limit.
@@ -168,7 +169,7 @@ impl Storage {
     /// These errors should not be propagated to peers, because the transactions are valid.
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
-    /// as [`StorageRejectionError::RandomlyEvicted`].
+    /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
     pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -312,7 +313,7 @@ impl Storage {
         self.verified.transactions().map(|tx| tx.id)
     }
 
-    /// Returns the set of [`UnminedTx`]es in the mempool.
+    /// Returns the set of [`UnminedTx`]s in the mempool.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
         self.verified.transactions()
     }
@@ -323,10 +324,11 @@ impl Storage {
         self.verified.transaction_count()
     }
 
-    /// Returns the set of [`UnminedTx`]es with exactly matching
-    /// `tx_ids` in the mempool.
+    /// Returns the set of [`UnminedTx`]es with exactly matching `tx_ids` in the
+    /// mempool.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    /// This matches the exact transaction, with identical blockchain effects,
+    /// signatures, and proofs.
     pub fn transactions_exact(
         &self,
         tx_ids: HashSet<UnminedTxId>,
@@ -339,7 +341,8 @@ impl Storage {
     /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
     /// the mempool.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    /// This matches the exact transaction, with identical blockchain effects,
+    /// signatures, and proofs.
     pub fn contains_transaction_exact(&self, txid: &UnminedTxId) -> bool {
         self.verified.transactions().any(|tx| &tx.id == txid)
     }
