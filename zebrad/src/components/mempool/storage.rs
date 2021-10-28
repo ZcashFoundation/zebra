@@ -115,7 +115,7 @@ pub struct Storage {
     tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
 
     /// A set of transactions rejected for their effects, and their rejection
-    /// reasons. These rejections only apply to the current tip.
+    /// reasons.  These rejections only apply to the current tip.
     ///
     /// Any transaction with the same [`transaction::Hash`] is invalid.
     tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
