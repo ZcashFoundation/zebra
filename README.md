@@ -33,17 +33,10 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 #### NU5
 - ZIP-155 - Parse addrv2 in Zebra
 - Full validation of Orchard transactions from NU5 onwards
-   - Validate nSpendsSapling, nOutputsSapling, and nActionsOrchard limits in V5 transactions #2379
    - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set #2433
    - Validation of Orchard anchors
    - Validation of Halo2 proofs
    - Validation of orchard note commitment trees
-
-Validate nSpendsSapling, nOutputsSapling, and nActionsOrchard limits in V5 transactions #2379
-
-        Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set #2433
-    Validation of Orchard anchors
-    Validation of transaction V5 Halo2 proofs
 
 #### NU4 - Canopy
 - Calculation of Block Subsidy and Funding streams
