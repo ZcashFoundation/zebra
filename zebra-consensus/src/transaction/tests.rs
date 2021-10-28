@@ -7,6 +7,7 @@ use zebra_chain::{
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
+    sapling,
     serialization::ZcashDeserialize,
     sprout,
     transaction::{
@@ -428,6 +429,193 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     );
 }
 
+/// Test if V4 transaction with an internal double spend of transparent funds is rejected.
+#[tokio::test]
+async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input.clone(), input.clone()],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    let expected_outpoint = input.outpoint().expect("Input should have an outpoint");
+
+    assert_eq!(
+        result,
+        Err(TransactionError::DuplicateTransparentSpend(
+            expected_outpoint
+        ))
+    );
+}
+
+/// Test if V4 transaction with a joinsplit that has duplicate nullifiers is rejected.
+#[test]
+fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+        let network_upgrade = NetworkUpgrade::Canopy;
+
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(network)
+            .expect("Canopy activation height is specified");
+
+        let transaction_block_height =
+            (canopy_activation_height + 10).expect("transaction block height is too large");
+
+        // Create a fake Sprout join split
+        let (mut joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        // Make both nullifiers the same inside the joinsplit transaction
+        let duplicate_nullifier = joinsplit_data.first.nullifiers[0];
+        joinsplit_data.first.nullifiers[1] = duplicate_nullifier;
+
+        // Create a V4 transaction
+        let mut transaction = Transaction::V4 {
+            inputs: vec![],
+            outputs: vec![],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+            joinsplit_data: Some(joinsplit_data),
+            sapling_shielded_data: None,
+        };
+
+        // Sign the transaction
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+
+        match &mut transaction {
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
+            _ => unreachable!("Mock transaction was created incorrectly"),
+        }
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: transaction_block_height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSproutNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
+/// Test if V4 transaction with duplicate nullifiers across joinsplits is rejected.
+#[test]
+fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejected() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+        let network_upgrade = NetworkUpgrade::Canopy;
+
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(network)
+            .expect("Canopy activation height is specified");
+
+        let transaction_block_height =
+            (canopy_activation_height + 10).expect("transaction block height is too large");
+
+        // Create a fake Sprout join split
+        let (mut joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        // Duplicate a nullifier from the created joinsplit
+        let duplicate_nullifier = joinsplit_data.first.nullifiers[1];
+
+        // Add a new joinsplit with the duplicate nullifier
+        let mut new_joinsplit = joinsplit_data.first.clone();
+        new_joinsplit.nullifiers[0] = duplicate_nullifier;
+        new_joinsplit.nullifiers[1] = sprout::note::Nullifier([2u8; 32]);
+
+        joinsplit_data.rest.push(new_joinsplit);
+
+        // Create a V4 transaction
+        let mut transaction = Transaction::V4 {
+            inputs: vec![],
+            outputs: vec![],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+            joinsplit_data: Some(joinsplit_data),
+            sapling_shielded_data: None,
+        };
+
+        // Sign the transaction
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+
+        match &mut transaction {
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
+            _ => unreachable!("Mock transaction was created incorrectly"),
+        }
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: transaction_block_height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSproutNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
 /// Test if V5 transaction with transparent funds is accepted.
 #[tokio::test]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
@@ -579,6 +767,59 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         Err(TransactionError::InternalDowncastError(
             "downcast to known transaction error type failed, original error: ScriptInvalid"
                 .to_string()
+        ))
+    );
+}
+
+/// Test if V5 transaction with an internal double spend of transparent funds is rejected.
+#[tokio::test]
+async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
+    let network = Network::Mainnet;
+    let network_upgrade = NetworkUpgrade::Nu5;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V5 {
+        inputs: vec![input.clone(), input.clone()],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+        })
+        .await;
+
+    let expected_outpoint = input.outpoint().expect("Input should have an outpoint");
+
+    assert_eq!(
+        result,
+        Err(TransactionError::DuplicateTransparentSpend(
+            expected_outpoint
         ))
     );
 }
@@ -750,6 +991,52 @@ fn v4_with_sapling_spends() {
     });
 }
 
+/// Test if a V4 transaction with a duplicate Sapling spend is rejected by the verifier.
+#[test]
+fn v4_with_duplicate_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let (height, mut transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.has_valid_coinbase_transaction_inputs()
+                    && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
+            .expect("No transaction found with Sapling spends");
+
+        // Duplicate one of the spends
+        let duplicate_nullifier = duplicate_sapling_spend(
+            Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
+        );
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSaplingNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
 /// Test if a V4 transaction with Sapling outputs but no spends is accepted by the verifier.
 #[test]
 fn v4_with_sapling_outputs_and_no_spends() {
@@ -837,6 +1124,117 @@ fn v5_with_sapling_spends() {
         assert_eq!(
             result.expect("unexpected error response").tx_id(),
             expected_hash
+        );
+    });
+}
+
+/// Test if a V5 transaction with a duplicate Sapling spend is rejected by the verifier.
+#[test]
+fn v5_with_duplicate_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let mut transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+                .rev()
+                .filter(|transaction| {
+                    !transaction.has_valid_coinbase_transaction_inputs()
+                        && transaction.inputs().is_empty()
+                })
+                .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+                .expect("No transaction found with Sapling spends");
+
+        let height = transaction
+            .expiry_height()
+            .expect("Transaction is missing expiry height");
+
+        // Duplicate one of the spends
+        let duplicate_nullifier = duplicate_sapling_spend(&mut transaction);
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSaplingNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
+/// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
+#[test]
+fn v5_with_duplicate_orchard_action() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        // Find a transaction with no inputs or outputs to use as base
+        let mut transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+                .rev()
+                .find(|transaction| {
+                    transaction.inputs().is_empty()
+                        && transaction.outputs().is_empty()
+                        && transaction.sapling_spends_per_anchor().next().is_none()
+                        && transaction.sapling_outputs().next().is_none()
+                        && transaction.joinsplit_count() == 0
+                })
+                .expect("At least one fake V5 transaction with no inputs and no outputs");
+
+        let height = transaction
+            .expiry_height()
+            .expect("Transaction is missing expiry height");
+
+        // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
+        // guaranteed structurally by `orchard::ShieldedData`)
+        let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+
+        // Enable spends
+        shielded_data.flags = orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS;
+
+        // Duplicate the first action
+        let duplicate_action = shielded_data.actions.first().clone();
+        let duplicate_nullifier = duplicate_action.action.nullifier;
+
+        shielded_data.actions.push(duplicate_action);
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateOrchardNullifier(
+                duplicate_nullifier
+            ))
         );
     });
 }
@@ -958,7 +1356,8 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
         .try_into()
         .expect("Invalid JoinSplit transparent input");
     let anchor = sprout::tree::Root::default();
-    let nullifier = sprout::note::Nullifier([0u8; 32]);
+    let first_nullifier = sprout::note::Nullifier([0u8; 32]);
+    let second_nullifier = sprout::note::Nullifier([1u8; 32]);
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
         x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand07::thread_rng()));
@@ -973,7 +1372,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
         vpub_old: zero_amount,
         vpub_new: zero_amount,
         anchor,
-        nullifiers: [nullifier; 2],
+        nullifiers: [first_nullifier, second_nullifier],
         commitments: [commitment; 2],
         ephemeral_key,
         random_seed,
@@ -995,6 +1394,52 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     (joinsplit_data, signing_key)
+}
+
+/// Duplicate a Sapling spend inside a `transaction`.
+///
+/// Returns the nullifier of the duplicate spend.
+///
+/// # Panics
+///
+/// Will panic if the `transaction` does not have Sapling spends.
+fn duplicate_sapling_spend(transaction: &mut Transaction) -> sapling::Nullifier {
+    match transaction {
+        Transaction::V4 {
+            sapling_shielded_data: Some(ref mut shielded_data),
+            ..
+        } => duplicate_sapling_spend_in_shielded_data(shielded_data),
+        Transaction::V5 {
+            sapling_shielded_data: Some(ref mut shielded_data),
+            ..
+        } => duplicate_sapling_spend_in_shielded_data(shielded_data),
+        _ => unreachable!("Transaction has no Sapling shielded data"),
+    }
+}
+
+/// Duplicates the first spend of the `shielded_data`.
+///
+/// Returns the nullifier of the duplicate spend.
+///
+/// # Panics
+///
+/// Will panic if `shielded_data` has no spends.
+fn duplicate_sapling_spend_in_shielded_data<A: sapling::AnchorVariant + Clone>(
+    shielded_data: &mut sapling::ShieldedData<A>,
+) -> sapling::Nullifier {
+    match shielded_data.transfers {
+        sapling::TransferData::SpendsAndMaybeOutputs { ref mut spends, .. } => {
+            let duplicate_spend = spends.first().clone();
+            let duplicate_nullifier = duplicate_spend.nullifier;
+
+            spends.push(duplicate_spend);
+
+            duplicate_nullifier
+        }
+        sapling::TransferData::JustOutputs { .. } => {
+            unreachable!("Sapling shielded data has no spends")
+        }
+    }
 }
 
 #[test]
