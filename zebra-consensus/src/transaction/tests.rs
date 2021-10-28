@@ -1128,6 +1128,55 @@ fn v5_with_sapling_spends() {
     });
 }
 
+/// Test if a V5 transaction with a duplicate Sapling spend is rejected by the verifier.
+#[test]
+fn v5_with_duplicate_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let mut transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+                .rev()
+                .filter(|transaction| {
+                    !transaction.has_valid_coinbase_transaction_inputs()
+                        && transaction.inputs().is_empty()
+                })
+                .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+                .expect("No transaction found with Sapling spends");
+
+        let height = transaction
+            .expiry_height()
+            .expect("Transaction is missing expiry height");
+
+        // Duplicate one of the spends
+        let duplicate_nullifier = duplicate_sapling_spend(&mut transaction);
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSaplingNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
 // Utility functions
 
 /// Create a mock transparent transfer to be included in a transaction.
