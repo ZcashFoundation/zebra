@@ -7,6 +7,7 @@ use zebra_chain::{
     block, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
+    sapling,
     serialization::ZcashDeserialize,
     sprout,
     transaction::{
@@ -990,6 +991,52 @@ fn v4_with_sapling_spends() {
     });
 }
 
+/// Test if a V4 transaction with a duplicate Sapling spend is rejected by the verifier.
+#[test]
+fn v4_with_duplicate_sapling_spends() {
+    zebra_test::init();
+    zebra_test::RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let (height, mut transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.has_valid_coinbase_transaction_inputs()
+                    && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
+            .expect("No transaction found with Sapling spends");
+
+        // Duplicate one of the spends
+        let duplicate_nullifier = duplicate_sapling_spend(
+            Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
+        );
+
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSaplingNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
+}
+
 /// Test if a V4 transaction with Sapling outputs but no spends is accepted by the verifier.
 #[test]
 fn v4_with_sapling_outputs_and_no_spends() {
@@ -1236,6 +1283,52 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     (joinsplit_data, signing_key)
+}
+
+/// Duplicate a Sapling spend inside a `transaction`.
+///
+/// Returns the nullifier of the duplicate spend.
+///
+/// # Panics
+///
+/// Will panic if the `transaction` does not have Sapling spends.
+fn duplicate_sapling_spend(transaction: &mut Transaction) -> sapling::Nullifier {
+    match transaction {
+        Transaction::V4 {
+            sapling_shielded_data: Some(ref mut shielded_data),
+            ..
+        } => duplicate_sapling_spend_in_shielded_data(shielded_data),
+        Transaction::V5 {
+            sapling_shielded_data: Some(ref mut shielded_data),
+            ..
+        } => duplicate_sapling_spend_in_shielded_data(shielded_data),
+        _ => unreachable!("Transaction has no Sapling shielded data"),
+    }
+}
+
+/// Duplicates the first spend of the `shielded_data`.
+///
+/// Returns the nullifier of the duplicate spend.
+///
+/// # Panics
+///
+/// Will panic if `shielded_data` has no spends.
+fn duplicate_sapling_spend_in_shielded_data<A: sapling::AnchorVariant + Clone>(
+    shielded_data: &mut sapling::ShieldedData<A>,
+) -> sapling::Nullifier {
+    match shielded_data.transfers {
+        sapling::TransferData::SpendsAndMaybeOutputs { ref mut spends, .. } => {
+            let duplicate_spend = spends.first().clone();
+            let duplicate_nullifier = duplicate_spend.nullifier;
+
+            spends.push(duplicate_spend);
+
+            duplicate_nullifier
+        }
+        sapling::TransferData::JustOutputs { .. } => {
+            unreachable!("Sapling shielded data has no spends")
+        }
+    }
 }
 
 #[test]
