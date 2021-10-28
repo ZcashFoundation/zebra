@@ -199,8 +199,16 @@ where
     );
     let _ = candidates.update_initial(active_initial_peer_count).await;
 
-    // TODO: reduce demand by `active_outbound_connections.update_count()` (#2902)
-    for _ in 0..config.peerset_initial_target_size {
+    // Reduce demand by the last `active_outbound_connections.update_count()` output.
+    let demand_count = match config
+        .peerset_initial_target_size
+        .checked_sub(active_outbound_connections.update_count())
+    {
+        Some(count) => count,
+        None => active_initial_peer_count,
+    };
+
+    for _ in 0..demand_count {
         let _ = demand_tx.try_send(MorePeers);
     }
 
