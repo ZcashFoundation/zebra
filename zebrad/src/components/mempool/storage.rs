@@ -203,6 +203,9 @@ impl Storage {
         // > EvictTransaction (with the new transaction included as a candidate to evict) until the
         // > total cost does not exceed `mempooltxcostlimit`.
         //
+        // 'EvictTransaction' is equivalent to [`VerifiedSet::evict_one()`] in
+        // our implementation.
+        //
         // [ZIP-401]: https://zips.z.cash/zip-0401
         while self.verified.total_cost() > self.tx_cost_limit {
             // > EvictTransaction MUST do the following:
