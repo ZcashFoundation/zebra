@@ -24,7 +24,7 @@ use futures::{
     channel::{mpsc, oneshot},
     FutureExt, StreamExt,
 };
-use tokio::task::JoinHandle;
+use tokio::{net::TcpStream, task::JoinHandle};
 use tower::{discover::Change, service_fn, Service};
 use tracing::Span;
 
@@ -34,9 +34,12 @@ use zebra_test::net::random_known_port;
 use crate::{
     constants, init,
     meta_addr::MetaAddr,
-    peer::{self, ErrorSlot, OutboundConnectorRequest},
+    peer::{self, ErrorSlot, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
-        initialize::{add_initial_peers, crawl_and_dial, PeerChange},
+        initialize::{
+            accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
+            PeerChange,
+        },
         set::MorePeers,
         ActiveConnectionCounter, CandidateSet,
     },
@@ -50,6 +53,11 @@ use Network::*;
 ///
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
+
+/// The amount of time to run the listener, before testing what it has done.
+///
+/// Using a very short time can make the listener not run at all.
+const LISTENER_TEST_DURATION: Duration = Duration::from_secs(10);
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
@@ -588,6 +596,367 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     );
 }
 
+/// Test the listener with an inbound peer limit of zero peers, and a handshaker that panics.
+#[tokio::test]
+async fn listener_peer_limit_zero_handshake_panic() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let unreachable_inbound_handshaker = service_fn(|_| async {
+        unreachable!("inbound handshaker should never be called with a zero peer limit")
+    });
+
+    let (_config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(0, unreachable_inbound_handshaker).await;
+
+    let peer_result = peerset_tx.try_next();
+    assert!(
+        // `Err(_)` means that no peers are available, and the sender has not been dropped.
+        // `Ok(None)` means that no peers are available, and the sender has been dropped.
+        matches!(peer_result, Err(_) | Ok(None)),
+        "unexpected peer when inbound limit is zero: {:?}",
+        peer_result,
+    );
+}
+
+/// Test the listener with an inbound peer limit of one peer, and a handshaker that always errors.
+#[tokio::test]
+async fn listener_peer_limit_one_handshake_error() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let error_inbound_handshaker =
+        service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
+
+    let (_config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(1, error_inbound_handshaker).await;
+
+    let peer_result = peerset_tx.try_next();
+    assert!(
+        // `Err(_)` means that no peers are available, and the sender has not been dropped.
+        // `Ok(None)` means that no peers are available, and the sender has been dropped.
+        matches!(peer_result, Err(_) | Ok(None)),
+        "unexpected peer when all handshakes error: {:?}",
+        peer_result,
+    );
+}
+
+/// Test the listener with an inbound peer limit of one peer,
+/// and a handshaker that returns success then disconnects the peer.
+#[tokio::test]
+async fn listener_peer_limit_one_handshake_ok_then_drop() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let success_disconnect_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
+        let HandshakeRequest {
+            tcp_stream,
+            connected_addr: _,
+            connection_tracker,
+        } = req;
+
+        let (server_tx, _server_rx) = mpsc::channel(0);
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+        let error_slot = ErrorSlot::default();
+
+        let fake_client = peer::Client {
+            shutdown_tx: Some(shutdown_tx),
+            server_tx,
+            error_slot,
+        };
+
+        // Actually close the connection.
+        std::mem::drop(connection_tracker);
+        std::mem::drop(tcp_stream);
+
+        // Give the crawler time to get the message.
+        tokio::task::yield_now().await;
+
+        Ok(fake_client)
+    });
+
+    let (config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(1, success_disconnect_inbound_handshaker).await;
+
+    let mut peer_count: usize = 0;
+    loop {
+        let peer_result = peerset_tx.try_next();
+        match peer_result {
+            // A peer handshake succeeded.
+            Ok(Some(peer_result)) => {
+                assert!(
+                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    "unexpected connection error: {:?}\n\
+                     {} previous peers succeeded",
+                    peer_result,
+                    peer_count,
+                );
+                peer_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    assert!(
+        peer_count > config.peerset_inbound_connection_limit(),
+        "unexpected number of peer connections {}, should be over the limit of {}",
+        peer_count,
+        config.peerset_inbound_connection_limit(),
+    );
+}
+
+/// Test the listener with an inbound peer limit of one peer,
+/// and a handshaker that returns success then holds the peer open.
+#[tokio::test]
+async fn listener_peer_limit_one_handshake_ok_stay_open() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let success_stay_open_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
+        let HandshakeRequest {
+            tcp_stream,
+            connected_addr: _,
+            connection_tracker,
+        } = req;
+
+        let (server_tx, _server_rx) = mpsc::channel(0);
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+        let error_slot = ErrorSlot::default();
+
+        let fake_client = peer::Client {
+            shutdown_tx: Some(shutdown_tx),
+            server_tx,
+            error_slot,
+        };
+
+        // Fake the connection being open forever.
+        std::mem::forget(connection_tracker);
+        std::mem::forget(tcp_stream);
+
+        Ok(fake_client)
+    });
+
+    let (config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(1, success_stay_open_inbound_handshaker).await;
+
+    let mut peer_count: usize = 0;
+    loop {
+        let peer_result = peerset_tx.try_next();
+        match peer_result {
+            // A peer handshake succeeded.
+            Ok(Some(peer_result)) => {
+                assert!(
+                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    "unexpected connection error: {:?}\n\
+                     {} previous peers succeeded",
+                    peer_result,
+                    peer_count,
+                );
+                peer_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    assert!(
+        peer_count <= config.peerset_inbound_connection_limit(),
+        "unexpected number of peer connections {}, over limit of {}",
+        peer_count,
+        config.peerset_inbound_connection_limit(),
+    );
+}
+
+/// Test the listener with the default inbound peer limit, and a handshaker that always errors.
+#[tokio::test]
+async fn listener_peer_limit_default_handshake_error() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let error_inbound_handshaker =
+        service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
+
+    let (_config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(None, error_inbound_handshaker).await;
+
+    let peer_result = peerset_tx.try_next();
+    assert!(
+        // `Err(_)` means that no peers are available, and the sender has not been dropped.
+        // `Ok(None)` means that no peers are available, and the sender has been dropped.
+        matches!(peer_result, Err(_) | Ok(None)),
+        "unexpected peer when all handshakes error: {:?}",
+        peer_result,
+    );
+}
+
+/// Test the listener with the default inbound peer limit,
+/// and a handshaker that returns success then disconnects the peer.
+#[tokio::test]
+async fn listener_peer_limit_default_handshake_ok_then_drop() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let success_disconnect_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
+        let HandshakeRequest {
+            tcp_stream,
+            connected_addr: _,
+            connection_tracker,
+        } = req;
+
+        let (server_tx, _server_rx) = mpsc::channel(0);
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+        let error_slot = ErrorSlot::default();
+
+        let fake_client = peer::Client {
+            shutdown_tx: Some(shutdown_tx),
+            server_tx,
+            error_slot,
+        };
+
+        // Actually close the connection.
+        std::mem::drop(connection_tracker);
+        std::mem::drop(tcp_stream);
+
+        // Give the crawler time to get the message.
+        tokio::task::yield_now().await;
+
+        Ok(fake_client)
+    });
+
+    let (config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(None, success_disconnect_inbound_handshaker).await;
+
+    let mut peer_count: usize = 0;
+    loop {
+        let peer_result = peerset_tx.try_next();
+        match peer_result {
+            // A peer handshake succeeded.
+            Ok(Some(peer_result)) => {
+                assert!(
+                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    "unexpected connection error: {:?}\n\
+                     {} previous peers succeeded",
+                    peer_result,
+                    peer_count,
+                );
+                peer_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    assert!(
+        peer_count > config.peerset_inbound_connection_limit(),
+        "unexpected number of peer connections {}, should be over the limit of {}",
+        peer_count,
+        config.peerset_inbound_connection_limit(),
+    );
+}
+
+/// Test the listener with the default inbound peer limit,
+/// and a handshaker that returns success then holds the peer open.
+#[tokio::test]
+async fn listener_peer_limit_default_handshake_ok_stay_open() {
+    zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let success_stay_open_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
+        let HandshakeRequest {
+            tcp_stream,
+            connected_addr: _,
+            connection_tracker,
+        } = req;
+
+        let (server_tx, _server_rx) = mpsc::channel(0);
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+        let error_slot = ErrorSlot::default();
+
+        let fake_client = peer::Client {
+            shutdown_tx: Some(shutdown_tx),
+            server_tx,
+            error_slot,
+        };
+
+        // Fake the connection being open forever.
+        std::mem::forget(connection_tracker);
+        std::mem::forget(tcp_stream);
+
+        Ok(fake_client)
+    });
+
+    let (config, mut peerset_tx) =
+        spawn_inbound_listener_with_peer_limit(None, success_stay_open_inbound_handshaker).await;
+
+    let mut peer_count: usize = 0;
+    loop {
+        let peer_result = peerset_tx.try_next();
+        match peer_result {
+            // A peer handshake succeeded.
+            Ok(Some(peer_result)) => {
+                assert!(
+                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    "unexpected connection error: {:?}\n\
+                     {} previous peers succeeded",
+                    peer_result,
+                    peer_count,
+                );
+                peer_count += 1;
+            }
+
+            // The channel is closed and there are no messages left in the channel.
+            Ok(None) => break,
+            // The channel is still open, but there are no messages left in the channel.
+            Err(_) => break,
+        }
+    }
+
+    assert!(
+        peer_count <= config.peerset_inbound_connection_limit(),
+        "unexpected number of peer connections {}, over limit of {}",
+        peer_count,
+        config.peerset_inbound_connection_limit(),
+    );
+}
+
 /// Test if the initial seed peer connections is rate-limited.
 #[tokio::test]
 async fn add_initial_peers_is_rate_limited() {
@@ -796,6 +1165,102 @@ where
         "expected {} peers in Mainnet address book, but got: {:?}",
         over_limit_peers,
         address_book.lock().unwrap().address_metrics()
+    );
+
+    (config, peerset_rx)
+}
+
+/// Run an inbound peer listener with `peerset_initial_target_size` and `handshaker`.
+///
+/// Uses the default values for all other config fields.
+///
+/// Returns the generated [`Config`], and the peer set receiver.
+async fn spawn_inbound_listener_with_peer_limit<S>(
+    peerset_initial_target_size: impl Into<Option<usize>>,
+    listen_handshaker: S,
+) -> (Config, mpsc::Receiver<PeerChange>)
+where
+    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    // Create a test config that listens on any unused port.
+    let listen_addr = "127.0.0.1:0".parse().unwrap();
+    let mut config = Config {
+        listen_addr,
+        ..Config::default()
+    };
+
+    if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
+        config.peerset_initial_target_size = peerset_initial_target_size;
+    }
+
+    // Open the listener port.
+    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+
+    // Make enough inbound connections to go over the limit, even if the limit is zero.
+    // Make the channels large enough to hold all the connections.
+    let over_limit_connections = config.peerset_inbound_connection_limit() * 2 + 1;
+    let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(over_limit_connections);
+
+    // Start listening for connections.
+    let listen_fut = {
+        let config = config.clone();
+        let peerset_tx = peerset_tx.clone();
+        accept_inbound_connections(config, tcp_listener, listen_handshaker, peerset_tx)
+    };
+    let listen_task_handle = tokio::spawn(listen_fut);
+
+    // Open inbound connections.
+    let mut outbound_task_handles = Vec::new();
+    for _ in 0..over_limit_connections {
+        let outbound_fut = async move {
+            let outbound_result = TcpStream::connect(listen_addr).await;
+            // Let other tasks run before we block on reading.
+            tokio::task::yield_now().await;
+
+            if let Ok(outbound_stream) = outbound_result {
+                // Wait until the listener closes the connection.
+                // The handshaker is fake, so it never sends any data.
+                let readable_result = outbound_stream.readable().await;
+                info!(
+                    ?readable_result,
+                    "outbound connection became readable or errored: \
+                     closing connection to test inbound listener"
+                );
+            } else {
+                // If the connection is closed quickly, we might get errors here.
+                debug!(
+                    ?outbound_result,
+                    "outbound connection error in inbound listener test"
+                );
+            }
+        };
+
+        // TODO: Abort all the tasks.
+        let outbound_task_handle = tokio::spawn(outbound_fut);
+        outbound_task_handles.push(outbound_task_handle);
+    }
+
+    // Let the listener run for a while.
+    tokio::time::sleep(LISTENER_TEST_DURATION).await;
+
+    // Stop the listener and outbound tasks, and let them finish.
+    listen_task_handle.abort();
+    for outbound_task_handle in outbound_task_handles {
+        outbound_task_handle.abort();
+    }
+    tokio::task::yield_now().await;
+
+    // Check for panics or errors in the listener.
+    let listen_result = listen_task_handle.now_or_never();
+    assert!(
+        matches!(listen_result, None)
+            || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
+        "unexpected error or panic in inbound peer listener task: {:?}",
+        listen_result,
     );
 
     (config, peerset_rx)
