@@ -144,6 +144,7 @@ where
 
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
+        &config,
         PeakEwmaDiscover::new(
             // Discover interprets an error as stream termination,
             // so discard any errored connections...
