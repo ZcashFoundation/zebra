@@ -1,10 +1,8 @@
-Design Overview
----------------------
+# Design Overview
 
 This document sketches the future design for Zebra.
 
-Desiderata
-==========
+## Desiderata
 
 The following are general desiderata for Zebra:
 
@@ -30,26 +28,93 @@ The following are general desiderata for Zebra:
 * Zebra should checkpoint on Canopy activation and drop all
   Sprout-related functionality not required post-Canopy.
 
-### Non-Goals
+## Non-Goals
 
 * Zebra keeps a copy of the chain state, so it isn't intended for
   lightweight applications like light wallets. Those applications
   should use a light client protocol.
 
-Internal Structure
-==================
+## Architecture
 
-The following is a list of internal component libraries (crates), and
-a description of functional responsibility.
+Unlike `zcashd`, which originated as a Bitcoin Core fork and inherited its
+monolithic architecture, Zebra has a modular, library-first design, with the
+intent that each component can be independently reused outside of the `zebrad`
+full node.  For instance, the `zebra-network` crate containing the network stack
+can also be used to implement anonymous transaction relay, network crawlers, or
+other functionality, without requiring a full node.
 
-`zebra-chain`
---------------
+At a high level, the fullnode functionality required by `zebrad` is factored
+into several components:
 
-### Internal Dependencies
+- [`zebra-chain`](https://doc.zebra.zfnd.org/zebra_chain/index.html), providing
+  definitions of core data structures for Zcash, such as blocks, transactions,
+  addresses, etc., and related functionality.  It also contains the
+  implementation of the consensus-critical serialization formats used in Zcash.
+  The data structures in `zebra-chain` are defined to enforce
+  [*structural validity*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
+  by making invalid states unrepresentable.  For instance, the
+  `Transaction` enum has variants for each transaction version, and it's
+  impossible to construct a transaction with, e.g., spend or output
+  descriptions but no binding signature, or, e.g., a version 2 (Sprout)
+  transaction with Sapling proofs.  Currently, `zebra-chain` is oriented
+  towards verifying transactions, but will be extended to support creating them
+  in the future.
+
+- [`zebra-network`](https://doc.zebra.zfnd.org/zebra_network/index.html),
+  providing an asynchronous, multithreaded implementation of the Zcash network
+  protocol inherited from Bitcoin.  In contrast to `zcashd`, each peer
+  connection has a separate state machine, and the crate translates the
+  external network protocol into a stateless, request/response-oriented
+  protocol for internal use.  The crate provides two interfaces:
+  - an auto-managed connection pool that load-balances local node requests
+    over available peers, and sends peer requests to a local inbound service,
+    and
+  - a `connect_isolated` method that produces a peer connection completely
+    isolated from all other node state.  This can be used, for instance, to
+    safely relay data over Tor, without revealing distinguishing information.
+
+- [`zebra-script`](https://doc.zebra.zfnd.org/zebra_script/index.html) provides
+  script validation.  Currently, this is implemented by linking to the C++
+  script verification code from `zcashd`, but in the future we may implement a
+  pure-Rust script implementation.
+
+- [`zebra-consensus`](https://doc.zebra.zfnd.org/zebra_consensus/index.html)
+  performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
+  of blocks and transactions: all consensus
+  rules that can be checked independently of the chain state, such as
+  verification of signatures, proofs, and scripts.  Internally, the library
+  uses [`tower-batch`](https://doc.zebra.zfnd.org/tower_batch/index.html) to
+  perform automatic, transparent batch processing of contemporaneous
+  verification requests.
+
+- [`zebra-state`](https://doc.zebra.zfnd.org/zebra_state/index.html) is
+  responsible for storing, updating, and querying the chain state.  The state
+  service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
+  all consensus rules
+  that check whether a new block is a valid extension of an existing chain,
+  such as updating the nullifier set or checking that transaction inputs remain
+  unspent.
+
+- [`zebrad`](https://doc.zebra.zfnd.org/zebrad/index.html) contains the full
+  node, which connects these components together and implements logic to handle
+  inbound requests from peers and the chain sync process.
+
+- `zebra-rpc` and `zebra-client` will eventually contain the RPC and wallet
+  functionality, but as mentioned above, our goal is to implement replication
+  of chain state first before asking users to entrust Zebra with their funds.
+
+All of these components can be reused as independent libraries, and all
+communication between stateful components is handled internally by
+[internal asynchronous RPC abstraction](https://docs.rs/tower/)
+("microservices in one process").
+
+### `zebra-chain`
+
+#### Internal Dependencies
 
 None: these are the core data structure definitions.
 
-### Responsible for
+#### Responsible for
 
 - definitions of commonly used data structures, e.g.,
   - `Block`,
@@ -62,18 +127,17 @@ None: these are the core data structure definitions.
   - `ZcashSerialize` and `ZcashDeserialize`, which perform
     consensus-critical serialization logic.
 
-### Exported types
+#### Exported types
 
 - [...]
 
-`zebra-network`
-----------------
+### `zebra-network`
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - `zebra-chain`
 
-### Responsible for
+#### Responsible for
 
 - definition of a well structured, internal request/response protocol
 - provides an abstraction for "this node" and "the network" using the
@@ -83,7 +147,7 @@ None: these are the core data structure definitions.
   Bitcoin/Zcash protocol
 - tokio codec for Bitcoin/Zcash message encoding.
 
-### Exported types
+#### Exported types
 
 - `Request`, an enum representing all possible requests in the internal protocol;
 - `Response`, an enum representing all possible responses in the internal protocol;
@@ -103,14 +167,13 @@ All peerset management (finding new peers, creating new outbound
 connections, etc) is completely encapsulated, as is responsibility for
 routing outbound requests to appropriate peers.
 
-`zebra-state`
-----------------
+### `zebra-state`
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - `zebra-chain` for data structure definitions.
 
-### Responsible for
+#### Responsible for
 
 - block storage API
   - operates on parsed block structs
@@ -127,7 +190,7 @@ routing outbound requests to appropriate peers.
 - providing `tower::Service` interfaces for all of the above to
   support backpressure.
 
-### Exported types
+#### Exported types
 
 - `Request`, an enum representing all possible requests in the internal protocol;
   - blocks can be accessed via their chain height or hash
@@ -141,44 +204,42 @@ send requests for the chain state.
 All state management (adding blocks, getting blocks by index or hash) is completely
 encapsulated.
 
-`zebra-script`
----------------
+### `zebra-script`
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - ??? depends on how it's implemented internally
 
-### Responsible for
+#### Responsible for
 
 - the minimal Bitcoin script implementation required for Zcash
 - script parsing
 - context-free script validation
 
-### Notes
+#### Notes
 
 This can wrap an existing script implementation at the beginning.
 
 If this existed in a "good" way, we could use it to implement tooling
 for Zcash script inspection, debugging, etc.
 
-### Questions
+#### Questions
 
 - How does this interact with NU4 script changes?
 
-### Exported types
+#### Exported types
 
 - [...]
 
-`zebra-consensus`
-------------------
+### `zebra-consensus`
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - `zebra-chain` for data structures and parsing.
 - `zebra-state` to read and update the state database.
 - `zebra-script` for script parsing and validation.
 
-### Responsible for
+#### Responsible for
 
 - consensus-specific parameters (network magics, genesis block, pow
   parameters, etc) that determine the network consensus
@@ -199,7 +260,7 @@ for Zcash script inspection, debugging, etc.
 - providing `tower::Service` interfaces for all of the above to
   support backpressure and batch validation.
 
-### Exported types
+#### Exported types
 
 - `block::init() -> impl Service`, the main entry-point for block
   verification.
@@ -212,60 +273,57 @@ for Zcash script inspection, debugging, etc.
 The `init` entrypoints return `Service`s that can be used to
 verify blocks or transactions, and add them to the relevant state.
 
-`zebra-rpc`
-------------
+### `zebra-rpc`
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - `zebra-chain` for data structure definitions
 - `zebra-network` possibly? for definitions of network messages?
 
-### Responsible for
+#### Responsible for
 
 - rpc interface
 
-### Exported types
+#### Exported types
 
 - [...]
 
-`zebra-client`
------------------
+### `zebra-client`
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - `zebra-chain` for structure definitions
 - `zebra-state` for transaction queries and client/wallet state storage
 - `zebra-script` possibly? for constructing transactions
 
-### Responsible for
+#### Responsible for
 
 - implementation of some event a user might trigger
 - would be used to implement a full wallet
 - create transactions, monitors shielded wallet state, etc.
 
-### Notes
+#### Notes
 
 Communication between the client code and the rest of the node should be done
 by a tower service interface. Since the `Service` trait can abstract from a
 function call to RPC, this means that it will be possible for us to isolate
 all client code to a subprocess.
 
-### Exported types
+#### Exported types
 
 - [...]
 
-`zebrad`
----------
+### `zebrad`
 
 Abscissa-based application which loads configs, all application components,
 and connects them to each other.
 
-### Responsible for
+#### Responsible for
 
 - actually running the server
 - connecting functionality in dependencies
 
-### Internal Dependencies
+#### Internal Dependencies
 
 - `zebra-chain`
 - `zebra-network`
@@ -274,8 +332,7 @@ and connects them to each other.
 - `zebra-client`
 - `zebra-rpc`
 
-Unassigned functionality
-------------------------
+### Unassigned functionality
 
 Responsibility for this functionality needs to be assigned to one of
 the modules above (subject to discussion):
