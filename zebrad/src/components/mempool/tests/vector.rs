@@ -27,6 +27,14 @@ type MockTxVerifier = MockService<tx::Request, tx::Response, PanicAssertion, Tra
 
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
+    // Test multiple times to catch intermittent bugs since eviction is randomized
+    for _ in 0..10 {
+        mempool_service_basic_single().await?;
+    }
+    Ok(())
+}
+
+async fn mempool_service_basic_single() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
@@ -94,7 +102,9 @@ async fn mempool_service_basic() -> Result<(), Report> {
     // Skip the last (will be used later)
     for tx in more_transactions {
         inserted_ids.insert(tx.transaction.id);
-        service.storage().insert(tx.clone())?;
+        // Error must be ignored because a insert can trigger an eviction and
+        // an error is returned if the transaction being inserted in chosen.
+        let _ = service.storage().insert(tx.clone());
     }
 
     // Test `Request::RejectedTransactionIds`
@@ -136,6 +146,14 @@ async fn mempool_service_basic() -> Result<(), Report> {
 
 #[tokio::test]
 async fn mempool_queue() -> Result<(), Report> {
+    // Test multiple times to catch intermittent bugs since eviction is randomized
+    for _ in 0..10 {
+        mempool_queue_single().await?;
+    }
+    Ok(())
+}
+
+async fn mempool_queue_single() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
@@ -165,7 +183,9 @@ async fn mempool_queue() -> Result<(), Report> {
     // This will cause the at least one transaction to be rejected, since
     // the cost limit is the sum of all costs except of the last transaction.
     for tx in transactions.iter() {
-        service.storage().insert(tx.clone())?;
+        // Error must be ignored because a insert can trigger an eviction and
+        // an error is returned if the transaction being inserted in chosen.
+        let _ = service.storage().insert(tx.clone());
     }
 
     // Test `Request::Queue` for a new transaction

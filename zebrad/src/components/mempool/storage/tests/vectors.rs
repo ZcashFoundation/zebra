@@ -57,8 +57,11 @@ fn mempool_storage_crud_exact_mainnet() {
 fn mempool_storage_basic() -> Result<()> {
     zebra_test::init();
 
-    mempool_storage_basic_for_network(Network::Mainnet)?;
-    mempool_storage_basic_for_network(Network::Testnet)?;
+    // Test multiple times to catch intermittent bugs since eviction is randomized
+    for _ in 0..10 {
+        mempool_storage_basic_for_network(Network::Mainnet)?;
+        mempool_storage_basic_for_network(Network::Testnet)?;
+    }
 
     Ok(())
 }
@@ -67,6 +70,13 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Get transactions from the first 10 blocks of the Zcash blockchain
     let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, network).collect();
 
+    assert!(
+        MEMPOOL_TX_COUNT < unmined_transactions.len(),
+        "inconsistent MEMPOOL_TX_COUNT value for this test; decrease it"
+    );
+
+    // Use the sum of the costs of the first `MEMPOOL_TX_COUNT` transactions
+    // as the cost limit
     let tx_cost_limit = unmined_transactions
         .iter()
         .take(MEMPOOL_TX_COUNT)
@@ -92,6 +102,9 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
             Err(_) => {
                 // Other transactions can be rejected on a successful insert,
                 // so not all rejected transactions will be added.
+                // Note that `some_rejected_transactions` can be empty since `insert` only
+                // returns a rejection error if the transaction being inserted is the one
+                // that was randomly evicted.
                 some_rejected_transactions.push(unmined_transaction);
             }
         }
@@ -99,13 +112,16 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Since transactions are rejected randomly we can't test exact numbers.
     // We know the first MEMPOOL_TX_COUNT must have been inserted successfully.
     assert!(maybe_inserted_transactions.len() >= MEMPOOL_TX_COUNT);
-    // We know that at least the transaction after the MEMPOOL_TX_COUNT
-    // must be rejected.
-    assert!(!some_rejected_transactions.is_empty());
+    assert_eq!(
+        some_rejected_transactions.len() + maybe_inserted_transactions.len(),
+        unmined_transactions.len()
+    );
 
+    // Test if the actual number of inserted/rejected transactions is consistent.
     assert!(storage.verified.transaction_count() <= maybe_inserted_transactions.len());
     assert!(storage.rejected_transaction_count() >= some_rejected_transactions.len());
 
+    // Test if rejected transactions were actually rejected.
     for tx in some_rejected_transactions.iter() {
         assert!(!storage.contains_transaction_exact(&tx.transaction.id));
     }
@@ -117,15 +133,17 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         .collect();
 
     // Convert response to a `HashSet`, because the order of the response doesn't matter.
-    let rejected_response: HashSet<UnminedTxId> =
+    let all_rejected_ids: HashSet<UnminedTxId> =
         storage.rejected_transactions(all_ids).into_iter().collect();
 
-    let rejected_ids = some_rejected_transactions
+    let some_rejected_ids = some_rejected_transactions
         .iter()
         .map(|tx| tx.transaction.id)
-        .collect();
+        .collect::<HashSet<_>>();
 
-    assert!(rejected_response.is_superset(&rejected_ids));
+    // Test if the rejected transactions we have are a subset of the actually
+    // rejected transactions.
+    assert!(some_rejected_ids.is_subset(&all_rejected_ids));
 
     Ok(())
 }
