@@ -41,11 +41,12 @@ This is the first beta release of Zebra. Today the mempool work is fully finishe
 
 ### Documentation
 
+- Improve main `README` documentation and other book sections (#2967, #2894) 
 - Expand documentation for the mempool::crawler module (#2968)
 - Improve mempool documentation (#2942, #2963, #2964, #2965)
 - Improve documentation and types in the PeerSet (#2925)
 - Update the documentation for value pools (#2919)
-- Document why CheckForVerifiedTransactions is required for correctness (#2955)
+- Document why `CheckForVerifiedTransactions` is required for correctness (#2955)
 
 #### Metrics
 
