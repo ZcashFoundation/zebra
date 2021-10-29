@@ -13,17 +13,51 @@ consensus-compatible implementation of the Zcash protocol, currently under
 development.  Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
 like to find out more or get involved!
 
-## Alpha Releases
+## Beta Releases
 
-Every few weeks, we release a new Zebra alpha release.
+Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashFoundation/zebra/releases).
 
-The goals of the alpha release series are to:
-- participate in the Zcash network,
-- replicate the Zcash chain state,
-- implement the Zcash proof of work consensus rules, and
-- sync on Mainnet under excellent network conditions.
+The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node, except for:
 
-Currently, Zebra does not validate all the Zcash consensus rules. It may be
+- Mempool transactions
+- Block subsidies
+- Transaction fees
+- Some undocumented rules derived from Bitcoin
+- Some consensus rules removed before Canopy activation (Zebra checkpoints on Canopy activation)
+
+Zebra's network stack is interoperable with zcashd.
+Zebra implements all the features required to reach Zcash network consensus.
+
+Currently, Zebra does not validate the following Zcash consensus rules:
+
+#### NU5
+- ZIP-155 - Parse addrv2 in Zebra
+- Full validation of Orchard transactions from NU5 onwards
+   - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set
+   - Validation of Orchard anchors
+   - Validation of Halo2 proofs
+   - Validation of orchard note commitment trees
+
+#### NU4 - Canopy
+- Calculation of Block Subsidy and Funding streams
+- Validation of coinbase miner subsidy and miner fees
+- Validation of shielded outputs for coinbase transactions (ZIP-212/ZIP-213)
+
+#### NU1 - Sapling
+- Validation of Sapling anchors
+- Validation of sapling note commitment trees
+- Validation of JoinSplit proofs using Groth16 verifier
+
+#### NU0 - Overwinter
+- ZIP-203: Transaction Expiry consensus rules
+
+#### Sprout
+- Validation of Sprout anchors
+- Validation of JoinSplit proofs using BCTV14 verifier
+- Validation of transaction lock times
+- Validation of sprout note commitment trees
+
+It may be
 unreliable on Testnet, and under less-than-perfect network conditions. See
 our [current features](#current-features) and [roadmap](#future-work) for
 details.
@@ -106,8 +140,9 @@ especially the ability to make good connections to other Zcash network peers.
 
 Network:
 - synchronize the chain from peers
-- download gossiped blocks from peers
-- answer inbound peer requests for hashes, headers, and blocks
+- maintain a transaction mempool
+- download gossiped blocks and transactions from peers
+- answer inbound peer requests for hashes, headers, blocks and transactions
 
 State:
 - persist block, transaction, UTXO, and nullifier indexes
@@ -139,26 +174,30 @@ Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
 ### Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
+- [When Zebra receives an unexpected network message from a peer, it disconnects from that peer #2107](https://github.com/ZcashFoundation/zebra/issues/2107)
+- [A Zebra instance could be used to pollute the peer addresses of other nodes #1889](https://github.com/ZcashFoundation/zebra/issues/1889)
+- [Zebra's address book can use all available memory #1873](https://github.com/ZcashFoundation/zebra/issues/1873)
+- [Zebra's address book can be flooded or taken over #1869](https://github.com/ZcashFoundation/zebra/issues/1869)
+- [Zebra does not evict pre-upgrade peers from the peer set across a network upgrade #706](https://github.com/ZcashFoundation/zebra/issues/706)
+- [Zebra accepts non-minimal height encodings #2226](https://github.com/ZcashFoundation/zebra/issues/2226)
+- [Zebra nodes continually try to contact peers that always fail #1865](https://github.com/ZcashFoundation/zebra/issues/1865)
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
-- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-  - These errors can be ignored, unless they happen frequently
 
 Zebra's state commits changes using database transactions.
 If you forcibly terminate it, or it panics, any incomplete changes will be rolled back the next time it starts.
 
 ## Future Work
 
-In 2021, we intend to finish validation, add RPC support, and add wallet integration.
+In 2021, we intend to finish NU5 validation, start adding RPC support and start adding wallet integrations.
 This phased approach allows us to test Zebra's independent implementation of the
 consensus rules, before asking users to entrust it with their funds.
 
 Features:
 - full consensus rule validation
-- transaction mempool
 - wallet functionality
 - RPC functionality
 
