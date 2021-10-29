@@ -198,7 +198,6 @@ consensus rules, before asking users to entrust it with their funds.
 
 Features:
 - full consensus rule validation
-- transaction mempool
 - wallet functionality
 - RPC functionality
 
