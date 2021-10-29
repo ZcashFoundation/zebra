@@ -46,13 +46,13 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 #### NU1 - Sapling
 - Validation of Sapling anchors
 - Validation of sapling note commitment trees
+- Validation of JoinSplit proofs using Groth16 verifier
 
 #### NU0 - Overwinter
 - ZIP-203: Transaction Expiry consensus rules
 
 #### Sprout
 - Validation of Sprout anchors
-- Validation of JoinSplit proofs using Groth16 verifier
 - Validation of transaction lock times
 - Validation of sprout note commitment trees
 
