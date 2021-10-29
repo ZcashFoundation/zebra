@@ -29,14 +29,14 @@ pub mod tests;
 mod eviction_list;
 mod verified_set;
 
-/// The size limit for mempool transaction rejection lists.
+/// The size limit for mempool transaction rejection lists per [ZIP-401].
 ///
-/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries` entries,
-/// > which is the constant 40000.
-///
-/// https://zips.z.cash/zip-0401#specification
+/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries`
+/// > entries, which is the constant 40000.
 ///
 /// We use the specified value for all lists for consistency.
+///
+/// [ZIP-401]: https://zips.z.cash/zip-0401#specification
 pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
@@ -78,12 +78,13 @@ pub enum SameEffectsChainRejectionError {
     #[error("best chain tip has reached transaction expiry height")]
     Expired,
 
-    /// Otherwise valid transaction removed from mempool due to ZIP-401 random eviction.
+    /// Otherwise valid transaction removed from mempool due to [ZIP-401] random
+    /// eviction.
     ///
     /// Consensus rule:
     /// > The txid (rather than the wtxid ...) is used even for version 5 transactions
     ///
-    /// https://zips.z.cash/zip-0401#specification
+    /// [ZIP-401]: https://zips.z.cash/zip-0401#specification
     #[error("transaction evicted from the mempool due to ZIP-401 denial of service limits")]
     RandomlyEvicted,
 }
@@ -103,37 +104,38 @@ pub enum RejectionError {
 
 /// Hold mempool verified and rejected mempool transactions.
 pub struct Storage {
-    /// The set of verified transactions in the mempool. This is a
-    /// cache of size [`MEMPOOL_SIZE`].
+    /// The set of verified transactions in the mempool.
     verified: VerifiedSet,
 
-    /// The set of transactions rejected due to bad authorizations, or for other reasons,
-    /// and their rejection reasons. These rejections only apply to the current tip.
+    /// The set of transactions rejected due to bad authorizations, or for other
+    /// reasons, and their rejection reasons. These rejections only apply to the
+    /// current tip.
     ///
-    /// Only transactions with the exact `UnminedTxId` are invalid.
+    /// Only transactions with the exact [`UnminedTxId`] are invalid.
     tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
 
-    /// A set of transactions rejected for their effects, and their rejection reasons.
-    /// These rejections only apply to the current tip.
+    /// A set of transactions rejected for their effects, and their rejection
+    /// reasons. These rejections only apply to the current tip.
     ///
-    /// Any transaction with the same `transaction::Hash` is invalid.
+    /// Any transaction with the same [`transaction::Hash`] is invalid.
     tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
 
     /// Sets of transactions rejected for their effects, keyed by rejection reason.
     /// These rejections apply until a rollback or network upgrade.
     ///
-    /// Any transaction with the same `transaction::Hash` is invalid.
+    /// Any transaction with the same [`transaction::Hash`] is invalid.
     ///
-    /// An [`EvictionList`] is used for both randomly evicted and expired transactions,
-    /// even if it is only needed for the evicted ones. This was done just to simplify
-    /// the existing code; there is no harm in having a timeout for expired transactions
-    /// too since re-checking expired transactions is cheap.
-    // If this code is ever refactored and the lists are split in different fields,
-    // then we can use an `EvictionList` just for the evicted list.
+    /// An [`EvictionList`] is used for both randomly evicted and expired
+    /// transactions, even if it is only needed for the evicted ones. This was
+    /// done just to simplify the existing code; there is no harm in having a
+    /// timeout for expired transactions too since re-checking expired
+    /// transactions is cheap.
+    // If this code is ever refactored and the lists are split in different
+    // fields, then we can use an `EvictionList` just for the evicted list.
     chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
 
     /// The mempool transaction eviction age limit.
-    /// Same as [`Config::eviction_memory_time`].
+    /// Same as [`config::Config::eviction_memory_time`].
     eviction_memory_time: Duration,
 
     /// Max total cost of the verified mempool set, beyond which transactions
@@ -167,7 +169,7 @@ impl Storage {
     /// These errors should not be propagated to peers, because the transactions are valid.
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
-    /// as [`StorageRejectionError::RandomlyEvicted`].
+    /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
     pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -202,6 +204,9 @@ impl Storage {
         // > one would `exceed mempooltxcostlimit`, then the node MUST repeatedly call
         // > EvictTransaction (with the new transaction included as a candidate to evict) until the
         // > total cost does not exceed `mempooltxcostlimit`.
+        //
+        // 'EvictTransaction' is equivalent to [`VerifiedSet::evict_one()`] in
+        // our implementation.
         //
         // [ZIP-401]: https://zips.z.cash/zip-0401
         while self.verified.total_cost() > self.tx_cost_limit {
@@ -308,7 +313,7 @@ impl Storage {
         self.verified.transactions().map(|tx| tx.id)
     }
 
-    /// Returns the set of [`UnminedTx`]es in the mempool.
+    /// Returns the set of [`UnminedTx`]s in the mempool.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
         self.verified.transactions()
     }
@@ -319,10 +324,11 @@ impl Storage {
         self.verified.transaction_count()
     }
 
-    /// Returns the set of [`UnminedTx`]es with exactly matching
-    /// `tx_ids` in the mempool.
+    /// Returns the set of [`UnminedTx`]es with exactly matching `tx_ids` in the
+    /// mempool.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    /// This matches the exact transaction, with identical blockchain effects,
+    /// signatures, and proofs.
     pub fn transactions_exact(
         &self,
         tx_ids: HashSet<UnminedTxId>,
@@ -335,7 +341,8 @@ impl Storage {
     /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
     /// the mempool.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    /// This matches the exact transaction, with identical blockchain effects,
+    /// signatures, and proofs.
     pub fn contains_transaction_exact(&self, txid: &UnminedTxId) -> bool {
         self.verified.transactions().any(|tx| &tx.id == txid)
     }
@@ -454,9 +461,14 @@ impl Storage {
     }
 
     /// Remove transactions from the mempool if they have not been mined after a
-    /// specified height.
+    /// specified height, per [ZIP-203].
     ///
-    /// https://zips.z.cash/zip-0203#specification
+    /// > Transactions will have a new field, nExpiryHeight, which will set the
+    /// > block height after which transactions will be removed from the mempool
+    /// > if they have not been mined.
+    ///
+    ///
+    /// [ZIP-203]: https://zips.z.cash/zip-0203#specification
     pub fn remove_expired_transactions(
         &mut self,
         tip_height: zebra_chain::block::Height,
