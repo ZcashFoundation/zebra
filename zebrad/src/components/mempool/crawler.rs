@@ -1,6 +1,51 @@
 //! Zebra Mempool crawler.
 //!
-//! The crawler periodically requests transactions from peers in order to populate the mempool.
+//! The [`Crawler`] periodically requests transactions from peers in order to populate the mempool.
+//!
+//! Crawling only happens when the local node has synchronized the chain to be close to its tip. If
+//! synchronization is still happening at a fast rate, the crawler will stay disabled until it
+//! slows down.
+//!
+//! Once enabled, the crawler will periodically request [`FANOUT`] number of peers for transactions
+//! from the `peer_set` specified when it started. These crawl iterations occur at most once per
+//! [`RATE_LIMIT_DELAY`]. The received transaction IDs are forwarded to the `mempool` service so
+//! that they can be downloaded and included in the mempool.
+//!
+//! # Example
+//!
+//! ```compile_fail
+//! use zebrad::components::mempool;
+//! #
+//! # use zebra_chain::parameters::Network;
+//! # use zebra_state::ChainTipSender;
+//! # use zebra_test::mock_service::MockService;
+//! # use zebrad::components::sync::SyncStatus;
+//! #
+//! # let runtime = tokio::runtime::Builder::new_current_thread()
+//! #     .enable_all()
+//! #     .build()
+//! #     .expect("Failed to create Tokio runtime");
+//! # let _guard = runtime.enter();
+//! #
+//! # let peer_set_service = MockService::build().for_unit_tests();
+//! # let mempool_service = MockService::build().for_unit_tests();
+//! # let (sync_status, _) = SyncStatus::new();
+//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, Network::Mainnet);
+//!
+//! let crawler_task = mempool::Crawler::spawn(
+//!     &mempool::Config::default(),
+//!     peer_set_service,
+//!     mempool_service,
+//!     sync_status,
+//!     chain_tip_change,
+//! );
+//!
+//! # // Won't actually crawl because the sender endpoint of `sync_status` was dropped immediately
+//! # // when it was created.
+//! # runtime.block_on(async move {
+//! crawler_task.await;
+//! # });
+//! ```
 
 use std::{collections::HashSet, time::Duration};
 
