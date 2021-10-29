@@ -53,6 +53,7 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 
 #### Sprout
 - Validation of Sprout anchors
+- Validation of JoinSplit proofs using BCTV14 verifier
 - Validation of transaction lock times
 - Validation of sprout note commitment trees
 
