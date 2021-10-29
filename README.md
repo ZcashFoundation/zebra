@@ -10,7 +10,7 @@
 
 - [Contents](#contents)
 - [About](#about)
-- [Alpha Releases](#alpha-releases)
+- [Beta Releases](#beta-releases)
 - [Getting Started](#getting-started)
 - [Current Features](#current-features)
 - [Known Issues](#known-issues)
