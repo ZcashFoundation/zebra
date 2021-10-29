@@ -248,6 +248,14 @@ pub enum MetaAddrChange {
         addr: SocketAddr,
         services: Option<PeerServices>,
     },
+
+    AddPeer {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr_strategy()")
+        )]
+        addr: SocketAddr,
+    },
 }
 
 impl MetaAddr {
@@ -344,6 +352,14 @@ impl MetaAddr {
         // TODO: if the peer shut down in the Responded state, preserve that
         // state. All other states should be treated as (timeout) errors.
         MetaAddr::new_errored(addr, services.into())
+    }
+
+    /// Returns a [`MetaAddrChange::AddPeer`] for a peer that was excluded from
+    /// the list of the initial peers.
+    pub fn new_peer(addr: SocketAddr) -> MetaAddrChange {
+        AddPeer {
+            addr: canonical_socket_addr(addr),
+        }
     }
 
     /// Returns the time of the last successful interaction with this peer.
@@ -558,7 +574,8 @@ impl MetaAddrChange {
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr,
+            | UpdateFailed { addr, .. }
+            | AddPeer { addr } => *addr,
         }
     }
 
@@ -573,7 +590,8 @@ impl MetaAddrChange {
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr = new_addr,
+            | UpdateFailed { addr, .. }
+            | AddPeer { addr } => *addr = new_addr,
         }
     }
 
@@ -592,6 +610,7 @@ impl MetaAddrChange {
             // TODO: split untrusted and direct services (#2234)
             UpdateResponded { services, .. } => Some(*services),
             UpdateFailed { services, .. } => *services,
+            AddPeer { .. } => None,
         }
     }
 
@@ -608,6 +627,7 @@ impl MetaAddrChange {
             UpdateAttempt { .. } => None,
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,
+            AddPeer { .. } => None,
         }
     }
 
@@ -623,6 +643,7 @@ impl MetaAddrChange {
             UpdateAttempt { .. } => Some(Instant::now()),
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,
+            AddPeer { .. } => None,
         }
     }
 
@@ -640,6 +661,7 @@ impl MetaAddrChange {
             //   reconnection attempts.
             UpdateResponded { .. } => Some(DateTime32::now()),
             UpdateFailed { .. } => None,
+            AddPeer { .. } => None,
         }
     }
 
@@ -657,6 +679,7 @@ impl MetaAddrChange {
             // - the peer will appear to be used for longer, delaying future
             //   reconnection attempts.
             UpdateFailed { .. } => Some(Instant::now()),
+            AddPeer { .. } => None,
         }
     }
 
@@ -670,6 +693,7 @@ impl MetaAddrChange {
             UpdateAttempt { .. } => AttemptPending,
             UpdateResponded { .. } => Responded,
             UpdateFailed { .. } => Failed,
+            AddPeer { .. } => NeverAttemptedGossiped,
         }
     }
 
@@ -688,7 +712,11 @@ impl MetaAddrChange {
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
             }),
-            UpdateAttempt { .. } | UpdateResponded { .. } | UpdateFailed { .. } => None,
+
+            UpdateAttempt { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. }
+            | AddPeer { .. } => None,
         }
     }
 

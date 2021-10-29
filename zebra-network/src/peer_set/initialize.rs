@@ -29,7 +29,7 @@ use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     constants,
-    meta_addr::MetaAddr,
+    meta_addr::{MetaAddr, MetaAddrChange},
     peer::{self, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     timestamp_collector::TimestampCollector,
@@ -117,7 +117,7 @@ where
             .with_config(config.clone())
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
-            .with_timestamp_collector(timestamp_collector)
+            .with_timestamp_collector(timestamp_collector.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
             .with_latest_chain_tip(latest_chain_tip)
@@ -176,6 +176,7 @@ where
         config.clone(),
         outbound_connector.clone(),
         peerset_tx.clone(),
+        timestamp_collector,
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
 
@@ -231,6 +232,7 @@ async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: mpsc::Sender<PeerChange>,
+    timestamp_collector: mpsc::Sender<MetaAddrChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<
@@ -240,7 +242,7 @@ where
         > + Clone,
     S::Future: Send + 'static,
 {
-    let initial_peers = limit_initial_peers(&config).await;
+    let initial_peers = limit_initial_peers(&config, timestamp_collector).await;
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
@@ -358,26 +360,34 @@ where
 /// `peerset_initial_target_size`.
 ///
 /// The result is randomly chosen entries from the provided set of addresses.
-async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
-    let initial_peers = config.initial_peers().await;
-    let initial_peer_count = initial_peers.len();
+async fn limit_initial_peers(
+    config: &Config,
+    mut timestamp_collector: mpsc::Sender<MetaAddrChange>,
+) -> HashSet<SocketAddr> {
+    let all_peers = config.initial_peers().await;
+    let peers_count = all_peers.len();
 
     // Limit the number of initial peers to `config.peerset_initial_target_size`
-    if initial_peer_count > config.peerset_initial_target_size {
+    if peers_count > config.peerset_initial_target_size {
         info!(
             "Limiting the initial peers list from {} to {}",
-            initial_peer_count, config.peerset_initial_target_size
+            peers_count, config.peerset_initial_target_size
         );
     }
 
-    let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
+    // Split all the peers into the `initial_peers` that will be returned and
+    // `unused_peers` that will be sent to the address book.
+    let mut all_peers: Vec<SocketAddr> = all_peers.iter().copied().collect();
+    let (initial_peers, unused_peers) =
+        all_peers.partial_shuffle(&mut rand::thread_rng(), config.peerset_initial_target_size);
 
-    // TODO: add unused peers to the AddressBook (#2931)
-    //       https://docs.rs/rand/0.8.4/rand/seq/trait.SliceRandom.html#tymethod.partial_shuffle
-    initial_peers_vect
-        .choose_multiple(&mut rand::thread_rng(), config.peerset_initial_target_size)
-        .copied()
-        .collect()
+    // Send the unused peers to the address book.
+    for peer in unused_peers {
+        let peer_addr = MetaAddr::new_peer(*peer);
+        let _ = timestamp_collector.send(peer_addr).await;
+    }
+
+    initial_peers.iter().copied().collect()
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
@@ -390,7 +400,7 @@ async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
 ///
 /// If opening the listener fails.
 #[instrument(skip(config), fields(addr = ?config.listen_addr))]
-async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
+pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     // Warn if we're configured using the wrong network port.
     use Network::*;
     let wrong_net = match config.network {

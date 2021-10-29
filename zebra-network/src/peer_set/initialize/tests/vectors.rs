@@ -44,6 +44,7 @@ use crate::{
         ActiveConnectionCounter, CandidateSet,
     },
     protocol::types::PeerServices,
+    timestamp_collector::TimestampCollector,
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -1136,7 +1137,7 @@ async fn add_initial_peers_is_rate_limited() {
     let before = Instant::now();
 
     let (initial_peers_task_handle, peerset_rx) =
-        spawn_add_initial_peers(PEER_COUNT, outbound_connector);
+        spawn_add_initial_peers(PEER_COUNT, outbound_connector).await;
     let connections = peerset_rx.take(PEER_COUNT).collect::<Vec<_>>().await;
 
     let elapsed = Instant::now() - before;
@@ -1436,7 +1437,7 @@ where
 /// Dummy IPs are used.
 ///
 /// Returns the task [`JoinHandle`], and the peer set receiver.
-fn spawn_add_initial_peers<C>(
+async fn spawn_add_initial_peers<C>(
     peer_count: usize,
     outbound_connector: C,
 ) -> (
@@ -1469,7 +1470,10 @@ where
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(peer_count + 1);
 
-    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx);
+    let (_tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+    let (_address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
+
+    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, timestamp_collector);
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx)
