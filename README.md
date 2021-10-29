@@ -19,11 +19,11 @@ Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashF
 
 The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node, except for:
 
-- mempool transactions,
-- block subsidies,
-- transaction fees,
-- some undocumented rules derived from Bitcoin, and
-- some consensus rules removed before Canopy activation. (Zebra checkpoints on Canopy activation.)
+- Mempool transactions
+- Block subsidies
+- Transaction fees
+- Some undocumented rules derived from Bitcoin
+- Some consensus rules removed before Canopy activation (Zebra checkpoints on Canopy activation)
 
 Zebra's network stack is interoperable with zcashd.
 Zebra implements all the features required to reach Zcash network consensus.
@@ -33,7 +33,7 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 #### NU5
 - ZIP-155 - Parse addrv2 in Zebra
 - Full validation of Orchard transactions from NU5 onwards
-   - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set #2433
+   - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set
    - Validation of Orchard anchors
    - Validation of Halo2 proofs
    - Validation of orchard note commitment trees
