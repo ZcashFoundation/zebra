@@ -4,6 +4,62 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.0) - 2021-10-29
+
+This is the first beta release of Zebra. Today the mempool work is fully finished and compatible with [ZIP-401](https://zips.z.cash/zip-0401) and several security issues in the network stack are fixed. In addition to that we improved our documentation specially in the `zebrad` crate while we increased our test coverage. Finally, we get started with the task of upgrading Tokio to version 1.
+
+### Added
+
+#### Mempool
+
+- ZIP-401: weighted random mempool eviction (#2889, #2932)
+- Reject a mempool transaction if it has internal spend conflicts (#2843)
+- Limit transaction size in the mempool (#2917)
+
+#### Cleanup and performance
+
+- Remove unused mempool errors (#2941)
+- Simplify calling add_initial_peers (#2945)
+- Disable the new clippy::question_mark lint (#2946)
+- Downgrade startup logs to debug to speed up CI (#2938)
+- Speed up alternative state and zebrad tests in CI (#2929)
+
+#### Tests
+
+- Restore and update mempool tests (#2966)
+- Test multiple chain resets (#2897)
+
+### Security
+
+- Track the number of active inbound and outbound peer connections so we can implement limits (#2912)
+- Limit the number of initial peers (#2913)
+- Rate-limit initial seed peer connections (#2943)
+- Limit the number of inbound peer connections (#2961)
+- Rate limit inbound connections (#2928)
+- Limit the number of outbound peer connections (#2944)
+- Reduce outgoing peers demand (#2969)
+
+### Documentation
+
+- Improve main `README` documentation and other book sections (#2967, #2894) 
+- Expand documentation for the mempool::crawler module (#2968)
+- Improve mempool documentation (#2942, #2963, #2964, #2965)
+- Improve documentation and types in the PeerSet (#2925)
+- Update the documentation for value pools (#2919)
+- Document why `CheckForVerifiedTransactions` is required for correctness (#2955)
+
+#### Metrics
+
+- Add user agent metrics (#2957)
+
+### Changed
+
+Part of the Tokio version 1 upgrade:
+
+- Manually pin Sleep futures (#2914)
+- Refactor handshake rate limiting to not store a Sleep type (#2915)
+- Use single thread Tokio runtime for tests (#2916)
+
 ## [Zebra 1.0.0-alpha.19](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.19) - 2021-10-19
 
 Zebra's latest alpha updates dependencies, improves metrics, gossips verified blocks and transactions, and continues the mempool-related implementation.

@@ -6,66 +6,151 @@
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
+## Contents
+
+- [Contents](#contents)
+- [About](#about)
+- [Beta Releases](#beta-releases)
+- [Getting Started](#getting-started)
+- [Current Features](#current-features)
+- [Known Issues](#known-issues)
+- [Future Work](#future-work)
+- [Documentation](#documentation)
+- [Security](#security)
+- [License](#license)
+
 ## About
 
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
-consensus-compatible implementation of the Zcash protocol, currently under
-development.  Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
+consensus-compatible implementation of a Zcash node, currently under
+development. It can be used to join the Zcash peer-to-peer network, which helps
+keeping Zcash working by validating and broadcasting transactions, and maintaining
+the Zcash blockchain state in a distributed manner.
+Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
 like to find out more or get involved!
 
-## Alpha Releases
+Zcash is a cryptocurrency designed to preserve the user's privacy. Like most
+cryptocurrencies, it works by a collection of software nodes run by members of
+the Zcash community or any other interested parties. The nodes talk to each
+other in peer-to-peer fashion in order to maintain the state of the Zcash
+blockchain. They also communicate with miners who create news blocks. When a
+Zcash user sends Zcash, their wallet broadcasts transactions to these nodes
+which will eventually reach miners, and the mined transaction will then go
+through Zcash nodes until they reach the recipient's wallet which will report
+the received Zcash to the recipient.
 
-Every few weeks, we release a new Zebra alpha release.
+The original Zcash node is named `zcashd` and is developed by the Electric Coin
+Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
+an independent Zcash node implementation developed from scratch. Since they
+implement the same protocol, `zcashd` and Zebra nodes can communicate with each
+other.
 
-The goals of the alpha release series are to:
-- participate in the Zcash network,
-- replicate the Zcash chain state,
-- implement the Zcash proof of work consensus rules, and
-- sync on Mainnet under excellent network conditions.
+If you just want to send and receive Zcash then you don't need to use Zebra
+directly. You can download a Zcash wallet application which will handle that
+for you. (Eventually, Zebra can be used by wallets to implement their
+functionality.) You would want to run Zebra if you want to contribute to the
+Zcash network: the more nodes are run, the more reliable the network will be
+in terms of speed and resistance to denial of service attacks, for example.
 
-Currently, Zebra does not validate all the Zcash consensus rules. It may be
+These are some of advantages or benefits of Zebra:
+
+- Better performance: since it was implemented from scratch, Zebra was able to be
+  implemented in a manner that is currently faster than `zcashd`.
+- Better security: since it is developed in a memory-safe language (Rust), Zebra
+  is less likely to be affected by security bugs that could compromise the
+  environment where it is run.
+- Better governance: with a new node deployment, there will be more developers
+  who can implement different features.
+- Dev accessibility: there will be more developers which gives new developers
+  options for contributing to protocol development.
+- Runtime safety: the detection of consensus bugs can happen quicker, preventing
+  the likelihood of black swan events.
+- Spec safety: with several node implementations, it is much easier to notice
+  bugs and ambiguity in protocol specification.
+- User options: different nodes present different features and tradeoffs for
+  users to decide on their preferred options.
+- Additional contexts: wider target deployments for people to use a consensus
+  node in more contexts e.g. mobile, wasm, etc.
+
+## Beta Releases
+
+Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashFoundation/zebra/releases).
+
+The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node, except for:
+
+- Mempool transactions
+- Block subsidies
+- Transaction fees
+- Some undocumented rules derived from Bitcoin
+- Some consensus rules removed before Canopy activation (Zebra checkpoints on Canopy activation)
+
+Zebra's network stack is interoperable with zcashd.
+Zebra implements all the features required to reach Zcash network consensus.
+
+Currently, Zebra does not validate the following Zcash consensus rules:
+
+#### NU5
+- ZIP-155 - Parse addrv2 in Zebra
+- Full validation of Orchard transactions from NU5 onwards
+   - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set
+   - Validation of Orchard anchors
+   - Validation of Halo2 proofs
+   - Validation of orchard note commitment trees
+
+#### NU4 - Canopy
+- Calculation of Block Subsidy and Funding streams
+- Validation of coinbase miner subsidy and miner fees
+- Validation of shielded outputs for coinbase transactions (ZIP-212/ZIP-213)
+
+#### NU1 - Sapling
+- Validation of Sapling anchors
+- Validation of sapling note commitment trees
+- Validation of JoinSplit proofs using Groth16 verifier
+
+#### NU0 - Overwinter
+- ZIP-203: Transaction Expiry consensus rules
+
+#### Sprout
+- Validation of Sprout anchors
+- Validation of JoinSplit proofs using BCTV14 verifier
+- Validation of transaction lock times
+- Validation of sprout note commitment trees
+
+It may be
 unreliable on Testnet, and under less-than-perfect network conditions. See
 our [current features](#current-features) and [roadmap](#future-work) for
 details.
 
-### Getting Started
+## Getting Started
 
 Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
 
-#### Detailed Build and Run Instructions
+### Build and Run Instructions
+
+`zebrad` is still under development, so there is no supported packaging or
+install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
+for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-     - Using `rustup` installs the stable Rust toolchain, which `zebrad` targets.
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-alpha.19 zebrad`
-4. Run `zebrad start`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.0 zebrad`
+4. Run `zebrad start` (see [Running Zebra](user/run.md) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
 that there is a lot of key functionality still missing.
 
-#### Build Troubleshooting
-
-If you're having trouble with:
-- **dependencies:**
-  - install both `libclang` and `clang` - they are usually different packages
-  - use `cargo install` without `--locked` to build with the latest versions of each dependency
-- **libclang:** check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
-- **g++ or MSVC++:** try using clang or Xcode instead
-- **rustc:** use rustc 1.48 or later
-  - Zebra does not have a minimum supported Rust version (MSRV) policy yet
+For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
 
 ### System Requirements
 
-We usually build `zebrad` on systems with:
-- 2+ CPU cores
-- 7+ GB RAM
-- 14+ GB of disk space
-
-On many-core machines (like, 32-core) the build is very fast; on 2-core machines
-it's less fast.
+The recommended requirements for compiling and running `zebrad` are:
+- 4+ CPU cores
+- 16+ GB RAM
+- 50GB+ available disk space for finalized state
+- 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
 - Windows Server 2019
@@ -73,14 +158,10 @@ We continuously test that our builds and tests pass on:
 - Ubuntu 18.04 / the latest LTS
 - Debian Buster
 
-We usually run `zebrad` on systems with:
-- 4+ CPU cores
-- 16+ GB RAM
-- 50GB+ available disk space for finalized state
-- 100+ Mbps network connections
-
 `zebrad` might build and run fine on smaller and slower systems - we haven't
 tested its exact limits yet.
+
+For more detailed requirements, refer to the [documentation](https://zebra.zfnd.org/user/requirements.html).
 
 ### Network Ports and Data Usage
 
@@ -88,85 +169,77 @@ By default, Zebra uses the following inbound TCP listener ports:
 - 8233 on Mainnet
 - 18233 on Testnet
 
-If Zebra is configured with a specific [`listen_addr`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.listen_addr),
-it will advertise this address to other nodes for inbound connections.
-
-Zebra makes outbound connections to peers on any port.
-But `zcashd` prefers peers on the default ports,
-so that it can't be used for DDoS attacks on other networks.
-
 `zebrad`'s typical network usage is:
-- initial sync: 30 GB download
-- ongoing updates: 10-50 MB upload and download per day, depending on peer requests
+- Initial sync: 30 GB download
+- Ongoing updates: 10-50 MB upload and download per day, depending on peer requests
 
-The major constraint we've found on `zebrad` performance is the network weather,
-especially the ability to make good connections to other Zcash network peers.
+For more detailed information, refer to the [documentation](https://zebra.zfnd.org/user/run.html).
 
-### Current Features
+## Current Features
 
 Network:
-- synchronize the chain from peers
-- download gossiped blocks from peers
-- answer inbound peer requests for hashes, headers, and blocks
+- Synchronize the chain from peers
+- Maintain a transaction mempool
+- Download gossiped blocks and transactions from peers
+- Answer inbound peer requests for hashes, headers, blocks and transactions
 
 State:
-- persist block, transaction, UTXO, and nullifier indexes
-- handle chain reorganizations
+- Persist block, transaction, UTXO, and nullifier indexes
+- Handle chain reorganizations
 
 Proof of Work:
-- validate equihash, block difficulty threshold, and difficulty adjustment
-- validate transaction merkle roots
+- Validate equihash, block difficulty threshold, and difficulty adjustment
+- Validate transaction merkle roots
 
 Validating proof of work increases the cost of creating a consensus split
 between `zebrad` and `zcashd`.
 
 This release also implements some other Zcash consensus rules, to check that
-Zebra's [validation architecture](#architecture) supports future work on a
+Zebra's [validation architecture](https://zebra.zfnd.org/dev/overview.html#architecture)
+supports future work on a
 full validating node:
-- block and transaction structure
-- checkpoint-based verification up to and including Canopy activation
-- transaction validation (incomplete)
-- transaction cryptography (incomplete)
-- transaction scripts (incomplete)
-- batch verification (incomplete)
+- Block and transaction structure
+- Checkpoint-based verification up to and including Canopy activation
+- Transaction validation (incomplete)
+- Transaction cryptography (incomplete)
+- Transaction scripts (incomplete)
+- Batch verification (incomplete)
 
-### Dependencies
-
-Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
-- [rocksdb](https://crates.io/crates/rocksdb)
-- [zcash_script](https://crates.io/crates/zcash_script)
-
-### Known Issues
+## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
+- [When Zebra receives an unexpected network message from a peer, it disconnects from that peer #2107](https://github.com/ZcashFoundation/zebra/issues/2107)
+- [A Zebra instance could be used to pollute the peer addresses of other nodes #1889](https://github.com/ZcashFoundation/zebra/issues/1889)
+- [Zebra's address book can use all available memory #1873](https://github.com/ZcashFoundation/zebra/issues/1873)
+- [Zebra's address book can be flooded or taken over #1869](https://github.com/ZcashFoundation/zebra/issues/1869)
+- [Zebra does not evict pre-upgrade peers from the peer set across a network upgrade #706](https://github.com/ZcashFoundation/zebra/issues/706)
+- [Zebra accepts non-minimal height encodings #2226](https://github.com/ZcashFoundation/zebra/issues/2226)
+- [Zebra nodes continually try to contact peers that always fail #1865](https://github.com/ZcashFoundation/zebra/issues/1865)
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
-- [Duplicate block errors #1372](https://github.com/ZcashFoundation/zebra/issues/1372)
-  - These errors can be ignored, unless they happen frequently
 
 Zebra's state commits changes using database transactions.
 If you forcibly terminate it, or it panics, any incomplete changes will be rolled back the next time it starts.
 
 ## Future Work
 
-In 2021, we intend to finish validation, add RPC support, and add wallet integration.
+In 2021, we intend to finish NU5 validation, start adding RPC support and start adding wallet integrations.
 This phased approach allows us to test Zebra's independent implementation of the
 consensus rules, before asking users to entrust it with their funds.
 
 Features:
-- full consensus rule validation
-- transaction mempool
-- wallet functionality
+- Full consensus rule validation
+- Wallet functionality
 - RPC functionality
 
 Performance and Reliability:
-- reliable syncing on Testnet
-- reliable syncing under poor network conditions
-- batch verification
-- performance tuning
+- Reliable syncing on Testnet
+- Reliable syncing under poor network conditions
+- Batch verification
+- Performance tuning
 
 ## Documentation
 
@@ -176,80 +249,6 @@ developer documentation, such as design documents.  We also render [API
 documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
 as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
 private APIs.
-
-## Architecture
-
-Unlike `zcashd`, which originated as a Bitcoin Core fork and inherited its
-monolithic architecture, Zebra has a modular, library-first design, with the
-intent that each component can be independently reused outside of the `zebrad`
-full node.  For instance, the `zebra-network` crate containing the network stack
-can also be used to implement anonymous transaction relay, network crawlers, or
-other functionality, without requiring a full node.
-
-At a high level, the fullnode functionality required by `zebrad` is factored
-into several components:
-
-- [`zebra-chain`](https://doc.zebra.zfnd.org/zebra_chain/index.html), providing
-  definitions of core data structures for Zcash, such as blocks, transactions,
-  addresses, etc., and related functionality.  It also contains the
-  implementation of the consensus-critical serialization formats used in Zcash.
-  The data structures in `zebra-chain` are defined to enforce
-  [*structural validity*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
-  by making invalid states unrepresentable.  For instance, the
-  `Transaction` enum has variants for each transaction version, and it's
-  impossible to construct a transaction with, e.g., spend or output
-  descriptions but no binding signature, or, e.g., a version 2 (Sprout)
-  transaction with Sapling proofs.  Currently, `zebra-chain` is oriented
-  towards verifying transactions, but will be extended to support creating them
-  in the future.
-
-- [`zebra-network`](https://doc.zebra.zfnd.org/zebra_network/index.html),
-  providing an asynchronous, multithreaded implementation of the Zcash network
-  protocol inherited from Bitcoin.  In contrast to `zcashd`, each peer
-  connection has a separate state machine, and the crate translates the
-  external network protocol into a stateless, request/response-oriented
-  protocol for internal use.  The crate provides two interfaces:
-  - an auto-managed connection pool that load-balances local node requests
-    over available peers, and sends peer requests to a local inbound service,
-    and
-  - a `connect_isolated` method that produces a peer connection completely
-    isolated from all other node state.  This can be used, for instance, to
-    safely relay data over Tor, without revealing distinguishing information.
-
-- [`zebra-script`](https://doc.zebra.zfnd.org/zebra_script/index.html) provides
-  script validation.  Currently, this is implemented by linking to the C++
-  script verification code from `zcashd`, but in the future we may implement a
-  pure-Rust script implementation.
-
-- [`zebra-consensus`](https://doc.zebra.zfnd.org/zebra_consensus/index.html)
-  performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
-  of blocks and transactions: all consensus
-  rules that can be checked independently of the chain state, such as
-  verification of signatures, proofs, and scripts.  Internally, the library
-  uses [`tower-batch`](https://doc.zebra.zfnd.org/tower_batch/index.html) to
-  perform automatic, transparent batch processing of contemporaneous
-  verification requests.
-
-- [`zebra-state`](https://doc.zebra.zfnd.org/zebra_state/index.html) is
-  responsible for storing, updating, and querying the chain state.  The state
-  service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
-  all consensus rules
-  that check whether a new block is a valid extension of an existing chain,
-  such as updating the nullifier set or checking that transaction inputs remain
-  unspent.
-
-- [`zebrad`](https://doc.zebra.zfnd.org/zebrad/index.html) contains the full
-  node, which connects these components together and implements logic to handle
-  inbound requests from peers and the chain sync process.
-
-- `zebra-rpc` and `zebra-client` will eventually contain the RPC and wallet
-  functionality, but as mentioned above, our goal is to implement replication
-  of chain state first before asking users to entrust Zebra with their funds.
-
-All of these components can be reused as independent libraries, and all
-communication between stateful components is handled internally by
-[internal asynchronous RPC abstraction](https://docs.rs/tower/)
-("microservices in one process").
 
 ## Security
 
