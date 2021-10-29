@@ -39,7 +39,7 @@ The following are general desiderata for Zebra:
 Unlike `zcashd`, which originated as a Bitcoin Core fork and inherited its
 monolithic architecture, Zebra has a modular, library-first design, with the
 intent that each component can be independently reused outside of the `zebrad`
-full node.  For instance, the `zebra-network` crate containing the network stack
+full node. For instance, the `zebra-network` crate containing the network stack
 can also be used to implement anonymous transaction relay, network crawlers, or
 other functionality, without requiring a full node.
 
@@ -52,20 +52,20 @@ into several components:
   implementation of the consensus-critical serialization formats used in Zcash.
   The data structures in `zebra-chain` are defined to enforce
   [*structural validity*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
-  by making invalid states unrepresentable.  For instance, the
+  by making invalid states unrepresentable. For instance, the
   `Transaction` enum has variants for each transaction version, and it's
   impossible to construct a transaction with, e.g., spend or output
   descriptions but no binding signature, or, e.g., a version 2 (Sprout)
-  transaction with Sapling proofs.  Currently, `zebra-chain` is oriented
+  transaction with Sapling proofs. Currently, `zebra-chain` is oriented
   towards verifying transactions, but will be extended to support creating them
   in the future.
 
 - [`zebra-network`](https://doc.zebra.zfnd.org/zebra_network/index.html),
   providing an asynchronous, multithreaded implementation of the Zcash network
-  protocol inherited from Bitcoin.  In contrast to `zcashd`, each peer
+  protocol inherited from Bitcoin. In contrast to `zcashd`, each peer
   connection has a separate state machine, and the crate translates the
   external network protocol into a stateless, request/response-oriented
-  protocol for internal use.  The crate provides two interfaces:
+  protocol for internal use. The crate provides two interfaces:
   - an auto-managed connection pool that load-balances local node requests
     over available peers, and sends peer requests to a local inbound service,
     and
@@ -74,7 +74,7 @@ into several components:
     safely relay data over Tor, without revealing distinguishing information.
 
 - [`zebra-script`](https://doc.zebra.zfnd.org/zebra_script/index.html) provides
-  script validation.  Currently, this is implemented by linking to the C++
+  script validation. Currently, this is implemented by linking to the C++
   script verification code from `zcashd`, but in the future we may implement a
   pure-Rust script implementation.
 
@@ -82,13 +82,13 @@ into several components:
   performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
   of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
-  verification of signatures, proofs, and scripts.  Internally, the library
+  verification of signatures, proofs, and scripts. Internally, the library
   uses [`tower-batch`](https://doc.zebra.zfnd.org/tower_batch/index.html) to
   perform automatic, transparent batch processing of contemporaneous
   verification requests.
 
 - [`zebra-state`](https://doc.zebra.zfnd.org/zebra_state/index.html) is
-  responsible for storing, updating, and querying the chain state.  The state
+  responsible for storing, updating, and querying the chain state. The state
   service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
   all consensus rules
   that check whether a new block is a valid extension of an existing chain,
