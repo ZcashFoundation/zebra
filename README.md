@@ -15,7 +15,7 @@ like to find out more or get involved!
 
 ## Beta Releases
 
-Every few weeks, we release a new Zebra beta release.
+Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashFoundation/zebra/releases).
 
 The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node, except for:
 
