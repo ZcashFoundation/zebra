@@ -140,8 +140,9 @@ especially the ability to make good connections to other Zcash network peers.
 
 Network:
 - synchronize the chain from peers
-- download gossiped blocks from peers
-- answer inbound peer requests for hashes, headers, and blocks
+- maintain a transaction mempool
+- download gossiped blocks and transactions from peers
+- answer inbound peer requests for hashes, headers, blocks and transactions
 
 State:
 - persist block, transaction, UTXO, and nullifier indexes
