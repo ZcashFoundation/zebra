@@ -6,6 +6,19 @@
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
+## Contents
+
+- [Contents](#contents)
+- [About](#about)
+- [Alpha Releases](#alpha-releases)
+- [Getting Started](#getting-started)
+- [Current Features](#current-features)
+- [Known Issues](#known-issues)
+- [Future Work](#future-work)
+- [Documentation](#documentation)
+- [Security](#security)
+- [License](#license)
+
 ## About
 
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
@@ -74,12 +87,12 @@ unreliable on Testnet, and under less-than-perfect network conditions. See
 our [current features](#current-features) and [roadmap](#future-work) for
 details.
 
-### Getting Started
+## Getting Started
 
 Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
 
-#### Build and Run Instructions
+### Build and Run Instructions
 
 `zebrad` is still under development, so there is no supported packaging or
 install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
@@ -128,7 +141,7 @@ By default, Zebra uses the following inbound TCP listener ports:
 
 For more detailed information, refer to the [documentation](https://zebra.zfnd.org/user/run.html).
 
-### Current Features
+## Current Features
 
 Network:
 - synchronize the chain from peers
@@ -156,7 +169,7 @@ full validating node:
 - transaction scripts (incomplete)
 - batch verification (incomplete)
 
-### Known Issues
+## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
