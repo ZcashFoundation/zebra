@@ -170,26 +170,26 @@ By default, Zebra uses the following inbound TCP listener ports:
 - 18233 on Testnet
 
 `zebrad`'s typical network usage is:
-- initial sync: 30 GB download
-- ongoing updates: 10-50 MB upload and download per day, depending on peer requests
+- Initial sync: 30 GB download
+- Ongoing updates: 10-50 MB upload and download per day, depending on peer requests
 
 For more detailed information, refer to the [documentation](https://zebra.zfnd.org/user/run.html).
 
 ## Current Features
 
 Network:
-- synchronize the chain from peers
-- maintain a transaction mempool
-- download gossiped blocks and transactions from peers
-- answer inbound peer requests for hashes, headers, blocks and transactions
+- Synchronize the chain from peers
+- Maintain a transaction mempool
+- Download gossiped blocks and transactions from peers
+- Answer inbound peer requests for hashes, headers, blocks and transactions
 
 State:
-- persist block, transaction, UTXO, and nullifier indexes
-- handle chain reorganizations
+- Persist block, transaction, UTXO, and nullifier indexes
+- Handle chain reorganizations
 
 Proof of Work:
-- validate equihash, block difficulty threshold, and difficulty adjustment
-- validate transaction merkle roots
+- Validate equihash, block difficulty threshold, and difficulty adjustment
+- Validate transaction merkle roots
 
 Validating proof of work increases the cost of creating a consensus split
 between `zebrad` and `zcashd`.
@@ -198,12 +198,12 @@ This release also implements some other Zcash consensus rules, to check that
 Zebra's [validation architecture](https://zebra.zfnd.org/dev/overview.html#architecture)
 supports future work on a
 full validating node:
-- block and transaction structure
-- checkpoint-based verification up to and including Canopy activation
-- transaction validation (incomplete)
-- transaction cryptography (incomplete)
-- transaction scripts (incomplete)
-- batch verification (incomplete)
+- Block and transaction structure
+- Checkpoint-based verification up to and including Canopy activation
+- Transaction validation (incomplete)
+- Transaction cryptography (incomplete)
+- Transaction scripts (incomplete)
+- Batch verification (incomplete)
 
 ## Known Issues
 
@@ -231,15 +231,15 @@ This phased approach allows us to test Zebra's independent implementation of the
 consensus rules, before asking users to entrust it with their funds.
 
 Features:
-- full consensus rule validation
-- wallet functionality
+- Full consensus rule validation
+- Wallet functionality
 - RPC functionality
 
 Performance and Reliability:
-- reliable syncing on Testnet
-- reliable syncing under poor network conditions
-- batch verification
-- performance tuning
+- Reliable syncing on Testnet
+- Reliable syncing under poor network conditions
+- Batch verification
+- Performance tuning
 
 ## Documentation
 
@@ -249,6 +249,7 @@ developer documentation, such as design documents.  We also render [API
 documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
 as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
 private APIs.
+
 ## Security
 
 Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which we encourage security researchers to follow.
