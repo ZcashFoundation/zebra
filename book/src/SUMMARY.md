@@ -2,6 +2,7 @@
 
 [Zebra](README.md)
 - [User Documentation](user.md)
+  - [Zebra System Requirements](user/requirements.md)
   - [Installing Zebra](user/install.md)
   - [Running Zebra](user/run.md)
   - [Tracing Zebra](user/tracing.md)
