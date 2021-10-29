@@ -160,7 +160,8 @@ Validating proof of work increases the cost of creating a consensus split
 between `zebrad` and `zcashd`.
 
 This release also implements some other Zcash consensus rules, to check that
-Zebra's [validation architecture](#architecture) supports future work on a
+Zebra's [validation architecture](https://zebra.zfnd.org/dev/overview.html#architecture)
+supports future work on a
 full validating node:
 - block and transaction structure
 - checkpoint-based verification up to and including Canopy activation
