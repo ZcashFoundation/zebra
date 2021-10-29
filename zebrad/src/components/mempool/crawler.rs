@@ -13,7 +13,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```compile_fail
 //! use zebrad::components::mempool;
 //! #
 //! # use zebra_chain::parameters::Network;
