@@ -543,12 +543,13 @@ pub async fn negotiate_version(
 
     // Check that we got a Version and destructure its fields into the local scope.
     debug!(?remote_msg, "got message from remote peer");
-    let (remote_nonce, remote_services, remote_version, remote_canonical_addr) =
+    let (remote_nonce, remote_services, remote_version, remote_canonical_addr, user_agent) =
         if let Message::Version {
             version,
             services,
             address_from,
             nonce,
+            user_agent,
             ..
         } = remote_msg
         {
@@ -561,7 +562,7 @@ pub async fn negotiate_version(
                 );
             }
 
-            (nonce, services, version, canonical_addr)
+            (nonce, services, version, canonical_addr, user_agent)
         } else {
             Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?
         };
@@ -603,6 +604,7 @@ pub async fn negotiate_version(
             "remote_ip" => their_addr.to_string(),
             "remote_version" => remote_version.to_string(),
             "min_version" => min_version.to_string(),
+            "user_agent" => user_agent,
         );
 
         // the value is the remote version of the most recent rejected handshake from each peer
@@ -633,6 +635,7 @@ pub async fn negotiate_version(
             "remote_version" => remote_version.to_string(),
             "negotiated_version" => negotiated_version.to_string(),
             "min_version" => min_version.to_string(),
+            "user_agent" => user_agent,
         );
 
         // the value is the remote version of the most recent connected handshake from each peer
