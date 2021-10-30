@@ -8,8 +8,8 @@
 //! Major parts of the mempool include:
 //!  * [Mempool Service][`Mempool`]
 //!    * activates when the syncer is near the chain tip
-//!    * spawns download and verify tasks for each crawled or gossiped transaction
-//!    * handles in-memory storage of unmined transactions as [`storage::Storage`]
+//!    * spawns [download and verify tasks][`downloads::Downloads`] for each crawled or gossiped transaction
+//!    * handles in-memory [storage][`storage::Storage`] of unmined transactions
 //!  * [Crawler][`crawler::Crawler`]
 //!    * runs in the background to periodically poll peers for fresh unmined transactions
 //!  * [Queue Checker][`queue_checker::QueueChecker`]
