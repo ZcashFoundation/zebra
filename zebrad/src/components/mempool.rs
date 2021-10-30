@@ -125,7 +125,7 @@ pub enum Request {
     /// because the mempool service is wrapped in a `Buffer`.
     /// Calling [`Buffer::poll_ready`] reserves a buffer slot, which can cause hangs when
     /// too many slots are reserved but unused:
-    /// https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
+    /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
     CheckForVerifiedTransactions,
 }
 

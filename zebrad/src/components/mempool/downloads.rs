@@ -63,7 +63,7 @@ pub(crate) const TRANSACTION_DOWNLOAD_TIMEOUT: Duration = BLOCK_DOWNLOAD_TIMEOUT
 /// consistency.
 ///
 /// This timeout may lead to denial of service, which will be handled in
-/// https://github.com/ZcashFoundation/zebra/issues/2694
+/// [#2694](https://github.com/ZcashFoundation/zebra/issues/2694)
 pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 
 /// The maximum number of concurrent inbound download and verify tasks.
