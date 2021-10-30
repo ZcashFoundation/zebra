@@ -219,9 +219,11 @@ proptest! {
 
                 // services:
                 // check that we only change if there was a handshake
-                if changed_addr.last_connection_state.is_never_attempted()
-                    || changed_addr.last_connection_state == AttemptPending
-                    || change.untrusted_services().is_none() {
+                if addr.services.is_some()
+                    && (changed_addr.last_connection_state.is_never_attempted()
+                        || changed_addr.last_connection_state == AttemptPending
+                        || change.untrusted_services().is_none())
+                {
                     prop_assert_eq!(changed_addr.services, addr.services);
                 }
 
