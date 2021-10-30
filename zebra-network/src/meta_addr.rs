@@ -151,7 +151,7 @@ pub struct MetaAddr {
     /// records, older peer versions, or buggy or malicious peers.
     //
     // TODO: make services private and optional
-    //       split gossiped and handshake services? (#2234)
+    //       split gossiped and handshake services? (#2324)
     pub(crate) services: PeerServices,
 
     /// The unverified "last seen time" gossiped by the remote peer that sent us
@@ -525,7 +525,7 @@ impl MetaAddr {
         Some(MetaAddr {
             addr: canonical_socket_addr(self.addr),
             // TODO: split untrusted and direct services
-            //       sanitize untrusted services to NODE_NETWORK only? (#2234)
+            //       sanitize untrusted services to NODE_NETWORK only? (#2324)
             services: self.services,
             // only put the last seen time in the untrusted field,
             // this matches deserialization, and avoids leaking internal state
@@ -586,10 +586,10 @@ impl MetaAddrChange {
             NewAlternate {
                 untrusted_services, ..
             } => Some(*untrusted_services),
-            // TODO: create a "services implemented by Zebra" constant (#2234)
+            // TODO: create a "services implemented by Zebra" constant (#2324)
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
-            // TODO: split untrusted and direct services (#2234)
+            // TODO: split untrusted and direct services (#2324)
             UpdateResponded { services, .. } => Some(*services),
             UpdateFailed { services, .. } => *services,
         }
@@ -727,7 +727,7 @@ impl MetaAddrChange {
                     // so malicious peers can't keep changing our peer connection order.
                     Some(MetaAddr {
                         addr: self.addr(),
-                        // TODO: or(self.untrusted_services()) when services become optional (#2234)
+                        // TODO: or(self.untrusted_services()) when services become optional (#2324)
                         services: previous.services,
                         untrusted_last_seen: previous
                             .untrusted_last_seen
@@ -831,7 +831,7 @@ impl Ord for MetaAddr {
         // So this comparison will have no impact until Zebra implements
         // more service features.
         //
-        // TODO: order services by usefulness, not bit pattern values (#2234)
+        // TODO: order services by usefulness, not bit pattern values (#2324)
         //       Security: split gossiped and direct services
         let larger_services = self.services.cmp(&other.services);
 
