@@ -76,7 +76,7 @@ const DEFAULT_PROXY_CHANNEL_SIZE: usize = 100;
 ///
 /// Note that if a test checks that no requests are received, each check has to wait for this
 /// amount of time, so this may affect the test execution time.
-const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(500);
+const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(25);
 
 /// An internal type representing the item that's sent in the [`broadcast`] channel.
 ///
