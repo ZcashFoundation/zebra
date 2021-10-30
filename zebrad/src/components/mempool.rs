@@ -1,4 +1,22 @@
 //! Zebra mempool.
+//!
+//! A zebrad application component that manages the active collection, reception,
+//! gossip, verification, in-memory storage, eviction, and rejection of unmined Zcash
+//! transactions (those that have not been confirmed in a mined block on the
+//! blockchain).
+//!
+//! Major parts of the mempool include:
+//!  * [Mempool Service][`Mempool`]
+//!    * activates when the syncer is near the chain tip
+//!    * spawns download and verify tasks for each crawled or gossiped transaction
+//!    * handles in-memory storage of unmined transactions as [`storage::Storage`]
+//!  * [Crawler][`crawler::Crawler`]
+//!    * runs in the background to periodically poll peers for fresh unmined transactions
+//!  * [Queue Checker][`queue_checker::QueueChecker`]
+//!    * runs in the background, polling the mempool to store newly verified transactions
+//!  * [Transaction Gossip Task][`gossip::gossip_mempool_transaction_id`]
+//!    * runs in the background and gossips newly added mempool transactions
+//!      to peers
 
 use std::{
     collections::HashSet,
