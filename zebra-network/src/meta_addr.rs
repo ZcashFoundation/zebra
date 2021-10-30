@@ -150,9 +150,9 @@ pub struct MetaAddr {
     /// `services` from `NeverAttempted` peers may be invalid due to outdated
     /// records, older peer versions, or buggy or malicious peers.
     //
-    // TODO: make services private and optional
+    // TODO: make services private
     //       split gossiped and handshake services? (#2324)
-    pub(crate) services: PeerServices,
+    pub(crate) services: Option<PeerServices>,
 
     /// The unverified "last seen time" gossiped by the remote peer that sent us
     /// this address.
@@ -177,8 +177,7 @@ pub struct MetaAddr {
 
     /// The outcome of our most recent communication attempt with this peer.
     //
-    // TODO: make services private and optional?
-    //       move the time and services fields into PeerAddrState?
+    // TODO: move the time and services fields into PeerAddrState?
     //       then some fields could be required in some states
     pub(crate) last_connection_state: PeerAddrState,
 }
@@ -260,7 +259,7 @@ impl MetaAddr {
     ) -> MetaAddr {
         MetaAddr {
             addr: canonical_socket_addr(addr),
-            services: untrusted_services,
+            services: Some(untrusted_services),
             untrusted_last_seen: Some(untrusted_last_seen),
             last_response: None,
             last_attempt: None,
@@ -274,7 +273,7 @@ impl MetaAddr {
     pub fn new_gossiped_change(self) -> MetaAddrChange {
         NewGossiped {
             addr: canonical_socket_addr(self.addr),
-            untrusted_services: self.services,
+            untrusted_services: self.services.expect("unexpected missing services"),
             untrusted_last_seen: self
                 .untrusted_last_seen
                 .expect("unexpected missing last seen"),
@@ -502,7 +501,12 @@ impl MetaAddr {
     /// - reject `NeverAttempted...` [`MetaAddrChange`]s, and
     /// - temporarily stop outbound connections to a [`MetaAddr`].
     pub fn last_known_info_is_valid_for_outbound(&self) -> bool {
-        self.services.contains(PeerServices::NODE_NETWORK) && self.address_is_valid_for_outbound()
+        let is_node = match self.services {
+            Some(services) => services.contains(PeerServices::NODE_NETWORK),
+            None => true,
+        };
+
+        is_node && self.address_is_valid_for_outbound()
     }
 
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
@@ -524,9 +528,8 @@ impl MetaAddr {
 
         Some(MetaAddr {
             addr: canonical_socket_addr(self.addr),
-            // TODO: split untrusted and direct services
-            //       sanitize untrusted services to NODE_NETWORK only? (#2324)
-            services: self.services,
+            // initial peers are sanitized assuming they are `NODE_NETWORK`
+            services: self.services.or(Some(PeerServices::NODE_NETWORK)),
             // only put the last seen time in the untrusted field,
             // this matches deserialization, and avoids leaking internal state
             untrusted_last_seen: Some(last_seen),
@@ -678,10 +681,7 @@ impl MetaAddrChange {
         match self {
             NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } => Some(MetaAddr {
                 addr: self.addr(),
-                // TODO: make services optional when we add a DNS seeder change and state
-                services: self
-                    .untrusted_services()
-                    .expect("unexpected missing services"),
+                services: self.untrusted_services(),
                 untrusted_last_seen: self.untrusted_last_seen(),
                 last_response: None,
                 last_attempt: None,
@@ -727,8 +727,7 @@ impl MetaAddrChange {
                     // so malicious peers can't keep changing our peer connection order.
                     Some(MetaAddr {
                         addr: self.addr(),
-                        // TODO: or(self.untrusted_services()) when services become optional (#2324)
-                        services: previous.services,
+                        services: previous.services.or_else(|| self.untrusted_services()),
                         untrusted_last_seen: previous
                             .untrusted_last_seen
                             .or_else(|| self.untrusted_last_seen()),
@@ -752,7 +751,7 @@ impl MetaAddrChange {
                     addr: self.addr(),
                     // We want up-to-date services, even if they have fewer bits,
                     // or they are applied out of order.
-                    services: self.untrusted_services().unwrap_or(previous.services),
+                    services: self.untrusted_services().or(previous.services),
                     // Only NeverAttempted changes can modify the last seen field
                     untrusted_last_seen: previous.untrusted_last_seen,
                     // Since Some(time) is always greater than None, `max` prefers:
@@ -885,7 +884,14 @@ impl ZcashSerialize for MetaAddr {
             )
             .zcash_serialize(&mut writer)?;
 
-        writer.write_u64::<LittleEndian>(self.services.bits())?;
+        writer.write_u64::<LittleEndian>(
+            self.services
+                .expect(
+                    "unexpected MetaAddr with missing peer services: MetaAddrs should be \
+                    sanitized before serialization",
+                )
+                .bits(),
+        )?;
 
         writer.write_socket_addr(self.addr)?;
 

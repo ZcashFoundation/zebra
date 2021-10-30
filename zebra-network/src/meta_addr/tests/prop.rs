@@ -52,7 +52,10 @@ proptest! {
             // also check the address, port, and services individually
             prop_assert!(!addr.addr.ip().is_unspecified());
             prop_assert_ne!(addr.addr.port(), 0);
-            prop_assert!(addr.services.contains(PeerServices::NODE_NETWORK));
+
+            if let Some(services) = addr.services {
+                prop_assert!(services.contains(PeerServices::NODE_NETWORK));
+            }
 
             check::sanitize_avoids_leaks(&addr, &sanitized);
         }
