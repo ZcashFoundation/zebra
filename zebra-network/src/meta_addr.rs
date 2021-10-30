@@ -879,10 +879,16 @@ impl Eq for MetaAddr {}
 impl ZcashSerialize for MetaAddr {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         self.last_seen()
-            .expect("unexpected MetaAddr with missing last seen time: MetaAddrs should be sanitized before serialization")
+            .expect(
+                "unexpected MetaAddr with missing last seen time: MetaAddrs should be sanitized \
+                before serialization",
+            )
             .zcash_serialize(&mut writer)?;
+
         writer.write_u64::<LittleEndian>(self.services.bits())?;
+
         writer.write_socket_addr(self.addr)?;
+
         Ok(())
     }
 }
