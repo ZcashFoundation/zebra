@@ -170,7 +170,7 @@ jobs:
           args: --verbose --release
 
   clippy:
-    name: Clippy (stable)
+    name: Clippy (stable) & Cargo.lock
     timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
@@ -204,8 +204,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --all-targets -- -D warnings
 
+      # This check makes sure the crate dependency check is accurate
+      - name: Check Cargo.lock is up to date
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: check
+          args: --locked --all-features --all-targets
+
   fmt:
-    name: Rustfmt
+    name: Rustfmt & Dependencies
     timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
@@ -231,7 +238,21 @@ jobs:
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
-      - uses: actions-rs/cargo@v1.0.3
+      - name: Check rustfmt
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: fmt
           args: --all -- --check
+
+      # Edit zebra/deny.toml to allow duplicates
+      - name: Check for dependent crates with different versions
+        uses: EmbarkStudios/cargo-deny-action@v1.2.6
+        with:
+          command: check bans
+          args: --all-features --workspace
+
+      - name: Check crate sources
+        uses: EmbarkStudios/cargo-deny-action@v1.2.6
+        with:
+          command: check sources
+          args: --all-features --workspace
