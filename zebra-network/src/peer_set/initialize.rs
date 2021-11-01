@@ -383,7 +383,7 @@ async fn limit_initial_peers(
 
     // Send the unused peers to the address book.
     for peer in unused_peers {
-        let peer_addr = MetaAddr::new_peer(*peer);
+        let peer_addr = MetaAddr::new_initial_peer(*peer);
         // `send` only waits when the channel is full.
         // The timestamp collector is a separate task, so we will only wait for a short time.
         let _ = timestamp_collector.send(peer_addr).await;
