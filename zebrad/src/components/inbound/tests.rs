@@ -1,6 +1,9 @@
 //! Inbound service tests.
 
-use std::{collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{
+    collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc,
+    time::Duration,
+};
 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -26,6 +29,14 @@ use crate::{
     },
     BoxError,
 };
+
+/// Maximum time to wait for a network service request.
+///
+/// The default [`MockService`] value can be too short for some of these tests that take a little
+/// longer than expected to actually send the network request.
+///
+/// Increasing this value causes the tests to take longer to complete, so it can't be too large.
+const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
 #[tokio::test]
 async fn mempool_requests_for_transactions() {
@@ -581,7 +592,9 @@ async fn setup(
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
-    let mut peer_set = MockService::build().for_unit_tests();
+    let mut peer_set = MockService::build()
+        .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+        .for_unit_tests();
     let buffered_peer_set = Buffer::new(BoxService::new(peer_set.clone()), 10);
 
     let mock_tx_verifier = MockService::build().for_unit_tests();
