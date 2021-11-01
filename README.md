@@ -12,7 +12,6 @@
 - [About](#about)
 - [Beta Releases](#beta-releases)
 - [Getting Started](#getting-started)
-- [Current Features](#current-features)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
@@ -116,10 +115,8 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 - Validation of transaction lock times
 - Validation of sprout note commitment trees
 
-It may be
-unreliable on Testnet, and under less-than-perfect network conditions. See
-our [current features](#current-features) and [roadmap](#future-work) for
-details.
+It may ben unreliable on Testnet, and under less-than-perfect network conditions.
+See our [roadmap](#future-work) for details.
 
 ## Getting Started
 
@@ -158,10 +155,23 @@ We continuously test that our builds and tests pass on:
 - Ubuntu 18.04 / the latest LTS
 - Debian Buster
 
+Zebra's tests can take over an hour, depending on your machine.
+We're working on making them faster.
+
 `zebrad` might build and run fine on smaller and slower systems - we haven't
 tested its exact limits yet.
 
 For more detailed requirements, refer to the [documentation](https://zebra.zfnd.org/user/requirements.html).
+
+#### Memory Troubleshooting
+
+If Zebra's build runs out of RAM, try setting:
+`export CARGO_BUILD_JOBS=2`
+
+If Zebra's tests timeout or run out of RAM, try running:
+`cargo test -- --test-threads=2`
+
+(cargo uses all the processor cores on your machine by default.)
 
 ### Network Ports and Data Usage
 
@@ -175,35 +185,10 @@ By default, Zebra uses the following inbound TCP listener ports:
 
 For more detailed information, refer to the [documentation](https://zebra.zfnd.org/user/run.html).
 
-## Current Features
+#### Network Troubleshooting
 
-Network:
-- Synchronize the chain from peers
-- Maintain a transaction mempool
-- Download gossiped blocks and transactions from peers
-- Answer inbound peer requests for hashes, headers, blocks and transactions
-
-State:
-- Persist block, transaction, UTXO, and nullifier indexes
-- Handle chain reorganizations
-
-Proof of Work:
-- Validate equihash, block difficulty threshold, and difficulty adjustment
-- Validate transaction merkle roots
-
-Validating proof of work increases the cost of creating a consensus split
-between `zebrad` and `zcashd`.
-
-This release also implements some other Zcash consensus rules, to check that
-Zebra's [validation architecture](https://zebra.zfnd.org/dev/overview.html#architecture)
-supports future work on a
-full validating node:
-- Block and transaction structure
-- Checkpoint-based verification up to and including Canopy activation
-- Transaction validation (incomplete)
-- Transaction cryptography (incomplete)
-- Transaction scripts (incomplete)
-- Batch verification (incomplete)
+Some of Zebra's tests download Zcash blocks, so they might be unreliable depending on your network connection.
+You can set `ZEBRA_SKIP_NETWORK_TESTS=1` to skip the network tests.
 
 ## Known Issues
 
