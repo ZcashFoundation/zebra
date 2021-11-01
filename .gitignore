@@ -1,15 +1,22 @@
 # Cargo files
 /target/
 /coverage-target/
+
 # Firebase caches (?)
 .firebase/
+
 # Emacs detritus
 *~
 \#*
 *\#
-# Vscode detrius
+
+# Vscode detritus
 .vscode/
 .zebra-state/
 .cargo/
+
 # Nix configs
 shell.nix
+
+# Proptest cache
+*/proptest-regressions/
