@@ -31,12 +31,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # ticket #2200: tokio dependencies
-    { name = "metrics-exporter-prometheus", version = "=0.1.0-alpha.7" },
-    { name = "tower", version = "=0.4.0" },
-    { name = "tokio", version = "=0.2.23" },
-    { name = "tokio-util", version = "=0.3.1" },
-
     # ticket #2953: tracing dependencies
     { name = "tracing-subscriber", version = "=0.1.6" },
 
@@ -95,8 +89,4 @@ allow-git = [
 github = [
     "ZcashFoundation",
     "zcash",
-
-    # ticket #2200: tokio dependencies
-    "hyperium",
-    "tower-rs",
 ]
