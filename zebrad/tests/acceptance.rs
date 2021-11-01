@@ -703,7 +703,8 @@ const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
-const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+/// In particular, macOS can take more than 5 seconds to read the tip height (#2988).
+const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The maximum amount of time Zebra should take to sync a few hundred blocks.
 ///
