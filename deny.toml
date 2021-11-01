@@ -84,11 +84,11 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
+    # ticket #2200: tokio dependencies
+    "https://github.com/kellpossible/sentry-tracing",
+
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
-
-    # doesn't have a tagged or published version yet
-    "https://github.com/kellpossible/sentry-tracing",
 ]
 
 [sources.allow-org]
