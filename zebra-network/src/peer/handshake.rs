@@ -51,7 +51,7 @@ use crate::{
 pub struct Handshake<S, C = NoChainTip> {
     config: Config,
     inbound_service: S,
-    timestamp_collector: mpsc::Sender<MetaAddrChange>,
+    address_book_updater: mpsc::Sender<MetaAddrChange>,
     inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
     user_agent: String,
@@ -303,7 +303,7 @@ impl fmt::Debug for ConnectedAddr {
 pub struct Builder<S, C = NoChainTip> {
     config: Option<Config>,
     inbound_service: Option<S>,
-    timestamp_collector: Option<mpsc::Sender<MetaAddrChange>>,
+    address_book_updater: Option<mpsc::Sender<MetaAddrChange>>,
     our_services: Option<PeerServices>,
     user_agent: Option<String>,
     relay: Option<bool>,
@@ -345,11 +345,11 @@ where
     ///
     /// This channel takes `MetaAddr`s, permanent addresses which can be used to
     /// make outbound connections to peers.
-    pub fn with_timestamp_collector(
+    pub fn with_address_book_updater(
         mut self,
-        timestamp_collector: mpsc::Sender<MetaAddrChange>,
+        address_book_updater: mpsc::Sender<MetaAddrChange>,
     ) -> Self {
-        self.timestamp_collector = Some(timestamp_collector);
+        self.address_book_updater = Some(address_book_updater);
         self
     }
 
@@ -381,7 +381,7 @@ where
             // TODO: Until Rust RFC 2528 reaches stable, we can't do `..self`
             config: self.config,
             inbound_service: self.inbound_service,
-            timestamp_collector: self.timestamp_collector,
+            address_book_updater: self.address_book_updater,
             our_services: self.our_services,
             user_agent: self.user_agent,
             relay: self.relay,
@@ -409,7 +409,7 @@ where
             let (tx, _) = broadcast::channel(100);
             tx
         });
-        let timestamp_collector = self.timestamp_collector.unwrap_or_else(|| {
+        let address_book_updater = self.address_book_updater.unwrap_or_else(|| {
             // No timestamp collector was passed, so create a stub channel.
             // Dropping the receiver means sends will fail, but we don't care.
             let (tx, _rx) = mpsc::channel(1);
@@ -424,7 +424,7 @@ where
             config,
             inbound_service,
             inv_collector,
-            timestamp_collector,
+            address_book_updater,
             nonces,
             user_agent,
             our_services,
@@ -448,7 +448,7 @@ where
         Builder {
             config: None,
             inbound_service: None,
-            timestamp_collector: None,
+            address_book_updater: None,
             user_agent: None,
             our_services: None,
             relay: None,
@@ -708,7 +708,7 @@ where
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
         let inbound_service = self.inbound_service.clone();
-        let mut timestamp_collector = self.timestamp_collector.clone();
+        let mut address_book_updater = self.address_book_updater.clone();
         let inv_collector = self.inv_collector.clone();
         let config = self.config.clone();
         let user_agent = self.user_agent.clone();
@@ -763,7 +763,7 @@ where
             for alt_addr in alternate_addrs {
                 let alt_addr = MetaAddr::new_alternate(&alt_addr, &remote_services);
                 // awaiting a local task won't hang
-                let _ = timestamp_collector.send(alt_addr).await;
+                let _ = address_book_updater.send(alt_addr).await;
             }
 
             // Set the connection's version to the minimum of the received version or our own.
@@ -817,7 +817,7 @@ where
             //
             // Every message and error must update the peer address state via
             // the inbound_ts_collector.
-            let inbound_ts_collector = timestamp_collector.clone();
+            let inbound_ts_collector = address_book_updater.clone();
             let inv_collector = inv_collector.clone();
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
@@ -938,14 +938,14 @@ where
             //
             // Returning from the spawned closure terminates the connection's heartbeat task.
             let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
-            let heartbeat_ts_collector = timestamp_collector.clone();
+            let heartbeat_ts_collector = address_book_updater.clone();
             tokio::spawn(
                 async move {
                     use futures::future::Either;
 
                     let mut shutdown_rx = shutdown_rx;
                     let mut server_tx = server_tx;
-                    let mut timestamp_collector = heartbeat_ts_collector.clone();
+                    let mut address_book_updater = heartbeat_ts_collector.clone();
                     let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
 
                     loop {
@@ -967,7 +967,7 @@ where
                             tracing::trace!("shutting down due to Client shut down");
                             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                 // awaiting a local task won't hang
-                                let _ = timestamp_collector
+                                let _ = address_book_updater
                                     .send(MetaAddr::new_shutdown(&book_addr, remote_services))
                                     .await;
                             }
@@ -983,7 +983,7 @@ where
                         let heartbeat = send_one_heartbeat(&mut server_tx);
                         if heartbeat_timeout(
                             heartbeat,
-                            &mut timestamp_collector,
+                            &mut address_book_updater,
                             &connected_addr,
                             &remote_services,
                         )
@@ -1056,7 +1056,7 @@ async fn send_one_heartbeat(server_tx: &mut mpsc::Sender<ClientRequest>) -> Resu
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout<F, T>(
     fut: F,
-    timestamp_collector: &mut mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &mut mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, BoxError>
@@ -1067,7 +1067,7 @@ where
         Ok(inner_result) => {
             handle_heartbeat_error(
                 inner_result,
-                timestamp_collector,
+                address_book_updater,
                 connected_addr,
                 remote_services,
             )
@@ -1076,7 +1076,7 @@ where
         Err(elapsed) => {
             handle_heartbeat_error(
                 Err(elapsed),
-                timestamp_collector,
+                address_book_updater,
                 connected_addr,
                 remote_services,
             )
@@ -1087,10 +1087,10 @@ where
     Ok(t)
 }
 
-/// If `result.is_err()`, mark `connected_addr` as failed using `timestamp_collector`.
+/// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    timestamp_collector: &mut mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &mut mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, E>
@@ -1103,7 +1103,7 @@ where
             tracing::debug!(?err, "heartbeat error, shutting down");
 
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                let _ = timestamp_collector
+                let _ = address_book_updater
                     .send(MetaAddr::new_errored(&book_addr, *remote_services))
                     .await;
             }
