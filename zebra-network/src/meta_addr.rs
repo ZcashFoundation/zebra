@@ -269,15 +269,19 @@ impl MetaAddr {
     }
 
     /// Returns a [`MetaAddrChange::NewGossiped`], based on a gossiped peer
-    /// `MetaAddr`.
-    pub fn new_gossiped_change(self) -> MetaAddrChange {
-        NewGossiped {
+    /// [`MetaAddr`].
+    ///
+    /// Returns [`None`] if the gossiped peer is missing the untrusted services field.
+    pub fn new_gossiped_change(self) -> Option<MetaAddrChange> {
+        let untrusted_services = self.services?;
+
+        Some(NewGossiped {
             addr: canonical_socket_addr(self.addr),
-            untrusted_services: self.services.expect("unexpected missing services"),
+            untrusted_services,
             untrusted_last_seen: self
                 .untrusted_last_seen
                 .expect("unexpected missing last seen"),
-        }
+        })
     }
 
     /// Returns a [`MetaAddrChange::UpdateResponded`] for a peer that has just

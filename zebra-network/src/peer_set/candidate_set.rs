@@ -267,7 +267,7 @@ where
 
     /// Add new `addrs` to the address book.
     fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
-        let addrs = addrs.into_iter().map(MetaAddr::new_gossiped_change);
+        let addrs = addrs.into_iter().filter_map(MetaAddr::new_gossiped_change);
 
         // # Correctness
         //
