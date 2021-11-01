@@ -169,8 +169,8 @@ jobs:
           command: build
           args: --verbose --release
 
-  clippy:
-    name: Clippy (stable) & Cargo.lock
+  clippy-cargo-lock:
+    name: Clippy (stable)
     timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
@@ -211,8 +211,8 @@ jobs:
           command: check
           args: --locked --all-features --all-targets
 
-  fmt:
-    name: Rustfmt & Dependencies
+  fmt-deps:
+    name: Rustfmt
     timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
