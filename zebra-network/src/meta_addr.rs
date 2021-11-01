@@ -529,6 +529,8 @@ impl MetaAddr {
         Some(MetaAddr {
             addr: canonical_socket_addr(self.addr),
             // initial peers are sanitized assuming they are `NODE_NETWORK`
+            // TODO: split untrusted and direct services
+            //       consider sanitizing untrusted services to NODE_NETWORK (#2324)
             services: self.services.or(Some(PeerServices::NODE_NETWORK)),
             // only put the last seen time in the untrusted field,
             // this matches deserialization, and avoids leaking internal state
