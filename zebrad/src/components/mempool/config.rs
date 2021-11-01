@@ -39,7 +39,7 @@ pub struct Config {
     ///
     /// This corresponds to `mempoolevictionmemoryminutes` from
     /// [ZIP-401](https://zips.z.cash/zip-0401#specification).
-    //
+    ///
     // Note: Durations become a TOML table, so they must be the final item in the config
     //       We'll replace them with a more user-friendly format in #2847
     pub eviction_memory_time: Duration,
@@ -48,15 +48,15 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            /// Consensus rules:
-            ///
-            /// > There MUST be a configuration option mempooltxcostlimit,
-            /// > which SHOULD default to 80000000.
-            /// >
-            /// > There MUST be a configuration option mempoolevictionmemoryminutes,
-            /// > which SHOULD default to 60 [minutes].
-            ///
-            /// https://zips.z.cash/zip-0401#specification
+            // [ZIP-401] Consensus rules:
+            //
+            // > There MUST be a configuration option mempooltxcostlimit,
+            // > which SHOULD default to 80000000.
+            // >
+            // > There MUST be a configuration option mempoolevictionmemoryminutes,
+            // > which SHOULD default to 60 [minutes].
+            //
+            // [ZIP-401]: https://zips.z.cash/zip-0401#specification
             tx_cost_limit: 80_000_000,
             eviction_memory_time: Duration::from_secs(60 * 60),
 
