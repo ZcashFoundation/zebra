@@ -372,7 +372,8 @@ impl Service<zn::Request> for Inbound {
                         .map_ok(|_resp| zn::Response::Nil)
                         .boxed()
                 } else {
-                    info!(
+                    // Peers send a lot of these when we first connect to them.
+                    debug!(
                         "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
                     );
                     async { Ok(zn::Response::Nil) }.boxed()
@@ -385,7 +386,8 @@ impl Service<zn::Request> for Inbound {
                 {
                     block_downloads.download_and_verify(hash);
                 } else {
-                    info!(
+                    // Peers send a lot of these when we first connect to them.
+                    debug!(
                         ?hash,
                         "ignoring `AdvertiseBlock` request from remote peer during network setup"
                     );
@@ -396,7 +398,7 @@ impl Service<zn::Request> for Inbound {
                 if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
                     mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                         mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
-                        mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids),
+                        mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
                         _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                     })
                     .boxed()

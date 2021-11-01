@@ -692,14 +692,25 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     Ok(())
 }
 
+const TINY_CHECKPOINT_TEST_HEIGHT: Height = Height(0);
+const MEDIUM_CHECKPOINT_TEST_HEIGHT: Height =
+    Height(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32);
 const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
     Height((zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2) as u32);
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
-const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
-// usually it's much shorter than this
-const SMALL_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
+/// The maximum amount of time Zebra should take to reload after shutting down.
+///
+/// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
+const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The maximum amount of time Zebra should take to sync a few hundred blocks.
+///
+/// Usually the small checkpoint is much shorter than this.
+const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The maximum amount of time Zebra should take to sync a thousand blocks.
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
@@ -708,10 +719,10 @@ const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 #[test]
 fn sync_one_checkpoint_mainnet() -> Result<()> {
     sync_until(
-        Height(0),
+        TINY_CHECKPOINT_TEST_HEIGHT,
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
-        SMALL_CHECKPOINT_TIMEOUT,
+        TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
         None,
@@ -725,10 +736,10 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 #[test]
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_until(
-        Height(0),
+        TINY_CHECKPOINT_TEST_HEIGHT,
         Testnet,
         STOP_AT_HEIGHT_REGEX,
-        SMALL_CHECKPOINT_TIMEOUT,
+        TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
         None,
@@ -741,8 +752,8 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 fn restart_stop_at_height() -> Result<()> {
     zebra_test::init();
 
-    restart_stop_at_height_for_network(Network::Mainnet, Height(0))?;
-    restart_stop_at_height_for_network(Network::Testnet, Height(0))?;
+    restart_stop_at_height_for_network(Network::Mainnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
+    restart_stop_at_height_for_network(Network::Testnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
 
     Ok(())
 }
@@ -752,7 +763,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         height,
         network,
         STOP_AT_HEIGHT_REGEX,
-        SMALL_CHECKPOINT_TIMEOUT,
+        TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
         None,
@@ -778,13 +789,13 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
 #[test]
 fn activate_mempool_mainnet() -> Result<()> {
     sync_until(
-        Height(1),
+        Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
-        SMALL_CHECKPOINT_TIMEOUT,
+        TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        Some(Height(0)),
+        Some(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
 }
@@ -820,21 +831,23 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-// TODO: We had a `sync_large_checkpoints_testnet` here but it was removed because
-// the testnet is unreliable (#1222). Enable after we have more testnet instances (#1791).
+// TODO: We had `sync_large_checkpoints_testnet` and `sync_large_checkpoints_mempool_testnet`,
+// but they were removed because the testnet is unreliable (#1222).
+// We should re-add them after we have more testnet instances (#1791).
 
 /// Test if `zebrad` can run side by side with the mempool.
-/// This is done by running the mempool and sync some large checkpoints.
+/// This is done by running the mempool and syncing some checkpoints.
 #[test]
-fn running_mempool_mainnet() -> Result<()> {
+#[ignore]
+fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
     sync_until(
-        LARGE_CHECKPOINT_TEST_HEIGHT,
+        MEDIUM_CHECKPOINT_TEST_HEIGHT,
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
-        Some(Height(0)),
+        Some(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
 }

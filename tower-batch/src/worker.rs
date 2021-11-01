@@ -6,7 +6,6 @@ use std::{
 use futures::future::TryFutureExt;
 use pin_project::pin_project;
 use tokio::{
-    stream::StreamExt,
     sync::mpsc,
     time::{sleep, Sleep},
 };
@@ -123,11 +122,11 @@ where
         // submitted, so that the batch latency of all entries is at most
         // self.max_latency. However, we don't keep the timer running unless
         // there is a pending request to prevent wakeups on idle services.
-        let mut timer: Option<Sleep> = None;
+        let mut timer: Option<Pin<Box<Sleep>>> = None;
         let mut pending_items = 0usize;
         loop {
-            match timer {
-                None => match self.rx.next().await {
+            match timer.as_mut() {
+                None => match self.rx.recv().await {
                     // The first message in a new batch.
                     Some(msg) => {
                         let span = msg.span;
@@ -135,13 +134,13 @@ where
                             // Apply the provided span to request processing
                             .instrument(span)
                             .await;
-                        timer = Some(sleep(self.max_latency));
+                        timer = Some(Box::pin(sleep(self.max_latency)));
                         pending_items = 1;
                     }
                     // No more messages, ever.
                     None => return,
                 },
-                Some(mut sleep) => {
+                Some(sleep) => {
                     // Wait on either a new message or the batch timer.
                     // If both are ready, select! chooses one of them at random.
                     tokio::select! {
@@ -161,8 +160,7 @@ where
                                     timer = None;
                                     pending_items = 0;
                                 } else {
-                                    // The timer is still running, set it back!
-                                    timer = Some(sleep);
+                                    // The timer is still running.
                                 }
                             }
                             None => {
@@ -170,7 +168,7 @@ where
                                 return;
                             }
                         },
-                        () = &mut sleep => {
+                        () = sleep => {
                             // The batch timer elapsed.
                             // XXX(hdevalence): what span should instrument this?
                             self.flush_service().await;

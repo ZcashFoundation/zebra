@@ -27,13 +27,13 @@ These rules make sure that a fixed amount of Zcash is created by each block, eve
 ## Transaction Value Balances
 [definitions-transaction]: #definitions-transaction
 
-- `transaction value pool` - The unspent *input* value in a transaction. Inputs add value, outputs remove value, and value balances modify value.
+- `transaction value pool` - The unspent *input* value in a transaction. Inputs add value, outputs remove value, and value balances modify value. The pool represents the sum of transparent and shielded inputs, minus the sum of transparent and shielded outputs.
 - `value balance` - The change in a transaction's value pool. There is a separate value balance for each transparent and shielded pool.
 - `transparent value balance` - The change in the transaction value pool, due to transparent inputs and outputs. The sum of the UTXOs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields.
 - `sprout value balance` - The change in the transaction value pool, due to sprout JoinSplits. The sum of all `v_sprout_new` fields, minus the sum of all `v_sprout_old` fields.
 - `sapling value balance` - The change in the transaction value pool, due to sapling Spends and Outputs. Equal to the `valueBalanceSapling` field.
 - `orchard value balance` - The change in the transaction value pool, due to orchard Actions. Equal to the `valueBalanceOrchard` field.
-- `remaining transaction value` - The unspent value in the transaction value pool. The sum of the transparent and shielded value balances in each transaction.
+- `remaining transaction value` - The unspent value in the transaction value pool. The sum of the transparent and shielded value balances in each transaction. This value is equal to the `transaction value pool` after we know the values of all the input UTXOs.
 - `coinbase transaction` - A transaction which spends newly created value (coinbase), and the remaining value of other transactions in its block (miner fees). Coinbase transactions do not have any other inputs, so they can't spend the outputs of other transactions.
 
 ## Chain Value Pools

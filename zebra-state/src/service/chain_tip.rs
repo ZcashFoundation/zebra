@@ -55,7 +55,7 @@ pub struct ChainTipBlock {
     ///
     /// If the best chain fork has changed, or some blocks have been skipped,
     /// this hash will be different to the last returned `ChainTipBlock.hash`.
-    pub(crate) previous_block_hash: block::Hash,
+    pub previous_block_hash: block::Hash,
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {

@@ -129,6 +129,8 @@ proptest! {
             loop {
                 update_events.acquire().await.forget();
 
+                // The refactor suggested by clippy is harder to read and understand.
+                #[allow(clippy::question_mark)]
                 if status.wait_until_close_to_tip().await.is_err() {
                     return Ok(());
                 }

@@ -30,6 +30,9 @@ pub struct VerifiedSet {
     /// serialized.
     transactions_serialized_size: usize,
 
+    /// The total cost of the verified transactons in the set.
+    total_cost: u64,
+
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
 
@@ -61,6 +64,13 @@ impl VerifiedSet {
         self.transactions.len()
     }
 
+    /// Returns the total cost of the verified transactions in the set.
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    pub fn total_cost(&self) -> u64 {
+        self.total_cost
+    }
+
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified `id.
     pub fn contains(&self, id: &UnminedTxId) -> bool {
@@ -77,6 +87,7 @@ impl VerifiedSet {
         self.sapling_nullifiers.clear();
         self.orchard_nullifiers.clear();
         self.transactions_serialized_size = 0;
+        self.total_cost = 0;
         self.update_metrics();
     }
 
@@ -97,6 +108,7 @@ impl VerifiedSet {
 
         self.cache_outputs_from(&transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
+        self.total_cost += transaction.cost();
         self.transactions.push_front(transaction);
 
         self.update_metrics();
@@ -104,15 +116,41 @@ impl VerifiedSet {
         Ok(())
     }
 
-    /// Evict one transaction from the set to open space for another transaction.
+    /// Evict one transaction from the set, returns the victim transaction.
+    ///
+    /// Removes a transaction with probability in direct proportion to the
+    /// eviction weight, as per [ZIP-401].
+    ///
+    /// Consensus rule:
+    ///
+    /// > Each transaction also has an eviction weight, which is cost +
+    /// > low_fee_penalty, where low_fee_penalty is 16000 if the transaction pays
+    /// > a fee less than the conventional fee, otherwise 0. The conventional fee
+    /// > is currently defined as 1000 zatoshis
+    ///
+    /// # Note
+    ///
+    /// Collecting and calculating weights is O(n). But in practice n is limited
+    /// to 20,000 (mempooltxcostlimit/min(cost)), so the actual cost shouldn't
+    /// be too bad.
+    ///
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
             None
         } else {
-            // TODO: use random weighted eviction as specified in ZIP-401 (#2780)
-            let last_index = self.transactions.len() - 1;
+            use rand::distributions::{Distribution, WeightedIndex};
+            use rand::prelude::thread_rng;
 
-            Some(self.remove(last_index))
+            let weights: Vec<u64> = self
+                .transactions
+                .iter()
+                .map(|tx| tx.clone().eviction_weight())
+                .collect();
+
+            let dist = WeightedIndex::new(weights).unwrap();
+
+            Some(self.remove(dist.sample(&mut thread_rng())))
         }
     }
 
@@ -154,6 +192,7 @@ impl VerifiedSet {
             .expect("invalid transaction index");
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
+        self.total_cost -= removed_tx.cost();
         self.remove_outputs(&removed_tx.transaction);
 
         self.update_metrics();
@@ -228,5 +267,6 @@ impl VerifiedSet {
             "zcash.mempool.size.bytes",
             self.transactions_serialized_size as _
         );
+        metrics::gauge!("zcash.mempool.cost.bytes", u64::from(self.total_cost) as _);
     }
 }

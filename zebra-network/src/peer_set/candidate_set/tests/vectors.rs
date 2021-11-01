@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{DateTime, Duration, Utc};
 use tokio::{
-    runtime::Runtime,
+    runtime,
     time::{self, Instant},
 };
 use tracing::Span;
@@ -138,7 +138,10 @@ fn candidate_set_updates_are_rate_limited() {
 
     zebra_test::init();
 
-    let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+    let runtime = runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
@@ -179,7 +182,10 @@ fn candidate_set_updates_are_rate_limited() {
 /// rate limited.
 #[test]
 fn candidate_set_update_after_update_initial_is_rate_limited() {
-    let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+    let runtime = runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());

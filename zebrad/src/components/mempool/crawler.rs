@@ -1,14 +1,59 @@
 //! Zebra Mempool crawler.
 //!
-//! The crawler periodically requests transactions from peers in order to populate the mempool.
+//! The [`Crawler`] periodically requests transactions from peers in order to populate the mempool.
+//!
+//! Crawling only happens when the local node has synchronized the chain to be close to its tip. If
+//! synchronization is still happening at a fast rate, the crawler will stay disabled until it
+//! slows down.
+//!
+//! Once enabled, the crawler will periodically request [`FANOUT`] number of peers for transactions
+//! from the `peer_set` specified when it started. These crawl iterations occur at most once per
+//! [`RATE_LIMIT_DELAY`]. The received transaction IDs are forwarded to the `mempool` service so
+//! that they can be downloaded and included in the mempool.
+//!
+//! # Example
+//!
+//! ```compile_fail
+//! use zebrad::components::mempool;
+//! #
+//! # use zebra_chain::parameters::Network;
+//! # use zebra_state::ChainTipSender;
+//! # use zebra_test::mock_service::MockService;
+//! # use zebrad::components::sync::SyncStatus;
+//! #
+//! # let runtime = tokio::runtime::Builder::new_current_thread()
+//! #     .enable_all()
+//! #     .build()
+//! #     .expect("Failed to create Tokio runtime");
+//! # let _guard = runtime.enter();
+//! #
+//! # let peer_set_service = MockService::build().for_unit_tests();
+//! # let mempool_service = MockService::build().for_unit_tests();
+//! # let (sync_status, _) = SyncStatus::new();
+//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, Network::Mainnet);
+//!
+//! let crawler_task = mempool::Crawler::spawn(
+//!     &mempool::Config::default(),
+//!     peer_set_service,
+//!     mempool_service,
+//!     sync_status,
+//!     chain_tip_change,
+//! );
+//!
+//! # // Won't actually crawl because the sender endpoint of `sync_status` was dropped immediately
+//! # // when it was created.
+//! # runtime.block_on(async move {
+//! crawler_task.await;
+//! # });
+//! ```
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use futures::{future, pin_mut, stream::FuturesUnordered, StreamExt};
 use tokio::{sync::watch, task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, transaction::UnminedTxId};
 use zebra_network as zn;
 use zebra_state::ChainTipChange;
 
@@ -171,8 +216,8 @@ where
 
     /// Handle a peer's response to the crawler's request for transactions.
     async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
-        let transaction_ids: Vec<_> = match response {
-            zn::Response::TransactionIds(ids) => ids.into_iter().map(Gossip::Id).collect(),
+        let transaction_ids: HashSet<_> = match response {
+            zn::Response::TransactionIds(ids) => ids.into_iter().collect(),
             _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
         };
 
@@ -189,7 +234,12 @@ where
     }
 
     /// Forward the crawled transactions IDs to the mempool transaction downloader.
-    async fn queue_transactions(&mut self, transaction_ids: Vec<Gossip>) -> Result<(), BoxError> {
+    async fn queue_transactions(
+        &mut self,
+        transaction_ids: HashSet<UnminedTxId>,
+    ) -> Result<(), BoxError> {
+        let transaction_ids = transaction_ids.into_iter().map(Gossip::Id).collect();
+
         let call_result = self
             .mempool
             .ready_and()

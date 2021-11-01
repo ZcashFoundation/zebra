@@ -1,11 +1,24 @@
-use std::collections::{HashMap, HashSet};
+//! Mempool transaction storage.
+//!
+//! The main struct [`Storage`] holds verified and rejected transactions.
+//! [`Storage`] is effectively the data structure of the mempool. Convenient methods to
+//! manage it are included.
+//!
+//! [`Storage`] does not expose a service so it can only be used by other code directly.
+//! Only code inside the [`crate::components::mempool`] module has access to it.
+
+use std::{
+    collections::{HashMap, HashSet},
+    mem::size_of,
+    time::Duration,
+};
 
 use thiserror::Error;
 
 use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
-use self::verified_set::VerifiedSet;
-use super::{downloads::TransactionDownloadVerifyError, MempoolError};
+use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
+use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -13,19 +26,17 @@ use proptest_derive::Arbitrary;
 #[cfg(test)]
 pub mod tests;
 
+mod eviction_list;
 mod verified_set;
 
-/// The maximum number of verified transactions to store in the mempool.
-const MEMPOOL_SIZE: usize = 4;
-
-/// The size limit for mempool transaction rejection lists.
+/// The size limit for mempool transaction rejection lists per [ZIP-401].
 ///
-/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries` entries,
-/// > which is the constant 40000.
-///
-/// https://zips.z.cash/zip-0401#specification
+/// > The size of RecentlyEvicted SHOULD never exceed `eviction_memory_entries`
+/// > entries, which is the constant 40000.
 ///
 /// We use the specified value for all lists for consistency.
+///
+/// [ZIP-401]: https://zips.z.cash/zip-0401#specification
 pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
@@ -67,12 +78,13 @@ pub enum SameEffectsChainRejectionError {
     #[error("best chain tip has reached transaction expiry height")]
     Expired,
 
-    /// Otherwise valid transaction removed from mempool due to ZIP-401 random eviction.
+    /// Otherwise valid transaction removed from mempool due to [ZIP-401] random
+    /// eviction.
     ///
     /// Consensus rule:
     /// > The txid (rather than the wtxid ...) is used even for version 5 transactions
     ///
-    /// https://zips.z.cash/zip-0401#specification
+    /// [ZIP-401]: https://zips.z.cash/zip-0401#specification
     #[error("transaction evicted from the mempool due to ZIP-401 denial of service limits")]
     RandomlyEvicted,
 }
@@ -90,33 +102,66 @@ pub enum RejectionError {
     SameEffectsChain(#[from] SameEffectsChainRejectionError),
 }
 
-#[derive(Default)]
+/// Hold mempool verified and rejected mempool transactions.
 pub struct Storage {
-    /// The set of verified transactions in the mempool. This is a
-    /// cache of size [`MEMPOOL_SIZE`].
+    /// The set of verified transactions in the mempool.
     verified: VerifiedSet,
 
-    /// The set of transactions rejected due to bad authorizations, or for other reasons,
-    /// and their rejection reasons. These rejections only apply to the current tip.
+    /// The set of transactions rejected due to bad authorizations, or for other
+    /// reasons, and their rejection reasons. These rejections only apply to the
+    /// current tip.
     ///
-    /// Only transactions with the exact `UnminedTxId` are invalid.
+    /// Only transactions with the exact [`UnminedTxId`] are invalid.
     tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
 
-    /// A set of transactions rejected for their effects, and their rejection reasons.
-    /// These rejections only apply to the current tip.
+    /// A set of transactions rejected for their effects, and their rejection
+    /// reasons. These rejections only apply to the current tip.
     ///
-    /// Any transaction with the same `transaction::Hash` is invalid.
+    /// Any transaction with the same [`transaction::Hash`] is invalid.
     tip_rejected_same_effects: HashMap<transaction::Hash, SameEffectsTipRejectionError>,
 
     /// Sets of transactions rejected for their effects, keyed by rejection reason.
     /// These rejections apply until a rollback or network upgrade.
     ///
-    /// Any transaction with the same `transaction::Hash` is invalid.
-    chain_rejected_same_effects:
-        HashMap<SameEffectsChainRejectionError, HashSet<transaction::Hash>>,
+    /// Any transaction with the same [`transaction::Hash`] is invalid.
+    ///
+    /// An [`EvictionList`] is used for both randomly evicted and expired
+    /// transactions, even if it is only needed for the evicted ones. This was
+    /// done just to simplify the existing code; there is no harm in having a
+    /// timeout for expired transactions too since re-checking expired
+    /// transactions is cheap.
+    // If this code is ever refactored and the lists are split in different
+    // fields, then we can use an `EvictionList` just for the evicted list.
+    chain_rejected_same_effects: HashMap<SameEffectsChainRejectionError, EvictionList>,
+
+    /// The mempool transaction eviction age limit.
+    /// Same as [`config::Config::eviction_memory_time`].
+    eviction_memory_time: Duration,
+
+    /// Max total cost of the verified mempool set, beyond which transactions
+    /// are evicted to make room.
+    tx_cost_limit: u64,
+}
+
+impl Drop for Storage {
+    fn drop(&mut self) {
+        self.clear();
+    }
 }
 
 impl Storage {
+    #[allow(clippy::field_reassign_with_default)]
+    pub(crate) fn new(config: &config::Config) -> Self {
+        Self {
+            tx_cost_limit: config.tx_cost_limit,
+            eviction_memory_time: config.eviction_memory_time,
+            verified: Default::default(),
+            tip_rejected_exact: Default::default(),
+            tip_rejected_same_effects: Default::default(),
+            chain_rejected_same_effects: Default::default(),
+        }
+    }
+
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
     /// Returns an error if the mempool's verified transactions or rejection caches
@@ -124,7 +169,7 @@ impl Storage {
     /// These errors should not be propagated to peers, because the transactions are valid.
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
-    /// as [`StorageRejectionError::RandomlyEvicted`].
+    /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
     pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -152,26 +197,40 @@ impl Storage {
             result = Err(rejection_error.into());
         }
 
-        // Once inserted, we evict transactions over the pool size limit.
-        while self.verified.transaction_count() > MEMPOOL_SIZE {
-            let evicted_tx = self
+        // Once inserted, we evict transactions over the pool size limit per [ZIP-401];
+        //
+        // > On receiving a transaction: (...)
+        // > Calculate its cost. If the total cost of transactions in the mempool including this
+        // > one would `exceed mempooltxcostlimit`, then the node MUST repeatedly call
+        // > EvictTransaction (with the new transaction included as a candidate to evict) until the
+        // > total cost does not exceed `mempooltxcostlimit`.
+        //
+        // 'EvictTransaction' is equivalent to [`VerifiedSet::evict_one()`] in
+        // our implementation.
+        //
+        // [ZIP-401]: https://zips.z.cash/zip-0401
+        while self.verified.total_cost() > self.tx_cost_limit {
+            // > EvictTransaction MUST do the following:
+            // > Select a random transaction to evict, with probability in direct proportion to
+            // > eviction weight. (...) Remove it from the mempool.
+            let victim_tx = self
                 .verified
                 .evict_one()
                 .expect("mempool is empty, but was expected to be full");
 
+            // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
+            // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
             self.reject(
-                evicted_tx.transaction.id,
+                victim_tx.transaction.id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
             // If this transaction gets evicted, set its result to the same error
             // (we could return here, but we still want to check the mempool size)
-            if evicted_tx.transaction.id == tx_id {
+            if victim_tx.transaction.id == tx_id {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
-
-        assert!(self.verified.transaction_count() <= MEMPOOL_SIZE);
 
         result
     }
@@ -215,17 +274,20 @@ impl Storage {
     }
 
     /// Clears the whole mempool storage.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.verified.clear();
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
         self.chain_rejected_same_effects.clear();
+        self.update_rejected_metrics();
     }
 
     /// Clears rejections that only apply to the current tip.
     pub fn clear_tip_rejections(&mut self) {
         self.tip_rejected_exact.clear();
         self.tip_rejected_same_effects.clear();
+        self.update_rejected_metrics();
     }
 
     /// Clears rejections that only apply to the current tip.
@@ -242,11 +304,8 @@ impl Storage {
         if self.tip_rejected_same_effects.len() > MAX_EVICTION_MEMORY_ENTRIES {
             self.tip_rejected_same_effects.clear();
         }
-        for (_, map) in self.chain_rejected_same_effects.iter_mut() {
-            if map.len() > MAX_EVICTION_MEMORY_ENTRIES {
-                map.clear();
-            }
-        }
+        // `chain_rejected_same_effects` limits its size by itself
+        self.update_rejected_metrics();
     }
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
@@ -254,7 +313,7 @@ impl Storage {
         self.verified.transactions().map(|tx| tx.id)
     }
 
-    /// Returns the set of [`UnminedTx`]es in the mempool.
+    /// Returns the set of [`UnminedTx`]s in the mempool.
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
         self.verified.transactions()
     }
@@ -265,10 +324,11 @@ impl Storage {
         self.verified.transaction_count()
     }
 
-    /// Returns the set of [`UnminedTx`]es with exactly matching
-    /// `tx_ids` in the mempool.
+    /// Returns the set of [`UnminedTx`]es with exactly matching `tx_ids` in the
+    /// mempool.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    /// This matches the exact transaction, with identical blockchain effects,
+    /// signatures, and proofs.
     pub fn transactions_exact(
         &self,
         tx_ids: HashSet<UnminedTxId>,
@@ -281,7 +341,8 @@ impl Storage {
     /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
     /// the mempool.
     ///
-    /// This matches the exact transaction, with identical blockchain effects, signatures, and proofs.
+    /// This matches the exact transaction, with identical blockchain effects,
+    /// signatures, and proofs.
     pub fn contains_transaction_exact(&self, txid: &UnminedTxId) -> bool {
         self.verified.transactions().any(|tx| &tx.id == txid)
     }
@@ -290,12 +351,12 @@ impl Storage {
     ///
     /// Transactions on multiple rejected lists are counted multiple times.
     #[allow(dead_code)]
-    pub fn rejected_transaction_count(&self) -> usize {
+    pub fn rejected_transaction_count(&mut self) -> usize {
         self.tip_rejected_exact.len()
             + self.tip_rejected_same_effects.len()
             + self
                 .chain_rejected_same_effects
-                .iter()
+                .iter_mut()
                 .map(|(_, map)| map.len())
                 .sum::<usize>()
     }
@@ -310,9 +371,12 @@ impl Storage {
                 self.tip_rejected_same_effects.insert(txid.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
+                let eviction_memory_time = self.eviction_memory_time;
                 self.chain_rejected_same_effects
                     .entry(e)
-                    .or_default()
+                    .or_insert_with(|| {
+                        EvictionList::new(MAX_EVICTION_MEMORY_ENTRIES, eviction_memory_time)
+                    })
                     .insert(txid.mined_id());
             }
         }
@@ -335,7 +399,7 @@ impl Storage {
         }
 
         for (error, set) in self.chain_rejected_same_effects.iter() {
-            if set.contains(&txid.mined_id()) {
+            if set.contains_key(&txid.mined_id()) {
                 return Some(error.clone().into());
             }
         }
@@ -397,9 +461,14 @@ impl Storage {
     }
 
     /// Remove transactions from the mempool if they have not been mined after a
-    /// specified height.
+    /// specified height, per [ZIP-203].
     ///
-    /// https://zips.z.cash/zip-0203#specification
+    /// > Transactions will have a new field, nExpiryHeight, which will set the
+    /// > block height after which transactions will be removed from the mempool
+    /// > if they have not been mined.
+    ///
+    ///
+    /// [ZIP-203]: https://zips.z.cash/zip-0203#specification
     pub fn remove_expired_transactions(
         &mut self,
         tip_height: zebra_chain::block::Height,
@@ -442,5 +511,22 @@ impl Storage {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// Update metrics related to the rejected lists.
+    ///
+    /// Must be called every time the rejected lists change.
+    fn update_rejected_metrics(&mut self) {
+        metrics::gauge!(
+            "mempool.rejected.transaction.ids",
+            self.rejected_transaction_count() as _
+        );
+        // This is just an approximation.
+        // TODO: make it more accurate #2869
+        let item_size = size_of::<(transaction::Hash, SameEffectsTipRejectionError)>();
+        metrics::gauge!(
+            "mempool.rejected.transaction.ids.bytes",
+            (self.rejected_transaction_count() * item_size) as _
+        );
     }
 }
