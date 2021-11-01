@@ -367,13 +367,15 @@ async fn limit_initial_peers(
     let all_peers = config.initial_peers().await;
     let peers_count = all_peers.len();
 
-    // Limit the number of initial peers to `config.peerset_initial_target_size`
-    if peers_count > config.peerset_initial_target_size {
-        info!(
-            "Limiting the initial peers list from {} to {}",
-            peers_count, config.peerset_initial_target_size
-        );
+    if peers_count <= config.peerset_initial_target_size {
+        return all_peers;
     }
+
+    // Limit the number of initial peers to `config.peerset_initial_target_size`
+    info!(
+        "Limiting the initial peers list from {} to {}",
+        peers_count, config.peerset_initial_target_size
+    );
 
     // Split all the peers into the `initial_peers` that will be returned and
     // `unused_peers` that will be sent to the address book.
