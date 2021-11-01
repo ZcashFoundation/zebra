@@ -665,7 +665,7 @@ impl MetaAddrChange {
         }
     }
 
-    /// Return the last attempt for this change, if available.
+    /// Return the last failure for this change, if available.
     pub fn last_failure(&self) -> Option<Instant> {
         match self {
             NewGossiped { .. } => None,
