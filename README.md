@@ -115,7 +115,7 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 - Validation of transaction lock times
 - Validation of sprout note commitment trees
 
-It may ben unreliable on Testnet, and under less-than-perfect network conditions.
+It may be unreliable on Testnet, and under less-than-perfect network conditions.
 See our [roadmap](#future-work) for details.
 
 ## Getting Started
