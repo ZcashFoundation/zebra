@@ -443,7 +443,7 @@ where
     ) -> Result<(), TransactionDownloadVerifyError> {
         // Check if the transaction is already in the state.
         match state
-            .ready_and()
+            .ready()
             .await
             .map_err(|e| TransactionDownloadVerifyError::StateError(e))?
             .call(zs::Request::Transaction(txid.mined_id()))

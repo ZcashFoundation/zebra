@@ -78,7 +78,7 @@ where
 
         async move {
             let stream = TcpStream::connect(addr).await?;
-            hs.ready_and().await?;
+            hs.ready().await?;
             let client = hs
                 .call(HandshakeRequest {
                     tcp_stream: stream,

@@ -949,6 +949,10 @@ async fn listener_peer_limit_default_handshake_error() {
 
 /// Test the listener with the default inbound peer limit,
 /// and a handshaker that returns success then disconnects the peer.
+///
+/// TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit on macOS
+///       (currently, getting over the limit can take 30 seconds or more)
+#[cfg(not(target_os = "macos"))]
 #[tokio::test]
 async fn listener_peer_limit_default_handshake_ok_then_drop() {
     zebra_test::init();
@@ -1260,7 +1264,9 @@ where
         let addr =
             MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now());
         fake_peer = Some(addr);
-        let addr = addr.new_gossiped_change();
+        let addr = addr
+            .new_gossiped_change()
+            .expect("created MetaAddr contains enough information to represent a gossiped address");
 
         address_book.update(addr);
     }

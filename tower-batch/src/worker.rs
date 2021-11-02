@@ -83,7 +83,7 @@ where
             tracing::trace!("notifying caller about worker failure");
             let _ = tx.send(Err(failed.clone()));
         } else {
-            match self.service.ready_and().await {
+            match self.service.ready().await {
                 Ok(svc) => {
                     let rsp = svc.call(req.into());
                     let _ = tx.send(Ok(rsp));
@@ -109,7 +109,7 @@ where
     async fn flush_service(&mut self) {
         if let Err(e) = self
             .service
-            .ready_and()
+            .ready()
             .and_then(|svc| svc.call(BatchControl::Flush))
             .await
         {

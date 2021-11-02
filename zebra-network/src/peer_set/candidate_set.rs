@@ -239,7 +239,7 @@ where
         debug!(?fanout_limit, "sending GetPeers requests");
         // TODO: launch each fanout in its own task (might require tokio 1.6)
         for _ in 0..fanout_limit {
-            let peer_service = self.peer_service.ready_and().await?;
+            let peer_service = self.peer_service.ready().await?;
             responses.push(peer_service.call(Request::Peers));
         }
         while let Some(rsp) = responses.next().await {
@@ -267,7 +267,12 @@ where
 
     /// Add new `addrs` to the address book.
     fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
-        let addrs = addrs.into_iter().map(MetaAddr::new_gossiped_change);
+        let addrs = addrs
+            .into_iter()
+            .map(MetaAddr::new_gossiped_change)
+            .map(|maybe_addr| {
+                maybe_addr.expect("Received gossiped peers always have services set")
+            });
 
         // # Correctness
         //
