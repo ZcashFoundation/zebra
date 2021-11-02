@@ -10,11 +10,9 @@ use std::{
     time::Duration,
 };
 
-use futures::{Stream, StreamExt};
-use tokio::{
-    sync::broadcast,
-    time::{self, Interval},
-};
+use futures::{FutureExt, Stream, StreamExt};
+use tokio::{sync::broadcast, time};
+use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, IntervalStream};
 
 use crate::{protocol::external::InventoryHash, BoxError};
 
@@ -32,13 +30,13 @@ pub struct InventoryRegistry {
     /// Stream of incoming inventory hashes to register
     inv_stream: Pin<
         Box<
-            dyn Stream<Item = Result<(InventoryHash, SocketAddr), broadcast::error::RecvError>>
+            dyn Stream<Item = Result<(InventoryHash, SocketAddr), BroadcastStreamRecvError>>
                 + Send
                 + 'static,
         >,
     >,
     /// Interval tracking how frequently we should rotate our maps
-    interval: Interval,
+    interval: IntervalStream,
 }
 
 impl std::fmt::Debug for InventoryRegistry {
@@ -56,8 +54,8 @@ impl InventoryRegistry {
         Self {
             current: Default::default(),
             prev: Default::default(),
-            inv_stream: inv_stream.into_stream().boxed(),
-            interval: time::interval(Duration::from_secs(75)),
+            inv_stream: BroadcastStream::new(inv_stream).boxed(),
+            interval: IntervalStream::new(time::interval(Duration::from_secs(75))),
         }
     }
 
@@ -97,17 +95,16 @@ impl InventoryRegistry {
         // rather than propagating it through the peer set's Service::poll_ready
         // implementation, where reporting a failure means reporting a permanent
         // failure of the peer set.
-        use broadcast::error::RecvError;
-        while let Poll::Ready(Some(channel_result)) = Pin::new(&mut self.inv_stream).poll_next(cx) {
+        while let Poll::Ready(channel_result) = self.inv_stream.next().poll_unpin(cx) {
             match channel_result {
-                Ok((hash, addr)) => self.register(hash, addr),
-                Err(RecvError::Lagged(count)) => {
+                Some(Ok((hash, addr))) => self.register(hash, addr),
+                Some(Err(BroadcastStreamRecvError::Lagged(count))) => {
                     metrics::counter!("pool.inventory.dropped", 1);
                     tracing::debug!(count, "dropped lagged inventory advertisements");
                 }
                 // This indicates all senders, including the one in the handshaker,
                 // have been dropped, which really is a permanent failure.
-                Err(RecvError::Closed) => return Err(RecvError::Closed.into()),
+                None => return Err(broadcast::error::RecvError::Closed.into()),
             }
         }
 

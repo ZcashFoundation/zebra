@@ -125,7 +125,7 @@ where
             // Check that this block is actually a new block.
             tracing::trace!("checking that block is not already in state");
             match state_service
-                .ready_and()
+                .ready()
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
                 .call(zs::Request::Depth(hash))
@@ -179,7 +179,7 @@ where
             ));
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
-                    .ready_and()
+                    .ready()
                     .await
                     .expect("transaction verifier is always ready")
                     .call(tx::Request::Block {
@@ -211,7 +211,7 @@ where
                 transaction_hashes,
             };
             match state_service
-                .ready_and()
+                .ready()
                 .await
                 .map_err(VerifyBlockError::Commit)?
                 .call(zs::Request::CommitBlock(prepared_block))

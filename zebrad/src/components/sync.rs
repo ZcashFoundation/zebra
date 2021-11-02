@@ -385,7 +385,7 @@ where
     async fn obtain_tips(&mut self) -> Result<(), Report> {
         let block_locator = self
             .state
-            .ready_and()
+            .ready()
             .await
             .map_err(|e| eyre!(e))?
             .call(zebra_state::Request::BlockLocator)
@@ -403,16 +403,12 @@ where
 
         let mut requests = FuturesUnordered::new();
         for _ in 0..FANOUT {
-            requests.push(
-                self.tip_network
-                    .ready_and()
-                    .await
-                    .map_err(|e| eyre!(e))?
-                    .call(zn::Request::FindBlocks {
-                        known_blocks: block_locator.clone(),
-                        stop: None,
-                    }),
-            );
+            requests.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
+                zn::Request::FindBlocks {
+                    known_blocks: block_locator.clone(),
+                    stop: None,
+                },
+            ));
         }
 
         let mut download_set = HashSet::new();
@@ -485,7 +481,7 @@ where
                     let new_download_len = download_set.len();
                     let new_hashes = new_download_len - prev_download_len;
                     tracing::debug!(new_hashes, "added hashes to download set");
-                    metrics::histogram!("sync.obtain.response.hash.count", new_hashes as u64);
+                    metrics::histogram!("sync.obtain.response.hash.count", new_hashes as f64);
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -526,16 +522,12 @@ where
             tracing::debug!(?tip, "asking peers to extend chain tip");
             let mut responses = FuturesUnordered::new();
             for _ in 0..FANOUT {
-                responses.push(
-                    self.tip_network
-                        .ready_and()
-                        .await
-                        .map_err(|e| eyre!(e))?
-                        .call(zn::Request::FindBlocks {
-                            known_blocks: vec![tip.tip],
-                            stop: None,
-                        }),
-                );
+                responses.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
+                    zn::Request::FindBlocks {
+                        known_blocks: vec![tip.tip],
+                        stop: None,
+                    },
+                ));
             }
             while let Some(res) = responses.next().await {
                 match res.map_err::<Report, _>(|e| eyre!(e)) {
@@ -621,7 +613,7 @@ where
                         let new_download_len = download_set.len();
                         let new_hashes = new_download_len - prev_download_len;
                         tracing::debug!(new_hashes, "added hashes to download set");
-                        metrics::histogram!("sync.extend.response.hash.count", new_hashes as u64);
+                        metrics::histogram!("sync.extend.response.hash.count", new_hashes as f64);
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -689,7 +681,7 @@ where
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
-            .ready_and()
+            .ready()
             .await
             .map_err(|e| eyre!(e))?
             .call(zebra_state::Request::Depth(hash))

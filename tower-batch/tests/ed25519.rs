@@ -112,7 +112,7 @@ where
             sk.sign(&msg[..])
         };
 
-        verifier.ready_and().await?;
+        verifier.ready().await?;
         results.push(span.in_scope(|| verifier.call((vk_bytes, sig, msg).into())))
     }
 

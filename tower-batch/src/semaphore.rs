@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub(crate) use self::sync::OwnedSemaphorePermit as Permit;
+use futures::FutureExt;
 use futures_core::ready;
 use std::{
     fmt,
@@ -66,7 +67,12 @@ impl Semaphore {
                     let permit = ready!(Pin::new(fut).poll(cx));
                     State::Ready(permit)
                 }
-                State::Empty => State::Waiting(Box::pin(self.semaphore.clone().acquire_owned())),
+                State::Empty => State::Waiting(Box::pin(
+                    self.semaphore
+                        .clone()
+                        .acquire_owned()
+                        .map(|result| result.expect("internal semaphore is never closed")),
+                )),
             };
         }
     }
