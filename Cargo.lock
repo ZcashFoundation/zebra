@@ -2505,9 +2505,9 @@ checksum = "2386b4ebe91c2f7f51082d4cefa145d030e33a1842a96b12e4885cc3c01f7a55"
 
 [[package]]
 name = "owo-colors"
-version = "3.0.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "503a1a6634186cefb8adc93a751df98215c52b8db8bf416b496865f04ec09e13"
+checksum = "f9ad6d222cdc2351ccabb7af4f68bfaecd601b33c5f10d410ec89d2a273f6fff"
 
 [[package]]
 name = "pairing"
@@ -4935,7 +4935,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "once_cell",
- "owo-colors 3.0.1",
+ "owo-colors 3.1.0",
  "pretty_assertions",
  "proptest",
  "rand 0.8.4",
