@@ -32,6 +32,7 @@ use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::Dat
 use zebra_test::net::random_known_port;
 
 use crate::{
+    address_book_updater::AddressBookUpdater,
     constants, init,
     meta_addr::MetaAddr,
     peer::{self, ErrorSlot, HandshakeRequest, OutboundConnectorRequest},
@@ -44,7 +45,6 @@ use crate::{
         ActiveConnectionCounter, CandidateSet,
     },
     protocol::types::PeerServices,
-    timestamp_collector::TimestampCollector,
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -1522,9 +1522,9 @@ where
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(peer_count + 1);
 
     let (_tcp_listener, listen_addr) = open_listener(&config.clone()).await;
-    let (_address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
+    let (_address_book, address_book_updater) = AddressBookUpdater::spawn(listen_addr);
 
-    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, timestamp_collector);
+    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx)

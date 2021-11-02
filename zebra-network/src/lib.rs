@@ -56,6 +56,7 @@ extern crate bitflags;
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 mod address_book;
+mod address_book_updater;
 mod config;
 pub mod constants;
 mod isolated;
@@ -64,7 +65,6 @@ mod peer;
 mod peer_set;
 mod policies;
 mod protocol;
-mod timestamp_collector;
 
 pub use crate::{
     address_book::AddressBook,
