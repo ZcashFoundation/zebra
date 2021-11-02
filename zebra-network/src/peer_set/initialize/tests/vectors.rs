@@ -1264,7 +1264,9 @@ where
         let addr =
             MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now());
         fake_peer = Some(addr);
-        let addr = addr.new_gossiped_change();
+        let addr = addr
+            .new_gossiped_change()
+            .expect("created MetaAddr contains enough information to represent a gossiped address");
 
         address_book.update(addr);
     }
