@@ -410,8 +410,8 @@ where
             tx
         });
         let address_book_updater = self.address_book_updater.unwrap_or_else(|| {
-            // No timestamp collector was passed, so create a stub channel.
-            // Dropping the receiver means sends will fail, but we don't care.
+            // No `AddressBookUpdater` for timestamp collection was passed, so create a stub
+            // channel. Dropping the receiver means sends will fail, but we don't care.
             let (tx, _rx) = mpsc::channel(1);
             tx
         });
