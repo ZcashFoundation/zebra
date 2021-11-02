@@ -63,7 +63,7 @@ These are some of the advantages or benefits of Zebra:
 - Dev accessibility: supports more developers, which gives new developers
   options for contributing to Zcash protocol development.
 - Runtime safety: with an independeny implementation, the detection of consensus bugs 
-  can happen quicker, preventing the likelihood of black swan events.
+  can happen quicker, reducing the risk of consensus splits.
 - Spec safety: with several node implementations, it is much easier to notice
   bugs and ambiguity in protocol specification.
 - User options: different nodes present different features and tradeoffs for
