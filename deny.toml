@@ -31,12 +31,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # ticket #2200: tokio dependencies
-    { name = "metrics-exporter-prometheus", version = "=0.1.0-alpha.7" },
-    { name = "tower", version = "=0.4.0" },
-    { name = "tokio", version = "=0.2.23" },
-    { name = "tokio-util", version = "=0.3.1" },
-
     # ticket #2953: tracing dependencies
     { name = "tracing-subscriber", version = "=0.1.6" },
 
@@ -52,6 +46,9 @@ skip-tree = [
     # ticket #2983: criterion dependencies
     { name = "criterion", version = "=0.3.4" },
 
+    # ticket #3000: tower-fallback dependencies
+    { name = "pin-project", version = "=0.4.28" },
+
     # ticket #2981: bindgen dependencies
     { name = "rocksdb", version = "=0.16.0" },
 
@@ -64,9 +61,22 @@ skip-tree = [
     # ticket #2980: inferno dependencies
     { name = "inferno", version = "=0.10.7" },
 
+    # ticket #2998: base64 dependencies
+    { name = "base64", version = "=0.10.1" },
+
+    # ticket #2999: http dependencies
+    { name = "bytes", version = "=0.5.6" },
+
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
     # alternative: downgrade Zebra to `bigint`
     { name = "bigint", version = "=4.4.3" },
+
+    # recent major version bumps
+
+    # wait for lots of crates in the tokio ecosystem to upgrade
+    # we should re-check these dependencies in February 2022
+    { name = "redox_syscall", version = "=0.1.57" },
+    { name = "socket2", version = "=0.3.16" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -84,9 +94,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    # ticket #2200: tokio dependencies
-    "https://github.com/kellpossible/sentry-tracing",
-
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
 ]
@@ -95,8 +102,4 @@ allow-git = [
 github = [
     "ZcashFoundation",
     "zcash",
-
-    # ticket #2200: tokio dependencies
-    "hyperium",
-    "tower-rs",
 ]

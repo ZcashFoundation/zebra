@@ -37,7 +37,7 @@ async fn populated_state(
     let mut responses = FuturesUnordered::new();
 
     for request in requests {
-        let rsp = state.ready_and().await.unwrap().call(request);
+        let rsp = state.ready().await.unwrap().call(request);
         responses.push(rsp);
     }
 

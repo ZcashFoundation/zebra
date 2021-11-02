@@ -30,7 +30,7 @@ async fn fallback() {
 
     let mut svc = Fallback::new(svc1, svc2);
 
-    assert_eq!(svc.ready_and().await.unwrap().call(1).await.unwrap(), 1);
-    assert_eq!(svc.ready_and().await.unwrap().call(11).await.unwrap(), 111);
-    assert!(svc.ready_and().await.unwrap().call(21).await.is_err());
+    assert_eq!(svc.ready().await.unwrap().call(1).await.unwrap(), 1);
+    assert_eq!(svc.ready().await.unwrap().call(11).await.unwrap(), 111);
+    assert!(svc.ready().await.unwrap().call(21).await.is_err());
 }

@@ -167,7 +167,7 @@ where
         tracing::debug!("waiting to request block");
         let block_req = self
             .network
-            .ready_and()
+            .ready()
             .await
             .map_err(|e| eyre!(e))?
             .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
@@ -201,7 +201,7 @@ where
                 metrics::counter!("sync.downloaded.block.count", 1);
 
                 let rsp = verifier
-                    .ready_and()
+                    .ready()
                     .await
                     .map_err(BlockDownloadVerifyError::VerifierError)?
                     .call(block);

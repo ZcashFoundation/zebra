@@ -15,6 +15,7 @@ use futures::{
     future, FutureExt, SinkExt, StreamExt,
 };
 use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
@@ -946,7 +947,8 @@ where
                     let mut shutdown_rx = shutdown_rx;
                     let mut server_tx = server_tx;
                     let mut timestamp_collector = heartbeat_ts_collector.clone();
-                    let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
+                    let mut interval_stream =
+                        IntervalStream::new(tokio::time::interval(constants::HEARTBEAT_INTERVAL));
 
                     loop {
                         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);

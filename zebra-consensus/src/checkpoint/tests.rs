@@ -6,9 +6,12 @@ use super::types::Progress::*;
 use super::types::TargetHeight::*;
 
 use color_eyre::eyre::{eyre, Report};
-use futures::{future::TryFutureExt, stream::FuturesUnordered};
+use futures::{
+    future::TryFutureExt,
+    stream::{FuturesUnordered, StreamExt},
+};
 use std::{cmp::min, convert::TryInto, mem::drop, time::Duration};
-use tokio::{stream::StreamExt, time::timeout};
+use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -64,10 +67,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
     );
 
     /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
+    let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
     /// SPANDOC: Set up the future for block 0
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -148,10 +148,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     // Now verify each block
     for (block, height, hash) in checkpoint_data {
         /// SPANDOC: Make sure the verifier service is ready
-        let ready_verifier_service = checkpoint_verifier
-            .ready_and()
-            .map_err(|e| eyre!(e))
-            .await?;
+        let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
 
         /// SPANDOC: Set up the future for block {?height}
         let verify_future = timeout(
@@ -325,8 +322,7 @@ async fn continuous_blockchain(
                 if height <= restart_height {
                     let mut state_service = state_service.clone();
                     /// SPANDOC: Make sure the state service is ready for block {?height}
-                    let ready_state_service =
-                        state_service.ready_and().map_err(|e| eyre!(e)).await?;
+                    let ready_state_service = state_service.ready().map_err(|e| eyre!(e)).await?;
 
                     /// SPANDOC: Add block directly to the state {?height}
                     ready_state_service
@@ -342,10 +338,7 @@ async fn continuous_blockchain(
             }
 
             /// SPANDOC: Make sure the verifier service is ready for block {?height}
-            let ready_verifier_service = checkpoint_verifier
-                .ready_and()
-                .map_err(|e| eyre!(e))
-                .await?;
+            let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
 
             /// SPANDOC: Set up the future for block {?height}
             let verify_future = timeout(
@@ -470,10 +463,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
     );
 
     /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
+    let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
     /// SPANDOC: Set up the future for block 415000
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -547,10 +537,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     );
 
     /// SPANDOC: Make sure the verifier service is ready (1/3)
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
+    let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
     /// SPANDOC: Set up the future for bad block 0 (1/3)
     // TODO(teor || jlusby): check error kind
     let bad_verify_future_1 = timeout(
@@ -574,10 +561,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     );
 
     /// SPANDOC: Make sure the verifier service is ready (2/3)
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
+    let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
     /// SPANDOC: Set up the future for bad block 0 again (2/3)
     // TODO(teor || jlusby): check error kind
     let bad_verify_future_2 = timeout(
@@ -601,10 +585,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     );
 
     /// SPANDOC: Make sure the verifier service is ready (3/3)
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
+    let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
     /// SPANDOC: Set up the future for good block 0 (3/3)
     let good_verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -732,10 +713,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
     // Now collect verify futures for each block
     for (block, height, hash) in checkpoint_data {
         /// SPANDOC: Make sure the verifier service is ready
-        let ready_verifier_service = checkpoint_verifier
-            .ready_and()
-            .map_err(|e| eyre!(e))
-            .await?;
+        let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
 
         /// SPANDOC: Set up the future for block {?height}
         let verify_future = timeout(
@@ -811,10 +789,7 @@ async fn hard_coded_mainnet() -> Result<(), Report> {
     assert!(checkpoint_verifier.checkpoint_list.max_height() > block::Height(0));
 
     /// SPANDOC: Make sure the verifier service is ready
-    let ready_verifier_service = checkpoint_verifier
-        .ready_and()
-        .map_err(|e| eyre!(e))
-        .await?;
+    let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
     /// SPANDOC: Set up the future for block 0
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),

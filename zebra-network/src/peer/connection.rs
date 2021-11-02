@@ -924,7 +924,7 @@ where
         trace!(?req);
         use tower::{load_shed::error::Overloaded, ServiceExt};
 
-        if self.svc.ready_and().await.is_err() {
+        if self.svc.ready().await.is_err() {
             // Treat all service readiness errors as Overloaded
             // TODO: treat `TryRecvError::Closed` in `Inbound::poll_ready` as a fatal error (#1655)
             self.fail_with(PeerError::Overloaded);
