@@ -52,7 +52,10 @@ proptest! {
             // also check the address, port, and services individually
             prop_assert!(!addr.addr.ip().is_unspecified());
             prop_assert_ne!(addr.addr.port(), 0);
-            prop_assert!(addr.services.contains(PeerServices::NODE_NETWORK));
+
+            if let Some(services) = addr.services {
+                prop_assert!(services.contains(PeerServices::NODE_NETWORK));
+            }
 
             check::sanitize_avoids_leaks(&addr, &sanitized);
         }
@@ -60,9 +63,7 @@ proptest! {
 
     /// Test round-trip serialization for gossiped MetaAddrs
     #[test]
-    fn gossiped_roundtrip(
-        gossiped_addr in MetaAddr::gossiped_strategy()
-    ) {
+    fn gossiped_roundtrip(gossiped_addr in MetaAddr::gossiped_strategy()) {
         zebra_test::init();
 
         // We require sanitization before serialization
@@ -121,14 +122,11 @@ proptest! {
             deserialized_addr,
             hex::encode(&addr_bytes2),
         );
-
     }
 
     /// Test round-trip serialization for all MetaAddr variants after sanitization
     #[test]
-    fn sanitized_roundtrip(
-        addr in any::<MetaAddr>()
-    ) {
+    fn sanitized_roundtrip(addr in any::<MetaAddr>()) {
         zebra_test::init();
 
         // We require sanitization before serialization,
@@ -194,14 +192,15 @@ proptest! {
             deserialized_addr,
             hex::encode(&addr_bytes2),
         );
-
     }
 
     /// Make sure that [`MetaAddrChange`]s:
     /// - do not modify the last seen time, unless it was None, and
     /// - only modify the services after a response or failure.
     #[test]
-    fn preserve_initial_untrusted_values((mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)) {
+    fn preserve_initial_untrusted_values(
+        (mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE),
+    ) {
         zebra_test::init();
 
         for change in changes {
@@ -211,14 +210,19 @@ proptest! {
                 if addr.untrusted_last_seen.is_some() {
                     prop_assert_eq!(changed_addr.untrusted_last_seen, addr.untrusted_last_seen);
                 } else {
-                    prop_assert_eq!(changed_addr.untrusted_last_seen, change.untrusted_last_seen());
+                    prop_assert_eq!(
+                        changed_addr.untrusted_last_seen,
+                        change.untrusted_last_seen()
+                    );
                 }
 
                 // services:
                 // check that we only change if there was a handshake
-                if changed_addr.last_connection_state.is_never_attempted()
-                    || changed_addr.last_connection_state == AttemptPending
-                    || change.untrusted_services().is_none() {
+                if addr.services.is_some()
+                    && (changed_addr.last_connection_state.is_never_attempted()
+                        || changed_addr.last_connection_state == AttemptPending
+                        || change.untrusted_services().is_none())
+                {
                     prop_assert_eq!(changed_addr.services, addr.services);
                 }
 
@@ -256,7 +260,7 @@ proptest! {
 
             // If `change` is invalid for the current MetaAddr state, skip it.
             if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
-                assert_eq!(changed_addr.addr, addr.addr);
+                prop_assert_eq!(changed_addr.addr, addr.addr);
                 addr = changed_addr;
             }
         }
@@ -276,16 +280,15 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let address_book = AddressBook::new_with_addrs(
-            local_listener,
-            Span::none(),
-            address_book_addrs
-        );
+        let address_book =
+            AddressBook::new_with_addrs(local_listener, Span::none(), address_book_addrs);
         let sanitized_addrs = address_book.sanitized();
 
         let expected_local_listener = address_book.local_listener_meta_addr();
         let canonical_local_listener = canonical_socket_addr(local_listener);
-        let book_sanitized_local_listener = sanitized_addrs.iter().find(|meta_addr| meta_addr.addr == canonical_local_listener );
+        let book_sanitized_local_listener = sanitized_addrs
+            .iter()
+            .find(|meta_addr| meta_addr.addr == canonical_local_listener);
 
         // invalid addresses should be removed by sanitization,
         // regardless of where they have come from
@@ -325,9 +328,10 @@ proptest! {
         // Run the test for this much simulated time
         let overall_test_time: Duration = MIN_PEER_RECONNECTION_DELAY * LIVE_PEER_INTERVALS;
         // Advance the clock by this much for every peer change
-        let peer_change_interval: Duration = overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
+        let peer_change_interval: Duration =
+            overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
 
-        assert!(
+        prop_assert!(
             u32::try_from(MAX_ADDR_CHANGE).unwrap() >= 3 * LIVE_PEER_INTERVALS,
             "there are enough changes for good test coverage",
         );
@@ -365,10 +369,10 @@ proptest! {
 
             for (i, change) in changes.into_iter().enumerate() {
                 while let Some(candidate_addr) = candidate_set.next().await {
-                    assert_eq!(candidate_addr.addr, addr.addr);
+                    prop_assert_eq!(candidate_addr.addr, addr.addr);
 
                     attempt_count += 1;
-                    assert!(
+                    prop_assert!(
                         attempt_count <= 1,
                         "candidate: {:?}, change: {}, now: {:?}, earliest next attempt: {:?}, \
                          attempts: {}, live peer interval limit: {}, test time limit: {:?}, \
@@ -395,7 +399,9 @@ proptest! {
                     attempt_count = 0;
                 }
             }
-        });
+
+            Ok(())
+        })?;
     }
 
     /// Make sure that all disconnected [`MetaAddr`]s are retried once, before
@@ -420,9 +426,10 @@ proptest! {
         // Run the test for this much simulated time
         let overall_test_time: Duration = MIN_PEER_RECONNECTION_DELAY * LIVE_PEER_INTERVALS;
         // Advance the clock by this much for every peer change
-        let peer_change_interval: Duration = overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
+        let peer_change_interval: Duration =
+            overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
 
-        assert!(
+        prop_assert!(
             u32::try_from(MAX_ADDR_CHANGE).unwrap() >= 3 * LIVE_PEER_INTERVALS,
             "there are enough changes for good test coverage",
         );
@@ -449,7 +456,9 @@ proptest! {
 
                     while addr.is_ready_for_connection_attempt() {
                         *attempt_counts.entry(addr.addr).or_default() += 1;
-                        assert!(*attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1);
+                        prop_assert!(
+                            *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
+                        );
 
                         // Simulate an attempt
                         *addr = MetaAddr::new_reconnect(&addr.addr)
@@ -461,17 +470,18 @@ proptest! {
                     // If we've run out of changes for this addr, do nothing.
                     if let Some(changed_addr) = change
                         .map(|change| change.apply_to_meta_addr(*addr))
-                        .flatten() {
-                            assert_eq!(changed_addr.addr, addr.addr);
-                            *addr = changed_addr;
-                        }
+                        .flatten()
+                    {
+                        prop_assert_eq!(changed_addr.addr, addr.addr);
+                        *addr = changed_addr;
+                    }
                 }
 
                 tokio::time::advance(peer_change_interval).await;
             }
 
-            attempt_counts
-        });
+            Ok(attempt_counts)
+        })?;
 
         let min_attempts = attempt_counts.values().min();
         let max_attempts = attempt_counts.values().max();
