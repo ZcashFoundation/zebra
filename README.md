@@ -32,7 +32,7 @@ Zcash is a cryptocurrency designed to preserve the user's privacy. Like most
 cryptocurrencies, it works by a collection of software nodes run by members of
 the Zcash community or any other interested parties. The nodes talk to each
 other in peer-to-peer fashion in order to maintain the state of the Zcash
-blockchain. They also communicate with miners who create news blocks. When a
+blockchain. They also communicate with miners who create new blocks. When a
 Zcash user sends Zcash, their wallet broadcasts transactions to these nodes
 which will eventually reach miners, and the mined transaction will then go
 through Zcash nodes until they reach the recipient's wallet which will report
@@ -42,7 +42,7 @@ The original Zcash node is named `zcashd` and is developed by the Electric Coin
 Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
 an independent Zcash node implementation developed from scratch. Since they
 implement the same protocol, `zcashd` and Zebra nodes can communicate with each
-other.
+other and maintain the Zcash network interoperably.
 
 If you just want to send and receive Zcash then you don't need to use Zebra
 directly. You can download a Zcash wallet application which will handle that
@@ -51,19 +51,19 @@ functionality.) You would want to run Zebra if you want to contribute to the
 Zcash network: the more nodes are run, the more reliable the network will be
 in terms of speed and resistance to denial of service attacks, for example.
 
-These are some of advantages or benefits of Zebra:
+These are some of the advantages or benefits of Zebra:
 
-- Better performance: since it was implemented from scratch, Zebra was able to be
-  implemented in a manner that is currently faster than `zcashd`.
+- Better performance: since it was implemented from scratch in an async, parallelized way, Zebra 
+  is currently faster than `zcashd`.
 - Better security: since it is developed in a memory-safe language (Rust), Zebra
-  is less likely to be affected by security bugs that could compromise the
-  environment where it is run.
+  is less likely to be affected by memory-safety and correctness security bugs that 
+  could compromise the environment where it is run.
 - Better governance: with a new node deployment, there will be more developers
-  who can implement different features.
-- Dev accessibility: there will be more developers which gives new developers
-  options for contributing to protocol development.
-- Runtime safety: the detection of consensus bugs can happen quicker, preventing
-  the likelihood of black swan events.
+  who can implement different features for the Zcash network.
+- Dev accessibility: supports more developers, which gives new developers
+  options for contributing to Zcash protocol development.
+- Runtime safety: with an independeny implementation, the detection of consensus bugs 
+  can happen quicker, preventing the likelihood of black swan events.
 - Spec safety: with several node implementations, it is much easier to notice
   bugs and ambiguity in protocol specification.
 - User options: different nodes present different features and tradeoffs for
@@ -78,16 +78,17 @@ Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashF
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 
-The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node.
+The goals of the beta release series are for Zebra to act as a fully validating Zcash node for 
+all applicable consensus rules as of NU5 activation.
+
 Currently, Zebra does not validate the following Zcash consensus rules:
 
 #### NU5
 - ZIP-155 - Parse addrv2 in Zebra
 - Full validation of Orchard transactions from NU5 onwards
    - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set
-   - Validation of Orchard anchors
+   - Validation of Orchard anchors (root of the Orchard note commitment tree)
    - Validation of Halo2 proofs
-   - Validation of orchard note commitment trees
 
 #### NU4 - Canopy
 - Calculation of Block Subsidy and Funding streams
@@ -95,18 +96,16 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 - Validation of shielded outputs for coinbase transactions (ZIP-212/ZIP-213)
 
 #### NU1 - Sapling
-- Validation of Sapling anchors
-- Validation of sapling note commitment trees
-- Validation of JoinSplit proofs using Groth16 verifier
+- Validation of Sapling anchors (root of the Sapling note commitment tree)
+- Validation of Sprout JoinSplit-on-Groth16 proofs
 
 #### NU0 - Overwinter
 - ZIP-203: Transaction Expiry consensus rules
 
 #### Sprout
-- Validation of Sprout anchors
-- Validation of JoinSplit proofs using BCTV14 verifier
+- Validation of Sprout anchors (root of the Sprout note commitment tree)
 - Validation of transaction lock times
-- Validation of sprout note commitment trees
+- Validating updates of the Sprout note commitment tree
 
 #### Other
 - Undocumented rules derived from Bitcoin
