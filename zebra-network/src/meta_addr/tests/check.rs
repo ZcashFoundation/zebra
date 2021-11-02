@@ -70,8 +70,9 @@ pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
     // Sanitize to the the default state, even though it's not serialized
     assert_eq!(sanitized.last_connection_state, Default::default());
     // Sanitize to known flags
-    let sanitized_peer_services = original.services & PeerServices::all();
-    assert_eq!(sanitized.services, sanitized_peer_services);
+    let sanitized_peer_services =
+        original.services.unwrap_or(PeerServices::NODE_NETWORK) & PeerServices::all();
+    assert_eq!(sanitized.services, Some(sanitized_peer_services));
 
     // Remove IPv6 scope ID and flow information
     let sanitized_socket_addr = SocketAddr::new(original.addr.ip(), original.addr.port());
