@@ -75,17 +75,10 @@ These are some of advantages or benefits of Zebra:
 
 Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashFoundation/zebra/releases).
 
-The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node, except for:
+Zebra's network stack is interoperable with `zcashd`,
+and Zebra implements all the features required to reach Zcash network consensus.
 
-- Mempool transactions
-- Block subsidies
-- Transaction fees
-- Some undocumented rules derived from Bitcoin
-- Some consensus rules removed before Canopy activation (Zebra checkpoints on Canopy activation)
-
-Zebra's network stack is interoperable with zcashd.
-Zebra implements all the features required to reach Zcash network consensus.
-
+The goals of the beta release series are for Zebra to act as a fully validating Canopy and NU5 node.
 Currently, Zebra does not validate the following Zcash consensus rules:
 
 #### NU5
@@ -115,8 +108,9 @@ Currently, Zebra does not validate the following Zcash consensus rules:
 - Validation of transaction lock times
 - Validation of sprout note commitment trees
 
-It may be unreliable on Testnet, and under less-than-perfect network conditions.
-See our [roadmap](#future-work) for details.
+#### Other
+- Undocumented rules derived from Bitcoin
+- Undocumented network protocol requirements
 
 ## Getting Started
 
@@ -201,6 +195,9 @@ For more detailed information, refer to the [documentation](https://zebra.zfnd.o
 Some of Zebra's tests download Zcash blocks, so they might be unreliable depending on your network connection.
 You can set `ZEBRA_SKIP_NETWORK_TESTS=1` to skip the network tests.
 
+Zebra may be unreliable on Testnet, and under less-than-perfect network conditions.
+See our [roadmap](#future-work) for details.
+
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
@@ -236,6 +233,11 @@ Performance and Reliability:
 - Reliable syncing under poor network conditions
 - Batch verification
 - Performance tuning
+
+Currently, the following features are out of scope:
+- Mining support
+- Optional Zcash network protocol messages
+- Consensus rules removed before Canopy activation (Zebra checkpoints on Canopy activation)
 
 ## Documentation
 
