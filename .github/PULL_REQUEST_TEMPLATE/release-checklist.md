@@ -92,6 +92,17 @@ Also check for crates that depend on crates that have changed. They should get a
 
 - [ ] After any changes, test that the `cargo install` command in works. Use
       e.g. `cargo install --locked --path zebrad`.
+      
+## README
+
+As we resolve various outstanding known issues and implement new functionality with each release, we should double check the README for any necessary updates.
+
+We should check and update if necessary:
+
+- [ ] The "Beta Release" section
+- [ ] The "Known Issues" section 
+
+to ensure that any items that are resolved in the latest release are no longer listed in the README. 
 
 ## Change Log
 
