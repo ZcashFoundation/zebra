@@ -203,7 +203,7 @@ where
     };
 
     let tip = match state_service
-        .ready_and()
+        .ready()
         .await
         .unwrap()
         .call(zs::Request::Tip)

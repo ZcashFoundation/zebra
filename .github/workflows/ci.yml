@@ -64,6 +64,15 @@ jobs:
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
+      - name: Change target output directory on Windows
+        # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
+        # larger C: drive.
+        # TODO: Remove this workaround once the build is more efficient (#3005).
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir C:\zebra-target
+          echo "CARGO_TARGET_DIR=C:\zebra-target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run tests
         uses: actions-rs/cargo@v1.0.3
         with:
