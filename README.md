@@ -173,6 +173,17 @@ If Zebra's tests timeout or run out of RAM, try running:
 
 (cargo uses all the processor cores on your machine by default.)
 
+#### macOS Test Troubleshooting
+
+Some of Zebra's tests deliberately cause errors that make Zebra panic.
+macOS records these panics as crash reports.
+
+If you are seeing "Crash Reporter" dialogs during Zebra tests,
+you can disable them using this Terminal.app command:
+```sh
+defaults write com.apple.CrashReporter DialogType none
+```
+
 ### Network Ports and Data Usage
 
 By default, Zebra uses the following inbound TCP listener ports:
