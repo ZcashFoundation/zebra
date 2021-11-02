@@ -18,6 +18,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Instant},
 };
+use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
     util::BoxService, Service, ServiceExt,
@@ -491,7 +492,7 @@ where
             let _guard = accept_span.enter();
 
             debug!("got incoming connection");
-            handshaker.ready_and().await?;
+            handshaker.ready().await?;
             // TODO: distinguish between proxied listeners and direct listeners
             let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
 
@@ -620,7 +621,8 @@ where
     handshakes.push(future::pending().boxed());
 
     let mut crawl_timer =
-        tokio::time::interval(config.crawl_new_peer_interval).map(|tick| TimerCrawl { tick });
+        IntervalStream::new(tokio::time::interval(config.crawl_new_peer_interval))
+            .map(|tick| TimerCrawl { tick });
 
     loop {
         metrics::gauge!(
@@ -764,7 +766,7 @@ where
 
     // the connector is always ready, so this can't hang
     let outbound_connector = outbound_connector
-        .ready_and()
+        .ready()
         .await
         .expect("outbound connector never errors");
 

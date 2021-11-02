@@ -98,7 +98,7 @@ where
             // These unwraps could propagate errors with the correct
             // bound on C::Error
             let fut = to_check
-                .ready_and()
+                .ready()
                 .await
                 .map_err(Into::into)
                 .map_err(|e| eyre!(e))

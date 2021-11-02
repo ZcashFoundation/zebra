@@ -76,7 +76,7 @@ where
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network
-            .ready_and()
+            .ready()
             .await
             .map_err(PeerSetReadiness)?
             .call(request)

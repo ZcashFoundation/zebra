@@ -40,6 +40,13 @@ type InboundBlockDownloads = BlockDownloads<Timeout<Outbound>, Timeout<BlockVeri
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>, Mempool);
 
+/// A bitcoin protocol constant that will hold the max number of peers
+/// we can return in response to a `Peers` request.
+const MAX_ADDR: usize = 1000; // bitcoin protocol constant
+/// A security parameter to return only 1/3 of available addresses as a
+/// response to a `Peers` request.
+const FRAC_OF_AVAILABLE_ADDRESS: f64 = 1. / 3.;
+
 /// Tracks the internal state of the [`Inbound`] service during network setup.
 pub enum Setup {
     /// Waiting for network setup to complete.
@@ -248,10 +255,9 @@ impl Service<zn::Request> for Inbound {
                 if let Setup::Initialized { address_book, .. } = &self.network_setup {
                     // # Security
                     //
-                    // We could truncate the list to try to not reveal our entire
-                    // peer set. But because we don't monitor repeated requests,
-                    // this wouldn't actually achieve anything, because a crawler
-                    // could just repeatedly query it.
+                    // We truncate the list to not reveal our entire peer set in one call.
+                    // But we don't monitor repeated requests and the results are shuffled,
+                    // a crawler could just send repeated queries and get the full list.
                     //
                     // # Correctness
                     //
@@ -262,8 +268,11 @@ impl Service<zn::Request> for Inbound {
 
                     // Send a sanitized response
                     let mut peers = peers.sanitized();
-                    const MAX_ADDR: usize = 1000; // bitcoin protocol constant
-                    peers.truncate(MAX_ADDR);
+
+                    // Truncate the list
+                    let truncate_at = MAX_ADDR
+                        .min((peers.len() as f64 * FRAC_OF_AVAILABLE_ADDRESS).ceil() as usize);
+                    peers.truncate(truncate_at);
 
                     if !peers.is_empty() {
                         async { Ok(zn::Response::Peers(peers)) }.boxed()

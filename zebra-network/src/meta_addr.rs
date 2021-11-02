@@ -709,20 +709,19 @@ impl MetaAddrChange {
     /// If this change can create a new `MetaAddr`, return that address.
     pub fn into_new_meta_addr(self) -> Option<MetaAddr> {
         match self {
-            NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } => Some(MetaAddr {
-                addr: self.addr(),
-                services: self.untrusted_services(),
-                untrusted_last_seen: self.untrusted_last_seen(),
-                last_response: None,
-                last_attempt: None,
-                last_failure: None,
-                last_connection_state: self.peer_addr_state(),
-            }),
+            NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } | NewInitial { .. } => {
+                Some(MetaAddr {
+                    addr: self.addr(),
+                    services: self.untrusted_services(),
+                    untrusted_last_seen: self.untrusted_last_seen(),
+                    last_response: None,
+                    last_attempt: None,
+                    last_failure: None,
+                    last_connection_state: self.peer_addr_state(),
+                })
+            }
 
-            UpdateAttempt { .. }
-            | UpdateResponded { .. }
-            | UpdateFailed { .. }
-            | NewInitial { .. } => None,
+            UpdateAttempt { .. } | UpdateResponded { .. } | UpdateFailed { .. } => None,
         }
     }
 

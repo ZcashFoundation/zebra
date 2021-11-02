@@ -22,12 +22,6 @@ panic = "abort"
 
 [patch.crates-io]
 
-# awaiting stable versions which all depend on tokio 1.0, see #1086 for details
-hyper = { git = "https://github.com/hyperium/hyper", rev = "ed2b22a7f66899d338691552fbcb6c0f2f4e06b9" }
-metrics = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
-metrics-exporter-prometheus = { git = "https://github.com/ZcashFoundation/metrics", rev = "971133128e5aebe3ad177acffc6154449736cfa2" }
-tower = { git = "https://github.com/tower-rs/tower", rev = "d4d1c67c6a0e4213a52abcc2b9df6cc58276ee39" }
-
 # TODO: remove these after a new librustzcash release.
 # These are librustzcash requirements specified in its workspace Cargo.toml that we must replicate here
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }

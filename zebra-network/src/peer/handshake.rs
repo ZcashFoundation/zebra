@@ -15,6 +15,7 @@ use futures::{
     future, FutureExt, SinkExt, StreamExt,
 };
 use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
 use tower::Service;
 use tracing::{span, Level, Span};
@@ -945,8 +946,9 @@ where
 
                     let mut shutdown_rx = shutdown_rx;
                     let mut server_tx = server_tx;
-                    let mut address_book_updater = heartbeat_ts_collector.clone();
-                    let mut interval_stream = tokio::time::interval(constants::HEARTBEAT_INTERVAL);
+                    let mut heartbeat_ts_collector = heartbeat_ts_collector.clone();
+                    let mut interval_stream =
+                        IntervalStream::new(tokio::time::interval(constants::HEARTBEAT_INTERVAL));
 
                     loop {
                         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
@@ -967,7 +969,7 @@ where
                             tracing::trace!("shutting down due to Client shut down");
                             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                 // awaiting a local task won't hang
-                                let _ = address_book_updater
+                                let _ = heartbeat_ts_collector
                                     .send(MetaAddr::new_shutdown(&book_addr, remote_services))
                                     .await;
                             }
@@ -983,7 +985,7 @@ where
                         let heartbeat = send_one_heartbeat(&mut server_tx);
                         if heartbeat_timeout(
                             heartbeat,
-                            &mut address_book_updater,
+                            &mut heartbeat_ts_collector,
                             &connected_addr,
                             &remote_services,
                         )
