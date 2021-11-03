@@ -1194,14 +1194,9 @@ async fn network_init_deadlock() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let before = Instant::now();
+    let init_future = init(config, nil_inbound_service, NoChainTip);
 
-    init(config, nil_inbound_service, NoChainTip).await;
-
-    let elapsed = Instant::now() - before;
-
-    // The [`init`] function should not take more than a few seconds.
-    assert!(elapsed < time_limit);
+    assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
 }
 
 /// Open a local listener on `listen_addr` for `network`.
