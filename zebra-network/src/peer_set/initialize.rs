@@ -392,7 +392,7 @@ async fn limit_initial_peers(
         let _ = address_book_updater.send(peer_addr).await;
     }
 
-    initial_peers.into_iter().collect()
+    initial_peers.iter().copied().collect()
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
