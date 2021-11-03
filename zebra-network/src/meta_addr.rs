@@ -186,6 +186,15 @@ pub struct MetaAddr {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum MetaAddrChange {
+    /// Creates a `MetaAddr` for an initial peer.
+    NewInitial {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_socket_addr_strategy()")
+        )]
+        addr: SocketAddr,
+    },
+
     /// Creates a new gossiped `MetaAddr`.
     NewGossiped {
         #[cfg_attr(
@@ -247,17 +256,17 @@ pub enum MetaAddrChange {
         addr: SocketAddr,
         services: Option<PeerServices>,
     },
-
-    NewInitial {
-        #[cfg_attr(
-            any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
-        )]
-        addr: SocketAddr,
-    },
 }
 
 impl MetaAddr {
+    /// Returns a [`MetaAddrChange::NewInitial`] for a peer that was excluded from
+    /// the list of the initial peers.
+    pub fn new_initial_peer(addr: SocketAddr) -> MetaAddrChange {
+        NewInitial {
+            addr: canonical_socket_addr(addr),
+        }
+    }
+
     /// Returns a new `MetaAddr`, based on the deserialized fields from a
     /// gossiped peer [`Addr`][crate::protocol::external::Message::Addr] message.
     pub fn new_gossiped_meta_addr(
@@ -355,14 +364,6 @@ impl MetaAddr {
         // TODO: if the peer shut down in the Responded state, preserve that
         // state. All other states should be treated as (timeout) errors.
         MetaAddr::new_errored(addr, services.into())
-    }
-
-    /// Returns a [`MetaAddrChange::NewInitial`] for a peer that was excluded from
-    /// the list of the initial peers.
-    pub fn new_initial_peer(addr: SocketAddr) -> MetaAddrChange {
-        NewInitial {
-            addr: canonical_socket_addr(addr),
-        }
     }
 
     /// Returns the time of the last successful interaction with this peer.
@@ -578,13 +579,13 @@ impl MetaAddrChange {
     /// Return the address for this change.
     pub fn addr(&self) -> SocketAddr {
         match self {
-            NewGossiped { addr, .. }
+            NewInitial { addr }
+            | NewGossiped { addr, .. }
             | NewAlternate { addr, .. }
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. }
-            | NewInitial { addr } => *addr,
+            | UpdateFailed { addr, .. } => *addr,
         }
     }
 
@@ -594,19 +595,20 @@ impl MetaAddrChange {
     /// This method should only be used in tests.
     pub fn set_addr(&mut self, new_addr: SocketAddr) {
         match self {
-            NewGossiped { addr, .. }
+            NewInitial { addr }
+            | NewGossiped { addr, .. }
             | NewAlternate { addr, .. }
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. }
-            | NewInitial { addr } => *addr = new_addr,
+            | UpdateFailed { addr, .. } => *addr = new_addr,
         }
     }
 
     /// Return the untrusted services for this change, if available.
     pub fn untrusted_services(&self) -> Option<PeerServices> {
         match self {
+            NewInitial { .. } => None,
             NewGossiped {
                 untrusted_services, ..
             } => Some(*untrusted_services),
@@ -619,13 +621,13 @@ impl MetaAddrChange {
             // TODO: split untrusted and direct services (#2324)
             UpdateResponded { services, .. } => Some(*services),
             UpdateFailed { services, .. } => *services,
-            NewInitial { .. } => None,
         }
     }
 
     /// Return the untrusted last seen time for this change, if available.
     pub fn untrusted_last_seen(&self) -> Option<DateTime32> {
         match self {
+            NewInitial { .. } => None,
             NewGossiped {
                 untrusted_last_seen,
                 ..
@@ -636,13 +638,13 @@ impl MetaAddrChange {
             UpdateAttempt { .. } => None,
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,
-            NewInitial { .. } => None,
         }
     }
 
     /// Return the last attempt for this change, if available.
     pub fn last_attempt(&self) -> Option<Instant> {
         match self {
+            NewInitial { .. } => None,
             NewGossiped { .. } => None,
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
@@ -652,13 +654,13 @@ impl MetaAddrChange {
             UpdateAttempt { .. } => Some(Instant::now()),
             UpdateResponded { .. } => None,
             UpdateFailed { .. } => None,
-            NewInitial { .. } => None,
         }
     }
 
     /// Return the last response for this change, if available.
     pub fn last_response(&self) -> Option<DateTime32> {
         match self {
+            NewInitial { .. } => None,
             NewGossiped { .. } => None,
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
@@ -670,13 +672,13 @@ impl MetaAddrChange {
             //   reconnection attempts.
             UpdateResponded { .. } => Some(DateTime32::now()),
             UpdateFailed { .. } => None,
-            NewInitial { .. } => None,
         }
     }
 
     /// Return the last failure for this change, if available.
     pub fn last_failure(&self) -> Option<Instant> {
         match self {
+            NewInitial { .. } => None,
             NewGossiped { .. } => None,
             NewAlternate { .. } => None,
             NewLocal { .. } => None,
@@ -688,13 +690,13 @@ impl MetaAddrChange {
             // - the peer will appear to be used for longer, delaying future
             //   reconnection attempts.
             UpdateFailed { .. } => Some(Instant::now()),
-            NewInitial { .. } => None,
         }
     }
 
     /// Return the peer connection state for this change.
     pub fn peer_addr_state(&self) -> PeerAddrState {
         match self {
+            NewInitial { .. } => NeverAttemptedGossiped,
             NewGossiped { .. } => NeverAttemptedGossiped,
             NewAlternate { .. } => NeverAttemptedAlternate,
             // local listeners get sanitized, so the state doesn't matter here
@@ -702,14 +704,13 @@ impl MetaAddrChange {
             UpdateAttempt { .. } => AttemptPending,
             UpdateResponded { .. } => Responded,
             UpdateFailed { .. } => Failed,
-            NewInitial { .. } => NeverAttemptedGossiped,
         }
     }
 
     /// If this change can create a new `MetaAddr`, return that address.
     pub fn into_new_meta_addr(self) -> Option<MetaAddr> {
         match self {
-            NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } | NewInitial { .. } => {
+            NewInitial { .. } | NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } => {
                 Some(MetaAddr {
                     addr: self.addr(),
                     services: self.untrusted_services(),
