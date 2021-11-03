@@ -380,7 +380,7 @@ async fn limit_initial_peers(
 
     // Split all the peers into the `initial_peers` that will be returned and
     // `unused_peers` that will be sent to the address book.
-    let mut all_peers: Vec<SocketAddr> = all_peers.iter().copied().collect();
+    let mut all_peers: Vec<SocketAddr> = all_peers.into_iter().collect();
     let (initial_peers, unused_peers) =
         all_peers.partial_shuffle(&mut rand::thread_rng(), config.peerset_initial_target_size);
 
@@ -392,7 +392,7 @@ async fn limit_initial_peers(
         let _ = address_book_updater.send(peer_addr).await;
     }
 
-    initial_peers.iter().copied().collect()
+    initial_peers.into_iter().collect()
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
