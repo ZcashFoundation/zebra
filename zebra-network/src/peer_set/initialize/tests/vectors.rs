@@ -1171,10 +1171,7 @@ async fn network_init_deadlock() {
     // still some extra peers left.
     const PEER_COUNT: usize = 200;
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
-
-    // This should be a const, but [`Duration::new`] is not yet stable as a
-    // const fn.
-    let time_limit: Duration = Duration::new(10, 0);
+    const TIME_LIMIT: Duration = Duration::from_secs(10);
 
     zebra_test::init();
 
