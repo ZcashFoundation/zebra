@@ -414,6 +414,89 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
 }
 
 #[test]
+fn funding_stream_validation() -> Result<(), Report> {
+    zebra_test::init();
+
+    funding_stream_validation_for_network(Network::Mainnet)?;
+    funding_stream_validation_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn funding_stream_validation_for_network(network: Network) -> Result<(), Report> {
+    let blocks = match network {
+        Network::Mainnet => vec![
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+                .expect("block should deserialize"),
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046401_BYTES[..])
+                .expect("block should deserialize"),
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES[..])
+                .expect("block should deserialize"),
+        ],
+        Network::Testnet => vec![
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1116000_BYTES[..])
+                .expect("block should deserialize"),
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1116001_BYTES[..])
+                .expect("block should deserialize"),
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES[..])
+                .expect("block should deserialize"),
+        ],
+    };
+
+    for block in blocks {
+        // Validate it
+        let result = check::subsidy_is_valid(&block, network);
+        assert_eq!(result.is_ok(), true);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn funding_stream_validation_failure() -> Result<(), Report> {
+    zebra_test::init();
+    use crate::error::*;
+    use zebra_chain::transaction::Transaction;
+
+    let network = Network::Mainnet;
+
+    // Get a block in the mainnet that is inside the funding stream period.
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+            .expect("block should deserialize");
+
+    // Build the new transaction with modified coinbase outputs
+    let tx = block
+        .transactions
+        .get(0)
+        .map(|transaction| Transaction::V4 {
+            inputs: transaction.inputs().to_vec(),
+            outputs: vec![transaction.outputs()[0].clone()],
+            lock_time: transaction.lock_time(),
+            expiry_height: Height(0),
+            joinsplit_data: None,
+            sapling_shielded_data: None,
+        })
+        .unwrap();
+
+    // Build new block
+    let transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = vec![Arc::new(tx)];
+    let block = Block {
+        header: block.header,
+        transactions,
+    };
+
+    // Validate it
+    let result = check::subsidy_is_valid(&block, network).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::FundingStreamNotFound,
+    ));
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
 fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
     zebra_test::init();
 

@@ -1,6 +1,9 @@
 //! Constants for Block Subsidy, Funding Streams, and Founders' Reward
 
-use zebra_chain::{amount::COIN, block::Height};
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+
+use zebra_chain::{amount::COIN, block::Height, parameters::Network};
 
 /// An initial period from Genesis to this Height where the block subsidy is gradually incremented. [What is slow-start mining][slow-mining]
 ///
@@ -41,3 +44,45 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
 ///
 /// Usage: founders_reward = block_subsidy / FOUNDERS_FRACTION_DIVISOR
 pub const FOUNDERS_FRACTION_DIVISOR: u64 = 5;
+
+/// The funding stream receiver categories
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum FundingStreamReceiver {
+    Ecc,
+    ZcashFoundation,
+    MajorGrants,
+}
+
+/// The number of founder reward receivers.
+/// This is the amount of variants of  [`FundingStreamReceiver`]
+pub const FUNDING_STREAM_NUMBER_OF_RECEIVERS: u64 = 3;
+
+/// Denominator as described in [protocol specification §7.9.1][7.9.1].
+///
+/// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
+
+lazy_static! {
+    /// The numerator for each funding stream receiving category
+    /// as described in [protocol specification §7.9.1][7.9.1].
+    ///
+    /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    pub static ref FUNDING_STREAM_RECEIVER_NUMERATORS: HashMap<FundingStreamReceiver, i64> = {
+        let mut hash_map = HashMap::new();
+        hash_map.insert(FundingStreamReceiver::Ecc, 7);
+        hash_map.insert(FundingStreamReceiver::ZcashFoundation, 5);
+        hash_map.insert(FundingStreamReceiver::MajorGrants, 8);
+        hash_map
+    };
+
+    /// Start and end Heights for funding streams
+    /// as described in [protocol specification §7.9.1][7.9.1].
+    ///
+    /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<Network, std::ops::Range<Height>> = {
+        let mut hash_map = HashMap::new();
+        hash_map.insert(Network::Mainnet, Height(1_046_400)..Height(2_726_400));
+        hash_map.insert(Network::Testnet, Height(1_028_500)..Height(2_796_000));
+        hash_map
+    };
+}

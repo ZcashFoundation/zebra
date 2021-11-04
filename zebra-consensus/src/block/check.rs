@@ -9,7 +9,10 @@ use zebra_chain::{
     work::{difficulty::ExpandedDifficulty, equihash},
 };
 
-use crate::{error::*, parameters::SLOW_START_INTERVAL};
+use crate::{
+    error::*,
+    parameters::{FUNDING_STREAM_NUMBER_OF_RECEIVERS, SLOW_START_INTERVAL},
+};
 
 use super::subsidy;
 
@@ -131,9 +134,25 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
-        tracing::trace!("funding stream block subsidy validation is not implemented");
-        // Return ok for now
-        Ok(())
+
+        let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
+            .expect("We always expect a funding stream hashmap response even if empty");
+
+        let mut counter = 0;
+        for (_receiver, amount) in funding_streams {
+            if !subsidy::general::find_output_with_amount(coinbase, amount).is_empty() {
+                counter += 1;
+            }
+        }
+
+        // If we can find `FUNDING_STREAM_NUMBER_OF_RECEIVERS` matches,
+        // then funding streams amounts in coinbase are valid.
+        // TODO: Validate funding stream addresses
+        if counter == FUNDING_STREAM_NUMBER_OF_RECEIVERS {
+            Ok(())
+        } else {
+            Err(SubsidyError::FundingStreamNotFound)?
+        }
     } else {
         // Future halving, with no founders reward or funding streams
         Ok(())

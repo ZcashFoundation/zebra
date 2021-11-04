@@ -70,6 +70,11 @@ impl<C> Amount<C> {
     {
         0.try_into().expect("an amount of 0 is always valid")
     }
+
+    /// Get the number inside the amount
+    pub fn number(&self) -> i64 {
+        self.0
+    }
 }
 
 impl<C> std::ops::Add<Amount<C>> for Amount<C>
