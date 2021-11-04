@@ -1,27 +1,32 @@
 //! Property-based tests for basic serialization primitives.
 
-use std::io::Cursor;
+use std::{convert::TryFrom, io::Cursor};
 
 use proptest::prelude::*;
 
 use crate::{
     serialization::{
         CompactSize64, CompactSizeMessage, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::UnminedTx,
 };
 
 proptest! {
     #[test]
-    fn compact_size_message_write_then_read_round_trip(s in any::<CompactSizeMessage>()) {
+    fn compact_size_message_write_then_read_round_trip(size in any::<CompactSizeMessage>()) {
         zebra_test::init();
 
-        let buf = s.zcash_serialize_to_vec().unwrap();
+        let buf = size.zcash_serialize_to_vec().unwrap();
         // Maximum encoding size of a CompactSize is 9 bytes.
         prop_assert!(buf.len() <= 9);
 
-        let expect_s: CompactSizeMessage = buf.zcash_deserialize_into().unwrap();
-        prop_assert_eq!(s, expect_s);
+        let expect_size: CompactSizeMessage = buf.zcash_deserialize_into().unwrap();
+        prop_assert_eq!(size, expect_size);
+
+        // Also check the range is correct
+        let size: usize = size.into();
+        prop_assert!(size <= MAX_PROTOCOL_MESSAGE_LEN);
     }
 
     #[test]
@@ -29,7 +34,7 @@ proptest! {
         zebra_test::init();
 
         // Only do the test if the bytes were valid.
-        if let Ok(s) = CompactSizeMessage::zcash_deserialize(Cursor::new(&bytes[..])) {
+        if let Ok(size) = CompactSizeMessage::zcash_deserialize(Cursor::new(&bytes[..])) {
             // The CompactSize encoding is variable-length, so we may not even
             // read all of the input bytes, and therefore we can't expect that
             // the encoding will reproduce bytes that were never read. Instead,
@@ -37,22 +42,40 @@ proptest! {
             // so that if the encoding is different, we'll catch it on the part
             // that's written.
             let mut expect_bytes = bytes;
-            s.zcash_serialize(Cursor::new(&mut expect_bytes[..])).unwrap();
+            size.zcash_serialize(Cursor::new(&mut expect_bytes[..])).unwrap();
 
             prop_assert_eq!(bytes, expect_bytes);
+
+            // Also check the range is correct
+            let size: usize = size.into();
+            prop_assert!(size <= MAX_PROTOCOL_MESSAGE_LEN);
         }
     }
 
     #[test]
-    fn compact_size_64_write_then_read_round_trip(s in any::<CompactSize64>()) {
+    fn compact_size_message_range(size in any::<usize>()) {
         zebra_test::init();
 
-        let buf = s.zcash_serialize_to_vec().unwrap();
+        if let Ok(compact_size) = CompactSizeMessage::try_from(size) {
+            prop_assert!(size <= MAX_PROTOCOL_MESSAGE_LEN);
+
+            let compact_size: usize = compact_size.into();
+            prop_assert_eq!(size, compact_size);
+        } else {
+            prop_assert!(size > MAX_PROTOCOL_MESSAGE_LEN);
+        }
+    }
+
+    #[test]
+    fn compact_size_64_write_then_read_round_trip(size in any::<CompactSize64>()) {
+        zebra_test::init();
+
+        let buf = size.zcash_serialize_to_vec().unwrap();
         // Maximum encoding size of a CompactSize is 9 bytes.
         prop_assert!(buf.len() <= 9);
 
-        let expect_s: CompactSize64 = buf.zcash_deserialize_into().unwrap();
-        prop_assert_eq!(s, expect_s);
+        let expect_size: CompactSize64 = buf.zcash_deserialize_into().unwrap();
+        prop_assert_eq!(size, expect_size);
     }
 
     #[test]
@@ -72,6 +95,15 @@ proptest! {
 
             prop_assert_eq!(bytes, expect_bytes);
         }
+    }
+
+    #[test]
+    fn compact_size_64_conversion(size in any::<u64>()) {
+        zebra_test::init();
+
+        let compact_size = CompactSize64::from(size);
+        let compact_size: u64 = compact_size.into();
+        prop_assert_eq!(size, compact_size);
     }
 
     #[test]
