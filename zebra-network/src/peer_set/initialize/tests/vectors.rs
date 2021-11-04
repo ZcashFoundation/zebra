@@ -32,6 +32,7 @@ use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::Dat
 use zebra_test::net::random_known_port;
 
 use crate::{
+    address_book_updater::AddressBookUpdater,
     constants, init,
     meta_addr::MetaAddr,
     peer::{self, ErrorSlot, HandshakeRequest, OutboundConnectorRequest},
@@ -1140,7 +1141,7 @@ async fn add_initial_peers_is_rate_limited() {
     let before = Instant::now();
 
     let (initial_peers_task_handle, peerset_rx) =
-        spawn_add_initial_peers(PEER_COUNT, outbound_connector);
+        spawn_add_initial_peers(PEER_COUNT, outbound_connector).await;
     let connections = peerset_rx.take(PEER_COUNT).collect::<Vec<_>>().await;
 
     let elapsed = Instant::now() - before;
@@ -1159,6 +1160,43 @@ async fn add_initial_peers_is_rate_limited() {
         "unexpected error or panic in add_initial_peers task: {:?}",
         initial_peers_result,
     );
+}
+
+/// Test that [`init`] does not deadlock.
+#[tokio::test]
+async fn network_init_deadlock() {
+    // The `PEER_COUNT` is the amount of initial seed peers. The value is set so
+    // that the peers fill up `PEERSET_INITIAL_TARGET_SIZE`, fill up the channel
+    // for sending unused peers to the `AddressBook`, and so that there are
+    // still some extra peers left.
+    const PEER_COUNT: usize = 200;
+    const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
+    const TIME_LIMIT: Duration = Duration::from_secs(10);
+
+    zebra_test::init();
+
+    // Create a list of dummy IPs, and initialize a config using them as the
+    // initial peers. The amount of these peers will overflow
+    // `PEERSET_INITIAL_TARGET_SIZE`.
+    let mut peers = HashSet::new();
+    for address_number in 0..PEER_COUNT {
+        peers.insert(
+            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+        );
+    }
+
+    let config = Config {
+        initial_mainnet_peers: peers,
+        peerset_initial_target_size: PEERSET_INITIAL_TARGET_SIZE,
+        network: Network::Mainnet,
+        ..Config::default()
+    };
+
+    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
+
+    let init_future = init(config, nil_inbound_service, NoChainTip);
+
+    assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
 }
 
 /// Open a local listener on `listen_addr` for `network`.
@@ -1442,7 +1480,7 @@ where
 /// Dummy IPs are used.
 ///
 /// Returns the task [`JoinHandle`], and the peer set receiver.
-fn spawn_add_initial_peers<C>(
+async fn spawn_add_initial_peers<C>(
     peer_count: usize,
     outbound_connector: C,
 ) -> (
@@ -1475,7 +1513,10 @@ where
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(peer_count + 1);
 
-    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx);
+    let (_tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+    let (_address_book, address_book_updater) = AddressBookUpdater::spawn(listen_addr);
+
+    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx)
