@@ -6,8 +6,7 @@ use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
 
 use super::{
-    read_zcash::canonical_socket_addr, CompactSize64, CompactSizeMessage, DateTime32,
-    MAX_PROTOCOL_MESSAGE_LEN,
+    read_zcash::canonical_socket_addr, CompactSizeMessage, DateTime32, MAX_PROTOCOL_MESSAGE_LEN,
 };
 
 impl Arbitrary for DateTime32 {

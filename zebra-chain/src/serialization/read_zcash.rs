@@ -1,6 +1,6 @@
-use std::io;
 use std::{
     convert::TryInto,
+    io,
     net::{IpAddr, Ipv6Addr, SocketAddr},
 };
 

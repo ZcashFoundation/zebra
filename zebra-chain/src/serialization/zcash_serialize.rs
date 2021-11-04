@@ -67,7 +67,7 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
             .len()
             .try_into()
             .expect("len fits in MAX_PROTOCOL_MESSAGE_LEN");
-        len.zcash_serialize(writer)?;
+        len.zcash_serialize(&mut writer)?;
 
         zcash_serialize_external_count(self, writer)
     }
@@ -97,14 +97,14 @@ pub fn zcash_serialize_bytes<W: io::Write>(vec: &Vec<u8>, mut writer: W) -> Resu
         .len()
         .try_into()
         .expect("len fits in MAX_PROTOCOL_MESSAGE_LEN");
-    len.zcash_serialize(writer)?;
+    len.zcash_serialize(&mut writer)?;
 
     zcash_serialize_bytes_external_count(vec, writer)
 }
 
 /// Serialize an empty list of items, by writing a zero CompactSize length.
 /// (And no items.)
-pub fn zcash_serialize_empty_list<W: io::Write>(mut writer: W) -> Result<(), io::Error> {
+pub fn zcash_serialize_empty_list<W: io::Write>(writer: W) -> Result<(), io::Error> {
     let len: CompactSizeMessage = 0.try_into().expect("zero fits in MAX_PROTOCOL_MESSAGE_LEN");
     len.zcash_serialize(writer)
 }

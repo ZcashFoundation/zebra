@@ -1,11 +1,12 @@
-use std::io;
 use std::{
     convert::TryInto,
+    io,
     net::{IpAddr, SocketAddr},
 };
 
-use super::MAX_PROTOCOL_MESSAGE_LEN;
 use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
+
+use super::MAX_PROTOCOL_MESSAGE_LEN;
 
 /// Extends [`Write`] with methods for writing Zcash/Bitcoin types.
 ///
@@ -51,12 +52,12 @@ pub trait WriteZcashExt: io::Write {
         // # Security
         // Defence-in-depth for memory DoS via preallocation.
         //
-        if n > MAX_PROTOCOL_MESSAGE_LEN
-            .try_into()
-            .expect("usize fits in u64")
-        {
-            panic!("CompactSize larger than protocol message limit");
-        }
+        assert!(
+            n <= MAX_PROTOCOL_MESSAGE_LEN
+                .try_into()
+                .expect("usize fits in u64"),
+            "CompactSize larger than protocol message limit"
+        );
 
         match n {
             0x0000_0000..=0x0000_00fc => self.write_u8(n as u8),

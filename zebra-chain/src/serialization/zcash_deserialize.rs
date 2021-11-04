@@ -27,7 +27,7 @@ pub trait ZcashDeserialize: Sized {
 /// information.
 impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for Vec<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let len: CompactSizeMessage = reader.zcash_deserialize_into()?;
+        let len: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
         zcash_deserialize_external_count(len.into(), reader)
     }
 }
@@ -48,7 +48,7 @@ impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for AtLeastOne<T
 /// This allows the optimization without relying on specialization.
 impl ZcashDeserialize for Vec<u8> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let len: CompactSizeMessage = reader.zcash_deserialize_into()?;
+        let len: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
         zcash_deserialize_bytes_external_count(len.into(), reader)
     }
 }

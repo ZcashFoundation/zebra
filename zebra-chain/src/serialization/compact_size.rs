@@ -5,10 +5,7 @@
 //! - [`CompactSizeMessage`] for sizes that must be less than the network message limit, and
 //! - [`CompactSize64`] for flags, arbitrary counts, and sizes that span multiple blocks.
 
-use std::{
-    cmp::Ordering,
-    convert::{TryFrom, TryInto},
-};
+use std::convert::{TryFrom, TryInto};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -231,6 +228,8 @@ pub struct CompactSize64(
 // because we want all values to go through the same code paths.
 // (And we don't want to accidentally truncate using `as`.)
 // It would also make integer literal type inference fail.
+//
+// We don't implement `Ord` for integers, because it makes type inference fail.
 
 impl TryFrom<usize> for CompactSizeMessage {
     type Error = SerializationError;
@@ -285,23 +284,9 @@ impl PartialEq<usize> for CompactSizeMessage {
     }
 }
 
-impl PartialOrd<usize> for CompactSizeMessage {
-    fn partial_cmp(&self, other: &usize) -> Option<Ordering> {
-        let size: usize = self.0.try_into().expect("u32 fits in usize");
-
-        size.partial_cmp(other)
-    }
-}
-
 impl PartialEq<CompactSizeMessage> for usize {
     fn eq(&self, other: &CompactSizeMessage) -> bool {
         other == self
-    }
-}
-
-impl PartialOrd<CompactSizeMessage> for usize {
-    fn partial_cmp(&self, other: &CompactSizeMessage) -> Option<Ordering> {
-        other.partial_cmp(self)
     }
 }
 
@@ -311,21 +296,9 @@ impl PartialEq<u64> for CompactSize64 {
     }
 }
 
-impl PartialOrd<u64> for CompactSize64 {
-    fn partial_cmp(&self, other: &u64) -> Option<Ordering> {
-        self.0.partial_cmp(other)
-    }
-}
-
 impl PartialEq<CompactSize64> for u64 {
     fn eq(&self, other: &CompactSize64) -> bool {
         other == self
-    }
-}
-
-impl PartialOrd<CompactSize64> for u64 {
-    fn partial_cmp(&self, other: &CompactSize64) -> Option<Ordering> {
-        other.partial_cmp(self)
     }
 }
 
