@@ -446,7 +446,7 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
     for block in blocks {
         // Validate it
         let result = check::subsidy_is_valid(&block, network);
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
     }
 
     Ok(())

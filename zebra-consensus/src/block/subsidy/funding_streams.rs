@@ -42,16 +42,9 @@ pub fn funding_stream_values(
                     Amount::<NonNegative>::try_from(amount_value as i64)?,
                 );
             }
-            // Return the hashmap with the funding stream value for each receiver
-            Ok(results)
-        } else {
-            // Return empty hashmap if we are out of the range
-            Ok(results)
         }
-    } else {
-        // Return empty hashmap if we are before Canopy activation height
-        Ok(results)
     }
+    Ok(results)
 }
 
 #[cfg(test)]
