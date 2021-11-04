@@ -530,6 +530,16 @@ impl MetaAddr {
         is_node && self.address_is_valid_for_outbound()
     }
 
+    /// Was this peer last seen a long time ago?
+    ///
+    /// A long time in this case is more than 3 days ago or never seen before.
+    pub fn was_not_recently_seen(&self) -> bool {
+        match self.last_seen() {
+            Some(last_seen) => last_seen.saturating_elapsed() > constants::MAX_PEER_TIME_UNSEEN,
+            None => true,
+        }
+    }
+
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
