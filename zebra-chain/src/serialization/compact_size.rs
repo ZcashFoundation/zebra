@@ -276,14 +276,15 @@ impl ZcashSerialize for CompactSizeMessage {
     fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
         // # Security
         // Defence-in-depth for memory DoS via preallocation.
-        if self.0
-            > MAX_PROTOCOL_MESSAGE_LEN
-                .try_into()
-                .expect("usize fits in u64")
-        {
-            // This is validated data inside Zebra, so we panic.
-            panic!("CompactSize larger than protocol message limit");
-        }
+        //
+        // This is validated data inside Zebra, so we panic.
+        assert!(
+            self.0
+                <= MAX_PROTOCOL_MESSAGE_LEN
+                    .try_into()
+                    .expect("usize fits in u64"),
+            "CompactSize larger than protocol message limit"
+        );
 
         // Use the same serialization format as CompactSize64.
         let size: u64 = self.0.into();
