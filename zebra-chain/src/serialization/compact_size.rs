@@ -306,8 +306,8 @@ impl ZcashSerialize for CompactSize64 {
     fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         let n = self.0;
         match n {
-            0x0000_0000..=0x0000_00fc => writer.write_u8(n as u8),
-            0x0000_00fd..=0x0000_ffff => {
+            0x00..=0xfc => writer.write_u8(n as u8),
+            0x00fd..=0xffff => {
                 writer.write_u8(0xfd)?;
                 writer.write_u16::<LittleEndian>(n as u16)
             }
@@ -332,15 +332,15 @@ impl ZcashDeserialize for CompactSize64 {
         let size = match flag_byte {
             n @ 0x00..=0xfc => Ok(n as u64),
             0xfd => match reader.read_u16::<LittleEndian>()? {
-                n @ 0x0000_00fd..=0x0000_ffff => Ok(n as u64),
+                n @ 0x00fd..=u16::MAX => Ok(n as u64),
                 _ => Err(Parse("non-canonical CompactSize")),
             },
             0xfe => match reader.read_u32::<LittleEndian>()? {
-                n @ 0x0001_0000..=0xffff_ffff => Ok(n as u64),
+                n @ 0x0001_0000..=u32::MAX => Ok(n as u64),
                 _ => Err(Parse("non-canonical CompactSize")),
             },
             0xff => match reader.read_u64::<LittleEndian>()? {
-                n @ 0x1_0000_0000..=0xffff_ffff_ffff_ffff => Ok(n),
+                n @ 0x0000_0001_0000_0000..=u64::MAX => Ok(n),
                 _ => Err(Parse("non-canonical CompactSize")),
             },
         }?;
