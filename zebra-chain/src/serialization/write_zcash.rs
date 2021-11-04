@@ -55,7 +55,7 @@ pub trait WriteZcashExt: io::Write {
             .try_into()
             .expect("usize fits in u64")
         {
-            panic!("compactsize larger than protocol message limit");
+            panic!("CompactSize larger than protocol message limit");
         }
 
         match n {

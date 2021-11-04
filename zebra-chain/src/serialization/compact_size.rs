@@ -14,7 +14,7 @@ use crate::serialization::{
     MAX_PROTOCOL_MESSAGE_LEN,
 };
 
-/// A compactSize-encoded field that is limited to [`MAX_PROTOCOL_MESSAGE_LEN`].
+/// A CompactSize-encoded field that is limited to [`MAX_PROTOCOL_MESSAGE_LEN`].
 /// Used for sizes or counts of objects that are sent in network messages.
 ///
 /// # Security
@@ -118,7 +118,7 @@ pub struct CompactSizeMessage(
     u32,
 );
 
-/// An arbitrary compactSize-encoded field.
+/// An arbitrary CompactSize-encoded field.
 /// Used for flags, arbitrary counts, and sizes that span multiple blocks.
 ///
 /// # Security
@@ -238,7 +238,7 @@ impl TryFrom<u64> for CompactSizeMessage {
                 .expect("MAX_PROTOCOL_MESSAGE_LEN fits in u32")
         {
             // This could be invalid data from peers, so we return a parse error.
-            Err(Parse("compactsize larger than protocol message limit"))?;
+            Err(Parse("CompactSize larger than protocol message limit"))?;
         }
 
         Ok(CompactSizeMessage(size))
@@ -282,7 +282,7 @@ impl ZcashSerialize for CompactSizeMessage {
                 .expect("usize fits in u64")
         {
             // This is validated data inside Zebra, so we panic.
-            panic!("compactsize larger than protocol message limit");
+            panic!("CompactSize larger than protocol message limit");
         }
 
         // Use the same serialization format as CompactSize64.
@@ -333,15 +333,15 @@ impl ZcashDeserialize for CompactSize64 {
             n @ 0x00..=0xfc => Ok(n as u64),
             0xfd => match reader.read_u16::<LittleEndian>()? {
                 n @ 0x0000_00fd..=0x0000_ffff => Ok(n as u64),
-                _ => Err(Parse("non-canonical compactsize")),
+                _ => Err(Parse("non-canonical CompactSize")),
             },
             0xfe => match reader.read_u32::<LittleEndian>()? {
                 n @ 0x0001_0000..=0xffff_ffff => Ok(n as u64),
-                _ => Err(Parse("non-canonical compactsize")),
+                _ => Err(Parse("non-canonical CompactSize")),
             },
             0xff => match reader.read_u64::<LittleEndian>()? {
                 n @ 0x1_0000_0000..=0xffff_ffff_ffff_ffff => Ok(n),
-                _ => Err(Parse("non-canonical compactsize")),
+                _ => Err(Parse("non-canonical CompactSize")),
             },
         }?;
 

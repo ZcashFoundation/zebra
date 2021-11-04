@@ -67,15 +67,15 @@ pub trait ReadZcashExt: io::Read {
             n @ 0x00..=0xfc => Ok(n as u64),
             0xfd => match self.read_u16::<LittleEndian>()? {
                 n @ 0x0000_00fd..=0x0000_ffff => Ok(n as u64),
-                _ => Err(Parse("non-canonical compactsize")),
+                _ => Err(Parse("non-canonical CompactSize")),
             },
             0xfe => match self.read_u32::<LittleEndian>()? {
                 n @ 0x0001_0000..=0xffff_ffff => Ok(n as u64),
-                _ => Err(Parse("non-canonical compactsize")),
+                _ => Err(Parse("non-canonical CompactSize")),
             },
             0xff => match self.read_u64::<LittleEndian>()? {
                 n @ 0x1_0000_0000..=0xffff_ffff_ffff_ffff => Ok(n),
-                _ => Err(Parse("non-canonical compactsize")),
+                _ => Err(Parse("non-canonical CompactSize")),
             },
         }?;
 
@@ -86,7 +86,7 @@ pub trait ReadZcashExt: io::Read {
                 .try_into()
                 .expect("usize fits in u64")
         {
-            Err(Parse("compactsize larger than protocol message limit"))?;
+            Err(Parse("CompactSize larger than protocol message limit"))?;
         }
 
         Ok(size)

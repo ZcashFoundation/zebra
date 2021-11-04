@@ -52,7 +52,7 @@ impl std::io::Write for FakeWriter {
     }
 }
 
-/// Serialize a `Vec` as a compactsize number of items, then the items. This is
+/// Serialize a `Vec` as a CompactSize number of items, then the items. This is
 /// the most common format in Zcash.
 ///
 /// See `zcash_serialize_external_count` for more details, and usage information.
@@ -63,7 +63,7 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
     }
 }
 
-/// Serialize a byte vector as a compactsize number of items, then the items.
+/// Serialize a byte vector as a CompactSize number of items, then the items.
 ///
 /// # Correctness
 ///
@@ -79,7 +79,7 @@ pub fn zcash_serialize_bytes<W: io::Write>(vec: &Vec<u8>, mut writer: W) -> Resu
     zcash_serialize_bytes_external_count(vec, writer)
 }
 
-/// Serialize an `AtLeastOne` vector as a compactsize number of items, then the
+/// Serialize an `AtLeastOne` vector as a CompactSize number of items, then the
 /// items. This is the most common format in Zcash.
 impl<T: ZcashSerialize> ZcashSerialize for AtLeastOne<T> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -88,11 +88,11 @@ impl<T: ZcashSerialize> ZcashSerialize for AtLeastOne<T> {
 }
 
 /// Serialize a typed `Vec` **without** writing the number of items as a
-/// compactsize.
+/// CompactSize.
 ///
-/// In Zcash, most arrays are stored as a compactsize, followed by that number
+/// In Zcash, most arrays are stored as a CompactSize, followed by that number
 /// of items of type `T`. But in `Transaction::V5`, some types are serialized as
-/// multiple arrays in different locations, with a single compactsize before the
+/// multiple arrays in different locations, with a single CompactSize before the
 /// first array.
 ///
 /// ## Usage
@@ -100,7 +100,7 @@ impl<T: ZcashSerialize> ZcashSerialize for AtLeastOne<T> {
 /// Use `zcash_serialize_external_count` when the array count is determined by
 /// other data, or a consensus rule.
 ///
-/// Use `Vec::zcash_serialize` for data that contains compactsize count,
+/// Use `Vec::zcash_serialize` for data that contains CompactSize count,
 /// followed by the data array.
 ///
 /// For example, when a single count applies to multiple arrays:
@@ -125,7 +125,7 @@ pub fn zcash_serialize_external_count<W: io::Write, T: ZcashSerialize>(
 }
 
 /// Serialize a raw byte `Vec` **without** writing the number of items as a
-/// compactsize.
+/// CompactSize.
 ///
 /// This is a convenience alias for `writer.write_all(&vec)`.
 //
