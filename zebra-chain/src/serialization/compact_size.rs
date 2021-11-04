@@ -61,11 +61,11 @@ use crate::serialization::{
 /// # use zebra_chain::serialization::{CompactSizeMessage, MAX_PROTOCOL_MESSAGE_LEN};
 /// # use std::convert::TryFrom;
 /// # let max_size = u64::try_from(MAX_PROTOCOL_MESSAGE_LEN).unwrap();
-/// let err = CompactSizeMessage::try_from(max_size + 1).unwrap_err();
+/// assert!(CompactSizeMessage::try_from(max_size + 1).is_err());
 ///
-/// let err = CompactSizeMessage::try_from(0xbbaafd).unwrap_err();
+/// assert!(CompactSizeMessage::try_from(0xbbaafd).is_err());
 ///
-/// let err = CompactSizeMessage::try_from(0x22ccbbaafd).unwrap_err();
+/// assert!(CompactSizeMessage::try_from(0x22ccbbaafd).is_err());
 /// ```
 ///
 /// # Deserialization Examples
@@ -102,13 +102,13 @@ use crate::serialization::{
 /// # use zebra_chain::serialization::{CompactSizeMessage, ZcashDeserialize, MAX_PROTOCOL_MESSAGE_LEN};
 /// # use std::{convert::TryFrom, io::Cursor};
 /// let max_size_plus_one = Cursor::new(b"\xfe\x01\x00\x20\x00");
-/// let err = CompactSizeMessage::zcash_deserialize(max_size_plus_one).unwrap_err();
+/// assert!(CompactSizeMessage::zcash_deserialize(max_size_plus_one).is_err());
 ///
 /// let bytes = Cursor::new(b"\xfe\xfd\xaa\xbb\x00");
-/// let err = CompactSizeMessage::zcash_deserialize(bytes).unwrap_err();
+/// assert!(CompactSizeMessage::zcash_deserialize(bytes).is_err());
 ///
 /// let bytes = Cursor::new(b"\xff\xfd\xaa\xbb\xcc\x22\x00\x00\x00");
-/// let err = CompactSizeMessage::zcash_deserialize(bytes).unwrap_err();
+/// assert!(CompactSizeMessage::zcash_deserialize(bytes).is_err());
 /// ```
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct CompactSizeMessage(
