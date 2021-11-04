@@ -53,7 +53,7 @@ Orchard uses `Halo2Proof`s with corresponding signature type changes. Each Orcha
 [other-transaction-v5-changes]: #other-transaction-v5-changes
 
 V5 transactions split `Spend`s, `Output`s, and `AuthorizedAction`s into multiple arrays,
-with a single `compactsize` count before the first array. We add new
+with a single `CompactSize` count before the first array. We add new
 `zcash_deserialize_external_count` and `zcash_serialize_external_count` utility functions,
 which make it easier to serialize and deserialize these arrays correctly.
 
