@@ -5,7 +5,10 @@
 //! - [`CompactSizeMessage`] for sizes that must be less than the network message limit, and
 //! - [`CompactSize64`] for flags, arbitrary counts, and sizes that span multiple blocks.
 
-use std::convert::{TryFrom, TryInto};
+use std::{
+    cmp::Ordering,
+    convert::{TryFrom, TryInto},
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -13,6 +16,9 @@ use crate::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     MAX_PROTOCOL_MESSAGE_LEN,
 };
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 
 /// A CompactSize-encoded field that is limited to [`MAX_PROTOCOL_MESSAGE_LEN`].
 /// Used for sizes or counts of objects that are sent in network messages.
@@ -207,6 +213,7 @@ pub struct CompactSizeMessage(
 /// );
 ///```
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CompactSize64(
     /// A numeric value.
     ///
@@ -214,18 +221,22 @@ pub struct CompactSize64(
     u64,
 );
 
+// `CompactSizeMessage` are item counts, so we expect them to be used with `usize`
+// `CompactSize64` are arbitrary integers, so we expect it to be used with `u64`
+//
 // We don't implement conversions between CompactSizeMessage and CompactSize64,
 // because we want to distinguish fields with different numeric constraints.
 //
 // We don't implement From<CompactSizeMessage> for u16 or u8,
 // because we want all values to go through the same code paths.
 // (And we don't want to accidentally truncate using `as`.)
+// It would also make integer literal type inference fail.
 
-impl TryFrom<u64> for CompactSizeMessage {
+impl TryFrom<usize> for CompactSizeMessage {
     type Error = SerializationError;
 
     #[inline]
-    fn try_from(size: u64) -> Result<Self, Self::Error> {
+    fn try_from(size: usize) -> Result<Self, Self::Error> {
         use SerializationError::Parse;
 
         let size: u32 = size.try_into()?;
@@ -245,10 +256,10 @@ impl TryFrom<u64> for CompactSizeMessage {
     }
 }
 
-impl From<CompactSizeMessage> for u64 {
+impl From<CompactSizeMessage> for usize {
     #[inline]
     fn from(size: CompactSizeMessage) -> Self {
-        size.0.into()
+        size.0.try_into().expect("u32 fits in usize")
     }
 }
 
@@ -263,6 +274,58 @@ impl From<u64> for CompactSize64 {
     #[inline]
     fn from(size: u64) -> Self {
         CompactSize64(size)
+    }
+}
+
+impl PartialEq<usize> for CompactSizeMessage {
+    fn eq(&self, other: &usize) -> bool {
+        let size: usize = self.0.try_into().expect("u32 fits in usize");
+
+        &size == other
+    }
+}
+
+impl PartialOrd<usize> for CompactSizeMessage {
+    fn partial_cmp(&self, other: &usize) -> Option<Ordering> {
+        let size: usize = self.0.try_into().expect("u32 fits in usize");
+
+        size.partial_cmp(other)
+    }
+}
+
+impl PartialEq<CompactSizeMessage> for usize {
+    fn eq(&self, other: &CompactSizeMessage) -> bool {
+        other == self
+    }
+}
+
+impl PartialOrd<CompactSizeMessage> for usize {
+    fn partial_cmp(&self, other: &CompactSizeMessage) -> Option<Ordering> {
+        other.partial_cmp(self)
+    }
+}
+
+impl PartialEq<u64> for CompactSize64 {
+    fn eq(&self, other: &u64) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialOrd<u64> for CompactSize64 {
+    fn partial_cmp(&self, other: &u64) -> Option<Ordering> {
+        self.0.partial_cmp(other)
+    }
+}
+
+impl PartialEq<CompactSize64> for u64 {
+    fn eq(&self, other: &CompactSize64) -> bool {
+        other == self
+    }
+}
+
+impl PartialOrd<CompactSize64> for u64 {
+    fn partial_cmp(&self, other: &CompactSize64) -> Option<Ordering> {
+        other.partial_cmp(self)
     }
 }
 
@@ -298,7 +361,8 @@ impl ZcashDeserialize for CompactSizeMessage {
         // Use the same deserialization format as CompactSize64.
         let size: CompactSize64 = reader.zcash_deserialize_into()?;
 
-        size.0.try_into()
+        let size: usize = size.0.try_into()?;
+        size.try_into()
     }
 }
 
