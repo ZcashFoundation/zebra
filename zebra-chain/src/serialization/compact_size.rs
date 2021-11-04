@@ -38,7 +38,7 @@ use proptest_derive::Arbitrary;
 ///
 /// ```
 /// use zebra_chain::serialization::{CompactSizeMessage, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN};
-/// use std::convert::TryFrom;
+/// use std::convert::{TryFrom, TryInto};
 ///
 /// let size = CompactSizeMessage::try_from(0x12).unwrap();
 /// let buf = size.zcash_serialize_to_vec().unwrap();
@@ -52,7 +52,7 @@ use proptest_derive::Arbitrary;
 /// let buf = size.zcash_serialize_to_vec().unwrap();
 /// assert_eq!(buf, b"\xfd\xfd\xaa");
 ///
-/// let max_size = u64::try_from(MAX_PROTOCOL_MESSAGE_LEN).unwrap();
+/// let max_size: usize = MAX_PROTOCOL_MESSAGE_LEN.try_into().unwrap();
 /// let size = CompactSizeMessage::try_from(max_size).unwrap();
 /// let buf = size.zcash_serialize_to_vec().unwrap();
 /// assert_eq!(buf, b"\xfe\x00\x00\x20\x00");
@@ -62,8 +62,8 @@ use proptest_derive::Arbitrary;
 /// can not be constructed:
 /// ```
 /// # use zebra_chain::serialization::{CompactSizeMessage, MAX_PROTOCOL_MESSAGE_LEN};
-/// # use std::convert::TryFrom;
-/// # let max_size = u64::try_from(MAX_PROTOCOL_MESSAGE_LEN).unwrap();
+/// # use std::convert::{TryFrom, TryInto};
+/// # let max_size: usize = MAX_PROTOCOL_MESSAGE_LEN.try_into().unwrap();
 /// assert!(CompactSizeMessage::try_from(max_size + 1).is_err());
 ///
 /// assert!(CompactSizeMessage::try_from(0xbbaafd).is_err());
@@ -75,7 +75,7 @@ use proptest_derive::Arbitrary;
 ///
 /// ```
 /// use zebra_chain::serialization::{CompactSizeMessage, ZcashDeserializeInto, MAX_PROTOCOL_MESSAGE_LEN};
-/// use std::{convert::TryFrom, io::Cursor};
+/// use std::{convert::{TryFrom, TryInto}, io::Cursor};
 ///
 /// assert_eq!(
 ///     CompactSizeMessage::try_from(0x12).unwrap(),
@@ -92,7 +92,7 @@ use proptest_derive::Arbitrary;
 ///     Cursor::new(b"\xfd\xfd\xaa").zcash_deserialize_into().unwrap(),
 /// );
 ///
-/// let max_size = u64::try_from(MAX_PROTOCOL_MESSAGE_LEN).unwrap();
+/// let max_size: usize = MAX_PROTOCOL_MESSAGE_LEN.try_into().unwrap();
 /// assert_eq!(
 ///     CompactSizeMessage::try_from(max_size).unwrap(),
 ///     Cursor::new(b"\xfe\x00\x00\x20\x00").zcash_deserialize_into().unwrap(),
@@ -229,7 +229,8 @@ pub struct CompactSize64(
 // (And we don't want to accidentally truncate using `as`.)
 // It would also make integer literal type inference fail.
 //
-// We don't implement `Ord` for integers, because it makes type inference fail.
+// We don't implement `PartialEq` or `Ord` with integers,
+// because it makes type inference fail.
 
 impl TryFrom<usize> for CompactSizeMessage {
     type Error = SerializationError;
@@ -273,32 +274,6 @@ impl From<u64> for CompactSize64 {
     #[inline]
     fn from(size: u64) -> Self {
         CompactSize64(size)
-    }
-}
-
-impl PartialEq<usize> for CompactSizeMessage {
-    fn eq(&self, other: &usize) -> bool {
-        let size: usize = self.0.try_into().expect("u32 fits in usize");
-
-        &size == other
-    }
-}
-
-impl PartialEq<CompactSizeMessage> for usize {
-    fn eq(&self, other: &CompactSizeMessage) -> bool {
-        other == self
-    }
-}
-
-impl PartialEq<u64> for CompactSize64 {
-    fn eq(&self, other: &u64) -> bool {
-        &self.0 == other
-    }
-}
-
-impl PartialEq<CompactSize64> for u64 {
-    fn eq(&self, other: &CompactSize64) -> bool {
-        other == self
     }
 }
 
