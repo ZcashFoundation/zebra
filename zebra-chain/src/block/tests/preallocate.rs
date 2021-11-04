@@ -1,15 +1,16 @@
 //! Tests for trusted preallocation during deserialization.
 
+use std::convert::TryInto;
+
+use proptest::prelude::*;
+
 use crate::{
     block::{
         header::MIN_COUNTED_HEADER_LEN, CountedHeader, Hash, Header, BLOCK_HASH_SIZE,
-        MAX_BLOCK_BYTES, MAX_PROTOCOL_MESSAGE_LEN,
+        MAX_PROTOCOL_MESSAGE_LEN,
     },
-    serialization::{TrustedPreallocate, ZcashSerialize},
+    serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize},
 };
-
-use proptest::prelude::*;
-use std::convert::TryInto;
 
 proptest! {
     /// Verify that the serialized size of a block hash used to calculate the allocation limit is correct
@@ -51,10 +52,10 @@ proptest! {
     /// Confirm that each counted header takes at least COUNTED_HEADER_LEN bytes when serialized.
     /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
-    fn counted_header_min_length(header in any::<Header>(), transaction_count in (0..MAX_BLOCK_BYTES)) {
+    fn counted_header_min_length(header in any::<Header>(), transaction_count in any::<CompactSizeMessage>()) {
         let header = CountedHeader {
             header,
-            transaction_count: transaction_count.try_into().expect("Must run test on platform with at least 32 bit address space"),
+            transaction_count,
         };
         let serialized_header = header.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
         prop_assert!(serialized_header.len() >= MIN_COUNTED_HEADER_LEN)
@@ -71,7 +72,7 @@ proptest! {
     fn counted_header_max_allocation(header in any::<Header>()) {
         let header = CountedHeader {
             header,
-            transaction_count: 0,
+            transaction_count: 0.try_into().expect("zero fits in MAX_PROTOCOL_MESSAGE_LEN"),
         };
         let max_allocation: usize = CountedHeader::max_allocation().try_into().unwrap();
         let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);

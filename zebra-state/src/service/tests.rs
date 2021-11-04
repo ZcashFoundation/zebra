@@ -62,7 +62,11 @@ async fn test_populated_state_responds_correctly(
         .iter()
         .map(|block| CountedHeader {
             header: block.header,
-            transaction_count: block.transactions.len(),
+            transaction_count: block
+                .transactions
+                .len()
+                .try_into()
+                .expect("test block transaction counts are valid"),
         })
         .collect();
 

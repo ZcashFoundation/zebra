@@ -5,8 +5,7 @@ use chrono::{TimeZone, Utc};
 
 use crate::{
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        ReadZcashExt, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
     work::{difficulty::CompactDifficulty, equihash},
 };
@@ -89,7 +88,7 @@ impl ZcashDeserialize for Header {
 impl ZcashSerialize for CountedHeader {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.header.zcash_serialize(&mut writer)?;
-        writer.write_compactsize(self.transaction_count as u64)?;
+        self.transaction_count.zcash_serialize(&mut writer)?;
         Ok(())
     }
 }
@@ -98,7 +97,7 @@ impl ZcashDeserialize for CountedHeader {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(CountedHeader {
             header: (&mut reader).zcash_deserialize_into()?,
-            transaction_count: reader.read_compactsize()?.try_into().unwrap(),
+            transaction_count: (&mut reader).zcash_deserialize_into()?,
         })
     }
 }
