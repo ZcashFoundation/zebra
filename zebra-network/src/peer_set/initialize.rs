@@ -29,11 +29,11 @@ use tracing_futures::Instrument;
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
+    address_book_updater::AddressBookUpdater,
     constants,
-    meta_addr::MetaAddr,
+    meta_addr::{MetaAddr, MetaAddrChange},
     peer::{self, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
-    timestamp_collector::TimestampCollector,
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -95,7 +95,7 @@ where
 
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (address_book, timestamp_collector) = TimestampCollector::spawn(listen_addr);
+    let (address_book, address_book_updater) = AddressBookUpdater::spawn(listen_addr);
 
     // Create a broadcast channel for peer inventory advertisements.
     // If it reaches capacity, this channel drops older inventory advertisements.
@@ -118,7 +118,7 @@ where
             .with_config(config.clone())
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
-            .with_timestamp_collector(timestamp_collector)
+            .with_address_book_updater(address_book_updater.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
             .with_latest_chain_tip(latest_chain_tip)
@@ -177,6 +177,7 @@ where
         config.clone(),
         outbound_connector.clone(),
         peerset_tx.clone(),
+        address_book_updater,
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
 
@@ -232,6 +233,7 @@ async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: mpsc::Sender<PeerChange>,
+    address_book_updater: mpsc::Sender<MetaAddrChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<
@@ -241,7 +243,7 @@ where
         > + Clone,
     S::Future: Send + 'static,
 {
-    let initial_peers = limit_initial_peers(&config).await;
+    let initial_peers = limit_initial_peers(&config, address_book_updater).await;
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
@@ -359,26 +361,38 @@ where
 /// `peerset_initial_target_size`.
 ///
 /// The result is randomly chosen entries from the provided set of addresses.
-async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
-    let initial_peers = config.initial_peers().await;
-    let initial_peer_count = initial_peers.len();
+async fn limit_initial_peers(
+    config: &Config,
+    mut address_book_updater: mpsc::Sender<MetaAddrChange>,
+) -> HashSet<SocketAddr> {
+    let all_peers = config.initial_peers().await;
+    let peers_count = all_peers.len();
 
-    // Limit the number of initial peers to `config.peerset_initial_target_size`
-    if initial_peer_count > config.peerset_initial_target_size {
-        info!(
-            "Limiting the initial peers list from {} to {}",
-            initial_peer_count, config.peerset_initial_target_size
-        );
+    if peers_count <= config.peerset_initial_target_size {
+        return all_peers;
     }
 
-    let initial_peers_vect: Vec<SocketAddr> = initial_peers.iter().copied().collect();
+    // Limit the number of initial peers to `config.peerset_initial_target_size`
+    info!(
+        "Limiting the initial peers list from {} to {}",
+        peers_count, config.peerset_initial_target_size
+    );
 
-    // TODO: add unused peers to the AddressBook (#2931)
-    //       https://docs.rs/rand/0.8.4/rand/seq/trait.SliceRandom.html#tymethod.partial_shuffle
-    initial_peers_vect
-        .choose_multiple(&mut rand::thread_rng(), config.peerset_initial_target_size)
-        .copied()
-        .collect()
+    // Split all the peers into the `initial_peers` that will be returned and
+    // `unused_peers` that will be sent to the address book.
+    let mut all_peers: Vec<SocketAddr> = all_peers.into_iter().collect();
+    let (initial_peers, unused_peers) =
+        all_peers.partial_shuffle(&mut rand::thread_rng(), config.peerset_initial_target_size);
+
+    // Send the unused peers to the address book.
+    for peer in unused_peers {
+        let peer_addr = MetaAddr::new_initial_peer(*peer);
+        // `send` only waits when the channel is full.
+        // The address book updater is a separate task, so we will only wait for a short time.
+        let _ = address_book_updater.send(peer_addr).await;
+    }
+
+    initial_peers.iter().copied().collect()
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
@@ -391,7 +405,7 @@ async fn limit_initial_peers(config: &Config) -> HashSet<SocketAddr> {
 ///
 /// If opening the listener fails.
 #[instrument(skip(config), fields(addr = ?config.listen_addr))]
-async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
+pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     // Warn if we're configured using the wrong network port.
     use Network::*;
     let wrong_net = match config.network {

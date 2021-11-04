@@ -6,12 +6,14 @@ use futures::{channel::mpsc, prelude::*};
 
 use crate::{meta_addr::MetaAddrChange, AddressBook};
 
-/// The timestamp collector hooks into incoming message streams for each peer and
-/// records per-connection last-seen timestamps into an [`AddressBook`].
-pub struct TimestampCollector {}
+/// The `AddressBookUpdater` hooks into incoming message streams for each peer
+/// and lets the owner of the sender handle update the address book. For
+/// example, it can be used to record per-connection last-seen timestamps, or
+/// add new initial peers to the address book.
+pub struct AddressBookUpdater {}
 
-impl TimestampCollector {
-    /// Spawn a new [`TimestampCollector`] task, updating a new [`AddressBook`]
+impl AddressBookUpdater {
+    /// Spawn a new [`AddressBookUpdater`] task, updating a new [`AddressBook`]
     /// configured with a `local_listener`.
     ///
     /// Returns handles for the transmission channel for timestamp events, and
