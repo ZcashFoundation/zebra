@@ -14,7 +14,7 @@ proptest! {
     fn compactsize_write_then_read_round_trip(s in 0u64..0x2_0000u64) {
         zebra_test::init();
 
-        // Maximum encoding size of a compactsize is 9 bytes.
+        // Maximum encoding size of a CompactSize is 9 bytes.
         let mut buf = [0u8; 8+1];
         Cursor::new(&mut buf[..]).write_compactsize(s).unwrap();
         let expect_s = Cursor::new(&buf[..]).read_compactsize().unwrap();
@@ -27,7 +27,7 @@ proptest! {
 
         // Only do the test if the bytes were valid.
         if let Ok(s) = Cursor::new(&bytes[..]).read_compactsize() {
-            // The compactsize encoding is variable-length, so we may not even
+            // The CompactSize encoding is variable-length, so we may not even
             // read all of the input bytes, and therefore we can't expect that
             // the encoding will reproduce bytes that were never read. Instead,
             // copy the input bytes, and overwrite them with the encoding of s,

@@ -1,9 +1,13 @@
 //! Arbitrary data generation for serialization proptests
 
-use super::{read_zcash::canonical_socket_addr, DateTime32};
+use std::{convert::TryInto, net::SocketAddr};
+
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
-use std::net::SocketAddr;
+
+use super::{
+    read_zcash::canonical_socket_addr, CompactSizeMessage, DateTime32, MAX_PROTOCOL_MESSAGE_LEN,
+};
 
 impl Arbitrary for DateTime32 {
     type Parameters = ();
@@ -61,4 +65,19 @@ pub fn datetime_u32() -> impl Strategy<Value = chrono::DateTime<Utc>> {
 /// See [`canonical_ip_addr`] for details.
 pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
     any::<SocketAddr>().prop_map(canonical_socket_addr)
+}
+
+impl Arbitrary for CompactSizeMessage {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (0..=MAX_PROTOCOL_MESSAGE_LEN)
+            .prop_map(|size| {
+                size.try_into()
+                    .expect("MAX_PROTOCOL_MESSAGE_LEN fits in CompactSizeMessage")
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }

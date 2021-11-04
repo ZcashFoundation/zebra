@@ -26,7 +26,7 @@ pub enum SerializationError {
     TryFromSliceError(#[from] TryFromSliceError),
 
     /// The length of a vec is too large to convert to a usize (and thus, too large to allocate on this platform)
-    #[error("compactsize too large: {0}")]
+    #[error("CompactSize too large: {0}")]
     TryFromIntError(#[from] TryFromIntError),
 
     /// An error caused when validating a zatoshi `Amount`

@@ -58,9 +58,6 @@ skip-tree = [
     # tickets #2985 and #2391: tempdir & rand dependencies
     { name = "tempdir", version = "=0.3.7" },
 
-    # ticket #2980: inferno dependencies
-    { name = "inferno", version = "=0.10.7" },
-
     # ticket #2998: base64 dependencies
     { name = "base64", version = "=0.10.1" },
 
