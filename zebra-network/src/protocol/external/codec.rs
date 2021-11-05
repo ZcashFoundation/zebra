@@ -25,7 +25,7 @@ use zebra_chain::{
 use crate::constants;
 
 use super::{
-    addr::{AddrInVersion, AddrV1},
+    addr::{AddrInVersion, AddrV1, AddrV2},
     message::{Message, RejectReason},
     types::*,
 };
@@ -408,7 +408,7 @@ impl Decoder for Codec {
                     b"pong\0\0\0\0\0\0\0\0" => self.read_pong(&mut body_reader),
                     b"reject\0\0\0\0\0\0" => self.read_reject(&mut body_reader),
                     b"addr\0\0\0\0\0\0\0\0" => self.read_addr(&mut body_reader),
-                    //b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
+                    b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
                     b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
                     b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
                     b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
@@ -519,18 +519,16 @@ impl Codec {
         Ok(Message::Addr(addrs))
     }
 
-    /*
     /// Deserialize an `addrv2` message into a list of `MetaAddr`s.
     ///
-    /// Currently, Zebra parses received IPv4 and IPv6 in `addrv2`, but ignores other address types.
+    /// Currently, Zebra parses received `addrv2`s, ignoring some address types.
     /// Zebra never sends `addrv2` messages.
     fn read_addrv2<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV2> = reader.zcash_deserialize_into()?;
 
-        let addrs = addrs.into_iter().map(Into::into).collect();
+        let addrs = addrs.into_iter().filter_map(Into::into).collect();
         Ok(Message::Addr(addrs))
     }
-     */
 
     fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
         Ok(Message::GetAddr)
