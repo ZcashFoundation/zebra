@@ -132,7 +132,7 @@ pub(in super::super) const ADDR_V1_SIZE: usize = 4 + 8 + 16 + 2;
 impl TrustedPreallocate for AddrV1 {
     fn max_allocation() -> u64 {
         // Since a maximal serialized Vec<AddrV1> uses at least three bytes for its length
-        // (2MB  messages / 30B MetaAddr implies the maximal length is much greater than 253)
+        // (2MB  messages / 30B AddrV1 implies the maximal length is much greater than 253)
         // the max allocation can never exceed (MAX_PROTOCOL_MESSAGE_LEN - 3) / META_ADDR_SIZE
         ((MAX_PROTOCOL_MESSAGE_LEN - 3) / ADDR_V1_SIZE) as u64
     }
