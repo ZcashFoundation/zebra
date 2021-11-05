@@ -15,11 +15,13 @@ use tokio::{runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
 
-use zebra_chain::serialization::{canonical_socket_addr, ZcashDeserialize, ZcashSerialize};
+use zebra_chain::serialization::{
+    canonical_socket_addr, DateTime32, ZcashDeserialize, ZcashSerialize,
+};
 
 use super::check;
 use crate::{
-    constants::MIN_PEER_RECONNECTION_DELAY,
+    constants::{MAX_PEER_TIME_UNSEEN, MIN_PEER_RECONNECTION_DELAY},
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -489,5 +491,25 @@ proptest! {
             prop_assert!(max_attempts >= min_attempts);
             prop_assert!(max_attempts - min_attempts <= 1);
         }
+    }
+
+    /// Make sure check if a peer was recently seen is correct.
+    #[test]
+    fn was_not_recently_seen_is_correct(peer in any::<MetaAddr>()) {
+        let time_since_last_seen = peer
+            .last_seen()
+            .map(|last_seen| last_seen.saturating_elapsed());
+
+        let recently_seen = time_since_last_seen
+            .map(|elapsed| elapsed <= MAX_PEER_TIME_UNSEEN)
+            .unwrap_or(false);
+
+        prop_assert_eq!(
+            peer.was_not_recently_seen(),
+            !recently_seen,
+            "last seen: {:?}, now: {:?}",
+            peer.last_seen(),
+            DateTime32::now(),
+        );
     }
 }
