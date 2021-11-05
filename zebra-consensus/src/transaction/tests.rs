@@ -4,11 +4,12 @@ use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block, orchard,
+    block::{self, Block},
+    orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::ZcashDeserialize,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
     sprout,
     transaction::{
         arbitrary::{
@@ -1498,4 +1499,73 @@ fn add_to_sprout_pool_after_nu() {
         check::disabled_add_to_sprout_pool(&block.transactions[7], block_height, network),
         Ok(())
     );
+}
+
+#[test]
+fn coinbase_outputs_are_decryptable_for_historical_blocks() -> Result<(), Report> {
+    zebra_test::init();
+
+    coinbase_outputs_are_decryptable_for_historical_blocks_for_network(Network::Mainnet)?;
+    coinbase_outputs_are_decryptable_for_historical_blocks_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
+    network: Network,
+) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    let mut tested_coinbase_txs = 0;
+    let mut tested_non_coinbase_txs = 0;
+
+    for (_height, block) in block_iter {
+        let block = block
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+        let height = block.coinbase_height().expect("a valid height");
+        let heartwood_onward = height
+            >= NetworkUpgrade::Heartwood
+                .activation_height(network)
+                .unwrap();
+        let coinbase_tx = block
+            .transactions
+            .get(0)
+            .expect("must have coinbase transaction");
+
+        // Check if the coinbase outputs are decryptable with an all-zero key.
+        if heartwood_onward
+            && (coinbase_tx.sapling_outputs().count() > 0
+                || coinbase_tx.orchard_actions().count() > 0)
+        {
+            // We are only truly decrypting something if it's Heartwood-onward
+            // and there are relevant outputs.
+            tested_coinbase_txs += 1;
+        }
+        check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)
+            .expect("coinbase outputs must be decryptable with an all-zero key");
+
+        // For remaining transactions, check if existing outputs are NOT decryptable
+        // with an all-zero key, if applicable.
+        for tx in block.transactions.iter().skip(1) {
+            let has_outputs = tx.sapling_outputs().count() > 0 || tx.orchard_actions().count() > 0;
+            if has_outputs && heartwood_onward {
+                tested_non_coinbase_txs += 1;
+                check::coinbase_outputs_are_decryptable(tx, network, height).expect_err(
+                    "decrypting a non-coinbase output with an all-zero key should fail",
+                );
+            } else {
+                check::coinbase_outputs_are_decryptable(tx, network, height)
+                    .expect("a transaction without outputs, or pre-Heartwood, must be considered 'decryptable'");
+            }
+        }
+    }
+
+    assert!(tested_coinbase_txs > 0, "ensure it was actually tested");
+    assert!(tested_non_coinbase_txs > 0, "ensure it was actually tested");
+
+    Ok(())
 }

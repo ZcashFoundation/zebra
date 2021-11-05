@@ -34,7 +34,7 @@ use zebra_state as zs;
 
 use crate::{error::TransactionError, primitives, script, BoxError};
 
-mod check;
+pub mod check;
 #[cfg(test)]
 mod tests;
 
