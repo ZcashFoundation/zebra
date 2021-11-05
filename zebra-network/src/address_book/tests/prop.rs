@@ -33,4 +33,19 @@ proptest! {
             prop_assert!(duration_since_last_seen <= MAX_PEER_ACTIVE_FOR_GOSSIP);
         }
     }
+
+    /// Test if peers that are probably unreachable are not listed for a reconnection attempt.
+    #[test]
+    fn probably_unreachable_addresses_are_not_attempted(
+        local_listener in any::<SocketAddr>(),
+        addresses in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
+    ) {
+        zebra_test::init();
+
+        let address_book = AddressBook::new_with_addrs(local_listener, Span::none(), addresses);
+
+        for peer in address_book.reconnection_peers() {
+            prop_assert!(!peer.is_probably_unreachable(), "peer: {:?}", peer);
+        }
+    }
 }
