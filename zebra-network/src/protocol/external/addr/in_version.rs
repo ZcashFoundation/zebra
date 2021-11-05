@@ -31,16 +31,6 @@ use super::{canonical_socket_addr, v1::ipv6_mapped_socket_addr};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AddrInVersion {
-    /// The peer's IPv6 socket address.
-    /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
-    ///
-    /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
-    #[cfg_attr(
-        any(test, feature = "proptest-impl"),
-        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
-    )]
-    ipv6_addr: SocketAddrV6,
-
     /// The unverified services for the peer at `ipv6_addr`.
     ///
     /// These services were advertised by the peer at `ipv6_addr`,
@@ -51,14 +41,24 @@ pub struct AddrInVersion {
     /// `untrusted_services` on gossiped peers may be invalid due to outdated
     /// records, older peer versions, or buggy or malicious peers.
     untrusted_services: PeerServices,
+
+    /// The peer's IPv6 socket address.
+    /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
+    ///
+    /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
+    )]
+    ipv6_addr: SocketAddrV6,
 }
 
 impl AddrInVersion {
     /// Returns a new `version` message address based on its fields.
     pub fn new(socket_addr: impl Into<SocketAddr>, untrusted_services: PeerServices) -> Self {
         Self {
-            ipv6_addr: ipv6_mapped_socket_addr(socket_addr),
             untrusted_services,
+            ipv6_addr: ipv6_mapped_socket_addr(socket_addr),
         }
     }
 

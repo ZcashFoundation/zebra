@@ -35,15 +35,11 @@ use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strate
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub(in super::super) struct AddrV1 {
-    /// The peer's IPv6 socket address.
-    /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
+    /// The unverified "last seen time" gossiped by the remote peer that sent us
+    /// this address.
     ///
-    /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
-    #[cfg_attr(
-        any(test, feature = "proptest-impl"),
-        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
-    )]
-    ipv6_addr: SocketAddrV6,
+    /// See the [`MetaAddr::last_seen`] method for details.
+    untrusted_last_seen: DateTime32,
 
     /// The unverified services for the peer at `ipv6_addr`.
     ///
@@ -56,11 +52,15 @@ pub(in super::super) struct AddrV1 {
     /// records, older peer versions, or buggy or malicious peers.
     untrusted_services: PeerServices,
 
-    /// The unverified "last seen time" gossiped by the remote peer that sent us
-    /// this address.
+    /// The peer's IPv6 socket address.
+    /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
-    /// See the [`MetaAddr::last_seen`] method for details.
-    untrusted_last_seen: DateTime32,
+    /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
+    )]
+    ipv6_addr: SocketAddrV6,
 }
 
 impl From<MetaAddr> for AddrV1 {
@@ -77,9 +77,9 @@ impl From<MetaAddr> for AddrV1 {
         );
 
         AddrV1 {
-            ipv6_addr,
-            untrusted_services,
             untrusted_last_seen,
+            untrusted_services,
+            ipv6_addr,
         }
     }
 }
