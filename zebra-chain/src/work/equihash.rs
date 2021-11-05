@@ -1,11 +1,14 @@
 //! Equihash Solution and related items.
 
-use crate::block::Header;
-use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
-    ZcashSerialize,
-};
 use std::{fmt, io};
+
+use crate::{
+    block::Header,
+    serialization::{
+        serde_helpers, zcash_serialize_bytes, SerializationError, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
+    },
+};
 
 /// The error type for Equihash
 #[non_exhaustive]
@@ -84,58 +87,25 @@ impl Clone for Solution {
 impl Eq for Solution {}
 
 impl ZcashSerialize for Solution {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_compactsize(SOLUTION_SIZE as u64)?;
-        writer.write_all(&self.0[..])?;
-        Ok(())
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        zcash_serialize_bytes(&self.0.to_vec(), writer)
     }
 }
 
 impl ZcashDeserialize for Solution {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let solution_size = reader.read_compactsize()?;
-        if solution_size != (SOLUTION_SIZE as u64) {
+        let solution: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
+
+        if solution.len() != SOLUTION_SIZE {
             return Err(SerializationError::Parse(
                 "incorrect equihash solution size",
             ));
         }
+
         let mut bytes = [0; SOLUTION_SIZE];
-        reader.read_exact(&mut bytes[..])?;
+        // Won't panic, because we just checked the length.
+        bytes.copy_from_slice(&solution);
+
         Ok(Self(bytes))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::block::MAX_BLOCK_BYTES;
-
-    static EQUIHASH_SIZE_TESTS: &[u64] = &[
-        0,
-        1,
-        (SOLUTION_SIZE - 1) as u64,
-        SOLUTION_SIZE as u64,
-        (SOLUTION_SIZE + 1) as u64,
-        MAX_BLOCK_BYTES - 1,
-        MAX_BLOCK_BYTES,
-    ];
-
-    #[test]
-    fn equihash_solution_size_field() {
-        zebra_test::init();
-
-        for size in EQUIHASH_SIZE_TESTS {
-            let mut data = Vec::new();
-            data.write_compactsize(*size as u64)
-                .expect("Compact size should serialize");
-            data.resize(data.len() + SOLUTION_SIZE, 0);
-            let result = Solution::zcash_deserialize(data.as_slice());
-            if *size == (SOLUTION_SIZE as u64) {
-                result.expect("Correct size field in EquihashSolution should deserialize");
-            } else {
-                result
-                    .expect_err("Wrong size field in EquihashSolution should fail on deserialize");
-            }
-        }
     }
 }
