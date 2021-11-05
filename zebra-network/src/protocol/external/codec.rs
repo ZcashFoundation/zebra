@@ -242,6 +242,11 @@ impl Codec {
                 }
             }
             Message::Addr(addrs) => {
+                assert!(
+                    addrs.len() <= constants::MAX_ADDRS_IN_MESSAGE,
+                    "unexpectely large Addr message: greater than MAX_ADDRS_IN_MESSAGE addresses"
+                );
+
                 // Regardless of the way we received the address,
                 // Zebra always sends `addr` messages
                 let v1_addrs: Vec<AddrV1> = addrs.iter().map(|addr| AddrV1::from(*addr)).collect();
@@ -514,6 +519,12 @@ impl Codec {
     fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV1> = reader.zcash_deserialize_into()?;
 
+        if addrs.len() > constants::MAX_ADDRS_IN_MESSAGE {
+            return Err(Error::Parse(
+                "more than MAX_ADDRS_IN_MESSAGE in addr message",
+            ));
+        }
+
         // Convert the received address format to Zebra's internal `MetaAddr`.
         let addrs = addrs.into_iter().map(Into::into).collect();
         Ok(Message::Addr(addrs))
@@ -525,6 +536,12 @@ impl Codec {
     /// Zebra never sends `addrv2` messages.
     fn read_addrv2<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV2> = reader.zcash_deserialize_into()?;
+
+        if addrs.len() > constants::MAX_ADDRS_IN_MESSAGE {
+            return Err(Error::Parse(
+                "more than MAX_ADDRS_IN_MESSAGE in addrv2 message",
+            ));
+        }
 
         let addrs = addrs.into_iter().filter_map(Into::into).collect();
         Ok(Message::Addr(addrs))
