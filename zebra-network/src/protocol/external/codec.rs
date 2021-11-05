@@ -16,7 +16,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::{
         sha256d, zcash_deserialize_bytes_external_count, FakeWriter, ReadZcashExt,
-        SerializationError as Error, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        SerializationError as Error, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
         MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::Transaction,
@@ -25,6 +25,7 @@ use zebra_chain::{
 use crate::constants;
 
 use super::{
+    addr::{AddrInVersion, AddrV1},
     message::{Message, RejectReason},
     types::*,
 };
@@ -212,13 +213,8 @@ impl Codec {
                 // serialization can not error.
                 writer.write_i64::<LittleEndian>(timestamp.timestamp())?;
 
-                let (recv_services, recv_addr) = address_recv;
-                writer.write_u64::<LittleEndian>(recv_services.bits())?;
-                writer.write_socket_addr(*recv_addr)?;
-
-                let (from_services, from_addr) = address_from;
-                writer.write_u64::<LittleEndian>(from_services.bits())?;
-                writer.write_socket_addr(*from_addr)?;
+                address_recv.zcash_serialize(&mut writer)?;
+                address_from.zcash_serialize(&mut writer)?;
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
                 user_agent.zcash_serialize(&mut writer)?;
@@ -245,7 +241,12 @@ impl Codec {
                     writer.write_all(data)?;
                 }
             }
-            Message::Addr(addrs) => addrs.zcash_serialize(&mut writer)?,
+            Message::Addr(addrs) => {
+                // Regardless of the way we received the address,
+                // Zebra always sends `addr` messages
+                let v1_addrs: Vec<AddrV1> = addrs.iter().map(|addr| AddrV1::from(*addr)).collect();
+                v1_addrs.zcash_serialize(&mut writer)?
+            }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
             Message::GetBlocks { known_blocks, stop } => {
@@ -407,6 +408,7 @@ impl Decoder for Codec {
                     b"pong\0\0\0\0\0\0\0\0" => self.read_pong(&mut body_reader),
                     b"reject\0\0\0\0\0\0" => self.read_reject(&mut body_reader),
                     b"addr\0\0\0\0\0\0\0\0" => self.read_addr(&mut body_reader),
+                    //b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
                     b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
                     b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
                     b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
@@ -455,14 +457,8 @@ impl Codec {
                 .ok_or(Error::Parse(
                     "version timestamp is out of range for DateTime",
                 ))?,
-            address_recv: (
-                PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
-                reader.read_socket_addr()?,
-            ),
-            address_from: (
-                PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
-                reader.read_socket_addr()?,
-            ),
+            address_recv: AddrInVersion::zcash_deserialize(&mut reader)?,
+            address_from: AddrInVersion::zcash_deserialize(&mut reader)?,
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
             user_agent: String::zcash_deserialize(&mut reader)?,
             start_height: block::Height(reader.read_u32::<LittleEndian>()?),
@@ -514,9 +510,26 @@ impl Codec {
         })
     }
 
+    /// Deserialize an `addr` (v1) message into a list of `MetaAddr`s.
     fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::Addr(Vec::zcash_deserialize(reader)?))
+        let addrs: Vec<AddrV1> = reader.zcash_deserialize_into()?;
+
+        let addrs = addrs.into_iter().map(Into::into).collect();
+        Ok(Message::Addr(addrs))
     }
+
+    /*
+    /// Deserialize an `addrv2` message into a list of `MetaAddr`s.
+    ///
+    /// Currently, Zebra parses received IPv4 and IPv6 in `addrv2`, but ignores other address types.
+    /// Zebra never sends `addrv2` messages.
+    fn read_addrv2<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        let addrs: Vec<AddrV2> = reader.zcash_deserialize_into()?;
+
+        let addrs = addrs.into_iter().map(Into::into).collect();
+        Ok(Message::Addr(addrs))
+    }
+     */
 
     fn read_getaddr<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
         Ok(Message::GetAddr)
@@ -641,13 +654,13 @@ mod tests {
                 version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
                 services,
                 timestamp,
-                address_recv: (
-                    services,
+                address_recv: AddrInVersion::new(
                     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                    services,
                 ),
-                address_from: (
-                    services,
+                address_from: AddrInVersion::new(
                     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                    services,
                 ),
                 nonce: Nonce(0x9082_4908_8927_9238),
                 user_agent: "Zebra".to_owned(),
