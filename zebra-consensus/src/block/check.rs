@@ -1,18 +1,17 @@
 //! Consensus check functions
 
 use chrono::{DateTime, Utc};
+use std::collections::HashSet;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{Block, Hash, Header, Height},
     parameters::{Network, NetworkUpgrade},
     transaction,
     work::{difficulty::ExpandedDifficulty, equihash},
 };
 
-use crate::{
-    error::*,
-    parameters::{FUNDING_STREAM_NUMBER_OF_RECEIVERS, SLOW_START_INTERVAL},
-};
+use crate::{error::*, parameters::SLOW_START_INTERVAL};
 
 use super::subsidy;
 
@@ -138,17 +137,20 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
             .expect("We always expect a funding stream hashmap response even if empty");
 
-        let mut counter = 0;
-        for (_receiver, amount) in funding_streams {
-            if !subsidy::general::find_output_with_amount(coinbase, amount).is_empty() {
-                counter += 1;
-            }
-        }
+        let funding_stream_amounts: HashSet<Amount<NonNegative>> = funding_streams
+            .iter()
+            .map(|(_receiver, amount)| *amount)
+            .collect();
+        let output_amounts = subsidy::general::output_amounts(coinbase);
 
-        // If we can find `FUNDING_STREAM_NUMBER_OF_RECEIVERS` matches,
-        // then funding streams amounts in coinbase are valid.
-        // TODO: Validate funding stream addresses
-        if counter == FUNDING_STREAM_NUMBER_OF_RECEIVERS {
+        // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
+        // MUST contain at least one output per funding stream `fs` active at `height`,
+        // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
+        // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+
+        // TODO: We are only checking each fundign stream reward is present in the
+        // coinbase transaction outputs but not the recipient addresses.
+        if funding_stream_amounts.is_subset(&output_amounts) {
             Ok(())
         } else {
             Err(SubsidyError::FundingStreamNotFound)?
@@ -240,7 +242,6 @@ pub fn merkle_root_validity(
     //
     // To prevent malleability (CVE-2012-2459), we also need to check
     // whether the transaction hashes are unique.
-    use std::collections::HashSet;
     if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
         return Err(BlockError::DuplicateTransaction);
     }

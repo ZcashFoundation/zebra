@@ -53,10 +53,6 @@ pub enum FundingStreamReceiver {
     MajorGrants,
 }
 
-/// The number of founder reward receivers.
-/// This is the amount of variants of  [`FundingStreamReceiver`]
-pub const FUNDING_STREAM_NUMBER_OF_RECEIVERS: u64 = 3;
-
 /// Denominator as described in [protocol specification §7.9.1][7.9.1].
 ///
 /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
