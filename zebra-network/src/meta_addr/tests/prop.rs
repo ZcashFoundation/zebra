@@ -512,4 +512,18 @@ proptest! {
             DateTime32::now(),
         );
     }
+
+    /// Make sure a peer is correctly determined to be probably unreachable.
+    #[test]
+    fn probably_unrechable_is_determined_correctly(peer in any::<MetaAddr>()) {
+        let last_attempt_failed = peer.last_connection_state == Failed;
+
+        prop_assert_eq!(
+            peer.is_probably_unreachable(),
+            last_attempt_failed && peer.was_not_recently_seen(),
+            "last_connection_state: {:?}, last_seen: {:?}",
+            peer.last_connection_state,
+            peer.last_seen()
+        );
+    }
 }
