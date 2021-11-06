@@ -2,8 +2,6 @@
 //!
 //! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use std::convert::TryFrom;
-
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
