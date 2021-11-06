@@ -36,14 +36,12 @@ pub fn funding_stream_values(
     if height >= canopy_height {
         let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network).unwrap();
         if range.contains(&height) {
+            let block_subsidy = block_subsidy(height, network)?;
             for (&receiver, &numerator) in FUNDING_STREAM_RECEIVER_NUMERATORS.iter() {
-                let amount_value = (i64::from(block_subsidy(height, network)?) as f64
-                    * (numerator as f64 / FUNDING_STREAM_RECEIVER_DENOMINATOR as f64))
-                    .floor();
-                results.insert(
-                    receiver,
-                    Amount::<NonNegative>::try_from(amount_value as i64)?,
-                );
+                let amount_value =
+                    ((block_subsidy * numerator)? / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
+
+                results.insert(receiver, amount_value);
             }
         }
     }

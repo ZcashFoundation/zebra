@@ -63,7 +63,7 @@ lazy_static! {
     /// as described in [protocol specification §7.9.1][7.9.1].
     ///
     /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub static ref FUNDING_STREAM_RECEIVER_NUMERATORS: HashMap<FundingStreamReceiver, i64> = {
+    pub static ref FUNDING_STREAM_RECEIVER_NUMERATORS: HashMap<FundingStreamReceiver, u64> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(FundingStreamReceiver::Ecc, 7);
         hash_map.insert(FundingStreamReceiver::ZcashFoundation, 5);
