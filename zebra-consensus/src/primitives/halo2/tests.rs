@@ -40,7 +40,7 @@ where
     for sd in shielded_data {
         tracing::trace!(?sd);
 
-        let rsp = verifier.ready().await?.call(Item::from(sd).into());
+        let rsp = verifier.ready().await?.call(Item::from(sd));
 
         async_checks.push(rsp);
     }
