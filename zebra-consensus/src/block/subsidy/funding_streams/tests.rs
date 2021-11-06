@@ -1,5 +1,7 @@
 use super::*;
 use color_eyre::Report;
+use std::convert::TryFrom;
+
 #[test]
 // Check funding streams are correct in the entire period.
 fn test_funding_stream_values() -> Result<(), Report> {
