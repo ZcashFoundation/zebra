@@ -2142,7 +2142,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.0.0"
-source = "git+https://github.com/zcash/orchard.git?rev=2c8241f25b943aa05203eacf9905db117c69bd29#2c8241f25b943aa05203eacf9905db117c69bd29"
+source = "git+https://github.com/dconnolly/orchard.git?rev=568e24cd5f129158375d7ac7d98c89ebff4f982f#568e24cd5f129158375d7ac7d98c89ebff4f982f"
 dependencies = [
  "aes",
  "arrayvec 0.7.1",
@@ -4379,6 +4379,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.7.3",

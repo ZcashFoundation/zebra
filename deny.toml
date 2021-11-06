@@ -93,6 +93,9 @@ allow-git = [
 
     # ticket #2523: replace unmaintained multiset
     "https://github.com/jmitchell/multiset",
+
+    # ticket #2982: upgrade to NU5 mainnet version of orchard w/ our changes merged in
+    "https://github.com/dconnolly/orchard"
 ]
 
 [sources.allow-org]

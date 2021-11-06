@@ -6,7 +6,7 @@ use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, 
 ///
 /// Corresponds to the Sapling 'encCiphertext's
 #[derive(Deserialize, Serialize)]
-pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub [u8; 580]);
+pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 580]);
 
 impl fmt::Debug for EncryptedNote {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -55,7 +55,7 @@ impl ZcashDeserialize for EncryptedNote {
 ///
 /// Corresponds to Sapling's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
-pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub [u8; 80]);
+pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 80]);
 
 impl fmt::Debug for WrappedNoteKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

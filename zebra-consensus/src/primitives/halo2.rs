@@ -1,6 +1,7 @@
 //! Async Halo2 batch verifier service
 
 use std::{
+    convert::TryFrom,
     fmt,
     future::Future,
     mem,
@@ -11,7 +12,8 @@ use std::{
 use futures::future::{ready, Ready};
 use once_cell::sync::Lazy;
 use orchard::circuit::VerifyingKey;
-use rand::thread_rng;
+use rand::{thread_rng, CryptoRng, RngCore};
+use thiserror::Error;
 use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
@@ -31,83 +33,113 @@ lazy_static::lazy_static! {
 // ed25519-zebra::batch. Once Halo2 batch proof verification math and
 // implementation is available, this code can be replaced with that.
 
-mod batch {
+/// A Halo2 verification item, used as the request type of the service.
+#[derive(Clone, Debug)]
+pub struct Item {
+    instances: Vec<orchard::circuit::Instance>,
+    proof: orchard::circuit::Proof,
+}
 
-    /// A Halo2 verification item, used as the request type of the service.
-    #[derive(Clone, Debug)]
-    pub struct Item {
-        actions: Vec<zebra_chain::orchard::Action>,
-        anchor: zebra_chain::orchard::tree::Root,
-        flags: zebra_chain::orchard::Flags,
-        proof: zebra_chain::primitives::Halo2Proof,
+impl Item {
+    /// Perform non-batched verification of this `Item`.
+    ///
+    /// This is useful (in combination with `Item::clone`) for implementing
+    /// fallback logic when batch verification fails.
+    pub fn verify_single(&self, vk: &VerifyingKey) -> Result<(), halo2::plonk::Error> {
+        self.proof.verify(vk, &self.instances[..])
+    }
+}
+
+#[derive(Default)]
+pub struct BatchVerifier {
+    queue: Vec<Item>,
+}
+
+impl BatchVerifier {
+    pub fn queue(&mut self, item: Item) {
+        self.queue.push(item);
     }
 
-    impl Item {
-        /// Produce `Instance`s of the public inputs to the Orchard Action Halo2
-        /// proof circuit.
-        pub fn instances(&self) -> impl Iterator<Item = &orchard::circuit::Instance> {
-            self.actions
-                .iter()
-                .map(|action| orchard::circuit::Instance {
-                    anchor: self.anchor.into(),
-                    cv_net: action.cv.into(),
-                    nf_old: action.nullifier.into(),
-                    rk: action.rk.into(),
-                    cmx: action.cm_x.into(),
-                    enable_spend: self
-                        .flags
-                        .contains(zebra_chain::orchard::Flags::ENABLE_SPENDS),
-                    enable_output: self
-                        .flags
-                        .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS),
-                })
+    pub fn verify<R: RngCore + CryptoRng>(
+        self,
+        _rng: R,
+        vk: &VerifyingKey,
+    ) -> Result<(), halo2::plonk::Error> {
+        for item in self.queue {
+            item.verify_single(vk)?;
         }
 
-        /// Perform non-batched verification of this `Item`.
-        ///
-        /// This is useful (in combination with `Item::clone`) for implementing
-        /// fallback logic when batch verification fails.
-        pub fn verify_single(&self, vk: &VerifyingKey) -> Result<(), VerificationError> {
-            self.proof.verify(vk, &self.instances())
-        }
-    }
-
-    #[derive(Default)]
-    pub struct Verifier {
-        queue: Vec<Item>,
-    }
-
-    impl Verifier {
-        fn queue(&mut self, item: Item) {
-            self.queue.push(item);
-        }
-
-        fn verify<R: RngCore + CryptoRng>(
-            self,
-            _rng: R,
-            vk: &VerifyingKey,
-        ) -> Result<(), VerificationError> {
-            for item in self.queue {
-                item.verify_single(vk)?;
-            }
-
-            Ok(())
-        }
+        Ok(())
     }
 }
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-/// Type alias to clarify that this batch::Item is a Halo2 Item.
-pub type Item = batch::Item;
-
 impl From<zebra_chain::orchard::ShieldedData> for Item {
     fn from(shielded_data: zebra_chain::orchard::ShieldedData) -> Item {
-        Self {
-            actions: shielded_data.actions,
-            anchor: shielded_data.anchor,
-            flags: shielded_data.flags,
-            proof: shielded_data.proof,
+        use orchard::{circuit, note, primitives::redpallas, tree, value};
+
+        let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
+
+        let enable_spend = shielded_data
+            .flags
+            .contains(zebra_chain::orchard::Flags::ENABLE_SPENDS);
+        let enable_output = shielded_data
+            .flags
+            .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
+
+        let instances = shielded_data
+            .actions()
+            .map(|action| {
+                circuit::Instance::from_parts(
+                    anchor,
+                    value::ValueCommitment::from_bytes(&action.cv.into()).unwrap(),
+                    note::Nullifier::from_bytes(&action.nullifier.into()).unwrap(),
+                    redpallas::VerificationKey::<redpallas::SpendAuth>::try_from(<[u8; 32]>::from(
+                        action.rk,
+                    ))
+                    .unwrap(),
+                    note::ExtractedNoteCommitment::from_bytes(&action.cm_x.into()).unwrap(),
+                    enable_spend,
+                    enable_output,
+                )
+            })
+            .collect();
+
+        Item {
+            instances,
+            proof: orchard::circuit::Proof::new(shielded_data.proof.0),
+        }
+    }
+}
+
+/// An error that may occur when verifying [Halo2 proofs of Zcash Orchard Action
+/// descriptions][actions].
+///
+/// [actions]: https://zips.z.cash/protocol/protocol.pdf#actiondesc
+// TODO: if halo2::plonk::Error gets the std::error::Error trait derived on it,
+// remove this and just wrap `halo2::plonk::Error` as an enum variant of
+// `crate::transaction::Error`, which does the trait derivation via `thiserror`
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum Halo2Error {
+    /// The constraint system is not satisfied.
+    // #[default]
+    ConstraintSystemFailure,
+    /// Catchall for now until https://github.com/zcash/halo2/pull/394 is merged
+    Other,
+}
+
+impl fmt::Display for Halo2Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self)
+    }
+}
+
+impl From<halo2::plonk::Error> for Halo2Error {
+    fn from(err: halo2::plonk::Error) -> Halo2Error {
+        match err {
+            halo2::plonk::Error::ConstraintSystemFailure => Halo2Error::ConstraintSystemFailure,
+            _ => Halo2Error::Other,
         }
     }
 }
@@ -120,8 +152,9 @@ impl From<zebra_chain::orchard::ShieldedData> for Item {
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
+#[allow(dead_code)]
 pub static VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), Halo2Error>>>>,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -137,28 +170,32 @@ pub static VERIFIER: Lazy<
         // blocks have eldritch types whose names cannot be written. So instead,
         // we use a Ready to avoid an async block and cast the closure to a
         // function (which is possible because it doesn't capture any state).
-        tower::service_fn((|item: Item| ready(item.verify_single(&VERIFYING_KEY))) as fn(_) -> _),
+        tower::service_fn(
+            (|item: Item| ready(item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)))
+                as fn(_) -> _,
+        ),
     )
 });
 
-/// Halo2 signature verifier implementation
+/// Halo2 proof verifier implementation
 ///
 /// This is the core implementation for the batch verification logic of the
 /// Halo2 verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
 pub struct Verifier {
     /// The sync Halo2 batch verifier.
-    batch: batch::Verifier,
+    batch: BatchVerifier,
     // Making this 'static makes managing lifetimes much easier.
     vk: &'static VerifyingKey,
     /// Broadcast sender used to send the result of a batch verification to each
     /// request source in the batch.
-    tx: Sender<Result<(), VerificationError>>,
+    tx: Sender<Result<(), Halo2Error>>,
 }
 
 impl Verifier {
+    #[allow(dead_code)]
     fn new(vk: &'static VerifyingKey) -> Self {
-        let batch = batch::Verifier::default();
+        let batch = BatchVerifier::default();
         let (tx, _) = channel(super::BROADCAST_BUFFER_SIZE);
         Self { batch, vk, tx }
     }
@@ -177,8 +214,8 @@ impl fmt::Debug for Verifier {
 
 impl Service<BatchControl<Item>> for Verifier {
     type Response = ();
-    type Error = VerificationError;
-    type Future = Pin<Box<dyn Future<Output = Result<(), VerificationError>> + Send + 'static>>;
+    type Error = Halo2Error;
+    type Future = Pin<Box<dyn Future<Output = Result<(), Halo2Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -207,7 +244,10 @@ impl Service<BatchControl<Item>> for Verifier {
                             tracing::error!(
                                 "missed channel updates, BROADCAST_BUFFER_SIZE is too low!!"
                             );
-                            Err(VerificationError::InvalidProof)
+                            // This is the enum variant that
+                            // orchard::circuit::Proof.verify() returns on
+                            // evaulation failure.
+                            Err(Halo2Error::ConstraintSystemFailure)
                         }
                         Err(RecvError::Closed) => panic!("verifier was dropped without flushing"),
                     }
@@ -217,7 +257,11 @@ impl Service<BatchControl<Item>> for Verifier {
             BatchControl::Flush => {
                 tracing::trace!("got flush command");
                 let batch = mem::take(&mut self.batch);
-                let _ = self.tx.send(batch.verify(thread_rng(), self.vk));
+                let _ = self.tx.send(
+                    batch
+                        .verify(thread_rng(), self.vk)
+                        .map_err(Halo2Error::from),
+                );
                 Box::pin(async { Ok(()) })
             }
         }
@@ -228,6 +272,10 @@ impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
         let batch = mem::take(&mut self.batch);
-        let _ = self.tx.send(batch.verify(thread_rng(), self.vk));
+        let _ = self.tx.send(
+            batch
+                .verify(thread_rng(), self.vk)
+                .map_err(Halo2Error::from),
+        );
     }
 }
