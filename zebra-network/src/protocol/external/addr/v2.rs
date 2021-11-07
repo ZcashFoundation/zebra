@@ -44,7 +44,8 @@ pub const ADDR_V2_IPV4_ADDR_SIZE: usize = 4;
 /// https://zips.z.cash/zip-0155#specification
 pub const ADDR_V2_IPV6_ADDR_SIZE: usize = 16;
 
-/// A version 2 node address, its advertised services, and last-seen time.
+/// The second format used for Bitcoin node addresses.
+/// Contains a node address, its advertised services, and last-seen time.
 /// This struct is serialized and deserialized into `addrv2` messages.
 ///
 /// [ZIP 155](https://zips.z.cash/zip-0155#specification)

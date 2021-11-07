@@ -28,8 +28,9 @@ use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strategy;
 
-/// A version 1 node address, its advertised services, and last-seen time.
-/// This struct is serialized and deserialized into `addr` messages.
+/// The first format used for Bitcoin node addresses.
+/// Contains a node address, its advertised services, and last-seen time.
+/// This struct is serialized and deserialized into `addr` (v1) messages.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

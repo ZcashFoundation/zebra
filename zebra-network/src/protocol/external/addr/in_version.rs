@@ -24,8 +24,8 @@ use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strate
 
 use super::{canonical_socket_addr, v1::ipv6_mapped_socket_addr};
 
-/// A version 1 node address and services, without a last-seen time.
-/// This struct is serialized and deserialized as part of `version` messages.
+/// The format used for Bitcoin node addresses in `version` messages.
+/// Contains a node address and services, without a last-seen time.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
