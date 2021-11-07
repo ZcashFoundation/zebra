@@ -11,7 +11,10 @@ use zebra_chain::{
     work::{difficulty::ExpandedDifficulty, equihash},
 };
 
-use crate::{error::*, parameters::SLOW_START_INTERVAL};
+use crate::{
+    error::*,
+    parameters::{subsidy::FundingStreamReceiver, SLOW_START_INTERVAL},
+};
 
 use super::subsidy;
 
@@ -134,6 +137,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
 
+        // funding stream amount values
         let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
             .expect("We always expect a funding stream hashmap response even if empty");
 
@@ -143,17 +147,39 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
             .collect();
         let output_amounts = subsidy::general::output_amounts(coinbase);
 
+        // funding stream addresses
+        let address_ecc = subsidy::funding_streams::funding_stream_address(
+            height,
+            network,
+            FundingStreamReceiver::Ecc,
+        );
+        let address_zf = subsidy::funding_streams::funding_stream_address(
+            height,
+            network,
+            FundingStreamReceiver::ZcashFoundation,
+        );
+        let address_mg = subsidy::funding_streams::funding_stream_address(
+            height,
+            network,
+            FundingStreamReceiver::MajorGrants,
+        );
+
+        let ecc_address = subsidy::funding_streams::find_output_with_address(coinbase, address_ecc);
+        let zf_address = subsidy::funding_streams::find_output_with_address(coinbase, address_zf);
+        let mg_address = subsidy::funding_streams::find_output_with_address(coinbase, address_mg);
+
         // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
         // MUST contain at least one output per funding stream `fs` active at `height`,
         // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
         // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
-
-        // TODO: We are only checking each fundign stream reward is present in the
-        // coinbase transaction outputs but not the recipient addresses.
         if funding_stream_amounts.is_subset(&output_amounts) {
-            Ok(())
+            if !ecc_address.is_empty() && !zf_address.is_empty() && !mg_address.is_empty() {
+                Ok(())
+            } else {
+                Err(SubsidyError::FundingStreamAddressNotFound)?
+            }
         } else {
-            Err(SubsidyError::FundingStreamNotFound)?
+            Err(SubsidyError::FundingStreamValueNotFound)?
         }
     } else {
         // Future halving, with no founders reward or funding streams

@@ -16,9 +16,9 @@ use crate::parameters::subsidy::*;
 
 /// The divisor used for halvings.
 ///
-/// `1 << Halving(height)`, as described in [protocol specification §7.7][7.7]
+/// `1 << Halving(height)`, as described in [protocol specification §7.8][7.8]
 ///
-/// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn halving_divisor(height: Height, network: Network) -> u64 {
     let blossom_height = Blossom
         .activation_height(network)
