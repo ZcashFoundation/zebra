@@ -2,6 +2,7 @@ use std::{
     convert::{TryFrom, TryInto},
     io,
     net::Ipv6Addr,
+    sync::Arc,
 };
 
 use super::{AtLeastOne, CompactSizeMessage, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
@@ -169,6 +170,15 @@ pub trait TrustedPreallocate {
     /// Provides a ***loose upper bound*** on the size of the Vec<T: TrustedPreallocate>
     /// which can possibly be received from an honest peer.
     fn max_allocation() -> u64;
+}
+
+impl<T> TrustedPreallocate for Arc<T>
+where
+    T: TrustedPreallocate,
+{
+    fn max_allocation() -> u64 {
+        T::max_allocation()
+    }
 }
 
 /// The length of the longest valid `Vec<u8>` that can be received over the network
