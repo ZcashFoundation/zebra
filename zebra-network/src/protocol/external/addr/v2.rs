@@ -26,6 +26,13 @@ use crate::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+#[cfg(test)]
+use byteorder::WriteBytesExt;
+#[cfg(test)]
+use std::io::Write;
+#[cfg(test)]
+use zebra_chain::serialization::{zcash_serialize_bytes, ZcashSerialize};
+
 /// The maximum permitted size of the `addr` field in `addrv2` messages.
 ///
 /// > Field addr has a variable length, with a maximum of 512 bytes (4096 bits).
@@ -98,8 +105,34 @@ pub(in super::super) enum AddrV2 {
     Unimplemented,
 }
 
-// > One message can contain up to 1,000 addresses.
-// > Clients MUST reject messages with more addresses.
+// Just serialize in the tests for now.
+//
+// We can't guarantee that peers support addrv2 until it activates,
+// and outdated peers are excluded from the network by a network upgrade.
+// (Likely NU5 on mainnet, and NU6 on testnet.)
+// https://zips.z.cash/zip-0155#deployment
+//
+// And Zebra doesn't use different codecs for different peer versions.
+#[cfg(test)]
+impl From<MetaAddr> for AddrV2 {
+    fn from(meta_addr: MetaAddr) -> Self {
+        let untrusted_services = meta_addr.services.expect(
+            "unexpected MetaAddr with missing peer services: \
+             MetaAddrs should be sanitized before serialization",
+        );
+        let untrusted_last_seen = meta_addr.last_seen().expect(
+            "unexpected MetaAddr with missing last seen time: \
+             MetaAddrs should be sanitized before serialization",
+        );
+
+        AddrV2::IpAddr {
+            untrusted_last_seen,
+            untrusted_services,
+            ip: meta_addr.addr.ip(),
+            port: meta_addr.addr.port(),
+        }
+    }
+}
 
 impl From<AddrV2> for Option<MetaAddr> {
     fn from(addr: AddrV2) -> Self {
@@ -120,6 +153,58 @@ impl From<AddrV2> for Option<MetaAddr> {
         } else {
             None
         }
+    }
+}
+
+// Just serialize in the tests for now.
+//
+// See the detailed note about ZIP-155 activation above.
+#[cfg(test)]
+impl ZcashSerialize for AddrV2 {
+    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        if let AddrV2::IpAddr {
+            untrusted_last_seen,
+            untrusted_services,
+            ip,
+            port,
+        } = self
+        {
+            // > uint32  Time that this node was last seen as connected to the network.
+            untrusted_last_seen.zcash_serialize(&mut writer)?;
+
+            // > Service bits. A CompactSize-encoded bit field that is 64 bits wide.
+            let untrusted_services: CompactSize64 = untrusted_services.bits().into();
+            untrusted_services.zcash_serialize(&mut writer)?;
+
+            match ip {
+                IpAddr::V4(ip) => {
+                    // > Network identifier. An 8-bit value that specifies which network is addressed.
+                    writer.write_u8(ADDR_V2_IPV4_NETWORK_ID)?;
+
+                    // > The IPV4 and IPV6 network IDs use addresses encoded in the usual way
+                    // > for binary IPv4 and IPv6 addresses in network byte order (big endian).
+                    let ip: [u8; ADDR_V2_IPV4_ADDR_SIZE] = ip.octets();
+                    // > CompactSize      The length in bytes of addr.
+                    // > uint8[sizeAddr]  Network address. The interpretation depends on networkID.
+                    zcash_serialize_bytes(&ip.to_vec(), &mut writer)?;
+
+                    // > uint16  Network port. If not relevant for the network this MUST be 0.
+                    writer.write_u16::<BigEndian>(*port)?;
+                }
+                IpAddr::V6(ip) => {
+                    writer.write_u8(ADDR_V2_IPV6_NETWORK_ID)?;
+
+                    let ip: [u8; ADDR_V2_IPV6_ADDR_SIZE] = ip.octets();
+                    zcash_serialize_bytes(&ip.to_vec(), &mut writer)?;
+
+                    writer.write_u16::<BigEndian>(*port)?;
+                }
+            }
+        } else {
+            panic!("unexpected AddrV2 variant: {:?}", self);
+        }
+
+        Ok(())
     }
 }
 

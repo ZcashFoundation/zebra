@@ -12,7 +12,7 @@ use zebra_chain::serialization::{
 use crate::{
     meta_addr::MetaAddr,
     protocol::external::{
-        addr::{AddrV1, ADDR_V1_SIZE},
+        addr::{AddrV1, AddrV2, ADDR_V1_SIZE, ADDR_V2_MIN_SIZE},
         inv::InventoryHash,
     },
 };
@@ -115,5 +115,55 @@ proptest! {
         prop_assert!((largest_allowed_vec_len as u64) == AddrV1::max_allocation());
         // Check that our largest_allowed_vec is small enough to fit in a Zcash message.
         prop_assert!(largest_allowed_serialized_len <= MAX_PROTOCOL_MESSAGE_LEN);
+    }
+}
+
+proptest! {
+    /// Confirm that each AddrV2 takes at least ADDR_V2_MIN_SIZE bytes when serialized.
+    /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
+    #[test]
+    fn addr_v2_size_is_correct(addr in MetaAddr::arbitrary()) {
+        zebra_test::init();
+
+        // We require sanitization before serialization
+        let addr = addr.sanitize();
+        prop_assume!(addr.is_some());
+
+        let addr: AddrV2 = addr.unwrap().into();
+
+        let serialized = addr
+            .zcash_serialize_to_vec()
+            .expect("Serialization to vec must succeed");
+        assert!(serialized.len() >= ADDR_V2_MIN_SIZE)
+    }
+
+    /// Verifies that...
+    /// 1. The smallest disallowed vector of `AddrV2`s is too large to fit in a legal Zcash message
+    /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
+    #[test]
+    fn addr_v2_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
+        zebra_test::init();
+
+        // We require sanitization before serialization
+        let addr = addr.sanitize();
+        prop_assume!(addr.is_some());
+
+        let addr: AddrV2 = addr.unwrap().into();
+
+        let (
+            smallest_disallowed_vec_len,
+            smallest_disallowed_serialized_len,
+            largest_allowed_vec_len,
+            _largest_allowed_serialized_len,
+        ) = max_allocation_is_big_enough(addr);
+
+        // Check that our smallest_disallowed_vec is only one item larger than the limit
+        assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV2::max_allocation());
+        // Check that our smallest_disallowed_vec is too big to send in a valid Zcash message
+        assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
+
+        // Check that our largest_allowed_vec contains the maximum number of AddrV2s
+        assert!((largest_allowed_vec_len as u64) == AddrV2::max_allocation());
+        // largest_allowed_serialized_len exceeds the limit for variable-sized types
     }
 }
