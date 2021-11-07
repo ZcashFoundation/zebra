@@ -34,10 +34,24 @@ use proptest_derive::Arbitrary;
 /// https://zips.z.cash/zip-0155#specification
 pub const MAX_ADDR_V2_ADDR_SIZE: usize = 512;
 
+/// The network ID of [`Ipv4Addr`]s in `addrv2` messages.
+///
+/// > 0x01  IPV4  4   IPv4 address (globally routed internet)
+///
+/// https://zips.z.cash/zip-0155#specification
+pub const ADDR_V2_IPV4_NETWORK_ID: u8 = 0x01;
+
 /// The size of [`Ipv4Addr`]s in `addrv2` messages.
 ///
 /// https://zips.z.cash/zip-0155#specification
 pub const ADDR_V2_IPV4_ADDR_SIZE: usize = 4;
+
+/// The network ID of [`Ipv6Addr`]s in `addrv2` messages.
+///
+/// > 0x02  IPV6  16  IPv6 address (globally routed internet)
+///
+/// https://zips.z.cash/zip-0155#specification
+pub const ADDR_V2_IPV6_NETWORK_ID: u8 = 0x02;
 
 /// The size of [`Ipv6Addr`]s in `addrv2` messages.
 ///
@@ -88,13 +102,13 @@ pub(in super::super) enum AddrV2 {
 // > Clients MUST reject messages with more addresses.
 
 impl From<AddrV2> for Option<MetaAddr> {
-    fn from(addr_v2: AddrV2) -> Self {
+    fn from(addr: AddrV2) -> Self {
         if let AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
             ip,
             port,
-        } = addr_v2
+        } = addr
         {
             let addr = SocketAddr::new(ip, port);
 
@@ -141,9 +155,7 @@ impl ZcashDeserialize for AddrV2 {
             ));
         }
 
-        if network_id == 0x01 {
-            // > 0x01  IPV4  4   IPv4 address (globally routed internet)
-
+        if network_id == ADDR_V2_IPV4_NETWORK_ID {
             // > Clients MUST reject messages that contain addresses that have
             // > a different length than specified in this table for a specific network ID,
             // > as these are meaningless.
@@ -164,9 +176,7 @@ impl ZcashDeserialize for AddrV2 {
                 ip: ip.into(),
                 port,
             })
-        } else if network_id == 0x02 {
-            // > 0x02  IPV6  16  IPv6 address (globally routed internet)
-
+        } else if network_id == ADDR_V2_IPV6_NETWORK_ID {
             if addr.len() != ADDR_V2_IPV6_ADDR_SIZE {
                 return Err(SerializationError::Parse(
                     "IPv6 field length did not match ADDR_V2_IPV6_ADDR_SIZE in addrv2 message",
@@ -206,9 +216,7 @@ pub(in super::super) const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
 
 impl TrustedPreallocate for AddrV2 {
     fn max_allocation() -> u64 {
-        // Since a maximal serialized Vec<AddrV2> uses at least three bytes for its length
-        // (2MB  messages / 9B AddrV2 implies the maximal length is much greater than 253)
-        // the max allocation can never exceed (MAX_PROTOCOL_MESSAGE_LEN - 3) / META_ADDR_SIZE
-        ((MAX_PROTOCOL_MESSAGE_LEN - 3) / ADDR_V2_MIN_SIZE) as u64
+        // Since ADDR_V2_MIN_SIZE is less than 2^5, the maximum length takes up 5 bytes.
+        ((MAX_PROTOCOL_MESSAGE_LEN - 5) / ADDR_V2_MIN_SIZE) as u64
     }
 }

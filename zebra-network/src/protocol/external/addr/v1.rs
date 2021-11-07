@@ -86,11 +86,11 @@ impl From<MetaAddr> for AddrV1 {
 }
 
 impl From<AddrV1> for MetaAddr {
-    fn from(addr_v1: AddrV1) -> Self {
+    fn from(addr: AddrV1) -> Self {
         MetaAddr::new_gossiped_meta_addr(
-            addr_v1.ipv6_addr.into(),
-            addr_v1.untrusted_services,
-            addr_v1.untrusted_last_seen,
+            addr.ipv6_addr.into(),
+            addr.untrusted_services,
+            addr.untrusted_last_seen,
         )
     }
 }
@@ -132,10 +132,8 @@ pub(in super::super) const ADDR_V1_SIZE: usize = 4 + 8 + 16 + 2;
 
 impl TrustedPreallocate for AddrV1 {
     fn max_allocation() -> u64 {
-        // Since a maximal serialized Vec<AddrV1> uses at least three bytes for its length
-        // (2MB  messages / 30B AddrV1 implies the maximal length is much greater than 253)
-        // the max allocation can never exceed (MAX_PROTOCOL_MESSAGE_LEN - 3) / META_ADDR_SIZE
-        ((MAX_PROTOCOL_MESSAGE_LEN - 3) / ADDR_V1_SIZE) as u64
+        // Since ADDR_V2_MIN_SIZE is less than 2^5, the maximum length takes up 5 bytes.
+        ((MAX_PROTOCOL_MESSAGE_LEN - 5) / ADDR_V1_SIZE) as u64
     }
 }
 
