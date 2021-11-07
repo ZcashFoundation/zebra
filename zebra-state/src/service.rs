@@ -500,7 +500,7 @@ impl StateService {
             .collect();
         res.reverse();
 
-        tracing::info!(
+        tracing::debug!(
             ?final_height,
             response_len = ?res.len(),
             ?chain_tip_height,

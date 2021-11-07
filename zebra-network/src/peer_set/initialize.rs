@@ -228,7 +228,9 @@ where
 
 /// Use the provided `outbound_connector` to connect to the configured initial peers,
 /// then send the resulting peer connections over `peerset_tx`.
-#[instrument(skip(config, outbound_connector, peerset_tx))]
+///
+/// Sends any unused initial peers to the `address_book_updater`.
+#[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
 async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
@@ -360,7 +362,9 @@ where
 /// Limit the number of `initial_peers` addresses entries to the configured
 /// `peerset_initial_target_size`.
 ///
-/// The result is randomly chosen entries from the provided set of addresses.
+/// Returns randomly chosen entries from the provided set of addresses.
+///
+/// Sends any unused entries to the `address_book_updater`.
 async fn limit_initial_peers(
     config: &Config,
     mut address_book_updater: mpsc::Sender<MetaAddrChange>,
