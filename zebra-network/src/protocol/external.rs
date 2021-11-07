@@ -1,3 +1,7 @@
+//! Network protocol types and serialization for the Zcash wire format.
+
+/// Node address wire formats.
+mod addr;
 /// A Tokio codec that transforms an `AsyncRead` into a `Stream` of `Message`s.
 pub mod codec;
 /// Inventory items.

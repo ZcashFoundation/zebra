@@ -1,8 +1,8 @@
 //! A Tokio codec mapping byte streams to Bitcoin message streams.
 
-use std::fmt;
 use std::{
     cmp::min,
+    fmt,
     io::{Cursor, Read, Write},
 };
 
