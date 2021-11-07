@@ -5,13 +5,21 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::{
     block,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        zcash_serialize_bytes, ReadZcashExt, SerializationError, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
     transaction,
 };
 
 use super::{CoinbaseData, Input, OutPoint, Output, Script};
+
+/// The maximum length of the coinbase data.
+/// Includes the encoded coinbase height, if any.
+///
+/// > The number of bytes in the coinbase script, up to a maximum of 100 bytes.
+///
+/// https://developer.bitcoin.org/reference/transactions.html#coinbase-input-the-input-of-the-first-transaction-in-a-block
+pub const MAX_COINBASE_DATA_LEN: usize = 100;
 
 /// The coinbase data for a genesis block.
 ///
@@ -116,27 +124,6 @@ fn parse_coinbase_height(
     }
 }
 
-/// Return the encoded length of `height`, as a prefix to the coinbase data.
-fn coinbase_height_len(height: block::Height) -> usize {
-    // We can't write this as a match statement on stable until exclusive range
-    // guards are stabilized.
-    if let 0 = height.0 {
-        0
-    } else if let _h @ 1..=16 = height.0 {
-        1
-    } else if let _h @ 17..=127 = height.0 {
-        2
-    } else if let _h @ 128..=32767 = height.0 {
-        3
-    } else if let _h @ 32768..=8_388_607 = height.0 {
-        4
-    } else if let _h @ 8_388_608..=block::Height::MAX_AS_U32 = height.0 {
-        5
-    } else {
-        panic!("Invalid coinbase height");
-    }
-}
-
 /// Encode `height` into a block height, as a prefix of the coinbase data.
 /// Does not write `coinbase_data`.
 ///
@@ -223,11 +210,12 @@ impl ZcashSerialize for Input {
             } => {
                 writer.write_all(&[0; 32][..])?;
                 writer.write_u32::<LittleEndian>(0xffff_ffff)?;
-                let height_len = coinbase_height_len(*height);
-                let total_len = height_len + data.as_ref().len();
-                writer.write_compactsize(total_len as u64)?;
-                write_coinbase_height(*height, data, &mut writer)?;
-                writer.write_all(data.as_ref())?;
+
+                let mut height_and_data = Vec::new();
+                write_coinbase_height(*height, data, &mut height_and_data)?;
+                height_and_data.extend(&data.0);
+                zcash_serialize_bytes(&height_and_data, &mut writer)?;
+
                 writer.write_u32::<LittleEndian>(*sequence)?;
             }
         }
@@ -244,15 +232,15 @@ impl ZcashDeserialize for Input {
             if reader.read_u32::<LittleEndian>()? != 0xffff_ffff {
                 return Err(SerializationError::Parse("wrong index in coinbase"));
             }
-            let len = reader.read_compactsize()?;
-            if len > 100 {
+
+            let data: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
+            if data.len() > MAX_COINBASE_DATA_LEN {
                 return Err(SerializationError::Parse("coinbase has too much data"));
             }
-            // Memory Denial of Service: this length has just been checked
-            let mut data = vec![0; len as usize];
-            reader.read_exact(&mut data[..])?;
             let (height, data) = parse_coinbase_height(data)?;
+
             let sequence = reader.read_u32::<LittleEndian>()?;
+
             Ok(Input::Coinbase {
                 height,
                 data,
