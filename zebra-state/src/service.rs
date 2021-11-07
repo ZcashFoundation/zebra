@@ -790,7 +790,11 @@ impl Service<Request> for StateService {
                             .best_block(hash.into())
                             .expect("block for found hash is in the best chain");
                         block::CountedHeader {
-                            transaction_count: block.transactions.len(),
+                            transaction_count: block
+                                .transactions
+                                .len()
+                                .try_into()
+                                .expect("transaction count has already been validated"),
                             header: block.header,
                         }
                     })

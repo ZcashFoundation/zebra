@@ -15,9 +15,9 @@ use crate::{
         Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
     serialization::{
-        zcash_deserialize_external_count, zcash_serialize_external_count, AtLeastOne, ReadZcashExt,
-        SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
-        ZcashDeserializeInto, ZcashSerialize,
+        zcash_deserialize_external_count, zcash_serialize_empty_list,
+        zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
+        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
     sprout,
 };
@@ -69,32 +69,30 @@ impl ZcashDeserialize for pallas::Base {
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_compactsize(self.joinsplits().count() as u64)?;
-        for joinsplit in self.joinsplits() {
-            joinsplit.zcash_serialize(&mut writer)?;
-        }
+        let joinsplits: Vec<_> = self.joinsplits().cloned().collect();
+        joinsplits.zcash_serialize(&mut writer)?;
+
         writer.write_all(&<[u8; 32]>::from(self.pub_key)[..])?;
         writer.write_all(&<[u8; 64]>::from(self.sig)[..])?;
         Ok(())
     }
 }
 
-impl<P: ZkSnarkProof> ZcashDeserialize for Option<JoinSplitData<P>> {
+impl<P> ZcashDeserialize for Option<JoinSplitData<P>>
+where
+    P: ZkSnarkProof,
+    sprout::JoinSplit<P>: TrustedPreallocate,
+{
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let num_joinsplits = reader.read_compactsize()?;
-        match num_joinsplits {
-            0 => Ok(None),
-            n => {
-                let first = sprout::JoinSplit::zcash_deserialize(&mut reader)?;
-                let mut rest = Vec::with_capacity((n - 1) as usize);
-                for _ in 0..(n - 1) {
-                    rest.push(sprout::JoinSplit::zcash_deserialize(&mut reader)?);
-                }
+        let joinsplits: Vec<sprout::JoinSplit<P>> = (&mut reader).zcash_deserialize_into()?;
+        match joinsplits.split_first() {
+            None => Ok(None),
+            Some((first, rest)) => {
                 let pub_key = reader.read_32_bytes()?.into();
                 let sig = reader.read_64_bytes()?.into();
                 Ok(Some(JoinSplitData {
-                    first,
-                    rest,
+                    first: first.clone(),
+                    rest: rest.to_vec(),
                     pub_key,
                     sig,
                 }))
@@ -112,9 +110,9 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
         match self {
             None => {
                 // nSpendsSapling
-                writer.write_compactsize(0)?;
+                zcash_serialize_empty_list(&mut writer)?;
                 // nOutputsSapling
-                writer.write_compactsize(0)?;
+                zcash_serialize_empty_list(&mut writer)?;
             }
             Some(sapling_shielded_data) => {
                 sapling_shielded_data.zcash_serialize(&mut writer)?;
@@ -254,7 +252,8 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
         match self {
             None => {
                 // nActionsOrchard
-                writer.write_compactsize(0)?;
+                zcash_serialize_empty_list(writer)?;
+
                 // We don't need to write anything else here.
                 // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
                 // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
@@ -399,7 +398,7 @@ impl ZcashSerialize for Transaction {
                 lock_time.zcash_serialize(&mut writer)?;
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
-                    None => writer.write_compactsize(0)?,
+                    None => zcash_serialize_empty_list(writer)?,
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
                 }
             }
@@ -417,7 +416,7 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
-                    None => writer.write_compactsize(0)?,
+                    None => zcash_serialize_empty_list(writer)?,
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
                 }
             }
@@ -448,30 +447,28 @@ impl ZcashSerialize for Transaction {
                         // Signal no value balance.
                         writer.write_i64::<LittleEndian>(0)?;
                         // Signal no shielded spends and no shielded outputs.
-                        writer.write_compactsize(0)?;
-                        writer.write_compactsize(0)?;
+                        zcash_serialize_empty_list(&mut writer)?;
+                        zcash_serialize_empty_list(&mut writer)?;
                     }
                     Some(sapling_shielded_data) => {
                         sapling_shielded_data
                             .value_balance
                             .zcash_serialize(&mut writer)?;
-                        writer.write_compactsize(sapling_shielded_data.spends().count() as u64)?;
-                        for spend in sapling_shielded_data.spends() {
-                            spend.zcash_serialize(&mut writer)?;
-                        }
-                        writer.write_compactsize(sapling_shielded_data.outputs().count() as u64)?;
-                        for output in sapling_shielded_data
+
+                        let spends: Vec<_> = sapling_shielded_data.spends().cloned().collect();
+                        spends.zcash_serialize(&mut writer)?;
+
+                        let outputs: Vec<_> = sapling_shielded_data
                             .outputs()
                             .cloned()
                             .map(sapling::OutputInTransactionV4)
-                        {
-                            output.zcash_serialize(&mut writer)?;
-                        }
+                            .collect();
+                        outputs.zcash_serialize(&mut writer)?;
                     }
                 }
 
                 match joinsplit_data {
-                    None => writer.write_compactsize(0)?,
+                    None => zcash_serialize_empty_list(&mut writer)?,
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
                 }
 
