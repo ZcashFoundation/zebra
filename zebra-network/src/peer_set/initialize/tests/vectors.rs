@@ -1131,6 +1131,8 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
 async fn add_initial_peers_is_rate_limited() {
     zebra_test::init();
 
+    // This test should not require network access.
+
     // We don't need to actually connect to the peers; we only need to check
     // if the connection attempts is rate-limited. Therefore, just return an error.
     let outbound_connector =
@@ -1162,9 +1164,10 @@ async fn add_initial_peers_is_rate_limited() {
     );
 }
 
-/// Test that [`init`] does not deadlock.
+/// Test that [`init`] does not deadlock in `add_initial_peers`,
+/// even if the seeders return a lot of peers.
 #[tokio::test]
-async fn network_init_deadlock() {
+async fn add_initial_peers_deadlock() {
     // The `PEER_COUNT` is the amount of initial seed peers. The value is set so
     // that the peers fill up `PEERSET_INITIAL_TARGET_SIZE`, fill up the channel
     // for sending unused peers to the `AddressBook`, and so that there are
@@ -1174,6 +1177,11 @@ async fn network_init_deadlock() {
     const TIME_LIMIT: Duration = Duration::from_secs(10);
 
     zebra_test::init();
+
+    // This test requires an IPv4 network stack. Localhost should be enough.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
 
     // Create a list of dummy IPs, and initialize a config using them as the
     // initial peers. The amount of these peers will overflow
@@ -1185,10 +1193,17 @@ async fn network_init_deadlock() {
         );
     }
 
+    // This test might fail on machines with no configured IPv4 addresses
+    // (localhost should be enough).
+    let unused_v4 = "0.0.0.0:0".parse().unwrap();
+
     let config = Config {
         initial_mainnet_peers: peers,
         peerset_initial_target_size: PEERSET_INITIAL_TARGET_SIZE,
+
         network: Network::Mainnet,
+        listen_addr: unused_v4,
+
         ..Config::default()
     };
 
@@ -1205,9 +1220,11 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let config = Config {
         listen_addr,
         network,
+
         // Stop Zebra making outbound connections
         initial_mainnet_peers: HashSet::new(),
         initial_testnet_peers: HashSet::new(),
+
         ..Config::default()
     };
     let inbound_service =
@@ -1239,6 +1256,8 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 
 /// Initialize a peer set with `peerset_initial_target_size` and `inbound_service` on `network`.
 /// Returns the newly created [`AddressBook`] for testing.
+///
+/// Binds the network listener to an unused port on all network interfaces.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
@@ -1269,6 +1288,7 @@ where
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
 ///
 /// Uses the default values for all other config fields.
+/// Does not bind a local listener.
 ///
 /// Returns the generated [`Config`], and the peer set receiver.
 async fn spawn_crawler_with_peer_limit<C>(
@@ -1380,6 +1400,7 @@ where
 
 /// Run an inbound peer listener with `peerset_initial_target_size` and `handshaker`.
 ///
+/// Binds the local listener to an unused localhost port.
 /// Uses the default values for all other config fields.
 ///
 /// Returns the generated [`Config`], and the peer set receiver.
@@ -1477,7 +1498,8 @@ where
 /// Initialize a task that connects to `peer_count` initial peers using the
 /// given connector.
 ///
-/// Dummy IPs are used.
+/// Connects to IP addresses in the IPv4 localhost range.
+/// Does not open a local listener port.
 ///
 /// Returns the task [`JoinHandle`], and the peer set receiver.
 async fn spawn_add_initial_peers<C>(
@@ -1505,16 +1527,22 @@ where
             SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
         );
     }
+
+    // This address isn't actually bound - it just gets passed to the address book.
+    let unused_v4 = "0.0.0.0:0".parse().unwrap();
+
     let config = Config {
         initial_mainnet_peers: peers,
+
         network: Network::Mainnet,
+        listen_addr: unused_v4,
+
         ..Config::default()
     };
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(peer_count + 1);
 
-    let (_tcp_listener, listen_addr) = open_listener(&config.clone()).await;
-    let (_address_book, address_book_updater) = AddressBookUpdater::spawn(listen_addr);
+    let (_address_book, address_book_updater) = AddressBookUpdater::spawn(unused_v4);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);
