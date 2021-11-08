@@ -13,7 +13,9 @@ use zebra_chain::{
 
 use crate::{
     error::*,
-    parameters::{subsidy::FundingStreamReceiver, SLOW_START_INTERVAL},
+    parameters::{
+        subsidy::FundingStreamReceiver, FUNDING_STREAM_RECEIVERS_NUMBER, SLOW_START_INTERVAL,
+    },
 };
 
 use super::subsidy;
@@ -148,32 +150,23 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         let output_amounts = subsidy::general::output_amounts(coinbase);
 
         // funding stream addresses
-        let address_ecc = subsidy::funding_streams::funding_stream_address(
-            height,
-            network,
-            FundingStreamReceiver::Ecc,
-        );
-        let address_zf = subsidy::funding_streams::funding_stream_address(
-            height,
-            network,
-            FundingStreamReceiver::ZcashFoundation,
-        );
-        let address_mg = subsidy::funding_streams::funding_stream_address(
-            height,
-            network,
-            FundingStreamReceiver::MajorGrants,
-        );
+        let mut found_outputs = HashSet::<FundingStreamReceiver>::new();
+        for receiver in FundingStreamReceiver::receivers() {
+            let address =
+                subsidy::funding_streams::funding_stream_address(height, network, receiver);
 
-        let ecc_address = subsidy::funding_streams::find_output_with_address(coinbase, address_ecc);
-        let zf_address = subsidy::funding_streams::find_output_with_address(coinbase, address_zf);
-        let mg_address = subsidy::funding_streams::find_output_with_address(coinbase, address_mg);
+            let outputs = subsidy::funding_streams::find_output_with_address(coinbase, address);
+            if !outputs.is_empty() {
+                found_outputs.insert(receiver);
+            }
+        }
 
         // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
         // MUST contain at least one output per funding stream `fs` active at `height`,
         // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
         // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
         if funding_stream_amounts.is_subset(&output_amounts) {
-            if !ecc_address.is_empty() && !zf_address.is_empty() && !mg_address.is_empty() {
+            if found_outputs.len() == FUNDING_STREAM_RECEIVERS_NUMBER {
                 Ok(())
             } else {
                 Err(SubsidyError::FundingStreamAddressNotFound)?
