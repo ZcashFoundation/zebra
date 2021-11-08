@@ -43,14 +43,14 @@ proptest! {
         ) = max_allocation_is_big_enough(joinsplit);
 
         // Check that our smallest_disallowed_vec is only one item larger than the limit
-        assert!(((smallest_disallowed_vec_len - 1) as u64) == <JoinSplit<Bctv14Proof>>::max_allocation());
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == <JoinSplit<Bctv14Proof>>::max_allocation());
         // Check that our smallest_disallowed_vec is too big to fit in a valid Zcash Block.
-        assert!(smallest_disallowed_serialized_len as u64 > MAX_BLOCK_BYTES);
+        prop_assert!(smallest_disallowed_serialized_len as u64 > MAX_BLOCK_BYTES);
 
         // Check that our largest_allowed_vec contains the maximum number of JoinSplits
-        assert!((largest_allowed_vec_len as u64) == <JoinSplit<Bctv14Proof>>::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == <JoinSplit<Bctv14Proof>>::max_allocation());
         // Check that our largest_allowed_vec is small enough to fit in a Zcash Block.
-        assert!(largest_allowed_serialized_len as u64 <= MAX_BLOCK_BYTES);
+        prop_assert!(largest_allowed_serialized_len as u64 <= MAX_BLOCK_BYTES);
     }
 
     /// Verify that...
@@ -67,13 +67,13 @@ proptest! {
         ) = max_allocation_is_big_enough(joinsplit);
 
         // Check that our smallest_disallowed_vec is only one item larger than the limit
-        assert!(((smallest_disallowed_vec_len - 1) as u64) == <JoinSplit<Groth16Proof>>::max_allocation());
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == <JoinSplit<Groth16Proof>>::max_allocation());
         // Check that our smallest_disallowed_vec is too big to fit in a valid Zcash Block.
-        assert!(smallest_disallowed_serialized_len as u64 > MAX_BLOCK_BYTES);
+        prop_assert!(smallest_disallowed_serialized_len as u64 > MAX_BLOCK_BYTES);
 
         // Check that our largest_allowed_vec contains the maximum number of JoinSplits
-        assert!((largest_allowed_vec_len as u64) == <JoinSplit<Groth16Proof>>::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == <JoinSplit<Groth16Proof>>::max_allocation());
         // Check that our largest_allowed_vec is small enough to fit in a Zcash Block.
-        assert!(largest_allowed_serialized_len as u64 <= MAX_BLOCK_BYTES);
+        prop_assert!(largest_allowed_serialized_len as u64 <= MAX_BLOCK_BYTES);
     }
 }

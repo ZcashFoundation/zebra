@@ -34,7 +34,7 @@ proptest! {
             InventoryHash::Wtx(_) => 32 + 32 + 4,
         };
 
-        assert_eq!(serialized_inv.len(), expected_size);
+        prop_assert_eq!(serialized_inv.len(), expected_size);
     }
 
     /// Verifies that...
@@ -49,9 +49,9 @@ proptest! {
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
         // Check that our smallest_disallowed_vec is only one item larger than the limit
-        assert!(((smallest_disallowed_vec.len() - 1) as u64) == InventoryHash::max_allocation());
+        prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == InventoryHash::max_allocation());
         // Check that our smallest_disallowed_vec is too big to fit in a Zcash message.
-        assert!(smallest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
+        prop_assert!(smallest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
 
         // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
         smallest_disallowed_vec.pop();
@@ -61,9 +61,9 @@ proptest! {
             .expect("Serialization to vec must succeed");
 
         // Check that our largest_allowed_vec contains the maximum number of InventoryHashes
-        assert!((largest_allowed_vec.len() as u64) == InventoryHash::max_allocation());
+        prop_assert!((largest_allowed_vec.len() as u64) == InventoryHash::max_allocation());
         // Check that our largest_allowed_vec is small enough to fit in a Zcash message.
-        assert!(largest_allowed_serialized.len() <= MAX_PROTOCOL_MESSAGE_LEN);
+        prop_assert!(largest_allowed_serialized.len() <= MAX_PROTOCOL_MESSAGE_LEN);
     }
 }
 
@@ -83,7 +83,7 @@ proptest! {
         let serialized = addr
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
-        assert!(serialized.len() == ADDR_V1_SIZE)
+        prop_assert!(serialized.len() == ADDR_V1_SIZE)
     }
 
     /// Verifies that...
@@ -107,13 +107,13 @@ proptest! {
         ) = max_allocation_is_big_enough(addr);
 
         // Check that our smallest_disallowed_vec is only one item larger than the limit
-        assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV1::max_allocation());
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV1::max_allocation());
         // Check that our smallest_disallowed_vec is too big to send in a valid Zcash message
-        assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
+        prop_assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
 
         // Check that our largest_allowed_vec contains the maximum number of AddrV1s
-        assert!((largest_allowed_vec_len as u64) == AddrV1::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == AddrV1::max_allocation());
         // Check that our largest_allowed_vec is small enough to fit in a Zcash message.
-        assert!(largest_allowed_serialized_len <= MAX_PROTOCOL_MESSAGE_LEN);
+        prop_assert!(largest_allowed_serialized_len <= MAX_PROTOCOL_MESSAGE_LEN);
     }
 }
