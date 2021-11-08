@@ -134,7 +134,7 @@ proptest! {
         let serialized = addr
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
-        assert!(serialized.len() >= ADDR_V2_MIN_SIZE)
+        prop_assert!(serialized.len() >= ADDR_V2_MIN_SIZE)
     }
 
     /// Verifies that...
@@ -158,12 +158,12 @@ proptest! {
         ) = max_allocation_is_big_enough(addr);
 
         // Check that our smallest_disallowed_vec is only one item larger than the limit
-        assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV2::max_allocation());
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV2::max_allocation());
         // Check that our smallest_disallowed_vec is too big to send in a valid Zcash message
-        assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
+        prop_assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
 
         // Check that our largest_allowed_vec contains the maximum number of AddrV2s
-        assert!((largest_allowed_vec_len as u64) == AddrV2::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == AddrV2::max_allocation());
         // largest_allowed_serialized_len exceeds the limit for variable-sized types
     }
 }
