@@ -503,6 +503,7 @@ impl MetaAddr {
             && !self.has_connection_recently_responded()
             && !self.was_connection_recently_attempted()
             && !self.has_connection_recently_failed()
+            && self.is_probably_reachable()
     }
 
     /// Is the [`SocketAddr`] we have for this peer valid for outbound
@@ -534,6 +535,17 @@ impl MetaAddr {
     ///
     /// A peer is considered unreachable if the last connection attempt to it failed and the last
     /// successful connection is more than 3 days ago.
+    ///
+    /// # Security
+    ///
+    /// This is used by [`Self::is_ready_for_connection_attempt`] so that Zebra stops trying to
+    /// connect to peers that are likely unreachable.
+    ///
+    /// The `untrusted_last_seen` time is used as a fallback time if the local node has never
+    /// itself seen the peer. If the reported last seen time is a long time ago, then the local
+    /// node will attempt to connect the peer once (because the peer state won't be
+    /// [`PeerAddrState::Failed`] before an attempt is made), and if that attempt fails it won't
+    /// try to connect ever again.
     pub fn is_probably_reachable(&self) -> bool {
         self.last_connection_state != PeerAddrState::Failed || self.last_seen_is_recent()
     }
