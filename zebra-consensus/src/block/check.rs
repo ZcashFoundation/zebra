@@ -1,8 +1,10 @@
 //! Consensus check functions
 
 use chrono::{DateTime, Utc};
+use std::collections::HashSet;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{Block, Hash, Header, Height},
     parameters::{Network, NetworkUpgrade},
     transaction,
@@ -131,9 +133,28 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
-        tracing::trace!("funding stream block subsidy validation is not implemented");
-        // Return ok for now
-        Ok(())
+
+        let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
+            .expect("We always expect a funding stream hashmap response even if empty");
+
+        let funding_stream_amounts: HashSet<Amount<NonNegative>> = funding_streams
+            .iter()
+            .map(|(_receiver, amount)| *amount)
+            .collect();
+        let output_amounts = subsidy::general::output_amounts(coinbase);
+
+        // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
+        // MUST contain at least one output per funding stream `fs` active at `height`,
+        // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
+        // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+
+        // TODO: We are only checking each fundign stream reward is present in the
+        // coinbase transaction outputs but not the recipient addresses.
+        if funding_stream_amounts.is_subset(&output_amounts) {
+            Ok(())
+        } else {
+            Err(SubsidyError::FundingStreamNotFound)?
+        }
     } else {
         // Future halving, with no founders reward or funding streams
         Ok(())
@@ -221,7 +242,6 @@ pub fn merkle_root_validity(
     //
     // To prevent malleability (CVE-2012-2459), we also need to check
     // whether the transaction hashes are unique.
-    use std::collections::HashSet;
     if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
         return Err(BlockError::DuplicateTransaction);
     }
