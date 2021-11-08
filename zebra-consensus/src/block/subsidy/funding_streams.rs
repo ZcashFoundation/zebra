@@ -36,6 +36,11 @@ pub fn funding_stream_values(
         if range.contains(&height) {
             let block_subsidy = block_subsidy(height, network)?;
             for (&receiver, &numerator) in FUNDING_STREAM_RECEIVER_NUMERATORS.iter() {
+                // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
+                //   https://zips.z.cash/protocol/protocol.pdf#subsidies
+                // - In Rust, "integer division rounds towards zero":
+                //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
+                //   This is the same as `floor()`, because these numbers are all positive.
                 let amount_value =
                     ((block_subsidy * numerator)? / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
 
