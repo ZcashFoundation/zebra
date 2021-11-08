@@ -513,15 +513,17 @@ proptest! {
         );
     }
 
-    /// Make sure a peer is correctly determined to be probably unreachable.
+    /// Make sure a peer is correctly determined to be probably reachable.
     #[test]
-    fn probably_unrechable_is_determined_correctly(peer in any::<MetaAddr>()) {
+    fn probably_rechable_is_determined_correctly(peer in any::<MetaAddr>()) {
         let last_attempt_failed = peer.last_connection_state == Failed;
         let not_recently_seen = !peer.last_seen_is_recent();
 
+        let probably_unreachable = last_attempt_failed && not_recently_seen;
+
         prop_assert_eq!(
-            peer.is_probably_unreachable(),
-            last_attempt_failed && not_recently_seen,
+            peer.is_probably_reachable(),
+            !probably_unreachable,
             "last_connection_state: {:?}, last_seen: {:?}",
             peer.last_connection_state,
             peer.last_seen()

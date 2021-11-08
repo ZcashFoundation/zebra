@@ -530,12 +530,12 @@ impl MetaAddr {
         is_node && self.address_is_valid_for_outbound()
     }
 
-    /// Should this peer considered unreachable?
+    /// Should this peer considered reachable?
     ///
     /// A peer is considered unreachable if the last connection attempt to it failed and the last
     /// successful connection is more than 3 days ago.
-    pub fn is_probably_unreachable(&self) -> bool {
-        self.last_connection_state == PeerAddrState::Failed && !self.last_seen_is_recent()
+    pub fn is_probably_reachable(&self) -> bool {
+        self.last_connection_state != PeerAddrState::Failed || self.last_seen_is_recent()
     }
 
     /// Was this peer last seen recently?

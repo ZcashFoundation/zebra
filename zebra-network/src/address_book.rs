@@ -305,7 +305,7 @@ impl AddressBook {
             .values()
             .filter(|peer| peer.is_ready_for_connection_attempt())
             // SECURITY: do not keep trying to reconnect to peers that are likely unreachable.
-            .filter(|peer| !peer.is_probably_unreachable())
+            .filter(|peer| peer.is_probably_reachable())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .cloned()
