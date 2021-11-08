@@ -2,6 +2,7 @@
 
 use std::{
     cmp::min,
+    convert::TryInto,
     fmt,
     io::{Cursor, Read, Write},
 };
@@ -543,7 +544,10 @@ impl Codec {
             ));
         }
 
-        let addrs = addrs.into_iter().filter_map(Into::into).collect();
+        let addrs = addrs
+            .into_iter()
+            .filter_map(|addr| addr.try_into().ok())
+            .collect();
         Ok(Message::Addr(addrs))
     }
 

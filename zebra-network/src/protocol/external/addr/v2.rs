@@ -6,12 +6,13 @@
 //! Zebra never sends `addrv2` messages, because peers still accept `addr` (v1) messages.
 
 use std::{
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     io::Read,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
+use thiserror::Error;
 
 use zebra_chain::serialization::{
     CompactSize64, DateTime32, SerializationError, TrustedPreallocate, ZcashDeserialize,
@@ -134,8 +135,16 @@ impl From<MetaAddr> for AddrV2 {
     }
 }
 
-impl From<AddrV2> for Option<MetaAddr> {
-    fn from(addr: AddrV2) -> Self {
+/// The error returned when converting `AddrV2::Unimplemented` fails.
+#[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[error("can not parse this addrv2 variant: unimplemented or unrecognised AddrV2 network ID")]
+pub struct AddrV2UnimplementedError;
+
+impl TryFrom<AddrV2> for MetaAddr {
+    type Error = AddrV2UnimplementedError;
+
+    fn try_from(addr: AddrV2) -> Result<MetaAddr, AddrV2UnimplementedError> {
         if let AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
@@ -145,13 +154,13 @@ impl From<AddrV2> for Option<MetaAddr> {
         {
             let addr = SocketAddr::new(ip, port);
 
-            Some(MetaAddr::new_gossiped_meta_addr(
+            Ok(MetaAddr::new_gossiped_meta_addr(
                 addr,
                 untrusted_services,
                 untrusted_last_seen,
             ))
         } else {
-            None
+            Err(AddrV2UnimplementedError)
         }
     }
 }
