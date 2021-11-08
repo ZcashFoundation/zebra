@@ -36,7 +36,7 @@ proptest! {
 
     /// Test if peers that are probably unreachable are not listed for a reconnection attempt.
     #[test]
-    fn probably_unreachable_addresses_are_not_attempted(
+    fn only_reachable_addresses_are_attempted(
         local_listener in any::<SocketAddr>(),
         addresses in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
     ) {
