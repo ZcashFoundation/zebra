@@ -116,6 +116,9 @@ pub enum TransactionError {
 
     #[error("orchard double-spend: duplicate nullifier: {_0:?}")]
     DuplicateOrchardNullifier(orchard::Nullifier),
+
+    #[error("must have at least one active orchard flag")]
+    NotEnoughFlags,
 }
 
 impl From<BoxError> for TransactionError {
