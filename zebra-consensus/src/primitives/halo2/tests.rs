@@ -117,7 +117,7 @@ where
     for sd in shielded_data {
         tracing::trace!(?sd);
 
-        let rsp = verifier.ready().await?.call(Item::from(sd));
+        let rsp = verifier.ready().await?.call(Item::from(&sd));
 
         async_checks.push(rsp);
     }
@@ -183,7 +183,7 @@ where
 
         tracing::trace!(?sd);
 
-        let rsp = verifier.ready().await?.call(Item::from(sd));
+        let rsp = verifier.ready().await?.call(Item::from(&sd));
 
         async_checks.push(rsp);
     }
