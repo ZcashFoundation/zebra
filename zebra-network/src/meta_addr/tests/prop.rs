@@ -495,7 +495,7 @@ proptest! {
 
     /// Make sure check if a peer was recently seen is correct.
     #[test]
-    fn was_not_recently_seen_is_correct(peer in any::<MetaAddr>()) {
+    fn last_seen_is_recent_is_correct(peer in any::<MetaAddr>()) {
         let time_since_last_seen = peer
             .last_seen()
             .map(|last_seen| last_seen.saturating_elapsed());
@@ -505,8 +505,8 @@ proptest! {
             .unwrap_or(false);
 
         prop_assert_eq!(
-            peer.was_not_recently_seen(),
-            !recently_seen,
+            peer.last_seen_is_recent(),
+            recently_seen,
             "last seen: {:?}, now: {:?}",
             peer.last_seen(),
             DateTime32::now(),
@@ -517,10 +517,11 @@ proptest! {
     #[test]
     fn probably_unrechable_is_determined_correctly(peer in any::<MetaAddr>()) {
         let last_attempt_failed = peer.last_connection_state == Failed;
+        let not_recently_seen = !peer.last_seen_is_recent();
 
         prop_assert_eq!(
             peer.is_probably_unreachable(),
-            last_attempt_failed && peer.was_not_recently_seen(),
+            last_attempt_failed && not_recently_seen,
             "last_connection_state: {:?}, last_seen: {:?}",
             peer.last_connection_state,
             peer.last_seen()

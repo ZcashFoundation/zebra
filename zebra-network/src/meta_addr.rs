@@ -535,16 +535,17 @@ impl MetaAddr {
     /// A peer is considered unreachable if the last connection attempt to it failed and the last
     /// successful connection is more than 3 days ago.
     pub fn is_probably_unreachable(&self) -> bool {
-        self.last_connection_state == PeerAddrState::Failed && self.was_not_recently_seen()
+        self.last_connection_state == PeerAddrState::Failed && !self.last_seen_is_recent()
     }
 
-    /// Was this peer last seen a long time ago?
+    /// Was this peer last seen recently?
     ///
-    /// A long time in this case is more than 3 days ago or never seen before.
-    pub fn was_not_recently_seen(&self) -> bool {
+    /// Returns `true` if this peer was last seen at most
+    /// [`MAX_RECENT_PEER_AGE`][constants::MAX_RECENT_PEER_AGE] ago.
+    pub fn last_seen_is_recent(&self) -> bool {
         match self.last_seen() {
-            Some(last_seen) => last_seen.saturating_elapsed() > constants::MAX_RECENT_PEER_AGE,
-            None => true,
+            Some(last_seen) => last_seen.saturating_elapsed() <= constants::MAX_RECENT_PEER_AGE,
+            None => false,
         }
     }
 
