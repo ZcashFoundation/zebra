@@ -85,7 +85,7 @@ pub const MAX_PEER_ACTIVE_FOR_GOSSIP: Duration32 = Duration32::from_hours(3);
 ///
 /// This is to ensure that Zebra can't have a denial-of-service as a consequence of having too many
 /// offline peers that it constantly and uselessly retries to connect to.
-pub const MAX_PEER_TIME_UNSEEN: Duration32 = Duration32::from_days(3);
+pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.

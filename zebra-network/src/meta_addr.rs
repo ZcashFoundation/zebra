@@ -543,7 +543,7 @@ impl MetaAddr {
     /// A long time in this case is more than 3 days ago or never seen before.
     pub fn was_not_recently_seen(&self) -> bool {
         match self.last_seen() {
-            Some(last_seen) => last_seen.saturating_elapsed() > constants::MAX_PEER_TIME_UNSEEN,
+            Some(last_seen) => last_seen.saturating_elapsed() > constants::MAX_RECENT_PEER_AGE,
             None => true,
         }
     }

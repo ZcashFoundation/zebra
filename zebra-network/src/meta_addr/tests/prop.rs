@@ -21,7 +21,7 @@ use zebra_chain::serialization::{
 
 use super::check;
 use crate::{
-    constants::{MAX_PEER_TIME_UNSEEN, MIN_PEER_RECONNECTION_DELAY},
+    constants::{MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -501,7 +501,7 @@ proptest! {
             .map(|last_seen| last_seen.saturating_elapsed());
 
         let recently_seen = time_since_last_seen
-            .map(|elapsed| elapsed <= MAX_PEER_TIME_UNSEEN)
+            .map(|elapsed| elapsed <= MAX_RECENT_PEER_AGE)
             .unwrap_or(false);
 
         prop_assert_eq!(
