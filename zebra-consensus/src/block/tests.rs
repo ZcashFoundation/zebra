@@ -1,6 +1,9 @@
 //! Tests for block verification
 
-use crate::{parameters::SLOW_START_INTERVAL, script};
+use crate::{
+    parameters::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
+    script,
+};
 
 use super::*;
 
@@ -424,29 +427,19 @@ fn funding_stream_validation() -> Result<(), Report> {
 }
 
 fn funding_stream_validation_for_network(network: Network) -> Result<(), Report> {
-    let blocks = match network {
-        Network::Mainnet => vec![
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
-                .expect("block should deserialize"),
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046401_BYTES[..])
-                .expect("block should deserialize"),
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES[..])
-                .expect("block should deserialize"),
-        ],
-        Network::Testnet => vec![
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1116000_BYTES[..])
-                .expect("block should deserialize"),
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1116001_BYTES[..])
-                .expect("block should deserialize"),
-            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_TESTNET_1326100_BYTES[..])
-                .expect("block should deserialize"),
-        ],
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    for block in blocks {
-        // Validate it
-        let result = check::subsidy_is_valid(&block, network);
-        assert!(result.is_ok());
+    for (&height, block) in block_iter {
+        if Height(height) > SLOW_START_SHIFT {
+            let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
+
+            // Validate
+            let result = check::subsidy_is_valid(&block, network);
+            assert!(result.is_ok());
+        }
     }
 
     Ok(())
