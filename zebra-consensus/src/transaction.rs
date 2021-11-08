@@ -265,6 +265,7 @@ where
 
             // Do basic checks first
             check::has_inputs_and_outputs(&tx)?;
+            check::has_enough_orchard_flags(&tx)?;
 
             if req.is_mempool() && tx.has_any_coinbase_inputs() {
                 return Err(TransactionError::CoinbaseInMempool);
