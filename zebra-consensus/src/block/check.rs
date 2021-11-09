@@ -155,7 +155,14 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
             let address =
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);
 
-            let outputs = subsidy::funding_streams::find_output_with_address(coinbase, address);
+            let amount = *funding_streams
+                .get(&receiver)
+                .expect("funding_streams hashmap has all possible receivers.");
+
+            // we should have at least one output with receiver address and amount
+            let outputs = subsidy::funding_streams::find_output_with_address_and_amount(
+                coinbase, address, amount,
+            );
             if !outputs.is_empty() {
                 found_outputs.insert(receiver);
             }

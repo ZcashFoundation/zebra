@@ -150,12 +150,17 @@ pub fn check_script_form(lock_script: Script, address: Address) -> bool {
     false
 }
 
-/// Returns a list of outputs in `Transaction`, which have a script address equal to `Address`.
-pub fn find_output_with_address(transaction: &Transaction, address: Address) -> Vec<Output> {
+/// Returns a list of outputs in `Transaction`, which have a script address equal to `Address`
+/// and a value equal to `Amount`.
+pub fn find_output_with_address_and_amount(
+    transaction: &Transaction,
+    address: Address,
+    amount: Amount<NonNegative>,
+) -> Vec<Output> {
     transaction
         .outputs()
         .iter()
-        .filter(|o| check_script_form(o.lock_script.clone(), address))
+        .filter(|o| check_script_form(o.lock_script.clone(), address) && o.value == amount)
         .cloned()
         .collect()
 }
