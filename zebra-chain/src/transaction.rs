@@ -266,6 +266,21 @@ impl Transaction {
                     .contains(orchard::Flags::ENABLE_OUTPUTS))
     }
 
+    /// Does this transaction has at least one flag when we have at least one orchard action?
+    ///
+    /// [NU5 onward] If effectiveVersion >= 5 and nActionsOrchard > 0, then at least one
+    /// of enableSpendsOrchard and enableOutputsOrchard MUST be 1.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    pub fn has_enough_orchard_flags(&self) -> bool {
+        if self.version() < 5 || self.orchard_actions().count() == 0 {
+            return true;
+        }
+        self.orchard_flags()
+            .unwrap_or_else(orchard::Flags::empty)
+            .intersects(orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS)
+    }
+
     /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
     /// assuming it is mined at `spend_height`.
     pub fn coinbase_spend_restriction(
