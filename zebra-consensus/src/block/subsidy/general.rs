@@ -2,7 +2,7 @@
 //!
 //! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use std::convert::TryFrom;
+use std::{collections::HashSet, convert::TryFrom};
 
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
@@ -98,6 +98,16 @@ pub fn find_output_with_amount(
         .outputs()
         .iter()
         .filter(|o| o.value == amount)
+        .cloned()
+        .collect()
+}
+
+/// Returns all output amounts in `Transaction`.
+pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>> {
+    transaction
+        .outputs()
+        .iter()
+        .map(|o| &o.value)
         .cloned()
         .collect()
 }
