@@ -40,6 +40,20 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
     }
 }
 
+/// Checks that the transaction has enough orchard flags.
+///
+/// For `Transaction::V5` only:
+/// * If `orchard_actions_count` > 0 then at least one of
+/// `ENABLE_SPENDS|ENABLE_OUTPUTS` must be active.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError> {
+    if !tx.has_enough_orchard_flags() {
+        return Err(TransactionError::NotEnoughFlags);
+    }
+    Ok(())
+}
+
 /// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
 ///
 /// A coinbase transaction MUST NOT have any transparent inputs, JoinSplit descriptions,

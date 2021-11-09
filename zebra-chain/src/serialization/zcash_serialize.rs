@@ -1,4 +1,4 @@
-use std::{convert::TryInto, io};
+use std::{convert::TryInto, io, net::Ipv6Addr};
 
 use super::{AtLeastOne, CompactSizeMessage};
 
@@ -172,5 +172,15 @@ impl ZcashSerialize for &str {
 impl ZcashSerialize for String {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.as_str().zcash_serialize(&mut writer)
+    }
+}
+
+// We don't impl ZcashSerialize for Ipv4Addr or SocketAddrs,
+// because the IPv4 and port formats are different in addr (v1) and addrv2 messages.
+
+/// Write a Bitcoin-encoded IPv6 address.
+impl ZcashSerialize for Ipv6Addr {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_all(&self.octets())
     }
 }

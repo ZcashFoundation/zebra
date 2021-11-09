@@ -1,6 +1,7 @@
 use std::{
     convert::{TryFrom, TryInto},
     io,
+    net::Ipv6Addr,
 };
 
 use super::{AtLeastOne, CompactSizeMessage, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
@@ -125,6 +126,19 @@ impl ZcashDeserialize for String {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         let bytes: Vec<_> = Vec::zcash_deserialize(reader)?;
         String::from_utf8(bytes).map_err(|_| SerializationError::Parse("invalid utf-8"))
+    }
+}
+
+// We don't impl ZcashDeserialize for Ipv4Addr or SocketAddrs,
+// because the IPv4 and port formats are different in addr (v1) and addrv2 messages.
+
+/// Read a Bitcoin-encoded IPv6 address.
+impl ZcashDeserialize for Ipv6Addr {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut ipv6_addr = [0u8; 16];
+        reader.read_exact(&mut ipv6_addr)?;
+
+        Ok(Ipv6Addr::from(ipv6_addr))
     }
 }
 

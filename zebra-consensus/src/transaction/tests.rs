@@ -115,6 +115,49 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
 }
 
 #[test]
+fn fake_v5_transaction_with_orchard_actions_has_flags() {
+    // Find a transaction with no inputs or outputs to use as base
+    let mut transaction = fake_v5_transactions_for_network(
+        Network::Mainnet,
+        zebra_test::vectors::MAINNET_BLOCKS.iter(),
+    )
+    .rev()
+    .find(|transaction| {
+        transaction.inputs().is_empty()
+            && transaction.outputs().is_empty()
+            && transaction.sapling_spends_per_anchor().next().is_none()
+            && transaction.sapling_outputs().next().is_none()
+            && transaction.joinsplit_count() == 0
+    })
+    .expect("At least one fake V5 transaction with no inputs and no outputs");
+
+    // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
+    // guaranteed structurally by `orchard::ShieldedData`)
+    insert_fake_orchard_shielded_data(&mut transaction);
+
+    // The check will fail if the transaction has no flags
+    assert_eq!(
+        check::has_enough_orchard_flags(&transaction),
+        Err(TransactionError::NotEnoughFlags)
+    );
+
+    // If we add ENABLE_SPENDS flag it will pass.
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+    shielded_data.flags = orchard::Flags::ENABLE_SPENDS;
+    assert!(check::has_enough_orchard_flags(&transaction).is_ok());
+
+    // If we add ENABLE_OUTPUTS flag instead, it will pass.
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+    shielded_data.flags = orchard::Flags::ENABLE_OUTPUTS;
+    assert!(check::has_enough_orchard_flags(&transaction).is_ok());
+
+    // If we add BOTH ENABLE_SPENDS and ENABLE_OUTPUTS flags it will pass.
+    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+    shielded_data.flags = orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS;
+    assert!(check::has_enough_orchard_flags(&transaction).is_ok());
+}
+
+#[test]
 fn v5_transaction_with_no_inputs_fails_validation() {
     let transaction = fake_v5_transactions_for_network(
         Network::Mainnet,

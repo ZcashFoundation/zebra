@@ -8,7 +8,10 @@ use zebra_chain::serialization::{TrustedPreallocate, ZcashSerialize, MAX_PROTOCO
 
 use crate::meta_addr::MetaAddr;
 
-use super::super::{addr::META_ADDR_SIZE, inv::InventoryHash};
+use super::super::{
+    addr::{AddrV1, ADDR_V1_SIZE},
+    inv::InventoryHash,
+};
 
 proptest! {
     /// Confirm that each InventoryHash takes the expected size in bytes when serialized.
@@ -63,45 +66,47 @@ proptest! {
 }
 
 proptest! {
-    /// Confirm that each MetaAddr takes exactly META_ADDR_SIZE bytes when serialized.
+    /// Confirm that each AddrV1 takes exactly ADDR_V1_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
-    fn meta_addr_size_is_correct(addr in MetaAddr::arbitrary()) {
+    fn addr_v1_size_is_correct(addr in MetaAddr::arbitrary()) {
         zebra_test::init();
 
         // We require sanitization before serialization
         let addr = addr.sanitize();
         prop_assume!(addr.is_some());
-        let addr = addr.unwrap();
+
+        let addr: AddrV1 = addr.unwrap().into();
 
         let serialized = addr
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
-        assert!(serialized.len() == META_ADDR_SIZE)
+        assert!(serialized.len() == ADDR_V1_SIZE)
     }
 
     /// Verifies that...
-    /// 1. The smallest disallowed vector of `MetaAddrs`s is too large to fit in a legal Zcash message
+    /// 1. The smallest disallowed vector of `AddrV1`s is too large to fit in a legal Zcash message
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
     #[test]
-    fn meta_addr_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
+    fn addr_v1_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
         zebra_test::init();
 
         // We require sanitization before serialization
         let addr = addr.sanitize();
         prop_assume!(addr.is_some());
-        let addr = addr.unwrap();
 
-        let max_allocation: usize = MetaAddr::max_allocation().try_into().unwrap();
+        let addr: AddrV1 = addr.unwrap().into();
+
+        let max_allocation: usize = AddrV1::max_allocation().try_into().unwrap();
         let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
-        for _ in 0..(MetaAddr::max_allocation() + 1) {
+        for _ in 0..(AddrV1::max_allocation() + 1) {
             smallest_disallowed_vec.push(addr);
         }
         let smallest_disallowed_serialized = smallest_disallowed_vec
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
         // Check that our smallest_disallowed_vec is only one item larger than the limit
-        assert!(((smallest_disallowed_vec.len() - 1) as u64) == MetaAddr::max_allocation());
+        assert!(((smallest_disallowed_vec.len() - 1) as u64) == AddrV1::max_allocation());
         // Check that our smallest_disallowed_vec is too big to send in a valid Zcash message
         assert!(smallest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
 
@@ -112,8 +117,8 @@ proptest! {
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
 
-        // Check that our largest_allowed_vec contains the maximum number of MetaAddrs
-        assert!((largest_allowed_vec.len() as u64) == MetaAddr::max_allocation());
+        // Check that our largest_allowed_vec contains the maximum number of AddrV1s
+        assert!((largest_allowed_vec.len() as u64) == AddrV1::max_allocation());
         // Check that our largest_allowed_vec is small enough to fit in a Zcash message.
         assert!(largest_allowed_serialized.len() <= MAX_PROTOCOL_MESSAGE_LEN);
     }
