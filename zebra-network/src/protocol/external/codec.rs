@@ -513,6 +513,7 @@ impl Codec {
     fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV1> = reader.zcash_deserialize_into()?;
 
+        // Convert the received address format to Zebra's internal `MetaAddr`.
         let addrs = addrs.into_iter().map(Into::into).collect();
         Ok(Message::Addr(addrs))
     }
