@@ -70,6 +70,11 @@ fn height_for_halving(network: Network) -> Height {
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_period(height: Height, network: Network) -> u32 {
+    // - Spec equation: `address_period = floor((height - height_for_halving() - post_blossom_halving_interval)/funding_stream_address_change_interval)`:
+    //   https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+    // - In Rust, "integer division rounds towards zero":
+    //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
+    //   This is the same as `floor()`, because these numbers are all positive.
     (height.0 + (POST_BLOSSOM_HALVING_INTERVAL.0) - (height_for_halving(network).0))
         / (FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL.0)
 }
