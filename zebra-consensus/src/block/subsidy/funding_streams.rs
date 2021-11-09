@@ -91,15 +91,17 @@ fn funding_stream_address_index(height: Height, network: Network) -> usize {
 
     let index = 1u32
         .checked_add(funding_stream_address_period(height, network))
-        .unwrap()
+        .expect("no overflow should happen in this sum")
         .checked_sub(funding_stream_address_period(
             FUNDING_STREAM_HEIGHT_RANGES.get(&network).unwrap().start,
             network,
         ))
-        .unwrap() as usize;
-    assert!(index > 0 && index <= num_addresses);
+        .expect("no overflow should happen in this sub") as usize;
 
-    index
+    assert!(index > 0 && index <= num_addresses);
+    // spec formula will output an index starting at 1 but
+    // Zebra indices for addresses start at zero, return converted.
+    index - 1
 }
 
 /// Return the address corresponding to this height for this funding stream receiver.
@@ -108,7 +110,7 @@ pub fn funding_stream_address(
     network: Network,
     receiver: FundingStreamReceiver,
 ) -> Address {
-    let index = funding_stream_address_index(height, network) - 1;
+    let index = funding_stream_address_index(height, network);
 
     let address = match receiver {
         FundingStreamReceiver::Ecc => match network {
