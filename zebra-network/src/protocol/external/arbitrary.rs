@@ -1,10 +1,17 @@
-use std::convert::TryInto;
+use std::{
+    convert::TryInto,
+    net::{SocketAddr, SocketAddrV6},
+};
 
 use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 
-use super::{types::PeerServices, InventoryHash, Message};
-
 use zebra_chain::{block, transaction};
+
+use super::{
+    addr::{canonical_socket_addr, ipv6_mapped_socket_addr},
+    types::PeerServices,
+    InventoryHash, Message,
+};
 
 impl InventoryHash {
     /// Generate a proptest strategy for [`InventoryHash::Error`]s.
@@ -103,4 +110,18 @@ impl Message {
             .prop_map(Message::GetData)
             .boxed()
     }
+}
+
+/// Returns a random canonical Zebra `SocketAddr`.
+///
+/// See [`canonical_ip_addr`] for details.
+pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
+    any::<SocketAddr>().prop_map(canonical_socket_addr)
+}
+
+/// Returns a random `SocketAddrV6` for use in `addr` (v1) Zcash network messages.
+///
+/// See [`canonical_ip_addr`] for details.
+pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = SocketAddrV6> {
+    any::<SocketAddr>().prop_map(ipv6_mapped_socket_addr)
 }

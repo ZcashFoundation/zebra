@@ -10,9 +10,10 @@ use std::{
 
 use tracing::Span;
 
-use zebra_chain::serialization::canonical_socket_addr;
-
-use crate::{meta_addr::MetaAddrChange, types::MetaAddr, PeerAddrState};
+use crate::{
+    meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr, types::MetaAddr,
+    PeerAddrState,
+};
 
 #[cfg(test)]
 mod tests;
