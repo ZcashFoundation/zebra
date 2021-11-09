@@ -1,13 +1,11 @@
 //! Arbitrary data generation for serialization proptests
 
-use std::{convert::TryInto, net::SocketAddr};
+use std::convert::TryInto;
 
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
 
-use super::{
-    read_zcash::canonical_socket_addr, CompactSizeMessage, DateTime32, MAX_PROTOCOL_MESSAGE_LEN,
-};
+use super::{CompactSizeMessage, DateTime32, MAX_PROTOCOL_MESSAGE_LEN};
 
 impl Arbitrary for DateTime32 {
     type Parameters = ();
@@ -58,13 +56,6 @@ pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
 /// TODO: replace this strategy with `any::<DateTime32>()`.
 pub fn datetime_u32() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     any::<DateTime32>().prop_map(Into::into)
-}
-
-/// Returns a random canonical Zebra `SocketAddr`.
-///
-/// See [`canonical_ip_addr`] for details.
-pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
-    any::<SocketAddr>().prop_map(canonical_socket_addr)
 }
 
 impl Arbitrary for CompactSizeMessage {

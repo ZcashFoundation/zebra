@@ -7,22 +7,27 @@ use std::{
     time::Instant,
 };
 
-use zebra_chain::serialization::{canonical_socket_addr, DateTime32};
+use zebra_chain::serialization::DateTime32;
 
-use crate::{constants, protocol::types::PeerServices};
+use crate::{
+    constants,
+    protocol::{external::canonical_socket_addr, types::PeerServices},
+};
 
 use MetaAddrChange::*;
 use PeerAddrState::*;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
 #[cfg(any(test, feature = "proptest-impl"))]
-use zebra_chain::serialization::arbitrary::canonical_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) mod arbitrary;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Peer connection state, based on our interactions with the peer.
 ///
@@ -112,6 +117,8 @@ impl PartialOrd for PeerAddrState {
 
 /// An address with metadata on its advertised services and last-seen time.
 ///
+/// This struct can be created from `addr` or `addrv2` messages.
+///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
@@ -131,8 +138,8 @@ pub struct MetaAddr {
     /// The exact meaning depends on `last_connection_state`:
     ///   - `Responded`: the services advertised by this peer, the last time we
     ///      performed a handshake with it
-    ///   - `NeverAttempted`: the unverified services provided by the remote peer
-    ///     that sent us this address
+    ///   - `NeverAttempted`: the unverified services advertised by another peer,
+    ///      then gossiped by the peer that sent us this address
     ///   - `Failed` or `AttemptPending`: unverified services via another peer,
     ///      or services advertised in a previous handshake
     ///

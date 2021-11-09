@@ -98,19 +98,25 @@ impl Service<Request> for Wrapper {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[tokio::test]
     async fn connect_isolated_sends_minimally_distinguished_version_message() {
-        use crate::{
-            protocol::external::{Codec, Message},
-            types::PeerServices,
-        };
+        use std::net::SocketAddr;
+
         use futures::stream::StreamExt;
         use tokio_util::codec::Framed;
 
+        use crate::{
+            protocol::external::{AddrInVersion, Codec, Message},
+            types::PeerServices,
+        };
+
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let listen_addr = listener.local_addr().unwrap();
+
+        let fixed_isolated_addr: SocketAddr = "0.0.0.0:8233".parse().unwrap();
 
         let conn = tokio::net::TcpStream::connect(listen_addr).await.unwrap();
 
@@ -139,7 +145,7 @@ mod tests {
             assert_eq!(timestamp.timestamp() % (5 * 60), 0);
             assert_eq!(
                 address_from,
-                (PeerServices::empty(), "0.0.0.0:8233".parse().unwrap())
+                AddrInVersion::new(fixed_isolated_addr, PeerServices::empty()),
             );
             assert_eq!(user_agent, "");
             assert_eq!(start_height.0, 0);
