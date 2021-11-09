@@ -103,7 +103,7 @@ pub(in super::super) enum AddrV2 {
     },
 
     /// A node address with an unimplemented `networkID`, in `addrv2` format.
-    Unimplemented,
+    Unsupported,
 }
 
 // Just serialize in the tests for now.
@@ -135,16 +135,16 @@ impl From<MetaAddr> for AddrV2 {
     }
 }
 
-/// The error returned when converting `AddrV2::Unimplemented` fails.
+/// The error returned when converting `AddrV2::Unsupported` fails.
 #[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[error("can not parse this addrv2 variant: unimplemented or unrecognised AddrV2 network ID")]
-pub struct AddrV2UnimplementedError;
+pub struct UnsupportedAddrV2NetworkIdError;
 
 impl TryFrom<AddrV2> for MetaAddr {
-    type Error = AddrV2UnimplementedError;
+    type Error = UnsupportedAddrV2NetworkIdError;
 
-    fn try_from(addr: AddrV2) -> Result<MetaAddr, AddrV2UnimplementedError> {
+    fn try_from(addr: AddrV2) -> Result<MetaAddr, UnsupportedAddrV2NetworkIdError> {
         if let AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
@@ -160,7 +160,7 @@ impl TryFrom<AddrV2> for MetaAddr {
                 untrusted_last_seen,
             ))
         } else {
-            Err(AddrV2UnimplementedError)
+            Err(UnsupportedAddrV2NetworkIdError)
         }
     }
 }
@@ -295,7 +295,7 @@ impl ZcashDeserialize for AddrV2 {
             // > because they have no means to validate those addresses
             // > and so can be tricked to gossip invalid addresses.
 
-            return Ok(AddrV2::Unimplemented);
+            return Ok(AddrV2::Unsupported);
         };
 
         Ok(AddrV2::IpAddr {
