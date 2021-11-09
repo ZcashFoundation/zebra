@@ -45,7 +45,7 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
 /// Usage: founders_reward = block_subsidy / FOUNDERS_FRACTION_DIVISOR
 pub const FOUNDERS_FRACTION_DIVISOR: u64 = 5;
 
-/// The funding stream receiver categories
+/// The funding stream receiver categories.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FundingStreamReceiver {
     Ecc,
@@ -60,21 +60,19 @@ impl FundingStreamReceiver {
     }
 }
 
-/// The number of funding stream entities.
+/// The number of funding stream receiver categories.
 pub const FUNDING_STREAM_RECEIVERS_NUMBER: usize = 3;
 
-/// The funding stream receiver categories
-
-/// Denominator as described in [protocol specification §7.9.1][7.9.1].
+/// Denominator as described in [protocol specification §7.10.1][7.10.1].
 ///
-/// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
 lazy_static! {
-    /// The numerator for each funding stream receiving category
-    /// as described in [protocol specification §7.9.1][7.9.1].
+    /// The numerator for each funding stream reciever category
+    /// as described in [protocol specification §7.10.1][7.10.1].
     ///
-    /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAM_RECEIVER_NUMERATORS: HashMap<FundingStreamReceiver, u64> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(FundingStreamReceiver::Ecc, 7);
@@ -84,9 +82,9 @@ lazy_static! {
     };
 
     /// Start and end Heights for funding streams
-    /// as described in [protocol specification §7.9.1][7.9.1].
+    /// as described in [protocol specification §7.10.1][7.10.1].
     ///
-    /// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<Network, std::ops::Range<Height>> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(Network::Mainnet, Height(1_046_400)..Height(2_726_400));
@@ -96,9 +94,9 @@ lazy_static! {
 }
 
 /// Address change interval function here as a constant
-/// as described in [protocol specification §7.9.1][7.9.1].
+/// as described in [protocol specification §7.10.1][7.10.1].
 ///
-/// [7.9.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: Height =
     Height(POST_BLOSSOM_HALVING_INTERVAL.0 / 48);
 
