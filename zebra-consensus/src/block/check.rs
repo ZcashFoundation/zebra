@@ -19,6 +19,8 @@ use super::subsidy;
 /// "The first (and only the first) transaction in a block is a coinbase
 /// transaction, which collects and spends any miner subsidy and transaction
 /// fees paid by transactions included in this block." [§3.10][3.10]
+///
+/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
 pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
     let first = block
         .transactions
