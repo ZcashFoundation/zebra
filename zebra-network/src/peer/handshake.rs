@@ -33,7 +33,7 @@ use crate::{
     peer::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerError},
     peer_set::ConnectionTracker,
     protocol::{
-        external::{types::*, Codec, InventoryHash, Message},
+        external::{types::*, AddrInVersion, Codec, InventoryHash, Message},
         internal::{Request, Response},
     },
     types::MetaAddr,
@@ -523,9 +523,9 @@ pub async fn negotiate_version(
         version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
         services: our_services,
         timestamp,
-        address_recv: (PeerServices::NODE_NETWORK, their_addr),
+        address_recv: AddrInVersion::new(their_addr, PeerServices::NODE_NETWORK),
         // TODO: detect external address (#1893)
-        address_from: (our_services, our_listen_addr),
+        address_from: AddrInVersion::new(our_listen_addr, our_services),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
         // The protocol works fine if we don't reveal our current block height,
@@ -554,7 +554,8 @@ pub async fn negotiate_version(
             ..
         } = remote_msg
         {
-            let (address_services, canonical_addr) = address_from;
+            let canonical_addr = address_from.addr();
+            let address_services = address_from.untrusted_services();
             if address_services != services {
                 info!(
                     ?services,

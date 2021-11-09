@@ -2,9 +2,11 @@ use std::net::SocketAddr;
 
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-use super::{MetaAddr, MetaAddrChange, PeerServices};
+use zebra_chain::serialization::DateTime32;
 
-use zebra_chain::serialization::{arbitrary::canonical_socket_addr_strategy, DateTime32};
+use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
+
+use super::{MetaAddr, MetaAddrChange, PeerServices};
 
 /// The largest number of random changes we want to apply to a [`MetaAddr`].
 ///
