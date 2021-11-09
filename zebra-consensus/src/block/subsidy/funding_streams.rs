@@ -113,9 +113,9 @@ pub fn funding_stream_address(
     let index = funding_stream_address_index(height, network);
     let address = &FUNDING_STREAM_ADDRESSES
         .get(&network)
-        .unwrap()
+        .expect("there is always another hash map as value for a given valid network")
         .get(&receiver)
-        .unwrap()[index];
+        .expect("in the inner hash map there is always a vector of strings with addresses")[index];
     Address::from_str(address).expect("Address should deserialize")
 }
 
