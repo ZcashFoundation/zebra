@@ -544,6 +544,8 @@ impl Codec {
             ));
         }
 
+        // Convert the received address format to Zebra's internal `MetaAddr`,
+        // ignoring unsupported network IDs.
         let addrs = addrs
             .into_iter()
             .filter_map(|addr| addr.try_into().ok())
