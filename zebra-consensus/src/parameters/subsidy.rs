@@ -91,6 +91,27 @@ lazy_static! {
         hash_map.insert(Network::Testnet, Height(1_028_500)..Height(2_796_000));
         hash_map
     };
+
+    /// Convinient storage for all addresses, for all receivers and networks
+    pub static ref FUNDING_STREAM_ADDRESSES: HashMap<Network, HashMap<FundingStreamReceiver, Vec<String>>> = {
+        let mut bigger_hash_map = HashMap::new();
+
+        // Mainnet addresses
+        let mut inner_hash_map = HashMap::new();
+        inner_hash_map.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
+        inner_hash_map.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
+        inner_hash_map.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
+        bigger_hash_map.insert(Network::Mainnet, inner_hash_map);
+
+        // Testnet addresses
+        let mut inner_hash_map = HashMap::new();
+        inner_hash_map.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        inner_hash_map.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        inner_hash_map.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        bigger_hash_map.insert(Network::Testnet, inner_hash_map);
+
+        bigger_hash_map
+    };
 }
 
 /// Address change interval function here as a constant

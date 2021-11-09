@@ -104,29 +104,19 @@ fn funding_stream_address_index(height: Height, network: Network) -> usize {
     index - 1
 }
 
-/// Return the address corresponding to this height for this funding stream receiver.
+/// Return the address corresponding to given height, network and funding stream receiver.
 pub fn funding_stream_address(
     height: Height,
     network: Network,
     receiver: FundingStreamReceiver,
 ) -> Address {
     let index = funding_stream_address_index(height, network);
-
-    let address = match receiver {
-        FundingStreamReceiver::Ecc => match network {
-            Network::Mainnet => FUNDING_STREAM_ECC_ADDRESSES_MAINNET[index].to_string(),
-            Network::Testnet => FUNDING_STREAM_ECC_ADDRESSES_TESTNET[index].to_string(),
-        },
-        FundingStreamReceiver::ZcashFoundation => match network {
-            Network::Mainnet => FUNDING_STREAM_ZF_ADDRESSES_MAINNET[index].to_string(),
-            Network::Testnet => FUNDING_STREAM_ZF_ADDRESSES_TESTNET[index].to_string(),
-        },
-        FundingStreamReceiver::MajorGrants => match network {
-            Network::Mainnet => FUNDING_STREAM_MG_ADDRESSES_MAINNET[index].to_string(),
-            Network::Testnet => FUNDING_STREAM_MG_ADDRESSES_TESTNET[index].to_string(),
-        },
-    };
-    Address::from_str(&address).expect("Address should deserialize")
+    let address = &FUNDING_STREAM_ADDRESSES
+        .get(&network)
+        .unwrap()
+        .get(&receiver)
+        .unwrap()[index];
+    Address::from_str(address).expect("Address should deserialize")
 }
 
 /// Given a founders reward address, create a script and check if it is the same
