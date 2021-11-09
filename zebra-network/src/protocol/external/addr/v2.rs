@@ -319,7 +319,7 @@ pub(in super::super) const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
 
 impl TrustedPreallocate for AddrV2 {
     fn max_allocation() -> u64 {
-        // Since ADDR_V2_MIN_SIZE is less than 2^5, the maximum length takes up 5 bytes.
+        // Since ADDR_V2_MIN_SIZE is less than 2^5, the length of the largest list takes up 5 bytes.
         ((MAX_PROTOCOL_MESSAGE_LEN - 5) / ADDR_V2_MIN_SIZE) as u64
     }
 }
