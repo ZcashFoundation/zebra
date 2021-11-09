@@ -4512,6 +4512,7 @@ dependencies = [
  "displaydoc",
  "futures 0.3.17",
  "futures-util",
+ "halo2",
  "jubjub 0.7.0",
  "lazy_static",
  "metrics",

@@ -1,11 +1,12 @@
 use std::{collections::HashMap, convert::TryFrom, convert::TryInto, sync::Arc};
 
+use halo2::{arithmetic::FieldExt, pasta::pallas};
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
-    orchard,
+    orchard::{self, AuthorizedAction, EncryptedNote, WrappedNoteKey},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
@@ -1568,4 +1569,105 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
     assert!(tested_non_coinbase_txs > 0, "ensure it was actually tested");
 
     Ok(())
+}
+
+/// Given an Orchard action as a base, fill fields related to note encryption
+/// from the given test vector and returned the modified action.
+fn fill_action_with_note_encryption_test_vector(
+    action: &orchard::Action,
+    v: &zebra_test::vectors::TestVector,
+) -> orchard::Action {
+    let mut action = action.clone();
+    action.cv = v.cv_net.try_into().expect("test vector must be valid");
+    action.cm_x = pallas::Base::from_bytes(&v.cmx).unwrap();
+    action.nullifier = v.rho.try_into().expect("test vector must be valid");
+    action.ephemeral_key = v
+        .ephemeral_key
+        .try_into()
+        .expect("test vector must be valid");
+    action.out_ciphertext = WrappedNoteKey(v.c_out);
+    action.enc_ciphertext = EncryptedNote(v.c_enc);
+    action
+}
+
+/// Test if shielded coinbase outputs are decryptable with an all-zero outgoing
+/// viewing key.
+#[test]
+fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
+    let network = Network::Testnet;
+
+    for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_ZERO_VECTOR.iter() {
+        // Find a transaction with no inputs or outputs to use as base
+        let mut transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::TESTNET_BLOCKS.iter())
+                .rev()
+                .find(|transaction| {
+                    transaction.inputs().is_empty()
+                        && transaction.outputs().is_empty()
+                        && transaction.sapling_spends_per_anchor().next().is_none()
+                        && transaction.sapling_outputs().next().is_none()
+                        && transaction.joinsplit_count() == 0
+                })
+                .expect("At least one fake V5 transaction with no inputs and no outputs");
+
+        let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+        shielded_data.flags = orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS;
+
+        let action =
+            fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
+        let sig = shielded_data.actions[0].spend_auth_sig;
+        shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
+            .try_into()
+            .unwrap();
+
+        assert_eq!(
+            check::coinbase_outputs_are_decryptable(
+                &transaction,
+                network,
+                NetworkUpgrade::Nu5.activation_height(network).unwrap(),
+            ),
+            Ok(())
+        );
+    }
+}
+
+/// Test if random shielded outputs are NOT decryptable with an all-zero outgoing
+/// viewing key.
+#[test]
+fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
+    let network = Network::Testnet;
+
+    for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_VECTOR.iter() {
+        // Find a transaction with no inputs or outputs to use as base
+        let mut transaction =
+            fake_v5_transactions_for_network(network, zebra_test::vectors::TESTNET_BLOCKS.iter())
+                .rev()
+                .find(|transaction| {
+                    transaction.inputs().is_empty()
+                        && transaction.outputs().is_empty()
+                        && transaction.sapling_spends_per_anchor().next().is_none()
+                        && transaction.sapling_outputs().next().is_none()
+                        && transaction.joinsplit_count() == 0
+                })
+                .expect("At least one fake V5 transaction with no inputs and no outputs");
+
+        let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+        shielded_data.flags = orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS;
+
+        let action =
+            fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
+        let sig = shielded_data.actions[0].spend_auth_sig;
+        shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
+            .try_into()
+            .unwrap();
+
+        assert_eq!(
+            check::coinbase_outputs_are_decryptable(
+                &transaction,
+                network,
+                NetworkUpgrade::Nu5.activation_height(network).unwrap(),
+            ),
+            Err(TransactionError::CoinbaseOutputsNotDecryptable)
+        );
+    }
 }
