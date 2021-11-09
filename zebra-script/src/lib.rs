@@ -6,19 +6,23 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
-// we allow unsafe code to call zcash_script
+// we allow unsafe code, so we can call zcash_script
 
-use displaydoc::Display;
+use std::sync::Arc;
+
 #[cfg(windows)]
 use std::convert::TryInto;
-use std::sync::Arc;
+
+use displaydoc::Display;
 use thiserror::Error;
+
 use zcash_script::{
     zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
     zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
     zcash_script_error_t_zcash_script_ERR_TX_INDEX,
     zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
 };
+
 use zebra_chain::{
     parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
     transparent,
@@ -119,8 +123,13 @@ impl CachedFfiTransaction {
         let script_len = script_pub_key.len();
 
         let amount = value.into();
+
         let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
             | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
+        #[cfg(windows)]
+        let flags = flags
+            .try_into()
+            .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
 
         let consensus_branch_id = branch_id.into();
 
@@ -133,12 +142,7 @@ impl CachedFfiTransaction {
                 script_ptr,
                 script_len as u32,
                 amount,
-                #[cfg(not(windows))]
                 flags,
-                #[cfg(windows)]
-                flags
-                    .try_into()
-                    .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint"),
                 consensus_branch_id,
                 &mut err,
             )
