@@ -102,11 +102,15 @@ lazy_static! {
 pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: Height =
     Height(POST_BLOSSOM_HALVING_INTERVAL.0 / 48);
 
-/// Number of addresses for each funding stream in the Mainnet
-pub const FUNDING_STREAMS_N_ADDRESSES_MAINNET: usize = 48;
+/// Number of addresses for each funding stream in the Mainnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 48;
 
 /// List of addresses for the ECC funding stream in the Mainnet.
-pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_N_ADDRESSES_MAINNET] = [
+pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] = [
     "t3LmX1cxWPPPqL4TZHx42HU3U5ghbFjRiif",
     "t3Toxk1vJQ6UjWQ42tUJz2rV2feUWkpbTDs",
     "t3ZBdBe4iokmsjdhMuwkxEdqMCFN16YxKe6",
@@ -158,18 +162,22 @@ pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_N_ADDRESS
 ];
 
 /// List of addresses for the Zcash Foundation funding stream in the Mainnet.
-pub const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; 48] =
-    ["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"; FUNDING_STREAMS_N_ADDRESSES_MAINNET];
+pub const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
+    ["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
 
 /// List of addresses for the Major Grants funding stream in the Mainnet.
-pub const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; 48] =
-    ["t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"; FUNDING_STREAMS_N_ADDRESSES_MAINNET];
+pub const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
+    ["t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
 
-/// Number of addresses for each funding stream in the Mainnet
-pub const FUNDING_STREAMS_N_ADDRESSES_TESTNET: usize = 51;
+/// Number of addresses for each funding stream in the Testnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 51;
 
 /// List of addresses for the ECC funding stream in the Testnet.
-pub const FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_N_ADDRESSES_TESTNET] = [
+pub const FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] = [
     "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
     "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
     "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
@@ -224,9 +232,9 @@ pub const FUNDING_STREAM_ECC_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_N_ADDRESS
 ];
 
 /// List of addresses for the Zcash Foundation funding stream in the Testnet.
-pub const FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_N_ADDRESSES_TESTNET] =
-    ["t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"; FUNDING_STREAMS_N_ADDRESSES_TESTNET];
+pub const FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
+    ["t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
 
 /// List of addresses for the Major Grants funding stream in the Testnet.
-pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_N_ADDRESSES_TESTNET] =
-    ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"; FUNDING_STREAMS_N_ADDRESSES_TESTNET];
+pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
+    ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];

@@ -85,8 +85,8 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_index(height: Height, network: Network) -> usize {
     let num_addresses = match network {
-        Network::Mainnet => FUNDING_STREAMS_N_ADDRESSES_MAINNET,
-        Network::Testnet => FUNDING_STREAMS_N_ADDRESSES_TESTNET,
+        Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
+        Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
     };
 
     let index = 1u32
