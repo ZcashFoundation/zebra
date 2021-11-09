@@ -8,7 +8,7 @@
 use std::{
     convert::{TryFrom, TryInto},
     io::Read,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
@@ -165,6 +165,41 @@ impl TryFrom<AddrV2> for MetaAddr {
     }
 }
 
+impl AddrV2 {
+    /// Deserialize `addr_bytes` as an IPv4 or IPv6 address, using the `addrv2` format.
+    /// Returns the corresponding [`IpAddr`].
+    ///
+    /// The returned IP version is chosen based on `IP_ADDR_SIZE`,
+    /// which should be [`ADDR_V2_IPV4_ADDR_SIZE`] or [`ADDR_V2_IPV6_ADDR_SIZE`].
+    fn ip_addr_from_bytes<const IP_ADDR_SIZE: usize>(
+        addr_bytes: Vec<u8>,
+    ) -> Result<IpAddr, SerializationError>
+    where
+        IpAddr: From<[u8; IP_ADDR_SIZE]>,
+    {
+        // > Clients MUST reject messages that contain addresses that have
+        // > a different length than specified in this table for a specific network ID,
+        // > as these are meaningless.
+        if addr_bytes.len() != IP_ADDR_SIZE {
+            let error_msg = if IP_ADDR_SIZE == ADDR_V2_IPV4_ADDR_SIZE {
+                "IP address field length did not match expected IPv4 address size in addrv2 message"
+            } else if IP_ADDR_SIZE == ADDR_V2_IPV6_ADDR_SIZE {
+                "IP address field length did not match expected IPv6 address size in addrv2 message"
+            } else {
+                panic!("unexpected IP address size when converting from bytes");
+            };
+
+            return Err(SerializationError::Parse(error_msg));
+        };
+
+        // > The IPV4 and IPV6 network IDs use addresses encoded in the usual way
+        // > for binary IPv4 and IPv6 addresses in network byte order (big endian).
+        let ip: [u8; IP_ADDR_SIZE] = addr_bytes.try_into().expect("just checked length");
+
+        Ok(IpAddr::from(ip))
+    }
+}
+
 // Just serialize in the tests for now.
 //
 // See the detailed note about ZIP-155 activation above.
@@ -249,43 +284,10 @@ impl ZcashDeserialize for AddrV2 {
             ));
         }
 
-        if network_id == ADDR_V2_IPV4_NETWORK_ID {
-            // > Clients MUST reject messages that contain addresses that have
-            // > a different length than specified in this table for a specific network ID,
-            // > as these are meaningless.
-            if addr.len() != ADDR_V2_IPV4_ADDR_SIZE {
-                return Err(SerializationError::Parse(
-                    "IPv4 field length did not match ADDR_V2_IPV4_ADDR_SIZE in addrv2 message",
-                ));
-            }
-
-            // > The IPV4 and IPV6 network IDs use addresses encoded in the usual way
-            // > for binary IPv4 and IPv6 addresses in network byte order (big endian).
-            let ip: [u8; ADDR_V2_IPV4_ADDR_SIZE] = addr.try_into().expect("just checked length");
-            let ip = Ipv4Addr::from(ip);
-
-            Ok(AddrV2::IpAddr {
-                untrusted_last_seen,
-                untrusted_services,
-                ip: ip.into(),
-                port,
-            })
+        let ip = if network_id == ADDR_V2_IPV4_NETWORK_ID {
+            AddrV2::ip_addr_from_bytes::<ADDR_V2_IPV4_ADDR_SIZE>(addr)?
         } else if network_id == ADDR_V2_IPV6_NETWORK_ID {
-            if addr.len() != ADDR_V2_IPV6_ADDR_SIZE {
-                return Err(SerializationError::Parse(
-                    "IPv6 field length did not match ADDR_V2_IPV6_ADDR_SIZE in addrv2 message",
-                ));
-            }
-
-            let ip: [u8; ADDR_V2_IPV6_ADDR_SIZE] = addr.try_into().expect("just checked length");
-            let ip = Ipv6Addr::from(ip);
-
-            Ok(AddrV2::IpAddr {
-                untrusted_last_seen,
-                untrusted_services,
-                ip: ip.into(),
-                port,
-            })
+            AddrV2::ip_addr_from_bytes::<ADDR_V2_IPV6_ADDR_SIZE>(addr)?
         } else {
             // unimplemented or unrecognised network ID, just consume the bytes
             //
@@ -293,8 +295,15 @@ impl ZcashDeserialize for AddrV2 {
             // > because they have no means to validate those addresses
             // > and so can be tricked to gossip invalid addresses.
 
-            Ok(AddrV2::Unimplemented)
-        }
+            return Ok(AddrV2::Unimplemented);
+        };
+
+        Ok(AddrV2::IpAddr {
+            untrusted_last_seen,
+            untrusted_services,
+            ip,
+            port,
+        })
     }
 }
 
