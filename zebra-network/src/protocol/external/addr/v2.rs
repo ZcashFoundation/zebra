@@ -102,7 +102,7 @@ pub(in super::super) enum AddrV2 {
         port: u16,
     },
 
-    /// A node address with an unimplemented `networkID`, in `addrv2` format.
+    /// A node address with an unsupported `networkID`, in `addrv2` format.
     Unsupported,
 }
 
@@ -255,8 +255,8 @@ impl ZcashSerialize for AddrV2 {
 /// Deserialize an `addrv2` entry according to:
 /// https://zips.z.cash/zip-0155#specification
 ///
-/// Unimplemented and unrecognised addresses are deserialized as `None`.
-/// Deserialization consumes the bytes for these addresses.
+/// Unimplemented and unrecognised addresses are deserialized as [`AddrV2::Unsupported`].
+/// (Deserialization consumes the correct number of bytes for unsupported addresses.)
 impl ZcashDeserialize for AddrV2 {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         // > uint32  Time that this node was last seen as connected to the network.
