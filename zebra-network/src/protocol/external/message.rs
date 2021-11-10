@@ -1,6 +1,6 @@
 //! Definitions of network messages.
 
-use std::{error::Error, fmt, net, sync::Arc};
+use std::{error::Error, fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
@@ -11,7 +11,7 @@ use zebra_chain::{
 
 use crate::meta_addr::MetaAddr;
 
-use super::{inv::InventoryHash, types::*};
+use super::{addr::AddrInVersion, inv::InventoryHash, types::*};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -65,11 +65,11 @@ pub enum Message {
         /// advertised network services.
         ///
         /// Q: how does the handshake know the remote peer's services already?
-        address_recv: (PeerServices, net::SocketAddr),
+        address_recv: AddrInVersion,
 
         /// The network address of the node sending this message, and its
         /// advertised network services.
-        address_from: (PeerServices, net::SocketAddr),
+        address_from: AddrInVersion,
 
         /// Node random nonce, randomly generated every time a version
         /// packet is sent. This nonce is used to detect connections
@@ -138,9 +138,15 @@ pub enum Message {
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getaddr)
     GetAddr,
 
-    /// An `addr` message.
+    /// A sent or received `addr` message, or a received `addrv2` message.
     ///
-    /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
+    /// Currently, Zebra:
+    /// - sends and receives `addr` messages,
+    /// - parses received `addrv2` messages,
+    /// - but does not send `addrv2` messages.
+    ///
+    /// [addr Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
+    /// [addrv2 ZIP 155](https://zips.z.cash/zip-0155#specification)
     Addr(Vec<MetaAddr>),
 
     /// A `getblocks` message.
