@@ -544,10 +544,9 @@ impl MetaAddr {
     /// connect to peers that are likely unreachable.
     ///
     /// The `untrusted_last_seen` time is used as a fallback time if the local node has never
-    /// itself seen the peer. If the reported last seen time is a long time ago, then the local
-    /// node will attempt to connect the peer once (because the peer state won't be
-    /// [`PeerAddrState::Failed`] before an attempt is made), and if that attempt fails it won't
-    /// try to connect ever again.
+    /// itself seen the peer. If the reported last seen time is a long time ago or `None`, then the local
+    /// node will attempt to connect the peer once, and if that attempt fails it won't
+    /// try to connect ever again. (The state can't be `Failed` until after the first connection attempt.)
     pub fn is_probably_reachable(&self) -> bool {
         self.last_connection_state != PeerAddrState::Failed || self.last_seen_is_recent()
     }
@@ -556,6 +555,7 @@ impl MetaAddr {
     ///
     /// Returns `true` if this peer was last seen at most
     /// [`MAX_RECENT_PEER_AGE`][constants::MAX_RECENT_PEER_AGE] ago.
+    /// Returns false if the peer is outdated, or it has no last seen time.
     pub fn last_seen_is_recent(&self) -> bool {
         match self.last_seen() {
             Some(last_seen) => last_seen.saturating_elapsed() <= constants::MAX_RECENT_PEER_AGE,
