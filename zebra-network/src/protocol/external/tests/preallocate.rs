@@ -164,6 +164,6 @@ proptest! {
 
         // Check that our largest_allowed_vec contains the maximum number of AddrV2s
         prop_assert!((largest_allowed_vec_len as u64) == AddrV2::max_allocation());
-        // largest_allowed_serialized_len exceeds the limit for variable-sized types
+        // This is a variable-sized type, so largest_allowed_serialized_len can exceed the length limit
     }
 }
