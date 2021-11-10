@@ -1,12 +1,12 @@
 //! Arbitrary data generation for serialization proptests
 
-use std::{convert::TryInto, net::SocketAddr};
+use std::convert::TryInto;
 
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
 use proptest::{arbitrary::any, prelude::*};
 
 use super::{
-    read_zcash::canonical_socket_addr, CompactSizeMessage, DateTime32, MAX_PROTOCOL_MESSAGE_LEN,
+    CompactSizeMessage, DateTime32, TrustedPreallocate, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
 };
 
 impl Arbitrary for DateTime32 {
@@ -60,13 +60,6 @@ pub fn datetime_u32() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     any::<DateTime32>().prop_map(Into::into)
 }
 
-/// Returns a random canonical Zebra `SocketAddr`.
-///
-/// See [`canonical_ip_addr`] for details.
-pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
-    any::<SocketAddr>().prop_map(canonical_socket_addr)
-}
-
 impl Arbitrary for CompactSizeMessage {
     type Parameters = ();
 
@@ -80,4 +73,41 @@ impl Arbitrary for CompactSizeMessage {
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+/// Allocate a maximum-sized vector of cloned `item`s, and serialize that array.
+///
+/// Returns the following calculations on `item`:
+///   smallest_disallowed_vec_len
+///   smallest_disallowed_serialized_len
+///   largest_allowed_vec_len
+///   largest_allowed_serialized_len
+///
+/// For varible-size types, `largest_allowed_serialized_len` might not fit within
+/// `MAX_PROTOCOL_MESSAGE_LEN` or `MAX_BLOCK_SIZE`.
+pub fn max_allocation_is_big_enough<T>(item: T) -> (usize, usize, usize, usize)
+where
+    T: TrustedPreallocate + ZcashSerialize + Clone,
+{
+    let max_allocation: usize = T::max_allocation().try_into().unwrap();
+    let mut smallest_disallowed_vec = vec![item; max_allocation + 1];
+
+    let smallest_disallowed_serialized = smallest_disallowed_vec
+        .zcash_serialize_to_vec()
+        .expect("Serialization to vec must succeed");
+    let smallest_disallowed_vec_len = smallest_disallowed_vec.len();
+
+    // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
+    smallest_disallowed_vec.pop();
+    let largest_allowed_vec = smallest_disallowed_vec;
+    let largest_allowed_serialized = largest_allowed_vec
+        .zcash_serialize_to_vec()
+        .expect("Serialization to vec must succeed");
+
+    (
+        smallest_disallowed_vec_len,
+        smallest_disallowed_serialized.len(),
+        largest_allowed_vec.len(),
+        largest_allowed_serialized.len(),
+    )
 }

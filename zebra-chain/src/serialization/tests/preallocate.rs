@@ -5,52 +5,31 @@ use proptest::{collection::size_range, prelude::*};
 use std::{convert::TryInto, matches};
 
 use crate::serialization::{
-    zcash_deserialize::MAX_U8_ALLOCATION, SerializationError, TrustedPreallocate, ZcashDeserialize,
-    ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
+    arbitrary::max_allocation_is_big_enough, zcash_deserialize::MAX_U8_ALLOCATION,
+    SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
+    MAX_PROTOCOL_MESSAGE_LEN,
 };
 
 // Allow direct serialization of Vec<u8> for these tests. We don't usually
 // allow this because some types have specific rules for about serialization
 // of their inner Vec<u8>. This method could be easily misused if it applied
 // more generally.
+//
+// Due to Rust's trait rules, these trait impls apply to all zebra-chain tests,
+// not just the tests in this module. But other crates' tests can't access them.
 impl ZcashSerialize for u8 {
     fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_all(&[*self])
     }
 }
 
-/// Return the following calculations on `item`:
-///   smallest_disallowed_vec_len
-///   smallest_disallowed_serialized_len
-///   largest_allowed_vec_len
-///   largest_allowed_serialized_len
-pub fn max_allocation_is_big_enough<T>(item: T) -> (usize, usize, usize, usize)
-where
-    T: TrustedPreallocate + ZcashSerialize + Clone,
-{
-    let max_allocation: usize = T::max_allocation().try_into().unwrap();
-    let mut smallest_disallowed_vec = Vec::with_capacity(max_allocation + 1);
-    for _ in 0..(max_allocation + 1) {
-        smallest_disallowed_vec.push(item.clone());
+impl TrustedPreallocate for u8 {
+    fn max_allocation() -> u64 {
+        // MAX_PROTOCOL_MESSAGE_LEN takes up 5 bytes when encoded as a CompactSize.
+        (MAX_PROTOCOL_MESSAGE_LEN - 5)
+            .try_into()
+            .expect("MAX_PROTOCOL_MESSAGE_LEN fits in u64")
     }
-    let smallest_disallowed_serialized = smallest_disallowed_vec
-        .zcash_serialize_to_vec()
-        .expect("Serialization to vec must succeed");
-    let smallest_disallowed_vec_len = smallest_disallowed_vec.len();
-
-    // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-    smallest_disallowed_vec.pop();
-    let largest_allowed_vec = smallest_disallowed_vec;
-    let largest_allowed_serialized = largest_allowed_vec
-        .zcash_serialize_to_vec()
-        .expect("Serialization to vec must succeed");
-
-    (
-        smallest_disallowed_vec_len,
-        smallest_disallowed_serialized.len(),
-        largest_allowed_vec.len(),
-        largest_allowed_serialized.len(),
-    )
 }
 
 proptest! {
@@ -111,25 +90,20 @@ fn u8_size_is_correct() {
 /// 1. The smallest disallowed `Vec<u8>` is too big to include in a Zcash Wire Protocol message
 /// 2. The largest allowed `Vec<u8>`is exactly the size of a maximal Zcash Wire Protocol message
 fn u8_max_allocation_is_correct() {
-    let mut shortest_disallowed_vec = vec![0u8; MAX_U8_ALLOCATION + 1];
-    let shortest_disallowed_serialized = shortest_disallowed_vec
-        .zcash_serialize_to_vec()
-        .expect("Serialization to vec must succeed");
+    let (
+        smallest_disallowed_vec_len,
+        smallest_disallowed_serialized_len,
+        largest_allowed_vec_len,
+        largest_allowed_serialized_len,
+    ) = max_allocation_is_big_enough(0u8);
 
     // Confirm that shortest_disallowed_vec is only one item larger than the limit
-    assert_eq!((shortest_disallowed_vec.len() - 1), MAX_U8_ALLOCATION);
+    assert_eq!((smallest_disallowed_vec_len - 1), MAX_U8_ALLOCATION);
     // Confirm that shortest_disallowed_vec is too large to be included in a valid zcash message
-    assert!(shortest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
-
-    // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
-    shortest_disallowed_vec.pop();
-    let longest_allowed_vec = shortest_disallowed_vec;
-    let longest_allowed_serialized = longest_allowed_vec
-        .zcash_serialize_to_vec()
-        .expect("serialization to vec must succed");
+    assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
 
     // Check that our largest_allowed_vec contains the maximum number of items
-    assert_eq!(longest_allowed_vec.len(), MAX_U8_ALLOCATION);
+    assert_eq!(largest_allowed_vec_len, MAX_U8_ALLOCATION);
     // Check that our largest_allowed_vec is the size of a maximal protocol message
-    assert_eq!(longest_allowed_serialized.len(), MAX_PROTOCOL_MESSAGE_LEN);
+    assert_eq!(largest_allowed_serialized_len, MAX_PROTOCOL_MESSAGE_LEN);
 }

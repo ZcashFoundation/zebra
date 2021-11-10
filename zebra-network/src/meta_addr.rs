@@ -3,21 +3,15 @@
 use std::{
     cmp::{Ord, Ordering},
     convert::TryInto,
-    io::{Read, Write},
     net::SocketAddr,
     time::Instant,
 };
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
-use zebra_chain::serialization::{
-    canonical_socket_addr, DateTime32, ReadZcashExt, SerializationError, TrustedPreallocate,
-    WriteZcashExt, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
-};
+use zebra_chain::serialization::DateTime32;
 
 use crate::{
     constants,
-    protocol::{external::MAX_PROTOCOL_MESSAGE_LEN, types::PeerServices},
+    protocol::{external::canonical_socket_addr, types::PeerServices},
 };
 
 use MetaAddrChange::*;
@@ -25,13 +19,15 @@ use PeerAddrState::*;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
 #[cfg(any(test, feature = "proptest-impl"))]
-use zebra_chain::serialization::arbitrary::canonical_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) mod arbitrary;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Peer connection state, based on our interactions with the peer.
 ///
@@ -121,6 +117,8 @@ impl PartialOrd for PeerAddrState {
 
 /// An address with metadata on its advertised services and last-seen time.
 ///
+/// This struct can be created from `addr` or `addrv2` messages.
+///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
@@ -140,8 +138,8 @@ pub struct MetaAddr {
     /// The exact meaning depends on `last_connection_state`:
     ///   - `Responded`: the services advertised by this peer, the last time we
     ///      performed a handshake with it
-    ///   - `NeverAttempted`: the unverified services provided by the remote peer
-    ///     that sent us this address
+    ///   - `NeverAttempted`: the unverified services advertised by another peer,
+    ///      then gossiped by the peer that sent us this address
     ///   - `Failed` or `AttemptPending`: unverified services via another peer,
     ///      or services advertised in a previous handshake
     ///
@@ -943,53 +941,3 @@ impl PartialEq for MetaAddr {
 }
 
 impl Eq for MetaAddr {}
-
-impl ZcashSerialize for MetaAddr {
-    fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        self.last_seen()
-            .expect(
-                "unexpected MetaAddr with missing last seen time: MetaAddrs should be sanitized \
-                before serialization",
-            )
-            .zcash_serialize(&mut writer)?;
-
-        writer.write_u64::<LittleEndian>(
-            self.services
-                .expect(
-                    "unexpected MetaAddr with missing peer services: MetaAddrs should be \
-                    sanitized before serialization",
-                )
-                .bits(),
-        )?;
-
-        writer.write_socket_addr(self.addr)?;
-
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for MetaAddr {
-    fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let untrusted_last_seen = (&mut reader).zcash_deserialize_into()?;
-        let untrusted_services =
-            PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?);
-        let addr = reader.read_socket_addr()?;
-
-        Ok(MetaAddr::new_gossiped_meta_addr(
-            addr,
-            untrusted_services,
-            untrusted_last_seen,
-        ))
-    }
-}
-
-/// A serialized meta addr has a 4 byte time, 8 byte services, 16 byte IP addr, and 2 byte port
-const META_ADDR_SIZE: usize = 4 + 8 + 16 + 2;
-
-impl TrustedPreallocate for MetaAddr {
-    fn max_allocation() -> u64 {
-        // Since a maximal serialized Vec<MetAddr> uses at least three bytes for its length (2MB  messages / 30B MetaAddr implies the maximal length is much greater than 253)
-        // the max allocation can never exceed (MAX_PROTOCOL_MESSAGE_LEN - 3) / META_ADDR_SIZE
-        ((MAX_PROTOCOL_MESSAGE_LEN - 3) / META_ADDR_SIZE) as u64
-    }
-}

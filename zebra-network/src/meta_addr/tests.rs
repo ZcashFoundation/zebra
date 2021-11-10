@@ -1,4 +1,6 @@
-mod check;
-mod preallocate;
+//! Tests for MetaAddrs
+
+pub(crate) mod check;
+
 mod prop;
 mod vectors;

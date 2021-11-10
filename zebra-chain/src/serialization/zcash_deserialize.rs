@@ -1,6 +1,8 @@
 use std::{
     convert::{TryFrom, TryInto},
     io,
+    net::Ipv6Addr,
+    sync::Arc,
 };
 
 use super::{AtLeastOne, CompactSizeMessage, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
@@ -128,6 +130,19 @@ impl ZcashDeserialize for String {
     }
 }
 
+// We don't impl ZcashDeserialize for Ipv4Addr or SocketAddrs,
+// because the IPv4 and port formats are different in addr (v1) and addrv2 messages.
+
+/// Read a Bitcoin-encoded IPv6 address.
+impl ZcashDeserialize for Ipv6Addr {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut ipv6_addr = [0u8; 16];
+        reader.read_exact(&mut ipv6_addr)?;
+
+        Ok(Ipv6Addr::from(ipv6_addr))
+    }
+}
+
 /// Helper for deserializing more succinctly via type inference
 pub trait ZcashDeserializeInto {
     /// Deserialize based on type inference
@@ -155,6 +170,15 @@ pub trait TrustedPreallocate {
     /// Provides a ***loose upper bound*** on the size of the Vec<T: TrustedPreallocate>
     /// which can possibly be received from an honest peer.
     fn max_allocation() -> u64;
+}
+
+impl<T> TrustedPreallocate for Arc<T>
+where
+    T: TrustedPreallocate,
+{
+    fn max_allocation() -> u64 {
+        T::max_allocation()
+    }
 }
 
 /// The length of the longest valid `Vec<u8>` that can be received over the network

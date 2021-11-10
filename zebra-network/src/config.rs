@@ -7,9 +7,9 @@ use std::{
 
 use serde::{de, Deserialize, Deserializer};
 
-use zebra_chain::{parameters::Network, serialization::canonical_socket_addr};
+use zebra_chain::parameters::Network;
 
-use crate::{constants, BoxError};
+use crate::{constants, protocol::external::canonical_socket_addr, BoxError};
 
 #[cfg(test)]
 mod tests;
