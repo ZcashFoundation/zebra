@@ -15,7 +15,7 @@ use tokio::{runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
 
-use zebra_chain::serialization::{DateTime32, ZcashDeserialize, ZcashSerialize};
+use zebra_chain::serialization::DateTime32;
 
 use crate::{
     constants::{MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
