@@ -533,8 +533,10 @@ impl MetaAddr {
 
     /// Should this peer considered reachable?
     ///
-    /// A peer is considered unreachable if the last connection attempt to it failed and the last
-    /// successful connection is more than 3 days ago.
+    /// A peer is probably reachable if:
+    /// - it has never been attempted, or
+    /// - the last connection attempt was successful, or
+    /// - the last successful connection was less than 3 days ago.
     ///
     /// # Security
     ///
