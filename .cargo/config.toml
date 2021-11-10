@@ -1,2 +1,9 @@
-[build]
-rustflags = ["-O"]
+# Some of Zebra's tests are really slow without optimisations turned on,
+# so we use basic optimisations in dev and test builds.
+# (release and bench builds use optimisation level 2 by default.)
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1
