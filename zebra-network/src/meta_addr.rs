@@ -501,6 +501,7 @@ impl MetaAddr {
             && !self.has_connection_recently_responded()
             && !self.was_connection_recently_attempted()
             && !self.has_connection_recently_failed()
+            && self.is_probably_reachable()
     }
 
     /// Is the [`SocketAddr`] we have for this peer valid for outbound
@@ -526,6 +527,38 @@ impl MetaAddr {
         };
 
         is_node && self.address_is_valid_for_outbound()
+    }
+
+    /// Should this peer considered reachable?
+    ///
+    /// A peer is probably reachable if:
+    /// - it has never been attempted, or
+    /// - the last connection attempt was successful, or
+    /// - the last successful connection was less than 3 days ago.
+    ///
+    /// # Security
+    ///
+    /// This is used by [`Self::is_ready_for_connection_attempt`] so that Zebra stops trying to
+    /// connect to peers that are likely unreachable.
+    ///
+    /// The `untrusted_last_seen` time is used as a fallback time if the local node has never
+    /// itself seen the peer. If the reported last seen time is a long time ago or `None`, then the local
+    /// node will attempt to connect the peer once, and if that attempt fails it won't
+    /// try to connect ever again. (The state can't be `Failed` until after the first connection attempt.)
+    pub fn is_probably_reachable(&self) -> bool {
+        self.last_connection_state != PeerAddrState::Failed || self.last_seen_is_recent()
+    }
+
+    /// Was this peer last seen recently?
+    ///
+    /// Returns `true` if this peer was last seen at most
+    /// [`MAX_RECENT_PEER_AGE`][constants::MAX_RECENT_PEER_AGE] ago.
+    /// Returns false if the peer is outdated, or it has no last seen time.
+    pub fn last_seen_is_recent(&self) -> bool {
+        match self.last_seen() {
+            Some(last_seen) => last_seen.saturating_elapsed() <= constants::MAX_RECENT_PEER_AGE,
+            None => false,
+        }
     }
 
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
