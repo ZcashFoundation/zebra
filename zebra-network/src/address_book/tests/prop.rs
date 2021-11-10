@@ -34,7 +34,7 @@ proptest! {
         }
     }
 
-    /// Test if peers that are probably unreachable are not listed for a reconnection attempt.
+    /// Test that only peers that are reachable are listed for reconnection attempts.
     #[test]
     fn only_reachable_addresses_are_attempted(
         local_listener in any::<SocketAddr>(),
