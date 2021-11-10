@@ -186,7 +186,7 @@ impl AddrV2 {
             } else if IP_ADDR_SIZE == ADDR_V2_IPV6_ADDR_SIZE {
                 "IP address field length did not match expected IPv6 address size in addrv2 message"
             } else {
-                panic!("unexpected IP address size when converting from bytes");
+                unreachable!("unexpected IP address size when converting from bytes");
             };
 
             return Err(SerializationError::Parse(error_msg));
@@ -245,7 +245,7 @@ impl ZcashSerialize for AddrV2 {
                 }
             }
         } else {
-            panic!("unexpected AddrV2 variant: {:?}", self);
+            unreachable!("unexpected AddrV2 variant: {:?}", self);
         }
 
         Ok(())
