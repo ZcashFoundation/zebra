@@ -138,6 +138,14 @@ impl Duration32 {
         Duration32::from_minutes(hours.saturating_mul(60))
     }
 
+    /// Creates a new [`Duration32`] to represent the given amount of days.
+    ///
+    /// If the resulting number of seconds does not fit in a [`u32`], [`Duration32::MAX`] is
+    /// returned.
+    pub const fn from_days(days: u32) -> Self {
+        Duration32::from_hours(days.saturating_mul(24))
+    }
+
     /// Returns the number of seconds in this duration.
     pub fn seconds(&self) -> u32 {
         self.seconds

@@ -717,11 +717,16 @@ where
 }
 
 /// A Tx Input must have an Outpoint (32 byte hash + 4 byte index), a 4 byte sequence number,
-/// and a signature script, which always takes a min of 1 byte (for a length 0 script)
+/// and a signature script, which always takes a min of 1 byte (for a length 0 script).
 pub(crate) const MIN_TRANSPARENT_INPUT_SIZE: u64 = 32 + 4 + 4 + 1;
-/// A Transparent output has an 8 byte value and script which takes a min of 1 byte
+
+/// A Transparent output has an 8 byte value and script which takes a min of 1 byte.
 pub(crate) const MIN_TRANSPARENT_OUTPUT_SIZE: u64 = 8 + 1;
-/// All txs must have at least one input, a 4 byte locktime, and at least one output
+
+/// All txs must have at least one input, a 4 byte locktime, and at least one output.
+///
+/// Shielded transfers are much larger than transparent transfers,
+/// so this is the minimum transaction size.
 pub(crate) const MIN_TRANSPARENT_TX_SIZE: u64 =
     MIN_TRANSPARENT_INPUT_SIZE + 4 + MIN_TRANSPARENT_OUTPUT_SIZE;
 
@@ -729,7 +734,7 @@ pub(crate) const MIN_TRANSPARENT_TX_SIZE: u64 =
 ///
 /// `tx` messages contain a single transaction, and `block` messages are limited to the maximum
 /// block size.
-impl TrustedPreallocate for Arc<Transaction> {
+impl TrustedPreallocate for Transaction {
     fn max_allocation() -> u64 {
         // A transparent transaction is the smallest transaction variant
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_TX_SIZE
