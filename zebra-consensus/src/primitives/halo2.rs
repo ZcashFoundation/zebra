@@ -98,7 +98,7 @@ impl From<zebra_chain::orchard::ShieldedData> for Item {
                     redpallas::VerificationKey::<redpallas::SpendAuth>::try_from(<[u8; 32]>::from(
                         action.rk,
                     ))
-                    .unwrap(),
+                    .expect("should be a valid redpallas spendauth verification key"),
                     note::ExtractedNoteCommitment::from_bytes(&action.cm_x.into()).unwrap(),
                     enable_spend,
                     enable_output,
