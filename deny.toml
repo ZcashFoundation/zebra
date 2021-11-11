@@ -96,6 +96,9 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
+
+    # ticket #2523: replace unmaintained multiset
+    "https://github.com/jmitchell/multiset",
 ]
 
 [sources.allow-org]
