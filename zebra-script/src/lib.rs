@@ -78,6 +78,7 @@ impl CachedFfiTransaction {
         let tx_to_len = tx_to.len() as u32;
         let mut err = 0;
 
+        // SAFETY: the tx_to fields are created from a Rust vector
         let precomputed = unsafe {
             zcash_script::zcash_script_new_precomputed_tx(tx_to_ptr, tx_to_len, &mut err)
         };
@@ -132,6 +133,8 @@ impl CachedFfiTransaction {
 
         let mut err = 0;
 
+        // SAFETY: `new` makes sure `self.precomputed` is not NULL
+        //         the script fields are created from a Rust slice
         let ret = unsafe {
             zcash_script::zcash_script_verify_precomputed(
                 self.precomputed,
@@ -157,6 +160,7 @@ impl CachedFfiTransaction {
     pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
         let mut err = 0;
 
+        // SAFETY: `new` makes sure `self.precomputed` is not NULL
         let ret = unsafe {
             zcash_script::zcash_script_legacy_sigop_count_precomputed(self.precomputed, &mut err)
         };
@@ -204,6 +208,7 @@ unsafe impl Sync for CachedFfiTransaction {}
 
 impl Drop for CachedFfiTransaction {
     fn drop(&mut self) {
+        // SAFETY: `new` makes sure `self.precomputed` is not NULL
         unsafe { zcash_script::zcash_script_free_precomputed_tx(self.precomputed) };
     }
 }
