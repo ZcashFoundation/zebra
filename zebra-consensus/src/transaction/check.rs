@@ -210,21 +210,21 @@ where
     Ok(())
 }
 
-/// Pre-Heartwood: returns true.
-/// Heartwood-onward: returns if all Sapling or Orchard outputs, if any, decrypt successfully with
-/// an all-zeroes outgoing viewing key.
+/// Pre-Heartwood: returns `Ok`.
+/// Heartwood-onward: returns `Ok` if all Sapling or Orchard outputs, if any, decrypt successfully with
+/// an all-zeroes outgoing viewing key. Returns `Err` otherwise.
 ///
 /// This is used to validate coinbase transactions:
 ///
 /// > [Heartwood onward] All Sapling and Orchard outputs in coinbase transactions MUST decrypt to a note
-/// > plaintext , i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key ( Sapling and Orchard )’ on p. 67
-/// > does not return ⊥, using a sequence of 32 zero bytes as the outgoing viewing key . (This implies that before
+/// > plaintext, i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key ( Sapling and Orchard )’ on p. 67
+/// > does not return ⊥, using a sequence of 32 zero bytes as the outgoing viewing key. (This implies that before
 /// > Canopy activation, Sapling outputs of a coinbase transaction MUST have note plaintext lead byte equal to
-/// > 0x01 .)
+/// > 0x01.)
 ///
 /// > [Canopy onward] Any Sapling or Orchard output of a coinbase transaction decrypted to a note plaintext
-/// > according to the preceding rule MUST have note plaintext lead byte equal to 0x02 . (This applies even during
-/// > the “grace period” specified in [ZIP-212].)
+/// > according to the preceding rule MUST have note plaintext lead byte equal to 0x02. (This applies even during
+/// > the "grace period" specified in [ZIP-212].)
 ///
 /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
 ///

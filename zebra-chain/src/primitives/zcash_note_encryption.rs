@@ -8,7 +8,7 @@ use crate::{
     transaction::Transaction,
 };
 
-/// Returns if all Sapling or Orchard outputs, if any, decrypt successfully with
+/// Returns true if all Sapling or Orchard outputs, if any, decrypt successfully with
 /// an all-zeroes outgoing viewing key.
 ///
 /// # Panics
@@ -24,7 +24,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
     let null_sapling_ovk = zcash_primitives::sapling::keys::OutgoingViewingKey([0u8; 32]);
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs.iter() {
-            let r = match network {
+            let recovery = match network {
                 Network::Mainnet => {
                     zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
                         &zcash_primitives::consensus::MAIN_NETWORK,
@@ -42,7 +42,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
                     )
                 }
             };
-            if r.is_none() {
+            if recovery.is_none() {
                 return false;
             }
         }
