@@ -246,7 +246,7 @@ impl Service<BatchControl<Item>> for Verifier {
                             );
                             // This is the enum variant that
                             // orchard::circuit::Proof.verify() returns on
-                            // evaulation failure.
+                            // evaluation failure.
                             Err(Halo2Error::ConstraintSystemFailure)
                         }
                         Err(RecvError::Closed) => panic!("verifier was dropped without flushing"),
