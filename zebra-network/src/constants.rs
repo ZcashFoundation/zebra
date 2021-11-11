@@ -78,6 +78,15 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 
 /// within the last three hours."
 pub const MAX_PEER_ACTIVE_FOR_GOSSIP: Duration32 = Duration32::from_hours(3);
 
+/// The maximum duration since a peer was last seen to consider reconnecting to it.
+///
+/// Peers that haven't been seen for more than three days and that had its last connection attempt
+/// fail are considered to be offline and Zebra will stop trying to connect to them.
+///
+/// This is to ensure that Zebra can't have a denial-of-service as a consequence of having too many
+/// offline peers that it constantly and uselessly retries to connect to.
+pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
+
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);

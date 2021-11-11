@@ -15,8 +15,10 @@ use tokio::{runtime, time::Instant};
 use tower::service_fn;
 use tracing::Span;
 
+use zebra_chain::serialization::DateTime32;
+
 use crate::{
-    constants::MIN_PEER_RECONNECTION_DELAY,
+    constants::{MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -355,5 +357,42 @@ proptest! {
             prop_assert!(max_attempts >= min_attempts);
             prop_assert!(max_attempts - min_attempts <= 1);
         }
+    }
+
+    /// Make sure check if a peer was recently seen is correct.
+    #[test]
+    fn last_seen_is_recent_is_correct(peer in any::<MetaAddr>()) {
+        let time_since_last_seen = peer
+            .last_seen()
+            .map(|last_seen| last_seen.saturating_elapsed());
+
+        let recently_seen = time_since_last_seen
+            .map(|elapsed| elapsed <= MAX_RECENT_PEER_AGE)
+            .unwrap_or(false);
+
+        prop_assert_eq!(
+            peer.last_seen_is_recent(),
+            recently_seen,
+            "last seen: {:?}, now: {:?}",
+            peer.last_seen(),
+            DateTime32::now(),
+        );
+    }
+
+    /// Make sure a peer is correctly determined to be probably reachable.
+    #[test]
+    fn probably_rechable_is_determined_correctly(peer in any::<MetaAddr>()) {
+        let last_attempt_failed = peer.last_connection_state == Failed;
+        let not_recently_seen = !peer.last_seen_is_recent();
+
+        let probably_unreachable = last_attempt_failed && not_recently_seen;
+
+        prop_assert_eq!(
+            peer.is_probably_reachable(),
+            !probably_unreachable,
+            "last_connection_state: {:?}, last_seen: {:?}",
+            peer.last_connection_state,
+            peer.last_seen()
+        );
     }
 }
