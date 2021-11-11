@@ -5,7 +5,7 @@ use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
+    block::{self, Block, Height},
     orchard::{self, AuthorizedAction, EncryptedNote, WrappedNoteKey},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
@@ -1566,11 +1566,11 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
     let mut tested_coinbase_txs = 0;
     let mut tested_non_coinbase_txs = 0;
 
-    for (_height, block) in block_iter {
+    for (height, block) in block_iter {
         let block = block
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
-        let height = block.coinbase_height().expect("a valid height");
+        let height = Height(*height);
         let heartwood_onward = height
             >= NetworkUpgrade::Heartwood
                 .activation_height(network)
