@@ -8,10 +8,7 @@
 #![deny(clippy::await_holding_lock)]
 // we allow unsafe code, so we can call zcash_script
 
-use std::sync::Arc;
-
-#[cfg(windows)]
-use std::convert::TryInto;
+use std::{convert::TryInto, sync::Arc};
 
 use displaydoc::Display;
 use thiserror::Error;
@@ -154,6 +151,23 @@ impl CachedFfiTransaction {
             Err(Error::from(err))
         }
     }
+
+    /// Returns the number of transparent signature operations in the
+    /// transparent inputs and outputs of this transaction.
+    pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
+        let mut err = 0;
+
+        let ret = unsafe {
+            zcash_script::zcash_script_legacy_sigop_count_precomputed(self.precomputed, &mut err)
+        };
+
+        if err == zcash_script_error_t_zcash_script_ERR_OK {
+            let ret = ret.try_into().expect("c_uint fits in a u64");
+            Ok(ret)
+        } else {
+            Err(Error::from(err))
+        }
+    }
 }
 
 // # SAFETY
@@ -181,6 +195,10 @@ impl CachedFfiTransaction {
 // `zcash_script::zcash_script_verify_precomputed` only reads from the
 // precomputed context while verifying inputs, which makes it safe to treat this
 // pointer like a shared reference (given that is how it is used).
+//
+// The function `zcash_script:zcash_script_legacy_sigop_count_precomputed` only reads
+// from the precomputed context. Currently, these reads happen after all the concurrent
+// async checks have finished.
 unsafe impl Send for CachedFfiTransaction {}
 unsafe impl Sync for CachedFfiTransaction {}
 
@@ -226,6 +244,19 @@ mod tests {
 
         let verifier = super::CachedFfiTransaction::new(transaction);
         verifier.is_valid(branch_id, (input_index, output))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn count_legacy_sigops() -> Result<()> {
+        zebra_test::init();
+
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        let cached_tx = super::CachedFfiTransaction::new(transaction);
+        assert_eq!(cached_tx.legacy_sigop_count()?, 1);
 
         Ok(())
     }
