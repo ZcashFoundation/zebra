@@ -185,7 +185,6 @@ pub enum NoteCommitmentTreeError {
 ///
 /// The tree is implemented as an incremental Merkle tree.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-// #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
