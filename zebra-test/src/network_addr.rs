@@ -121,20 +121,6 @@ lazy_static! {
 
         // Extra test cases:
         //
-        // all services flags set
-        <Vec<u8>>::from_hex(
-            concat!(
-                "01", // number of entries
-
-                "79627683",                         // time, Tue Nov 22 11:22:33 UTC 2039
-                "ffffffffffffffffff",               // service flags, COMPACTSIZE(all flags set)
-                "02",                               // network id, IPv6
-                "10",                               // address length, COMPACTSIZE(16)
-                "00000000000000000000000000000001", // address
-                "0000",                             // port
-            )
-        ).expect("Message bytes are in valid hex representation"),
-
         // IPv4
         <Vec<u8>>::from_hex(
             concat!(
@@ -154,6 +140,20 @@ lazy_static! {
                 "10",                               // address length, COMPACTSIZE(16)
                 "00000000000000000000000000000001", // address
                 "00f1",                             // port
+            )
+        ).expect("Message bytes are in valid hex representation"),
+
+        // all services flags set
+        <Vec<u8>>::from_hex(
+            concat!(
+                "01", // number of entries
+
+                "79627683",                         // time, Tue Nov 22 11:22:33 UTC 2039
+                "ffffffffffffffffff",               // service flags, COMPACTSIZE(all flags set)
+                "02",                               // network id, IPv6
+                "10",                               // address length, COMPACTSIZE(16)
+                "00000000000000000000000000000001", // address
+                "0000",                             // port
             )
         ).expect("Message bytes are in valid hex representation"),
 

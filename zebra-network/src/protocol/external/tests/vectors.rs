@@ -1,10 +1,19 @@
-use std::io::{self, Write};
+//! Fixed test vectors for external protocol messages.
+
+use std::{
+    convert::TryInto,
+    io::{self, Write},
+};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
+use chrono::{DateTime, Utc};
 use zebra_chain::serialization::ZcashDeserializeInto;
 
-use crate::protocol::external::{Codec, InventoryHash, Message};
+use crate::{
+    meta_addr::MetaAddr,
+    protocol::external::{types::PeerServices, Codec, InventoryHash, Message},
+};
 
 /// Test if deserializing [`InventoryHash::Wtx`] does not produce an error.
 #[test]
@@ -29,6 +38,8 @@ fn parses_msg_wtx_inventory_type() {
 
 /// Test that deserializing [`AddrV1`] into [`MetaAddr`] succeeds,
 /// and produces the expected number of addresses.
+///
+/// Also checks some of the deserialized address values.
 #[test]
 fn parses_msg_addr_v1_ip() {
     zebra_test::init();
@@ -58,6 +69,33 @@ fn parses_msg_addr_v1_ip() {
                 case_idx,
                 addrs
             );
+
+            // Check all the fields in the first test case
+            if case_idx == 0 {
+                assert_eq!(
+                    addrs,
+                    vec![
+                        MetaAddr::new_gossiped_meta_addr(
+                            "[::1]:0".parse().unwrap(),
+                            PeerServices::empty(),
+                            DateTime::parse_from_rfc3339("2009-01-09T02:54:25+00:00")
+                                .unwrap()
+                                .with_timezone(&Utc)
+                                .try_into()
+                                .unwrap(),
+                        ),
+                        MetaAddr::new_gossiped_meta_addr(
+                            "[::1]:241".parse().unwrap(),
+                            PeerServices::NODE_NETWORK,
+                            DateTime::parse_from_rfc3339("2039-11-22T11:22:33+00:00")
+                                .unwrap()
+                                .with_timezone(&Utc)
+                                .try_into()
+                                .unwrap(),
+                        ),
+                    ],
+                );
+            }
         } else {
             panic!(
                 "unexpected message variant in case {}: {:?}",
@@ -103,6 +141,8 @@ fn parses_msg_addr_v1_empty() {
 
 /// Test that deserializing [`AddrV2`] into [`MetaAddr`] succeeds,
 /// and produces the expected number of addresses.
+///
+/// Also checks some of the deserialized address values.
 #[test]
 fn parses_msg_addr_v2_ip() {
     zebra_test::init();
@@ -132,6 +172,58 @@ fn parses_msg_addr_v2_ip() {
                 case_idx,
                 addrs
             );
+
+            // Check all the fields in the IPv4 and IPv6 test cases
+            if case_idx == 0 {
+                assert_eq!(
+                    addrs,
+                    vec![
+                        MetaAddr::new_gossiped_meta_addr(
+                            "[::1]:0".parse().unwrap(),
+                            PeerServices::empty(),
+                            DateTime::parse_from_rfc3339("2009-01-09T02:54:25+00:00")
+                                .unwrap()
+                                .with_timezone(&Utc)
+                                .try_into()
+                                .unwrap(),
+                        ),
+                        MetaAddr::new_gossiped_meta_addr(
+                            "[::1]:241".parse().unwrap(),
+                            PeerServices::NODE_NETWORK,
+                            DateTime::parse_from_rfc3339("2039-11-22T11:22:33+00:00")
+                                .unwrap()
+                                .with_timezone(&Utc)
+                                .try_into()
+                                .unwrap(),
+                        ),
+                        // torv3 is unsupported, so it's not in the parsed list
+                    ],
+                );
+            } else if case_idx == 1 {
+                assert_eq!(
+                    addrs,
+                    vec![
+                        MetaAddr::new_gossiped_meta_addr(
+                            "127.0.0.1:1".parse().unwrap(),
+                            PeerServices::NODE_NETWORK,
+                            DateTime::parse_from_rfc3339("2039-11-22T11:22:33+00:00")
+                                .unwrap()
+                                .with_timezone(&Utc)
+                                .try_into()
+                                .unwrap(),
+                        ),
+                        MetaAddr::new_gossiped_meta_addr(
+                            "[::1]:241".parse().unwrap(),
+                            PeerServices::NODE_NETWORK,
+                            DateTime::parse_from_rfc3339("2039-11-22T11:22:33+00:00")
+                                .unwrap()
+                                .with_timezone(&Utc)
+                                .try_into()
+                                .unwrap(),
+                        ),
+                    ],
+                );
+            }
         } else {
             panic!(
                 "unexpected message variant in case {}: {:?}",
