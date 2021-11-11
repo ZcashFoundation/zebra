@@ -4375,6 +4375,7 @@ dependencies = [
  "futures",
  "futures-util",
  "halo2",
+ "hex",
  "jubjub 0.8.0",
  "lazy_static",
  "metrics",
