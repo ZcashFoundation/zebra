@@ -1,9 +1,6 @@
 //! Fixed test vectors for external protocol messages.
 
-use std::{
-    convert::TryInto,
-    io::{self, Write},
-};
+use std::{convert::TryInto, io::Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
@@ -50,10 +47,8 @@ fn parses_msg_addr_v1_ip() {
         .iter()
         .enumerate()
     {
-        let mut addr_v1_bytes = io::Cursor::new(addr_v1_bytes);
-
         let deserialized: Message = codec
-            .read_addr(&mut addr_v1_bytes)
+            .read_addr(&mut addr_v1_bytes.as_slice())
             .unwrap_or_else(|_| panic!("failed to deserialize AddrV1 case {}", case_idx));
 
         if let Message::Addr(addrs) = deserialized {
@@ -117,10 +112,8 @@ fn parses_msg_addr_v1_empty() {
         .iter()
         .enumerate()
     {
-        let mut addr_v1_bytes = io::Cursor::new(addr_v1_bytes);
-
         let deserialized: Message = codec
-            .read_addr(&mut addr_v1_bytes)
+            .read_addr(&mut addr_v1_bytes.as_slice())
             .unwrap_or_else(|_| panic!("failed to deserialize AddrV1 case {}", case_idx));
 
         if let Message::Addr(addrs) = deserialized {
@@ -153,10 +146,8 @@ fn parses_msg_addr_v2_ip() {
         .iter()
         .enumerate()
     {
-        let mut addr_v2_bytes = io::Cursor::new(addr_v2_bytes);
-
         let deserialized: Message = codec
-            .read_addrv2(&mut addr_v2_bytes)
+            .read_addrv2(&mut addr_v2_bytes.as_slice())
             .unwrap_or_else(|_| panic!("failed to deserialize AddrV2 case {}", case_idx));
 
         if let Message::Addr(addrs) = deserialized {
@@ -245,10 +236,8 @@ fn parses_msg_addr_v2_empty() {
         .iter()
         .enumerate()
     {
-        let mut addr_v2_bytes = io::Cursor::new(addr_v2_bytes);
-
         let deserialized: Message = codec
-            .read_addrv2(&mut addr_v2_bytes)
+            .read_addrv2(&mut addr_v2_bytes.as_slice())
             .unwrap_or_else(|_| panic!("failed to deserialize AddrV2 case {}", case_idx));
 
         if let Message::Addr(addrs) = deserialized {
@@ -278,11 +267,11 @@ fn parses_msg_addr_v2_invalid() {
         .iter()
         .enumerate()
     {
-        let mut addr_v2_bytes = io::Cursor::new(addr_v2_bytes);
-
-        codec.read_addrv2(&mut addr_v2_bytes).expect_err(&format!(
-            "unexpected success: deserializing invalid AddrV2 case {} should have failed",
-            case_idx
-        ));
+        codec
+            .read_addrv2(&mut addr_v2_bytes.as_slice())
+            .expect_err(&format!(
+                "unexpected success: deserializing invalid AddrV2 case {} should have failed",
+                case_idx
+            ));
     }
 }
