@@ -2109,8 +2109,7 @@ dependencies = [
 [[package]]
 name = "multiset"
 version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce8738c9ddd350996cb8b8b718192851df960803764bcdaa3afb44a63b1ddb5c"
+source = "git+https://github.com/jmitchell/multiset?rev=91ef8550b518f75ae87ae0d8771150f259fd34d5#91ef8550b518f75ae87ae0d8771150f259fd34d5"
 
 [[package]]
 name = "nibble_vec"
@@ -4472,6 +4471,7 @@ dependencies = [
  "itertools 0.10.1",
  "jubjub 0.7.0",
  "lazy_static",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.4",
@@ -4490,6 +4490,7 @@ dependencies = [
  "uint",
  "x25519-dalek",
  "zcash_history",
+ "zcash_note_encryption",
  "zcash_primitives",
  "zebra-test",
 ]
@@ -4510,6 +4511,7 @@ dependencies = [
  "displaydoc",
  "futures 0.3.17",
  "futures-util",
+ "halo2",
  "jubjub 0.7.0",
  "lazy_static",
  "metrics",
