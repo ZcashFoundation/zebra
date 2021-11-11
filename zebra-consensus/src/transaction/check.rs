@@ -211,7 +211,7 @@ where
 }
 
 /// Checks compatibility with [ZIP-212] shielded Sapling and Orchard coinbase output decryption
-/// 
+///
 /// Pre-Heartwood: returns `Ok`.
 /// Heartwood-onward: returns `Ok` if all Sapling or Orchard outputs, if any, decrypt successfully with
 /// an all-zeroes outgoing viewing key. Returns `Err` otherwise.
