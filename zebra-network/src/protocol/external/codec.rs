@@ -517,7 +517,7 @@ impl Codec {
     }
 
     /// Deserialize an `addr` (v1) message into a list of `MetaAddr`s.
-    fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
+    pub(super) fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV1> = reader.zcash_deserialize_into()?;
 
         if addrs.len() > constants::MAX_ADDRS_IN_MESSAGE {
@@ -535,7 +535,7 @@ impl Codec {
     ///
     /// Currently, Zebra parses received `addrv2`s, ignoring some address types.
     /// Zebra never sends `addrv2` messages.
-    fn read_addrv2<R: Read>(&self, reader: R) -> Result<Message, Error> {
+    pub(super) fn read_addrv2<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV2> = reader.zcash_deserialize_into()?;
 
         if addrs.len() > constants::MAX_ADDRS_IN_MESSAGE {
