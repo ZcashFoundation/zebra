@@ -78,6 +78,10 @@ pub enum VerifyBlockError {
 
 /// The maximum allowed number of legacy signature check operations in a block.
 ///
+/// This consensus rule is not documented, so Zebra follows the `zcashd` implementation.
+/// We re-use some `zcashd` C++ script code via `zebra-script` and `zcash_script`.
+///
+/// See:
 /// https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30
 pub const MAX_BLOCK_SIGOPS: u64 = 20_000;
 
