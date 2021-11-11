@@ -210,6 +210,8 @@ where
     Ok(())
 }
 
+/// Checks compatibility with [ZIP-212] shielded Sapling and Orchard coinbase output decryption
+/// 
 /// Pre-Heartwood: returns `Ok`.
 /// Heartwood-onward: returns `Ok` if all Sapling or Orchard outputs, if any, decrypt successfully with
 /// an all-zeroes outgoing viewing key. Returns `Err` otherwise.
@@ -227,6 +229,7 @@ where
 /// > the "grace period" specified in [ZIP-212].)
 ///
 /// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
+/// [ZIP-212]: https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions
 ///
 /// TODO: Currently, a 0x01 lead byte is allowed in the "grace period" mentioned since we're
 /// using `librustzcash` to implement this and it doesn't currently allow changing that behavior.

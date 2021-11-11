@@ -22,6 +22,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
 
     let alt_height = height.0.into();
     let null_sapling_ovk = zcash_primitives::sapling::keys::OutgoingViewingKey([0u8; 32]);
+
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs.iter() {
             let recovery = match network {

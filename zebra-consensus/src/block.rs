@@ -173,6 +173,7 @@ where
                 .transactions
                 .get(0)
                 .expect("must have coinbase transaction");
+            // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
             tx::check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)?;
             check::subsidy_is_valid(&block, network)?;
 
