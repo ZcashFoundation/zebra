@@ -33,6 +33,7 @@ hex = "0.4"
 incrementalmerkletree = "0.1.0"
 jubjub = "0.7.0"
 lazy_static = "1.4.0"
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
 rand_core = "0.6"
 ripemd160 = "0.9"
 secp256k1 = { version = "0.20.3", features = ["serde"] }
@@ -45,6 +46,7 @@ uint = "0.9.1"
 x25519-dalek = { version = "1.1", features = ["serde"] }
 zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }

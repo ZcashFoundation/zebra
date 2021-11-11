@@ -4471,6 +4471,7 @@ dependencies = [
  "itertools 0.10.1",
  "jubjub 0.7.0",
  "lazy_static",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.4",
@@ -4489,6 +4490,7 @@ dependencies = [
  "uint",
  "x25519-dalek",
  "zcash_history",
+ "zcash_note_encryption",
  "zcash_primitives",
  "zebra-test",
 ]
@@ -4509,6 +4511,7 @@ dependencies = [
  "displaydoc",
  "futures 0.3.17",
  "futures-util",
+ "halo2",
  "jubjub 0.7.0",
  "lazy_static",
  "metrics",
