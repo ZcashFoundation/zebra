@@ -165,7 +165,7 @@ async fn verify_generated_halo2_proofs() {
     );
 
     // This should fail if any of the proofs fail to validate.
-    verify_orchard_halo2_proofs(&mut verifier, shielded_data)
+    assert!(verify_orchard_halo2_proofs(&mut verifier, shielded_data)
         .await
-        .unwrap()
+        .is_ok());
 }
