@@ -267,9 +267,9 @@ impl NoteCommitmentTree {
 
     /// Returns an as-yet unused leaf node value of a Sprout note commitment tree.
     ///
-    /// Uncommitted^Sprout = [0]^(l^Sprout_Merkle).
+    /// Uncommitted^Sprout = [0]^(l^[Sprout_Merkle]).
     /// 
-    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
+    /// [Sprout_Merkle]: https://zips.z.cash/protocol/protocol.pdf#constants
     pub fn uncommitted() -> [u8; 32] {
         [0; 32]
     }
