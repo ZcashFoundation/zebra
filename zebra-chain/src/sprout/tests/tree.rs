@@ -13,7 +13,8 @@ fn empty_roots() {
     for i in 0..tree::EMPTY_ROOTS.len() {
         assert_eq!(
             hex::encode(tree::EMPTY_ROOTS[i]),
-            test_vectors::HEX_EMPTY_ROOTS[i]
+            // The test vector is in reversed order.
+            test_vectors::HEX_EMPTY_ROOTS[tree::MERKLE_DEPTH - i]
         );
     }
 }
