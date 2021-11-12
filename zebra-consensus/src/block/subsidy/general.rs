@@ -1,6 +1,6 @@
-//! Block and Miner subsidies, halvings and target spacing modifiers. - [§7.7][7.7]
+//! Block and Miner subsidies, halvings and target spacing modifiers. - [§7.8][7.8]
 //!
-//! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+//! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
 use std::{collections::HashSet, convert::TryFrom};
 
@@ -43,9 +43,9 @@ pub fn halving_divisor(height: Height, network: Network) -> u64 {
     }
 }
 
-/// `BlockSubsidy(height)` as described in [protocol specification §7.7][7.7]
+/// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
-/// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
     let blossom_height = Blossom
         .activation_height(network)
@@ -69,9 +69,9 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
     }
 }
 
-/// `MinerSubsidy(height)` as described in [protocol specification §7.7][7.7]
+/// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
-/// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 ///
 /// `non_miner_reward` is the founders reward or funding stream value.
 /// If all the rewards for a block go to the miner, use `None`.
@@ -131,7 +131,7 @@ mod test {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let first_halving_height = match network {
             Network::Mainnet => Canopy.activation_height(network).unwrap(),
-            // Based on "7.7 Calculation of Block Subsidy and Founders' Reward"
+            // Based on "7.8 Calculation of Block Subsidy and Founders' Reward"
             Network::Testnet => Height(1_116_000),
         };
 
@@ -218,7 +218,7 @@ mod test {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let first_halving_height = match network {
             Network::Mainnet => Canopy.activation_height(network).unwrap(),
-            // Based on "7.7 Calculation of Block Subsidy and Founders' Reward"
+            // Based on "7.8 Calculation of Block Subsidy and Founders' Reward"
             Network::Testnet => Height(1_116_000),
         };
 
@@ -244,7 +244,7 @@ mod test {
         );
 
         // After the 2nd halving, the block subsidy is reduced to 1.5625 ZEC
-        // See "7.7 Calculation of Block Subsidy and Founders' Reward"
+        // See "7.8 Calculation of Block Subsidy and Founders' Reward"
         assert_eq!(
             Amount::try_from(156_250_000),
             block_subsidy(

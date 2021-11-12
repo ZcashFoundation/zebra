@@ -10,9 +10,9 @@ use zebra_chain::{amount::COIN, block::Height, parameters::Network};
 /// [slow-mining]: https://z.cash/support/faq/#what-is-slow-start-mining
 pub const SLOW_START_INTERVAL: Height = Height(20_000);
 
-/// `SlowStartShift()` as described in [protocol specification §7.7][7.7]
+/// `SlowStartShift()` as described in [protocol specification §7.8][7.8]
 ///
-/// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 ///
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
 pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
