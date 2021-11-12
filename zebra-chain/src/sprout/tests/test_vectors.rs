@@ -75,3 +75,9 @@ pub const ROOTS: [&str; 16] = [
     "8261355fd9bafc52a08d738fed29a859fbe15f2e74a5353954b150be200d0e16",
     "90665cb8a43001f0655169952399590cd17f99165587c1dd842eb674fb9f0afe",
 ];
+
+/// Empty (unused) Sprout note commitment tree leaf node.
+///
+/// Uncommitted^Sprout = [0]^(l^Sprout_Merkle).
+/// https://zips.z.cash/protocol/protocol.pdf#constants
+pub const EMPTY_LEAF: [u8; 32] = [0; 32];
