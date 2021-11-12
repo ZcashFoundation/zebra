@@ -63,7 +63,7 @@ fn incremental_roots() {
 
         // The root hashes should match.
         let ad_hoc_root = ad_hoc_tree.root();
-        assert_eq!(ad_hoc_root.0, ad_hoc_root_hash);
+        assert_eq!(<[u8; 32]>::from(ad_hoc_root), ad_hoc_root_hash);
 
         // Test if the note commitments are counted correctly.
         assert_eq!(ad_hoc_tree.count(), (i + 1) as u64);
