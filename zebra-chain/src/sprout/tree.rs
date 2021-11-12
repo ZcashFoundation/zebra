@@ -15,7 +15,7 @@
 use std::{cell::Cell, fmt};
 
 use byteorder::{BigEndian, ByteOrder};
-use incrementalmerkletree::{bridgetree, Frontier};
+use incrementalmerkletree::bridgetree::{self, Frontier};
 use lazy_static::lazy_static;
 use thiserror::Error;
 
@@ -27,7 +27,7 @@ use sha2::digest::generic_array::GenericArray;
 
 /// Sprout note commitment trees have a max depth of 29.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#constants
+/// <https://zips.z.cash/protocol/protocol.pdf#constants>
 pub(super) const MERKLE_DEPTH: usize = 29;
 
 /// MerkleCRH^Sprout Hash Function.
@@ -65,7 +65,6 @@ lazy_static! {
     /// List of "empty" Sprout note commitment roots (nodes), one for each layer.
     ///
     /// The list is indexed by the layer number (0: root; `MERKLE_DEPTH`: leaf).
-    ///
     pub(super) static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
         // The empty leaf node at layer `MERKLE_DEPTH`.
         let mut v = vec![NoteCommitmentTree::uncommitted()];
@@ -138,11 +137,11 @@ impl incrementalmerkletree::Hashable for Node {
         Self(NoteCommitmentTree::uncommitted())
     }
 
-    /// Combines two nodes to generate a new node.
+    /// Combines two nodes to generate a new node using [MerkleCRH^Sprout].
     ///
     /// Note that Sprout does not use the `level` argument.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#sproutmerklecrh
+    /// [MerkleCRH^Sprout]: https://zips.z.cash/protocol/protocol.pdf#sproutmerklecrh
     fn combine(_level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
         Self(merkle_crh_sprout(a.0, b.0))
     }
@@ -189,12 +188,21 @@ pub enum NoteCommitmentTreeError {
     FullTree,
 }
 
-/// Sprout Note Commitment Tree.
+/// [Sprout Note Commitment Tree].
 ///
-/// The tree is implemented as an incremental Merkle tree.
+/// An incremental Merkle tree of fixed depth used to store Sprout note commitments. 
+/// It is used to express the existence of value and the capability to spend it. It is _not_ the 
+/// job of this tree to protect against double-spending, as it is append-only; double-spending 
+/// is prevented by maintaining the [nullifier set] for each shielded pool.
+///
+/// Internally this wraps [`incrementalmerkletree::bridgetree::Frontier`], so that we can maintain and increment
+/// the full tree with only the minimal amount of non-empty nodes/leaves required.
+/// 
+/// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
+/// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a Frontier.
+    /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
     ///
     /// A Frontier is a subset of the tree that allows to fully specify it. It
     /// consists of nodes along the rightmost (newer) branch of the tree that
@@ -257,17 +265,20 @@ impl NoteCommitmentTree {
         self.root().into()
     }
 
-    /// Returns an as-yet unused Sprout note commitment tree leaf node.
+    /// Returns an as-yet unused leaf node value of a Sprout note commitment tree.
     ///
     /// Uncommitted^Sprout = [0]^(l^Sprout_Merkle).
-    /// https://zips.z.cash/protocol/protocol.pdf#constants
+    /// 
+    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub fn uncommitted() -> [u8; 32] {
         [0; 32]
     }
 
     /// Counts the note commitments in the tree.
     ///
-    /// For Sprout, the tree is capped at 2^29.
+    /// For Sprout, the tree is [capped at 2^29 leaf nodes][spec].
+    ///
+    /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
         self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
     }
