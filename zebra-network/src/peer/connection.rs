@@ -874,33 +874,57 @@ where
                 // We don't expect to be advertised multiple blocks at a time,
                 // so we ignore any advertisements of multiple blocks.
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
-                tx_ids
-                    if tx_ids.iter().all(|item| item.unmined_tx_id().is_some())
-                        && !tx_ids.is_empty() =>
-                {
+
+                // Some peers advertise invs with mixed item types.
+                // But we're just interested in the transaction invs.
+                //
+                // TODO: split mixed invs into multiple requests,
+                //       but skip runs of multiple blocks.
+                tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::AdvertiseTransactionIds(transaction_ids(&items).collect())
                 }
+
+                // Log detailed messages for ignored inv advertisement messages.
+                [] => {
+                    debug!("ignoring empty inv");
+                    return;
+                }
+                [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
+                    debug!("ignoring inv with multiple blocks");
+                    return;
+                }
                 _ => {
-                    self.fail_with(PeerError::WrongMessage("inv with mixed item types"));
+                    debug!("ignoring inv with no transactions");
                     return;
                 }
             },
             Message::GetData(items) => match &items[..] {
-                [InventoryHash::Block(_), rest @ ..]
-                    if rest
+                // Some peers advertise invs with mixed item types.
+                // So we suspect they might do the same with getdata.
+                //
+                // Since we can only handle one message at a time,
+                // we treat it as a block request if there are any blocks,
+                // or a transaction request if there are any transactions.
+                //
+                // TODO: split mixed getdata into multiple requests.
+                b_hashes
+                    if b_hashes
                         .iter()
-                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
+                        .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
                     Request::BlocksByHash(block_hashes(&items).collect())
                 }
-                tx_ids
-                    if tx_ids.iter().all(|item| item.unmined_tx_id().is_some())
-                        && !tx_ids.is_empty() =>
-                {
+                tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::TransactionsById(transaction_ids(&items).collect())
                 }
+
+                // Log detailed messages for ignored getdata request messages.
+                [] => {
+                    debug!("ignoring empty getdata");
+                    return;
+                }
                 _ => {
-                    self.fail_with(PeerError::WrongMessage("getdata with mixed item types"));
+                    debug!("ignoring getdata with no blocks or transactions");
                     return;
                 }
             },
