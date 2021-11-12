@@ -49,7 +49,7 @@ fn incremental_roots() {
 
         // The root hashes should match.
         let incremental_root = incremental_tree.root();
-        assert_eq!(incremental_root.0, incremental_root_hash);
+        assert_eq!(incremental_root.into(), incremental_root_hash);
 
         // Test if the note commitments are counted correctly.
         assert_eq!(incremental_tree.count(), (i + 1) as u64);
