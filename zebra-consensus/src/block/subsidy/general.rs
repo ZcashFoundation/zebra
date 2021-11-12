@@ -103,6 +103,7 @@ pub fn find_output_with_amount(
 }
 
 /// Returns all output amounts in `Transaction`.
+#[allow(dead_code)]
 pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>> {
     transaction
         .outputs()

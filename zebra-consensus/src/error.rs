@@ -22,11 +22,8 @@ pub enum SubsidyError {
     #[error("founders reward output not found")]
     FoundersRewardNotFound,
 
-    #[error("funding stream output value not found")]
-    FundingStreamValueNotFound,
-
-    #[error("funding stream output address not found")]
-    FundingStreamAddressNotFound,
+    #[error("funding stream expected output not found")]
+    FundingStreamNotFound,
 }
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
