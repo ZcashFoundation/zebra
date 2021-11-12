@@ -204,7 +204,7 @@ pub enum NoteCommitmentTreeError {
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
     ///
-    /// A Frontier is a subset of the tree that allows to fully specify it. It
+    /// A [`incrementalmerkletree::Frontier`] is a subset of the tree that allows to fully specify it. It
     /// consists of nodes along the rightmost (newer) branch of the tree that
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
