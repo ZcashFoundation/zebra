@@ -93,23 +93,23 @@ lazy_static! {
 
     /// Convinient storage for all addresses, for all receivers and networks
     pub static ref FUNDING_STREAM_ADDRESSES: HashMap<Network, HashMap<FundingStreamReceiver, Vec<String>>> = {
-        let mut bigger_hash_map = HashMap::new();
+        let mut addresses_by_network = HashMap::with_capacity(2);
 
         // Mainnet addresses
-        let mut inner_hash_map = HashMap::new();
-        inner_hash_map.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
-        inner_hash_map.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
-        inner_hash_map.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
-        bigger_hash_map.insert(Network::Mainnet, inner_hash_map);
+        let mut mainnet_addresses = HashMap::with_capacity(3);
+        mainnet_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
+        mainnet_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
+        mainnet_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
+        addresses_by_network.insert(Network::Mainnet, mainnet_addresses);
 
         // Testnet addresses
-        let mut inner_hash_map = HashMap::new();
-        inner_hash_map.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        inner_hash_map.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        inner_hash_map.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        bigger_hash_map.insert(Network::Testnet, inner_hash_map);
+        let mut testnet_addresses = HashMap::with_capacity(3);
+        testnet_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        testnet_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        testnet_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        addresses_by_network.insert(Network::Testnet, testnet_addresses);
 
-        bigger_hash_map
+        addresses_by_network
     };
 }
 
