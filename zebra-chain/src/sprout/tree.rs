@@ -191,14 +191,14 @@ pub enum NoteCommitmentTreeError {
 
 /// [Sprout Note Commitment Tree].
 ///
-/// An incremental Merkle tree of fixed depth used to store Sprout note commitments. 
-/// It is used to express the existence of value and the capability to spend it. It is _not_ the 
-/// job of this tree to protect against double-spending, as it is append-only; double-spending 
+/// An incremental Merkle tree of fixed depth used to store Sprout note commitments.
+/// It is used to express the existence of value and the capability to spend it. It is _not_ the
+/// job of this tree to protect against double-spending, as it is append-only; double-spending
 /// is prevented by maintaining the [nullifier set] for each shielded pool.
 ///
 /// Internally this wraps [`incrementalmerkletree::bridgetree::Frontier`], so that we can maintain and increment
 /// the full tree with only the minimal amount of non-empty nodes/leaves required.
-/// 
+///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -269,7 +269,7 @@ impl NoteCommitmentTree {
     /// Returns an as-yet unused leaf node value of a Sprout note commitment tree.
     ///
     /// Uncommitted^Sprout = [0]^(l^[Sprout_Merkle]).
-    /// 
+    ///
     /// [Sprout_Merkle]: https://zips.z.cash/protocol/protocol.pdf#constants
     pub fn uncommitted() -> [u8; 32] {
         [0; 32]
