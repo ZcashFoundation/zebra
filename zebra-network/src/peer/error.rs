@@ -28,37 +28,32 @@ pub enum PeerError {
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,
+
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
+
     /// A serialization error occurred while reading or writing a message.
     #[error("Serialization error: {0}")]
     Serialization(#[from] SerializationError),
+
     /// A badly-behaved remote peer sent a handshake message after the handshake was
     /// already complete.
     #[error("Remote peer sent handshake messages after handshake")]
     DuplicateHandshake,
+
     /// This node's internal services were overloaded, so the connection was dropped
     /// to shed load.
     #[error("Internal services over capacity")]
     Overloaded,
+
+    // TODO: stop closing connections on these errors (#2107)
+    //       log info or debug logs instead
+    //
     /// A peer sent us a message we don't support.
     #[error("Remote peer sent an unsupported message type: {0}")]
     UnsupportedMessage(&'static str),
-    /// A peer sent us a message we couldn't interpret in context.
-    #[error("Remote peer sent an uninterpretable message: {0}")]
-    WrongMessage(&'static str),
-    /// We got a `Reject` message. This does not necessarily mean that
-    /// the peer connection is in a bad state, but for the time being
-    /// we are considering it a PeerError.
-    // TODO: Create a different error type (more at the application
-    // level than network/connection level) that will include the
-    // appropriate error when a `Reject` message is received.
-    #[error("Received a Reject message")]
-    Rejected,
-    /// The remote peer responded with a block we didn't ask for.
-    #[error("Remote peer responded with a block we didn't ask for.")]
-    WrongBlock,
+
     /// We requested data that the peer couldn't find.
     #[error("Remote peer could not find items: {0:?}")]
     NotFound(Vec<InventoryHash>),
