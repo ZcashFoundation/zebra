@@ -22,6 +22,7 @@ use std::sync::Once;
 pub mod command;
 pub mod mock_service;
 pub mod net;
+pub mod network_addr;
 pub mod prelude;
 pub mod transcript;
 pub mod vectors;
