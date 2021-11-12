@@ -12,9 +12,7 @@ lazy_static! {
         ORCHARD_SHIELDED_DATA_3_BYTES.as_ref(),
         ORCHARD_SHIELDED_DATA_4_BYTES.as_ref(),
     ]
-    .iter()
-    .cloned()
-    .collect();
+    .to_vec();
     pub static ref ORCHARD_SHIELDED_DATA_1_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("orchard-shielded-data-1.txt").trim())
             .expect("Orchard shielded data bytes are in valid hex representation");
