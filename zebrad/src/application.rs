@@ -286,9 +286,14 @@ impl Application for ZebradApp {
                     true
                 }
                 color_eyre::ErrorKind::Recoverable(error) => {
-                    // type checks should be faster than string conversions
+                    // Type checks should be faster than string conversions.
+                    //
+                    // Don't ask users to create bug reports for timeouts and peer errors.
                     if error.is::<tower::timeout::error::Elapsed>()
                         || error.is::<tokio::time::error::Elapsed>()
+                        || error.is::<zebra_network::PeerError>()
+                        || error.is::<zebra_network::SharedPeerError>()
+                        || error.is::<zebra_network::HandshakeError>()
                     {
                         return false;
                     }
