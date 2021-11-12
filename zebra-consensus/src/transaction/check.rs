@@ -9,6 +9,7 @@ use zebra_chain::{
     block::Height,
     orchard::Flags,
     parameters::{Network, NetworkUpgrade},
+    primitives::zcash_note_encryption,
     sapling::{Output, PerSpendAnchor, Spend},
     transaction::Transaction,
 };
@@ -204,6 +205,51 @@ where
         if let Some(duplicate) = hash_set.replace(item) {
             return Err(error_wrapper(duplicate.into_owned()));
         }
+    }
+
+    Ok(())
+}
+
+/// Checks compatibility with [ZIP-212] shielded Sapling and Orchard coinbase output decryption
+///
+/// Pre-Heartwood: returns `Ok`.
+/// Heartwood-onward: returns `Ok` if all Sapling or Orchard outputs, if any, decrypt successfully with
+/// an all-zeroes outgoing viewing key. Returns `Err` otherwise.
+///
+/// This is used to validate coinbase transactions:
+///
+/// > [Heartwood onward] All Sapling and Orchard outputs in coinbase transactions MUST decrypt to a note
+/// > plaintext, i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key ( Sapling and Orchard )’ on p. 67
+/// > does not return ⊥, using a sequence of 32 zero bytes as the outgoing viewing key. (This implies that before
+/// > Canopy activation, Sapling outputs of a coinbase transaction MUST have note plaintext lead byte equal to
+/// > 0x01.)
+///
+/// > [Canopy onward] Any Sapling or Orchard output of a coinbase transaction decrypted to a note plaintext
+/// > according to the preceding rule MUST have note plaintext lead byte equal to 0x02. (This applies even during
+/// > the "grace period" specified in [ZIP-212].)
+///
+/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
+/// [ZIP-212]: https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions
+///
+/// TODO: Currently, a 0x01 lead byte is allowed in the "grace period" mentioned since we're
+/// using `librustzcash` to implement this and it doesn't currently allow changing that behavior.
+/// https://github.com/ZcashFoundation/zebra/issues/3027
+pub fn coinbase_outputs_are_decryptable(
+    transaction: &Transaction,
+    network: Network,
+    height: Height,
+) -> Result<(), TransactionError> {
+    // The consensus rule only applies to Heartwood onward.
+    if height
+        < NetworkUpgrade::Heartwood
+            .activation_height(network)
+            .expect("Heartwood height is known")
+    {
+        return Ok(());
+    }
+
+    if !zcash_note_encryption::decrypts_successfully(transaction, network, height) {
+        return Err(TransactionError::CoinbaseOutputsNotDecryptable);
     }
 
     Ok(())

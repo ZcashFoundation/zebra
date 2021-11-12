@@ -63,7 +63,7 @@ proptest! {
 
         // Check that our largest_allowed_vec contains the maximum number of Transactions
         prop_assert!((largest_allowed_vec_len as u64) == Transaction::max_allocation());
-        // largest_allowed_serialized_len exceeds the limit for variable-sized types
+        // This is a variable-sized type, so largest_allowed_serialized_len can exceed the length limit
     }
 
     /// Verify the smallest disallowed vector of `Input`s is too large to fit in a Zcash block
@@ -86,7 +86,7 @@ proptest! {
 
         // Check that our largest_allowed_vec contains the maximum number of Inputs
         prop_assert!((largest_allowed_vec_len as u64) == Input::max_allocation());
-        // largest_allowed_serialized_len exceeds the limit for variable-sized types
+        // This is a variable-sized type, so largest_allowed_serialized_len can exceed the length limit
     }
 
     /// Verify the smallest disallowed vector of `Output`s is too large to fit in a Zcash block
@@ -109,6 +109,6 @@ proptest! {
 
         // Check that our largest_allowed_vec contains the maximum number of Outputs
         prop_assert!((largest_allowed_vec_len as u64) == Output::max_allocation());
-        // largest_allowed_serialized_len exceeds the limit for variable-sized types
+        // This is a variable-sized type, so largest_allowed_serialized_len can exceed the length limit
     }
 }

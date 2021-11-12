@@ -18,7 +18,7 @@ use zebra_state as zs;
 
 use zebra_chain::block::{self, Block};
 use zebra_consensus::chain::VerifyChainError;
-use zebra_network::AddressBook;
+use zebra_network::{constants::MAX_ADDRS_IN_MESSAGE, AddressBook};
 
 // Re-use the syncer timeouts for consistency.
 use super::{
@@ -40,9 +40,6 @@ type InboundBlockDownloads = BlockDownloads<Timeout<Outbound>, Timeout<BlockVeri
 
 pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>, Mempool);
 
-/// A bitcoin protocol constant that will hold the max number of peers
-/// we can return in response to a `Peers` request.
-const MAX_ADDR: usize = 1000; // bitcoin protocol constant
 /// A security parameter to return only 1/3 of available addresses as a
 /// response to a `Peers` request.
 const FRAC_OF_AVAILABLE_ADDRESS: f64 = 1. / 3.;
@@ -270,7 +267,7 @@ impl Service<zn::Request> for Inbound {
                     let mut peers = peers.sanitized();
 
                     // Truncate the list
-                    let truncate_at = MAX_ADDR
+                    let truncate_at = MAX_ADDRS_IN_MESSAGE
                         .min((peers.len() as f64 * FRAC_OF_AVAILABLE_ADDRESS).ceil() as usize);
                     peers.truncate(truncate_at);
 
