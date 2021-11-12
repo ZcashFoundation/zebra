@@ -28,7 +28,7 @@ use sha2::digest::generic_array::GenericArray;
 /// Sprout note commitment trees have a max depth of 29.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#constants
-const MERKLE_DEPTH: usize = 29;
+pub(super) const MERKLE_DEPTH: usize = 29;
 
 /// MerkleCRH^Sprout Hash Function.
 ///
@@ -50,6 +50,7 @@ fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
         0x5be0cd19,
     ];
+
     sha2::compress256(&mut state, &[GenericArray::clone_from_slice(&other_block)]);
 
     // Yes, SHA-256 does big endian here.
@@ -61,14 +62,20 @@ fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
 }
 
 lazy_static! {
-    /// Empty roots of the tree.
+    /// List of "empty" Sprout note commitment roots (nodes), one for each layer.
+    ///
+    /// The list is indexed by the layer number (0: root; `MERKLE_DEPTH`: leaf).
+    ///
     pub(super) static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
-        // Uncommitted^Sprout = = [0]^l_MerkleSprout
-        // https://zips.z.cash/protocol/protocol.pdf#constants
-        let mut v = vec![[0u8; 32]];
+        // The empty leaf node at layer `MERKLE_DEPTH`.
+        let mut v = vec![NoteCommitmentTree::uncommitted()];
 
-        for d in 0..MERKLE_DEPTH {
-            v.push(merkle_crh_sprout(v[d], v[d]));
+        // Starting with layer `MERKLE_DEPTH` - 1 (the first internal layer, after the leaves),
+        // generate the empty roots up to layer 0, the root.
+        for _ in 0..MERKLE_DEPTH {
+            // The vector is generated from the end, pushing new nodes to its beginning.
+            // For this reason, the layer below is v[0].
+            v.insert(0, merkle_crh_sprout(v[0], v[0]));
         }
 
         v
@@ -89,7 +96,7 @@ pub struct Position(pub(crate) u64);
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct Root([u8; 32]);
+pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -126,6 +133,7 @@ impl From<&Root> for [u8; 32] {
 struct Node([u8; 32]);
 
 impl incrementalmerkletree::Hashable for Node {
+    /// Returns an empty leaf.
     fn empty_leaf() -> Self {
         Self(NoteCommitmentTree::uncommitted())
     }
@@ -185,7 +193,6 @@ pub enum NoteCommitmentTreeError {
 ///
 /// The tree is implemented as an incremental Merkle tree.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-// #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
