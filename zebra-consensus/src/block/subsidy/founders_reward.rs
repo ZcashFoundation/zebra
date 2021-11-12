@@ -1,6 +1,6 @@
-//! Founders' Reward calculations. - [§7.7][7.7]
+//! Founders' Reward calculations. - [§7.8][7.8]
 //!
-//! [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+//! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
 use std::convert::TryFrom;
 
@@ -13,9 +13,9 @@ use zebra_chain::{
 use crate::block::subsidy::general::{block_subsidy, halving_divisor};
 use crate::parameters::subsidy::FOUNDERS_FRACTION_DIVISOR;
 
-/// `FoundersReward(height)` as described in [protocol specification §7.7][7.7]
+/// `FoundersReward(height)` as described in [protocol specification §7.8][7.8]
 ///
-/// [7.7]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn founders_reward(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
     if halving_divisor(height, network) == 1 {
         // this calculation is exact, because the block subsidy is divisible by
