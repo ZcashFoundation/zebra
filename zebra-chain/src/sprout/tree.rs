@@ -30,15 +30,16 @@ use sha2::digest::generic_array::GenericArray;
 /// <https://zips.z.cash/protocol/protocol.pdf#constants>
 pub(super) const MERKLE_DEPTH: usize = 29;
 
-/// MerkleCRH^Sprout Hash Function.
+/// [MerkleCRH^Sprout] Hash Function.
 ///
 /// Creates nodes of the note commitment tree.
 ///
-/// Definition: https://zips.z.cash/protocol/protocol.pdf#merklecrh.
 /// MerkleCRH^Sprout(layer, left, right) := SHA256Compress(left || right).
 ///
 /// Note: the implementation of MerkleCRH^Sprout does not use the `layer`
 /// argument from the definition above since the argument does not affect the output.
+///
+/// [MerkleCRH^Sprout]: https://zips.z.cash/protocol/protocol.pdf#merklecrh.
 fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut other_block = [0u8; 64];
     other_block[..32].copy_from_slice(&left[..]);
