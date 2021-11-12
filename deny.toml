@@ -41,7 +41,10 @@ skip-tree = [
     { name = "fpe", version = "=0.4.0" },
 
     # ticket #2982: librustzcash and orchard git versions
-    { name = "zcash_primitives", version = "=0.5.0" },
+    # Note that the equihash duplication is probably because `zcash_primitives`
+    # (which imports it with a path import) is being imported as a git dependency.
+    { name = "equihash", version = "=0.1.0" },
+    { name = "orchard", version = "=0.0.0" },
 
     # ticket #2983: criterion dependencies
     { name = "criterion", version = "=0.3.4" },
@@ -93,6 +96,9 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
+
+    # ticket #2523: replace unmaintained multiset
+    "https://github.com/jmitchell/multiset",
 ]
 
 [sources.allow-org]

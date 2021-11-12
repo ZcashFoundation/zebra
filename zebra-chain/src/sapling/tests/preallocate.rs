@@ -14,7 +14,7 @@ use crate::{
         },
         PerSpendAnchor, SharedAnchor,
     },
-    serialization::{tests::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize},
+    serialization::{arbitrary::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize},
 };
 
 use proptest::prelude::*;

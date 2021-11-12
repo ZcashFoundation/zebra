@@ -31,7 +31,10 @@ chrono = "0.4.19"
 rlimit = "0.5.4"
 # TODO: this crate is not maintained anymore. Replace it?
 # https://github.com/ZcashFoundation/zebra/issues/2523
-multiset = "0.0.5"
+#
+# Pinned to a commit which includes bug fix https://github.com/jmitchell/multiset/pull/21
+# The fix should be included in multiset 0.0.6.
+multiset = { git = "https://github.com/jmitchell/multiset", rev = "91ef8550b518f75ae87ae0d8771150f259fd34d5" }
 
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3", optional = true }

@@ -78,6 +78,15 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 
 /// within the last three hours."
 pub const MAX_PEER_ACTIVE_FOR_GOSSIP: Duration32 = Duration32::from_hours(3);
 
+/// The maximum duration since a peer was last seen to consider reconnecting to it.
+///
+/// Peers that haven't been seen for more than three days and that had its last connection attempt
+/// fail are considered to be offline and Zebra will stop trying to connect to them.
+///
+/// This is to ensure that Zebra can't have a denial-of-service as a consequence of having too many
+/// offline peers that it constantly and uselessly retries to connect to.
+pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
+
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
@@ -111,6 +120,20 @@ pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(10);
 /// TODO: limit the number of addresses that Zebra uses from a single peer
 ///       response (#1869)
 pub const GET_ADDR_FANOUT: usize = 3;
+
+/// The maximum number of addresses allowed in an `addr` or `addrv2` message.
+///
+/// `addr`:
+/// > The number of IP address entries up to a maximum of 1,000.
+///
+/// https://developer.bitcoin.org/reference/p2p_networking.html#addr
+///
+/// `addrv2`:
+/// > One message can contain up to 1,000 addresses.
+/// > Clients MUST reject messages with more addresses.
+///
+/// https://zips.z.cash/zip-0155#specification
+pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///

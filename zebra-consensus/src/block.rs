@@ -169,6 +169,12 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
             check::coinbase_is_first(&block)?;
+            let coinbase_tx = block
+                .transactions
+                .get(0)
+                .expect("must have coinbase transaction");
+            // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
+            tx::check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)?;
             check::subsidy_is_valid(&block, network)?;
 
             let mut async_checks = FuturesUnordered::new();

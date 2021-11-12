@@ -142,8 +142,11 @@ pub enum Message {
     ///
     /// Currently, Zebra:
     /// - sends and receives `addr` messages,
-    /// - parses received `addrv2` messages,
+    /// - parses received `addrv2` messages, ignoring some address types,
     /// - but does not send `addrv2` messages.
+    ///
+    /// Because some address types are ignored, the deserialized vector can be empty,
+    /// even if the peer sent addresses. This is not an error.
     ///
     /// [addr Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#addr)
     /// [addrv2 ZIP 155](https://zips.z.cash/zip-0155#specification)

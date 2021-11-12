@@ -39,7 +39,7 @@ impl TryFrom<&Transaction> for zcash_primitives::transaction::Transaction {
     }
 }
 
-fn convert_tx_to_librustzcash(
+pub(crate) fn convert_tx_to_librustzcash(
     trans: &Transaction,
     network_upgrade: NetworkUpgrade,
 ) -> Result<zcash_primitives::transaction::Transaction, io::Error> {
