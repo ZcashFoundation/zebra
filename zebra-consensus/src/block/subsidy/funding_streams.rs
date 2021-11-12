@@ -55,13 +55,13 @@ pub fn funding_stream_values(
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn height_for_first_halving(network: Network) -> Height {
     // First halving on Mainnet is at Canopy
-    // while in Testnet is at block 1_116_000
+    // while in Testnet is at block constant height of `1_116_000`
     // https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     match network {
         Network::Mainnet => Canopy
             .activation_height(network)
             .expect("canopy activation height should be available"),
-        Network::Testnet => Height(1_116_000),
+        Network::Testnet => FIRST_HALVING_TESTNET,
     }
 }
 

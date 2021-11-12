@@ -45,6 +45,12 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
 /// Usage: founders_reward = block_subsidy / FOUNDERS_FRACTION_DIVISOR
 pub const FOUNDERS_FRACTION_DIVISOR: u64 = 5;
 
+/// The first halving height in the testnet is at block height `1_116_000`
+/// as specified in [protocol specification §7.10.1][7.10.1]
+///
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
+
 /// The funding stream receiver categories.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FundingStreamReceiver {
