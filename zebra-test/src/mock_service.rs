@@ -170,7 +170,7 @@ where
 
 /// An entry point for starting the [`MockServiceBuilder`].
 ///
-/// This `impl` block exists for ergonomic reasons. The generic type paramaters don't matter,
+/// This `impl` block exists for ergonomic reasons. The generic type parameters don't matter,
 /// because they are actually set by [`MockServiceBuilder::finish`].
 impl MockService<(), (), ()> {
     /// Create a [`MockServiceBuilder`] to help with the creation of a [`MockService`].

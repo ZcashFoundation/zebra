@@ -143,7 +143,7 @@ let peers = address_book.lock().unwrap().clone();
 let mut peers = peers.sanitized();
 ```
 
-## Avoiding Deadlocks when Aquiring Buffer or Service Readiness
+## Avoiding Deadlocks when Acquiring Buffer or Service Readiness
 [readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
 
 To avoid deadlocks, readiness and locks must be acquired in a consistent order.

@@ -673,7 +673,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
     // Parse all the blocks
     let mut checkpoint_data = Vec::new();
     for b in &[
-        // Continous blocks are verified
+        // Continuous blocks are verified
         &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
         &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
         // Other blocks can't verify, so they are rejected on drop

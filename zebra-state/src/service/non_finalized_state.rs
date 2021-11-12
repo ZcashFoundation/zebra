@@ -34,7 +34,7 @@ use self::chain::Chain;
 
 use super::{check, finalized_state::FinalizedState};
 
-/// The state of the chains in memory, incuding queued blocks.
+/// The state of the chains in memory, including queued blocks.
 #[derive(Debug, Clone)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
@@ -419,7 +419,7 @@ impl NonFinalizedState {
                             .transpose()
                     })
                     .expect(
-                        "commit_block is only called with blocks that are ready to be commited",
+                        "commit_block is only called with blocks that are ready to be committed",
                     )?,
             )),
         }

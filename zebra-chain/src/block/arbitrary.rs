@@ -149,7 +149,7 @@ impl LedgerState {
     /// Returns a strategy for creating `LedgerState`s with features from
     /// `network_upgrade_override`.
     ///
-    /// These featues ignore the actual tip height and network.
+    /// These features ignore the actual tip height and network.
     pub fn network_upgrade_strategy(
         network_upgrade_override: NetworkUpgrade,
         transaction_version_override: impl Into<Option<u32>>,

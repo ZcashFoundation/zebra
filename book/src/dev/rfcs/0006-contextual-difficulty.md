@@ -654,10 +654,10 @@ after dividing by `AveragingWindowTimespan`. But as long as there is no overflow
 this is [equivalent to the single truncation of the final result] in the Zcash
 specification. However, Zebra should follow the order of operations in `zcashd`,
 and use repeated divisions, because that can't overflow. See the relevant
-[comment in the zcashd souce code].
+[comment in the zcashd source code].
 
 [equivalent to the single truncation of the final result]: https://math.stackexchange.com/questions/147771/rewriting-repeated-integer-division-with-multiplication
-[comment in the zcashd souce code]: https://github.com/zcash/zcash/pull/4860/files
+[comment in the zcashd source code]: https://github.com/zcash/zcash/pull/4860/files
 
 ## Module Structure
 [module-structure]: #module-structure
@@ -748,7 +748,7 @@ would be a security issue.
   - Testing
 
 - What related issues do you consider out of scope for this RFC that could be addressed in the future independently of the solution that comes out of this RFC?
-  - Monitoring and maintainence
+  - Monitoring and maintenance
 
 # Future possibilities
 [future-possibilities]: #future-possibilities

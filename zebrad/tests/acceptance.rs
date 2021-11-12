@@ -923,7 +923,7 @@ fn sync_until(
 
     child.expect_stdout_line_matches(stop_regex)?;
 
-    // make sure there is never a mempool if we don't explicity enable it
+    // make sure there is never a mempool if we don't explicitly enable it
     if enable_mempool_at_height.is_none() {
         // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
         // the error is delayed until the test timeout, or until the child reaches the stop height and exits.

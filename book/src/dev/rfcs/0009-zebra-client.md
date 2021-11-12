@@ -174,7 +174,7 @@ same process) of the normal node operation.
 
 In the case of the client component that needs to do blockchain scanning and
 trial decryption, every valid block with non-coinbase transactions will need to
-be checked and its transactions trial-decrypted with registerd incoming viewing
+be checked and its transactions trial-decrypted with registered incoming viewing
 keys to see if any notes have been received by the key's owner and if any notes
 have already been spent elsewhere.
 
@@ -318,7 +318,7 @@ Supporting a wallet assumes risk.  Effort required to implement wallet functiona
     - initial release could support mandatory sweeps, and future releases could support legacy keys
 
 - split `Client` component into subprocess
-    - this helps somewhat but the benefit is reduced by our prexisting memory safety, thanks to Rust
+    - this helps somewhat but the benefit is reduced by our preexisting memory safety, thanks to Rust
     - not meaningful without other isolation (need to restrict `zebrad` from accessing viewing keys on disk, etc)
     - could use [cap-std](https://blog.sunfishcode.online/introducing-cap-std/)
       to restrict filesystem and network access for zebra-client.

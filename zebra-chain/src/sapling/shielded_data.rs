@@ -261,7 +261,7 @@ where
     ///
     /// Getting the binding signature validating key from the Spend and Output
     /// description value commitments and the balancing value implicitly checks
-    /// that the balancing value is consistent with the value transfered in the
+    /// that the balancing value is consistent with the value transferred in the
     /// Spend and Output descriptions but also proves that the signer knew the
     /// randomness used for the Spend and Output value commitments, which
     /// prevents replays of Output descriptions.

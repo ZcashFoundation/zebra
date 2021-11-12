@@ -14,7 +14,7 @@ use crate::peer_set::set::CancelClientWork;
 
 /// A Future that becomes satisfied when an `S`-typed service is ready.
 ///
-/// May fail due to cancelation, i.e. if the service is removed from discovery.
+/// May fail due to cancellation, i.e. if the service is removed from discovery.
 #[pin_project]
 #[derive(Debug)]
 pub(super) struct UnreadyService<K, S, Req> {
