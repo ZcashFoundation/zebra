@@ -43,7 +43,7 @@ fn gen_128_bits<R: RngCore + CryptoRng>(mut rng: R) -> [u64; 4] {
 /// API in an async context
 ///
 /// The different enum variants are for the different signature types which use
-/// different Pallas basepoints for computation: SpendAuth and Binding sigantures.
+/// different Pallas basepoints for computation: SpendAuth and Binding signatures.
 #[derive(Clone, Debug)]
 enum Inner {
     /// A RedPallas signature using the SpendAuth generator group element.

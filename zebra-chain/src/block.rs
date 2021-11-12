@@ -105,7 +105,7 @@ impl Block {
     /// # Consensus rule:
     ///
     ///  The nConsensusBranchId field MUST match the consensus branch ID used for
-    ///  SIGHASH transaction hashes, as specifed in [ZIP-244] ([7.1]).
+    ///  SIGHASH transaction hashes, as specified in [ZIP-244] ([7.1]).
     ///
     /// [ZIP-244]: https://zips.z.cash/zip-0244
     /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus

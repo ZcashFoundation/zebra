@@ -166,7 +166,7 @@ impl CachedFfiTransaction {
 // point, while the transaction verifier is spawning all of the script verifier
 // futures. The service readiness check requires this await between each task
 // spawn. Each `script` future needs a copy of the
-// `Arc<CachedFfiTransaction>` so that it can simultaniously verify inputs
+// `Arc<CachedFfiTransaction>` so that it can simultaneously verify inputs
 // without cloning the c++ allocated type unnecessarily.
 //
 // ## Explanation
