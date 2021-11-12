@@ -2,6 +2,7 @@
 
 use std::{
     cmp::min,
+    convert::TryInto,
     fmt,
     io::{Cursor, Read, Write},
 };
@@ -25,7 +26,7 @@ use zebra_chain::{
 use crate::constants;
 
 use super::{
-    addr::{AddrInVersion, AddrV1},
+    addr::{AddrInVersion, AddrV1, AddrV2},
     message::{Message, RejectReason},
     types::*,
 };
@@ -242,6 +243,11 @@ impl Codec {
                 }
             }
             Message::Addr(addrs) => {
+                assert!(
+                    addrs.len() <= constants::MAX_ADDRS_IN_MESSAGE,
+                    "unexpectely large Addr message: greater than MAX_ADDRS_IN_MESSAGE addresses"
+                );
+
                 // Regardless of the way we received the address,
                 // Zebra always sends `addr` messages
                 let v1_addrs: Vec<AddrV1> = addrs.iter().map(|addr| AddrV1::from(*addr)).collect();
@@ -408,6 +414,7 @@ impl Decoder for Codec {
                     b"pong\0\0\0\0\0\0\0\0" => self.read_pong(&mut body_reader),
                     b"reject\0\0\0\0\0\0" => self.read_reject(&mut body_reader),
                     b"addr\0\0\0\0\0\0\0\0" => self.read_addr(&mut body_reader),
+                    b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
                     b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
                     b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
                     b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
@@ -510,11 +517,39 @@ impl Codec {
     }
 
     /// Deserialize an `addr` (v1) message into a list of `MetaAddr`s.
-    fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
+    pub(super) fn read_addr<R: Read>(&self, reader: R) -> Result<Message, Error> {
         let addrs: Vec<AddrV1> = reader.zcash_deserialize_into()?;
+
+        if addrs.len() > constants::MAX_ADDRS_IN_MESSAGE {
+            return Err(Error::Parse(
+                "more than MAX_ADDRS_IN_MESSAGE in addr message",
+            ));
+        }
 
         // Convert the received address format to Zebra's internal `MetaAddr`.
         let addrs = addrs.into_iter().map(Into::into).collect();
+        Ok(Message::Addr(addrs))
+    }
+
+    /// Deserialize an `addrv2` message into a list of `MetaAddr`s.
+    ///
+    /// Currently, Zebra parses received `addrv2`s, ignoring some address types.
+    /// Zebra never sends `addrv2` messages.
+    pub(super) fn read_addrv2<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        let addrs: Vec<AddrV2> = reader.zcash_deserialize_into()?;
+
+        if addrs.len() > constants::MAX_ADDRS_IN_MESSAGE {
+            return Err(Error::Parse(
+                "more than MAX_ADDRS_IN_MESSAGE in addrv2 message",
+            ));
+        }
+
+        // Convert the received address format to Zebra's internal `MetaAddr`,
+        // ignoring unsupported network IDs.
+        let addrs = addrs
+            .into_iter()
+            .filter_map(|addr| addr.try_into().ok())
+            .collect();
         Ok(Message::Addr(addrs))
     }
 
