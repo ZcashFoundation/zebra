@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{Block, Hash, Header, Height},
     parameters::{Network, NetworkUpgrade},
     transaction,
@@ -133,28 +132,29 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
-
+        // funding stream amount values
         let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
             .expect("We always expect a funding stream hashmap response even if empty");
-
-        let funding_stream_amounts: HashSet<Amount<NonNegative>> = funding_streams
-            .iter()
-            .map(|(_receiver, amount)| *amount)
-            .collect();
-        let output_amounts = subsidy::general::output_amounts(coinbase);
 
         // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
         // MUST contain at least one output per funding stream `fs` active at `height`,
         // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
         // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+        for (receiver, expected_amount) in funding_streams {
+            let address =
+                subsidy::funding_streams::funding_stream_address(height, network, receiver);
 
-        // TODO: We are only checking each fundign stream reward is present in the
-        // coinbase transaction outputs but not the recipient addresses.
-        if funding_stream_amounts.is_subset(&output_amounts) {
-            Ok(())
-        } else {
-            Err(SubsidyError::FundingStreamNotFound)?
+            let has_expected_output =
+                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
+                    .iter()
+                    .map(zebra_chain::transparent::Output::value)
+                    .any(|value| value == expected_amount);
+
+            if !has_expected_output {
+                Err(SubsidyError::FundingStreamNotFound)?;
+            }
         }
+        Ok(())
     } else {
         // Future halving, with no founders reward or funding streams
         Ok(())

@@ -22,7 +22,7 @@ pub enum SubsidyError {
     #[error("founders reward output not found")]
     FoundersRewardNotFound,
 
-    #[error("funding stream output not found")]
+    #[error("funding stream expected output not found")]
     FundingStreamNotFound,
 }
 
@@ -49,6 +49,9 @@ pub enum TransactionError {
 
     #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
     CoinbaseHasEnableSpendsOrchard,
+
+    #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
+    CoinbaseOutputsNotDecryptable,
 
     #[error("coinbase inputs MUST NOT exist in mempool")]
     CoinbaseInMempool,

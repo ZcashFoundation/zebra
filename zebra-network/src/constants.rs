@@ -121,6 +121,20 @@ pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(10);
 ///       response (#1869)
 pub const GET_ADDR_FANOUT: usize = 3;
 
+/// The maximum number of addresses allowed in an `addr` or `addrv2` message.
+///
+/// `addr`:
+/// > The number of IP address entries up to a maximum of 1,000.
+///
+/// https://developer.bitcoin.org/reference/p2p_networking.html#addr
+///
+/// `addrv2`:
+/// > One message can contain up to 1,000 addresses.
+/// > Clients MUST reject messages with more addresses.
+///
+/// https://zips.z.cash/zip-0155#specification
+pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
+
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// ## SECURITY
