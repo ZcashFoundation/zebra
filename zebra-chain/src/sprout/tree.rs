@@ -15,7 +15,7 @@
 use std::{cell::Cell, fmt};
 
 use byteorder::{BigEndian, ByteOrder};
-use incrementalmerkletree::bridgetree::{self, Frontier};
+use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
 use thiserror::Error;
 
