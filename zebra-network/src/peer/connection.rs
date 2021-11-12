@@ -98,10 +98,10 @@ impl Handler {
                 Message::Tx(transaction),
             ) => {
                 // assumptions:
-                //   - the transaction messages are sent in a single continous batch
+                //   - the transaction messages are sent in a single continuous batch
                 //   - missing transaction hashes are included in a `NotFound` message
                 if pending_ids.remove(&transaction.id) {
-                    // we are in the middle of the continous transaction messages
+                    // we are in the middle of the continuous transaction messages
                     transactions.push(transaction);
                     if pending_ids.is_empty() {
                         Handler::Finished(Ok(Response::Transactions(transactions)))

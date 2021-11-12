@@ -230,7 +230,7 @@ pub enum CommitmentError {
         actual: [u8; 32],
     },
 
-    #[error("invalid chain history activation reserved block committment: expected all zeroes, actual: {actual:?}")]
+    #[error("invalid chain history activation reserved block commitment: expected all zeroes, actual: {actual:?}")]
     InvalidChainHistoryActivationReserved { actual: [u8; 32] },
 
     #[error("invalid chain history root: expected {expected:?}, actual: {actual:?}")]
