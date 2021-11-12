@@ -55,13 +55,12 @@ pub enum FundingStreamReceiver {
 
 impl FundingStreamReceiver {
     /// Get a list of receiver types
-    pub fn receivers() -> Vec<Self> {
-        vec![Self::Ecc, Self::ZcashFoundation, Self::MajorGrants]
+    pub const fn receivers() -> [Self; 3] {
+        [Self::Ecc, Self::ZcashFoundation, Self::MajorGrants]
     }
 }
-
 /// The number of funding stream receiver categories.
-pub const FUNDING_STREAM_RECEIVERS_NUMBER: usize = 3;
+pub const FUNDING_STREAM_RECEIVERS_NUMBER: usize = FundingStreamReceiver::receivers().len();
 
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
 ///
