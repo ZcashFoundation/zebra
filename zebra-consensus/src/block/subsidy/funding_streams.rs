@@ -123,7 +123,7 @@ pub fn funding_stream_address(
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams.
-pub fn check_script_form(lock_script: Script, address: Address) -> bool {
+pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
     let mut address_hash = address
         .zcash_serialize_to_vec()
         .expect("we should get address bytes here");
@@ -133,7 +133,7 @@ pub fn check_script_form(lock_script: Script, address: Address) -> bool {
     address_hash.insert(0, OpCode::Hash160 as u8);
     address_hash.insert(address_hash.len(), OpCode::Equal as u8);
     if lock_script.as_raw_bytes().len() == address_hash.len()
-        && lock_script == Script::new(&address_hash)
+        && *lock_script == Script::new(&address_hash)
     {
         return true;
     }
@@ -150,7 +150,7 @@ pub fn find_output_with_address_and_amount(
     transaction
         .outputs()
         .iter()
-        .filter(|o| check_script_form(o.lock_script.clone(), address) && o.value == amount)
+        .filter(|o| check_script_form(&o.lock_script, address) && o.value == amount)
         .cloned()
         .collect()
 }
