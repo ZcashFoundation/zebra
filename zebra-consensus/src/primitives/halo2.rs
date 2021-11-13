@@ -122,19 +122,10 @@ impl From<zebra_chain::orchard::ShieldedData> for Item {
 // `crate::transaction::Error`, which does the trait derivation via `thiserror`
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum Halo2Error {
-    /// The constraint system is not satisfied.
+    #[error("the constraint system is not satisfied")]
     ConstraintSystemFailure,
-    /// Catchall for now until https://github.com/zcash/halo2/pull/394 is merged
+    #[error("unknown Halo2 error")]
     Other,
-}
-
-impl fmt::Display for Halo2Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Halo2Error::ConstraintSystemFailure => write!(f, "Constraint system failure"),
-            _ => write!(f, "Unknown Halo2 error"),
-        }
-    }
 }
 
 impl From<halo2::plonk::Error> for Halo2Error {
