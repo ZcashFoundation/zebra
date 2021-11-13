@@ -33,7 +33,7 @@ hex = "0.4"
 incrementalmerkletree = "0.1.0"
 jubjub = "0.8.0"
 lazy_static = "1.4.0"
-orchard = { git = "https://github.com/dconnolly/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
+orchard = "0.0"
 rand_core = "0.6"
 ripemd160 = "0.9"
 secp256k1 = { version = "0.20.3", features = ["serde"] }
