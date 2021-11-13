@@ -35,10 +35,9 @@ skip-tree = [
     { name = "tracing-subscriber", version = "=0.1.6" },
 
     # ticket #2952: cryptography dependencies
-    { name = "aes", version = "=0.6.0" },
     { name = "bellman", version = "=0.10.0" },
     { name = "bls12_381", version = "=0.5.0" },
-    { name = "fpe", version = "=0.4.0" },
+
 
     # ticket #2982: librustzcash and orchard git versions
     # Note that the equihash duplication is probably because `zcash_primitives`
