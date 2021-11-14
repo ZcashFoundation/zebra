@@ -447,10 +447,10 @@ Construct a new chain starting with `block`.
 
 ### The `QueuedBlocks` type
 
-The queued blocks type represents the non-finalized blocks that were commited
+The queued blocks type represents the non-finalized blocks that were committed
 before their parent blocks were. It is responsible for tracking which blocks
-are queued by their parent so they can be commited immediately after the
-parent is commited. It also tracks blocks by their height so they can be
+are queued by their parent so they can be committed immediately after the
+parent is committed. It also tracks blocks by their height so they can be
 discarded if they ever end up below the reorg limit.
 
 `NonFinalizedState` is defined by the following structure and API:
@@ -529,7 +529,7 @@ The state service uses the following entry points:
 
 ## Committing non-finalized blocks
 
-New `non-finalized` blocks are commited as follows:
+New `non-finalized` blocks are committed as follows:
 
 ### `pub(super) fn queue_and_commit_non_finalized_blocks(&mut self, new: Arc<Block>) -> tokio::sync::oneshot::Receiver<block::Hash>`
 
@@ -559,7 +559,7 @@ New `non-finalized` blocks are commited as follows:
 5. Else iteratively attempt to process queued blocks by their parent hash
    starting with `block.header.previous_block_hash`
 
-6. While there are recently commited parent hashes to process
+6. While there are recently committed parent hashes to process
     - Dequeue all blocks waiting on `parent` with `let queued_children =
       self.queued_blocks.dequeue_children(parent);`
     - for each queued `block`
@@ -574,8 +574,8 @@ New `non-finalized` blocks are commited as follows:
       - Else add the new block to an existing non-finalized chain or new fork
         with `self.mem.commit_block(block);`
       - Send `Ok(hash)` over the associated channel to indicate the block
-        was successfully commited
-      - Add `block.hash` to the set of recently commited parent hashes to
+        was successfully committed
+      - Add `block.hash` to the set of recently committed parent hashes to
         process
 
 7. While the length of the non-finalized portion of the best chain is greater

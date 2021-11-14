@@ -183,7 +183,7 @@ lazy_static! {
     /// represented as a network upgrade.
     ///
     /// The minimum protocol version is used to check the protocol versions of our
-    /// peers during the initial block download. After the intial block download,
+    /// peers during the initial block download. After the initial block download,
     /// we use the current block height to select the minimum network protocol
     /// version.
     ///

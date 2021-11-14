@@ -39,7 +39,7 @@ a given shielded payment address.
 
 **nullifier set**: The set of unique `Nullifier`s revealed by any `Transaction`s
 within a `Block`. `Nullifier`s are enforced to be unique within a valid block chain
-by commiting to previous treestates in `Spend` descriptions, in order to prevent
+by committing to previous treestates in `Spend` descriptions, in order to prevent
 double-spends.
 
 **note commitments**: Pedersen commitment to the values consisting a `Note`. One
@@ -174,7 +174,7 @@ To finalize the block, the Sprout and Sapling treestates are the ones resulting
 from the last transaction in the block, and determines the Sprout and Sapling
 anchors that will be associated with this block as we commit it to our finalized
 state. The Sprout and Sapling nullifiers revealed in the block will be merged
-with the exising ones in our finalized state (ie, it should strictly grow over
+with the existing ones in our finalized state (ie, it should strictly grow over
 time).
 
 ## State Management

@@ -51,7 +51,7 @@ spend.
 
 This means that script verification requires access to data about previous
 UTXOs, in order to determine the conditions under which those UTXOs can be
-spent. In Zebra, we aim to run operations asychronously and out-of-order to
+spent. In Zebra, we aim to run operations asynchronously and out-of-order to
 the greatest extent possible. For instance, we may begin verification of a
 block before all of its ancestors have been verified or even downloaded. So
 we need to design a mechanism that allows script verification to declare its
@@ -126,7 +126,7 @@ The request does not resolve until:
 - the output is spendable at `height` with `spend_restriction`.
 
 The new `Utxo` type adds a coinbase flag and height to `transparent::Output`s
-that we look up in the state, or get from newly commited blocks:
+that we look up in the state, or get from newly committed blocks:
 ```rust
 enum Response::SpendableUtxo(Utxo)
 

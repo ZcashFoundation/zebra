@@ -486,7 +486,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .respond(Response::Nil);
 
-    // Add all the rest of the continous blocks we have to test tx2 will never expire.
+    // Add all the rest of the continuous blocks we have to test tx2 will never expire.
     let more_blocks: Vec<Arc<Block>> = vec![
         zebra_test::vectors::BLOCK_MAINNET_4_BYTES
             .zcash_deserialize_into()

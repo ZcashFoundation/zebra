@@ -123,7 +123,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
 /// The size of a joinsplit, excluding the ZkProof
 ///
 /// Excluding the ZkProof, a Joinsplit consists of an 8 byte vpub_old, an 8 byte vpub_new, a 32 byte anchor,
-/// two 32 byte nullifiers, two 32 byte committments, a 32 byte epheremral key, a 32 byte random seed
+/// two 32 byte nullifiers, two 32 byte commitments, a 32 byte ephemeral key, a 32 byte random seed
 /// two 32 byte vmacs, and two 601 byte encrypted ciphertexts.
 const JOINSPLIT_SIZE_WITHOUT_ZKPROOF: u64 =
     8 + 8 + 32 + (32 * 2) + (32 * 2) + 32 + 32 + (32 * 2) + (601 * 2);

@@ -304,7 +304,7 @@ impl FinalizedState {
 
         // Check the block commitment. For Nu5-onward, the block hash commits only
         // to non-authorizing data (see ZIP-244). This checks the authorizing data
-        // commitment, making sure the entire block contents were commited to.
+        // commitment, making sure the entire block contents were committed to.
         // The test is done here (and not during semantic validation) because it needs
         // the history tree root. While it _is_ checked during contextual validation,
         // that is not called by the checkpoint verifier, and keeping a history tree there

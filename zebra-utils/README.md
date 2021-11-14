@@ -1,6 +1,6 @@
 # Zebra Utilities
 
-This crate contains tools for zebra mantainers. 
+This crate contains tools for zebra maintainers.
 
 ## Programs
 

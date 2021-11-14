@@ -383,7 +383,7 @@ impl<T> TestChild<T> {
 
 pub struct TestOutput<T> {
     #[allow(dead_code)]
-    // this just keeps the test dir around from `TestChild` so it doesnt get
+    // this just keeps the test dir around from `TestChild` so it doesn't get
     // deleted during `wait_with_output`
     dir: Option<T>,
     pub cmd: String,

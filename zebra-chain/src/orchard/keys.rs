@@ -791,7 +791,7 @@ impl From<FullViewingKey> for DiversifierKey {
     /// that cannot be distinguished (without knowledge of the
     /// spending key) from one with a random diversifier...'
     ///
-    /// Derived as specied in section [4.2.3] of the spec, and [ZIP-32].
+    /// Derived as specified in section [4.2.3] of the spec, and [ZIP-32].
     ///
     /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
     /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation

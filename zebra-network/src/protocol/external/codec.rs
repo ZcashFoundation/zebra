@@ -245,7 +245,7 @@ impl Codec {
             Message::Addr(addrs) => {
                 assert!(
                     addrs.len() <= constants::MAX_ADDRS_IN_MESSAGE,
-                    "unexpectely large Addr message: greater than MAX_ADDRS_IN_MESSAGE addresses"
+                    "unexpectedly large Addr message: greater than MAX_ADDRS_IN_MESSAGE addresses"
                 );
 
                 // Regardless of the way we received the address,
