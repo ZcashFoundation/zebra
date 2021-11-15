@@ -37,6 +37,13 @@ impl LockTime {
     /// LockTime is u32 in the spec, so times are limited to u32::MAX.
     pub const MAX_TIMESTAMP: i64 = u32::MAX as i64;
 
+    /// Returns a [`LockTime`] that is always unlocked.
+    ///
+    /// The lock time is set to the block height of the genesis block.
+    pub fn unlocked() -> Self {
+        LockTime::Height(block::Height(0))
+    }
+
     /// Returns the minimum LockTime::Time, as a LockTime.
     ///
     /// Users should not construct lock times less than `min_lock_timestamp`.
