@@ -20,7 +20,7 @@ jubjub = "0.8.0"
 lazy_static = "1.4.0"
 once_cell = "1.8"
 # TODO: replace with upstream orchard when these changes are merged
-orchard = "0.0"
+orchard = "0.0.0"
 rand = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
 
