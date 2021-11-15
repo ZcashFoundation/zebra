@@ -20,7 +20,7 @@ bitflags = "1.2.1"
 bitvec = "0.22"
 blake2b_simd = "0.5.11"
 blake2s_simd = "0.5.11"
-bls12_381 = "0.5.0"
+bls12_381 = "0.6.0"
 bs58 = { version = "0.4", features = ["check"] }
 byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
@@ -31,7 +31,7 @@ group = "0.11"
 halo2 = "=0.1.0-beta.1"
 hex = "0.4"
 incrementalmerkletree = "0.1.0"
-jubjub = "0.7.0"
+jubjub = "0.8.0"
 lazy_static = "1.4.0"
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
 rand_core = "0.6"
