@@ -27,7 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.2"
 fpe = "0.5.0"
 futures = "0.3"
-group = "0.11"
+group = "0.11.0"
 halo2 = "=0.1.0-beta.1"
 hex = "0.4"
 incrementalmerkletree = "0.1.0"
@@ -43,7 +43,7 @@ sha2 = { version = "0.9.8", features=["compress"] }
 subtle = "2.4"
 thiserror = "1"
 uint = "0.9.1"
-x25519-dalek = { version = "1.1", features = ["serde"] }
+x25519-dalek = { version = "1.2.0", features = ["serde"] }
 zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
