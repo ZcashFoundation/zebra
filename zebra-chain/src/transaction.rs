@@ -327,6 +327,12 @@ impl Transaction {
             | Transaction::V5 { lock_time, .. } => *lock_time,
         };
 
+        // A lock time with a block height of zero means in practice that the lock time is
+        // disabled because it was effectively unlocked at the genesis block.
+        if lock_time == LockTime::unlocked() {
+            return None;
+        }
+
         Some(lock_time)
     }
 
