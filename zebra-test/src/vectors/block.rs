@@ -104,6 +104,16 @@ lazy_static! {
             (1_180_900, BLOCK_MAINNET_1180900_BYTES.as_ref()),
         ].iter().cloned().collect();
 
+    /// Mainnet final sprout roots, indexed by height.
+    ///
+    /// If there are no sprout inputs or outputs in a block, the final sprout root is the same as the previous block.
+    pub static ref MAINNET_FINAL_SPROUT_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
+            // Overwinter
+            (347_499, SPROUT_FINAL_ROOT_MAINNET_347499_BYTES.as_ref().try_into().unwrap()),
+            (347_500, SPROUT_FINAL_ROOT_MAINNET_347500_BYTES.as_ref().try_into().unwrap()),
+            (347_501, SPROUT_FINAL_ROOT_MAINNET_347501_BYTES.as_ref().try_into().unwrap()),
+        ].iter().cloned().collect();
+
     /// Mainnet final sapling roots, indexed by height
     ///
     /// Pre-sapling roots are all-zeroes.
@@ -286,6 +296,22 @@ lazy_static! {
     pub static ref BAD_BLOCK_MAINNET_202_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-000-202-bad.txt").trim())
         .expect("Block bytes are in valid hex representation");
+
+    // for i in 347499 347500 347501; do
+    //     zcash-cli z_gettreestate "$i" | \
+    //     jq --arg i "$i" \
+    //     --raw-output \
+    //     '"pub static ref SPROUT_FINAL_ROOT_MAINNET_\($i)_BYTES: [u8; 32] = <[u8; 32]>::from_hex(\"\(.sprout.commitments.finalRoot)\").expect(\"final root bytes are in valid hex representation\").rev();"'
+    //     done
+    pub static ref SPROUT_FINAL_ROOT_MAINNET_347499_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("ce01f64025aba7c0e30a29f239f0eecd3cc18e5b1e575ca018c789a99482724f")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref SPROUT_FINAL_ROOT_MAINNET_347500_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("ce01f64025aba7c0e30a29f239f0eecd3cc18e5b1e575ca018c789a99482724f")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref SPROUT_FINAL_ROOT_MAINNET_347501_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("db036e080299a7401fd816789b5ea1b092ba3dab21e0f1d44161fffa149c65c1")
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Overwinter transition
     // for i in 347499 347500 347501; do
