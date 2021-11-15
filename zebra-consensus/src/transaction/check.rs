@@ -4,6 +4,8 @@
 
 use std::{borrow::Cow, collections::HashSet, convert::TryFrom, hash::Hash};
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::Height,
@@ -11,10 +13,45 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
     sapling::{Output, PerSpendAnchor, Spend},
-    transaction::Transaction,
+    transaction::{LockTime, Transaction},
 };
 
 use crate::error::TransactionError;
+
+/// Checks if the transaction's lock time allows this transaction to be included in a block.
+///
+/// Consensus rule:
+///
+/// > The transaction must be finalized: either its locktime must be in the past (or less
+/// > than or equal to the current block height), or all of its sequence numbers must be
+/// > 0xffffffff.
+///
+/// [`Transaction::lock_time`] validates the transparent input sequence numbers, returning [`None`]
+/// if they indicate that the transaction is finalized by them. Otherwise, this function validates
+/// if the lock time is in the past.
+pub fn lock_time_has_passed(
+    tx: &Transaction,
+    block_height: Height,
+    block_time: DateTime<Utc>,
+) -> Result<(), TransactionError> {
+    match tx.lock_time() {
+        Some(LockTime::Height(unlock_height)) => {
+            if block_height > unlock_height {
+                Ok(())
+            } else {
+                Err(TransactionError::LockedUntilAfterBlockHeight(unlock_height))
+            }
+        }
+        Some(LockTime::Time(unlock_time)) => {
+            if block_time > unlock_time {
+                Ok(())
+            } else {
+                Err(TransactionError::LockedUntilAfterBlockTime(unlock_time))
+            }
+        }
+        None => Ok(()),
+    }
+}
 
 /// Checks that the transaction has inputs and outputs.
 ///
