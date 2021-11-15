@@ -96,7 +96,7 @@ pub struct Position(pub(crate) u64);
 /// each treestate.
 #[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct Root([u8; 32]);
+pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
