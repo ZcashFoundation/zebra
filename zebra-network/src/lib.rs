@@ -71,6 +71,7 @@ pub use crate::{
     config::Config,
     isolated::connect_isolated,
     meta_addr::PeerAddrState,
+    peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::{RetryErrors, RetryLimit},
     protocol::internal::{Request, Response},
