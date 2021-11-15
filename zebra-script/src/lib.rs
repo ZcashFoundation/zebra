@@ -75,7 +75,10 @@ impl CachedFfiTransaction {
             .expect("serialization into a vec is infallible");
 
         let tx_to_ptr = tx_to.as_ptr();
-        let tx_to_len = tx_to.len() as u32;
+        let tx_to_len = tx_to
+            .len()
+            .try_into()
+            .expect("serialized transaction lengths are much less than u32::MAX");
         let mut err = 0;
 
         // SAFETY: the tx_to fields are created from a Rust vector
@@ -115,7 +118,12 @@ impl CachedFfiTransaction {
     ) -> Result<(), Error> {
         let transparent::Output { value, lock_script } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
-        let n_in = input_index as _;
+
+        // This conversion is useful on some platforms, but not others.
+        #[allow(clippy::useless_conversion)]
+        let n_in = input_index
+            .try_into()
+            .expect("transaction indexes are much less than c_uint::MAX");
 
         let script_ptr = script_pub_key.as_ptr();
         let script_len = script_pub_key.len();
@@ -124,7 +132,8 @@ impl CachedFfiTransaction {
 
         let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
             | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
-        #[cfg(windows)]
+        // This conversion is useful on some platforms, but not others.
+        #[allow(clippy::useless_conversion)]
         let flags = flags
             .try_into()
             .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
@@ -140,7 +149,9 @@ impl CachedFfiTransaction {
                 self.precomputed,
                 n_in,
                 script_ptr,
-                script_len as u32,
+                script_len
+                    .try_into()
+                    .expect("script lengths are much less than u32::MAX"),
                 amount,
                 flags,
                 consensus_branch_id,
