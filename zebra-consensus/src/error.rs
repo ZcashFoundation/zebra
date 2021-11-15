@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use zebra_chain::{orchard, sapling, sprout, transparent};
 
-use crate::BoxError;
+use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -208,4 +208,14 @@ pub enum BlockError {
 
     #[error("transaction has wrong consensus branch id for block network upgrade")]
     WrongTransactionConsensusBranchId,
+
+    #[error(
+        "block {height:?} {hash:?} has {legacy_sigop_count} legacy transparent signature operations, \
+         but the limit is {MAX_BLOCK_SIGOPS}"
+    )]
+    TooManyTransparentSignatureOperations {
+        height: zebra_chain::block::Height,
+        hash: zebra_chain::block::Hash,
+        legacy_sigop_count: u64,
+    },
 }

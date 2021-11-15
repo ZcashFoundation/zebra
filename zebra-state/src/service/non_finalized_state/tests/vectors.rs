@@ -20,8 +20,6 @@ use crate::{
     Config,
 };
 
-use self::assert_eq;
-
 #[test]
 fn construct_empty() {
     zebra_test::init();

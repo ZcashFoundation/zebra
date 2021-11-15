@@ -1,12 +1,5 @@
 //! Tests for block verification
 
-use crate::{
-    parameters::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
-    script,
-};
-
-use super::*;
-
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -15,15 +8,25 @@ use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{
+        self,
+        tests::generate::{large_multi_transaction_block, large_single_transaction_block},
+        Block, Height,
+    },
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, Transaction},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
+use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::transaction;
+use crate::{
+    parameters::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
+    script, transaction,
+};
+
+use super::*;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<
     Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
@@ -605,4 +608,56 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
     }
 
     Ok(())
+}
+
+#[test]
+fn legacy_sigops_count_for_large_generated_blocks() {
+    zebra_test::init();
+
+    // We can't test sigops using the transaction verifier, because it looks up UTXOs.
+
+    let block = large_single_transaction_block();
+    let mut legacy_sigop_count = 0;
+    for transaction in block.transactions {
+        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction.clone()));
+        let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
+        assert_eq!(tx_sigop_count, Ok(0));
+        legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
+    }
+    // We know this block has no sigops.
+    assert_eq!(legacy_sigop_count, 0);
+
+    let block = large_multi_transaction_block();
+    let mut legacy_sigop_count = 0;
+    for transaction in block.transactions {
+        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction.clone()));
+        let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
+        assert_eq!(tx_sigop_count, Ok(1));
+        legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
+    }
+    // Test that large blocks can actually fail the sigops check.
+    assert!(legacy_sigop_count > MAX_BLOCK_SIGOPS);
+}
+
+#[test]
+fn legacy_sigops_count_for_historic_blocks() {
+    zebra_test::init();
+
+    // We can't test sigops using the transaction verifier, because it looks up UTXOs.
+
+    for block in zebra_test::vectors::BLOCKS.iter() {
+        let mut legacy_sigop_count = 0;
+
+        let block: Block = block
+            .zcash_deserialize_into()
+            .expect("block test vector is valid");
+        for transaction in block.transactions {
+            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction.clone()));
+            legacy_sigop_count += cached_ffi_transaction
+                .legacy_sigop_count()
+                .expect("unexpected invalid sigop count");
+        }
+        // Test that historic blocks pass the sigops check.
+        assert!(legacy_sigop_count <= MAX_BLOCK_SIGOPS);
+    }
 }

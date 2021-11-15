@@ -6,19 +6,20 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
-// we allow unsafe code to call zcash_script
+// we allow unsafe code, so we can call zcash_script
+
+use std::{convert::TryInto, sync::Arc};
 
 use displaydoc::Display;
-#[cfg(windows)]
-use std::convert::TryInto;
-use std::sync::Arc;
 use thiserror::Error;
+
 use zcash_script::{
     zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
     zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
     zcash_script_error_t_zcash_script_ERR_TX_INDEX,
     zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
 };
+
 use zebra_chain::{
     parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
     transparent,
@@ -62,7 +63,16 @@ impl From<zcash_script_error_t> for Error {
 /// Transaction.
 #[derive(Debug)]
 pub struct CachedFfiTransaction {
+    /// The deserialized Zebra transaction.
+    ///
+    /// This field is private so that `transaction` and `precomputed` always match.
     transaction: Arc<Transaction>,
+
+    /// The deserialized `zcash_script` transaction, as a C++ object.
+    ///
+    /// SAFETY: this field must be private,
+    ///         and `CachedFfiTransaction::new` must be the only method that modifies it,
+    ///         so that it is [`Send`], [`Sync`], valid, and not NULL.
     precomputed: *mut std::ffi::c_void,
 }
 
@@ -74,12 +84,17 @@ impl CachedFfiTransaction {
             .expect("serialization into a vec is infallible");
 
         let tx_to_ptr = tx_to.as_ptr();
-        let tx_to_len = tx_to.len() as u32;
+        let tx_to_len = tx_to
+            .len()
+            .try_into()
+            .expect("serialized transaction lengths are much less than u32::MAX");
         let mut err = 0;
 
+        // SAFETY: the `tx_to_*` fields are created from a valid Rust `Vec`.
         let precomputed = unsafe {
             zcash_script::zcash_script_new_precomputed_tx(tx_to_ptr, tx_to_len, &mut err)
         };
+        // SAFETY: the safety of other methods depends on `precomputed` being valid and not NULL.
         assert!(
             !precomputed.is_null(),
             "zcash_script_new_precomputed_tx returned {} ({})",
@@ -89,6 +104,8 @@ impl CachedFfiTransaction {
 
         Self {
             transaction,
+            // SAFETY: `precomputed` must not be modified after initialisation,
+            //          so that it is `Send` and `Sync`.
             precomputed,
         }
     }
@@ -113,32 +130,42 @@ impl CachedFfiTransaction {
     ) -> Result<(), Error> {
         let transparent::Output { value, lock_script } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
-        let n_in = input_index as _;
+
+        // This conversion is useful on some platforms, but not others.
+        #[allow(clippy::useless_conversion)]
+        let n_in = input_index
+            .try_into()
+            .expect("transaction indexes are much less than c_uint::MAX");
 
         let script_ptr = script_pub_key.as_ptr();
         let script_len = script_pub_key.len();
 
         let amount = value.into();
+
         let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
             | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
+        // This conversion is useful on some platforms, but not others.
+        #[allow(clippy::useless_conversion)]
+        let flags = flags
+            .try_into()
+            .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
 
         let consensus_branch_id = branch_id.into();
 
         let mut err = 0;
 
+        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
+        //         The `script_*` fields are created from a valid Rust `slice`.
         let ret = unsafe {
             zcash_script::zcash_script_verify_precomputed(
                 self.precomputed,
                 n_in,
                 script_ptr,
-                script_len as u32,
-                amount,
-                #[cfg(not(windows))]
-                flags,
-                #[cfg(windows)]
-                flags
+                script_len
                     .try_into()
-                    .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint"),
+                    .expect("script lengths are much less than u32::MAX"),
+                amount,
+                flags,
                 consensus_branch_id,
                 &mut err,
             )
@@ -146,6 +173,24 @@ impl CachedFfiTransaction {
 
         if ret == 1 {
             Ok(())
+        } else {
+            Err(Error::from(err))
+        }
+    }
+
+    /// Returns the number of transparent signature operations in the
+    /// transparent inputs and outputs of this transaction.
+    pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
+        let mut err = 0;
+
+        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
+        let ret = unsafe {
+            zcash_script::zcash_script_legacy_sigop_count_precomputed(self.precomputed, &mut err)
+        };
+
+        if err == zcash_script_error_t_zcash_script_ERR_OK {
+            let ret = ret.try_into().expect("c_uint fits in a u64");
+            Ok(ret)
         } else {
             Err(Error::from(err))
         }
@@ -177,11 +222,16 @@ impl CachedFfiTransaction {
 // `zcash_script::zcash_script_verify_precomputed` only reads from the
 // precomputed context while verifying inputs, which makes it safe to treat this
 // pointer like a shared reference (given that is how it is used).
+//
+// The function `zcash_script:zcash_script_legacy_sigop_count_precomputed` only reads
+// from the precomputed context. Currently, these reads happen after all the concurrent
+// async checks have finished.
 unsafe impl Send for CachedFfiTransaction {}
 unsafe impl Sync for CachedFfiTransaction {}
 
 impl Drop for CachedFfiTransaction {
     fn drop(&mut self) {
+        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
         unsafe { zcash_script::zcash_script_free_precomputed_tx(self.precomputed) };
     }
 }
@@ -222,6 +272,19 @@ mod tests {
 
         let verifier = super::CachedFfiTransaction::new(transaction);
         verifier.is_valid(branch_id, (input_index, output))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn count_legacy_sigops() -> Result<()> {
+        zebra_test::init();
+
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        let cached_tx = super::CachedFfiTransaction::new(transaction);
+        assert_eq!(cached_tx.legacy_sigop_count()?, 1);
 
         Ok(())
     }
