@@ -20,7 +20,6 @@ COPY . .
 
 RUN cd zebrad/; cargo build --release --features enable-sentry
 
-
 # Runner image
 FROM debian:buster-slim AS zebrad-release
 
@@ -29,6 +28,9 @@ RUN apt-get update && \
 	ca-certificates
 
 COPY --from=builder /zebra/target/release/zebrad /
+
+# Download Zcash Sprout and Sapling parameters
+RUN curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zcash/zcash/master/zcutil/fetch-params.sh | sh
 
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet

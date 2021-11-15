@@ -31,6 +31,10 @@ jobs:
       - name: Install cargo-llvm-cov cargo command
         run: cargo install cargo-llvm-cov
 
+      - name: Download Zcash Sprout and Sapling parameters
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zcash/zcash/master/zcutil/fetch-params.sh | sh
+
       - name: Generate code coverage
         env:
           ZEBRA_SKIP_NETWORK_TESTS: 1
