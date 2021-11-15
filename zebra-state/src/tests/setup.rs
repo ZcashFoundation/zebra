@@ -9,7 +9,7 @@ use zebra_chain::{
         NetworkUpgrade,
     },
     serialization::ZcashDeserializeInto,
-    transaction::Transaction,
+    transaction::{LockTime, Transaction},
 };
 
 use crate::{
@@ -111,7 +111,7 @@ pub(crate) fn transaction_v4_from_coinbase(coinbase: &Transaction) -> Transactio
     Transaction::V4 {
         inputs: coinbase.inputs().to_vec(),
         outputs: coinbase.outputs().to_vec(),
-        lock_time: coinbase.lock_time(),
+        lock_time: coinbase.lock_time().unwrap_or_else(LockTime::unlocked),
         // `Height(0)` means that the expiry height is ignored
         expiry_height: coinbase.expiry_height().unwrap_or(Height(0)),
         // invalid for coinbase transactions

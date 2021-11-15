@@ -318,14 +318,16 @@ impl Transaction {
     }
 
     /// Get this transaction's lock time.
-    pub fn lock_time(&self) -> LockTime {
-        match self {
-            Transaction::V1 { lock_time, .. } => *lock_time,
-            Transaction::V2 { lock_time, .. } => *lock_time,
-            Transaction::V3 { lock_time, .. } => *lock_time,
-            Transaction::V4 { lock_time, .. } => *lock_time,
-            Transaction::V5 { lock_time, .. } => *lock_time,
-        }
+    pub fn lock_time(&self) -> Option<LockTime> {
+        let lock_time = match self {
+            Transaction::V1 { lock_time, .. }
+            | Transaction::V2 { lock_time, .. }
+            | Transaction::V3 { lock_time, .. }
+            | Transaction::V4 { lock_time, .. }
+            | Transaction::V5 { lock_time, .. } => *lock_time,
+        };
+
+        Some(lock_time)
     }
 
     /// Get this transaction's expiry height, if any.

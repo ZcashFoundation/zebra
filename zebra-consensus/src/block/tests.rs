@@ -15,7 +15,7 @@ use zebra_chain::{
     },
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    transaction::{arbitrary::transaction_to_fake_v5, Transaction},
+    transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_script::CachedFfiTransaction;
@@ -396,7 +396,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
         .map(|transaction| Transaction::V3 {
             inputs: transaction.inputs().to_vec(),
             outputs: vec![transaction.outputs()[0].clone()],
-            lock_time: transaction.lock_time(),
+            lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
             expiry_height: Height(0),
             joinsplit_data: None,
         })
@@ -468,7 +468,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
         .map(|transaction| Transaction::V4 {
             inputs: transaction.inputs().to_vec(),
             outputs: vec![transaction.outputs()[0].clone()],
-            lock_time: transaction.lock_time(),
+            lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
             expiry_height: Height(0),
             joinsplit_data: None,
             sapling_shielded_data: None,
