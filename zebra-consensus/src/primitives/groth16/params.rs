@@ -1,4 +1,7 @@
-use std::io::{self, BufReader};
+use std::{
+    fs,
+    io::{self, BufReader},
+};
 
 use bellman::groth16;
 use bls12_381::Bls12;
@@ -36,12 +39,50 @@ pub struct SaplingParams {
 
 impl SaplingParams {
     fn new() -> Self {
-        let (spend, output) = wagyu_zcash_parameters::load_sapling_parameters();
-        let spend_fs = BufReader::with_capacity(1024 * 1024, &spend[..]);
-        let output_fs = BufReader::with_capacity(1024 * 1024, &output[..]);
+        // Use exactly the same paths as fetch-params.sh.
+        let mut params_dir = dirs::home_dir().unwrap_or_else(|| "/".into());
+
+        // TODO: Is this path correct for Windows?
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        params_dir.push(".zcash-params");
+
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        params_dir.push("Library/Application Support/ZcashParams");
+
+        // Now the directory is correct, make sure we don't accidentally modify it.
+        let params_dir = params_dir;
+
+        // TODO: Make into a constant or re-implement in Rust.
+        let fetch_params_url =
+            "https://raw.githubusercontent.com/zcash/zcash/master/zcutil/fetch-params.sh";
+        let params_hint = format!(
+            "Hint: download parameters to {:?} using {:?}.",
+            params_dir, fetch_params_url,
+        );
+
+        let mut spend_path = params_dir.clone();
+        spend_path.push("sapling-spend.params");
+        let spend = fs::File::open(spend_path).unwrap_or_else(|_| {
+            panic!(
+                "unexpected missing or unreadable Sapling spend parameters file. {}",
+                params_hint
+            )
+        });
+
+        let mut output_path = params_dir;
+        output_path.push("sapling-output.params");
+        let output = fs::File::open(output_path).unwrap_or_else(|_| {
+            panic!(
+                "unexpected missing or unreadable Sapling output parameters file. {}",
+                params_hint
+            )
+        });
+
+        let spend_fs = BufReader::with_capacity(1024 * 1024, spend);
+        let output_fs = BufReader::with_capacity(1024 * 1024, output);
 
         Self::read(spend_fs, output_fs)
-            .expect("reading parameters from wagyu zcash parameter's vec will always succeed")
+            .unwrap_or_else(|_| panic!("unexpected error reading parameter files. {}", params_hint))
     }
 
     fn read<R: io::Read>(spend_fs: R, output_fs: R) -> Result<Self, io::Error> {
