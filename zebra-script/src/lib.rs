@@ -63,7 +63,16 @@ impl From<zcash_script_error_t> for Error {
 /// Transaction.
 #[derive(Debug)]
 pub struct CachedFfiTransaction {
+    /// The deserialized Zebra transaction.
+    ///
+    /// This field is private so that `transaction` and `precomputed` always match.
     transaction: Arc<Transaction>,
+
+    /// The deserialized `zcash_script` transaction, as a C++ object.
+    ///
+    /// SAFETY: this field must be private,
+    ///         and `CachedFfiTransaction::new` must be the only method that modifies it,
+    ///         so that it is [`Send`], [`Sync`], valid, and not NULL.
     precomputed: *mut std::ffi::c_void,
 }
 
@@ -81,10 +90,11 @@ impl CachedFfiTransaction {
             .expect("serialized transaction lengths are much less than u32::MAX");
         let mut err = 0;
 
-        // SAFETY: the tx_to fields are created from a Rust vector
+        // SAFETY: the `tx_to_*` fields are created from a valid Rust `Vec`.
         let precomputed = unsafe {
             zcash_script::zcash_script_new_precomputed_tx(tx_to_ptr, tx_to_len, &mut err)
         };
+        // SAFETY: the safety of other methods depends on `precomputed` being valid and not NULL.
         assert!(
             !precomputed.is_null(),
             "zcash_script_new_precomputed_tx returned {} ({})",
@@ -94,6 +104,8 @@ impl CachedFfiTransaction {
 
         Self {
             transaction,
+            // SAFETY: `precomputed` must not be modified after initialisation,
+            //          so that it is `Send` and `Sync`.
             precomputed,
         }
     }
@@ -142,8 +154,8 @@ impl CachedFfiTransaction {
 
         let mut err = 0;
 
-        // SAFETY: `new` makes sure `self.precomputed` is not NULL
-        //         the script fields are created from a Rust slice
+        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
+        //         The `script_*` fields are created from a valid Rust `slice`.
         let ret = unsafe {
             zcash_script::zcash_script_verify_precomputed(
                 self.precomputed,
@@ -171,7 +183,7 @@ impl CachedFfiTransaction {
     pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
         let mut err = 0;
 
-        // SAFETY: `new` makes sure `self.precomputed` is not NULL
+        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
         let ret = unsafe {
             zcash_script::zcash_script_legacy_sigop_count_precomputed(self.precomputed, &mut err)
         };
@@ -219,7 +231,7 @@ unsafe impl Sync for CachedFfiTransaction {}
 
 impl Drop for CachedFfiTransaction {
     fn drop(&mut self) {
-        // SAFETY: `new` makes sure `self.precomputed` is not NULL
+        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
         unsafe { zcash_script::zcash_script_free_precomputed_tx(self.precomputed) };
     }
 }
