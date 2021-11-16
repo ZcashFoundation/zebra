@@ -92,7 +92,8 @@ allow-git = [
     "https://github.com/str4d/redjubjub",
 
     # ticket #2523: replace unmaintained multiset
-    "https://github.com/jmitchell/multiset",]
+    "https://github.com/jmitchell/multiset",
+]
 
 [sources.allow-org]
 github = [
