@@ -35,9 +35,6 @@ skip-tree = [
     { name = "tracing-subscriber", version = "=0.1.6" },
 
     # ticket #2982: librustzcash and orchard git versions
-    # Note that the equihash duplication is probably because `zcash_primitives`
-    # (which imports it with a path import) is being imported as a git dependency.
-    { name = "equihash", version = "=0.1.0" },
     { name = "orchard", version = "=0.0.0" },
 
     # ticket #2983: criterion dependencies
@@ -60,6 +57,9 @@ skip-tree = [
 
     # ticket #2999: http dependencies
     { name = "bytes", version = "=0.5.6" },
+
+    # ticket #3061: reqwest and minreq dependencies
+    { name = "webpki-roots", version = "=0.18.0" },
 
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
     # alternative: downgrade Zebra to `bigint`
