@@ -11,7 +11,7 @@ pub mod merkle;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
-#[cfg(any(test, feature = "bench"))]
+#[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
 pub mod tests;
 
 use std::{collections::HashMap, convert::TryInto, fmt, ops::Neg};

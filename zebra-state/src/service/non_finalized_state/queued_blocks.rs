@@ -180,7 +180,6 @@ mod tests {
 
     use crate::{arbitrary::Prepare, tests::FakeChainHelper};
 
-    use self::assert_eq;
     use super::*;
 
     // Quick helper trait for making queued blocks with throw away channels
