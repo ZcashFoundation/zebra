@@ -18,16 +18,16 @@ use once_cell::sync::Lazy;
 use rand::thread_rng;
 use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
+
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
+
 use zebra_chain::sapling::{Output, PerSpendAnchor, Spend};
 
-mod hash_reader;
 mod params;
 #[cfg(test)]
 mod tests;
 
-use self::hash_reader::HashReader;
 use params::PARAMS;
 
 /// Global batch verification context for Groth16 proofs of Spend statements.
