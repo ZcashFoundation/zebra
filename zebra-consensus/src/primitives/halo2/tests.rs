@@ -110,8 +110,7 @@ async fn verify_orchard_halo2_proofs<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<Item>>::Error: From<tower::BoxError>,
-    <V as tower::Service<Item>>::Error: std::fmt::Debug,
+    <V as tower::Service<Item>>::Error: From<tower::BoxError> + std::fmt::Debug,
 {
     let mut async_checks = FuturesUnordered::new();
 
@@ -160,8 +159,6 @@ async fn verify_generated_halo2_proofs() {
         ),
     );
 
-    println!("Display: {}", Halo2Error::Other);
-
     // This should fail if any of the proofs fail to validate.
     assert!(verify_orchard_halo2_proofs(&mut verifier, shielded_data)
         .await
@@ -174,8 +171,7 @@ async fn verify_invalid_orchard_halo2_proofs<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<Item>>::Error: From<tower::BoxError>,
-    <V as tower::Service<Item>>::Error: std::fmt::Debug,
+    <V as tower::Service<Item>>::Error: From<tower::BoxError> + std::fmt::Debug,
 {
     let mut async_checks = FuturesUnordered::new();
 
