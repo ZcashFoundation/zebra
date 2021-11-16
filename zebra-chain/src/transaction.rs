@@ -327,8 +327,12 @@ impl Transaction {
             | Transaction::V5 { lock_time, .. } => *lock_time,
         };
 
-        // A lock time with a block height of zero means in practice that the lock time is
-        // disabled because it was effectively unlocked at the genesis block.
+        // `zcashd` checks that the block height is greater than the lock height.
+        // This check allows the genesis block transaction, which would otherwise be invalid.
+        // (Or have to use a lock time.)
+        //
+        // It matches the `zcashd` check here:
+        // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720
         if lock_time == LockTime::unlocked() {
             return None;
         }
