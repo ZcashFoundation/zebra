@@ -343,9 +343,12 @@ impl Transaction {
         // > than or equal to the current block height), or all of its sequence numbers must be
         // > 0xffffffff.
         //
-        // This means that the lock time is only enabled if at least one input sequence number is
-        // not `u32::MAX`. The code below will make the method return `None` if such sequence
-        // number isn't found.
+        // In `zcashd`, this rule applies to both coinbase and prevout input sequence numbers.
+        //
+        // Unlike Bitcoin, Zcash allows transactions with no transparent inputs. These transactions
+        // only have shielded inputs. Surprisingly, the `zcashd` implementation ignores the lock
+        // time in these transactions. `zcashd` only checks the lock time when it finds a
+        // transparent input sequence number that is not `u32::MAX`.
         //
         // https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions
         let has_sequence_number_enabling_lock_time = self
