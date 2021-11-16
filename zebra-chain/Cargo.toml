@@ -13,25 +13,25 @@ proptest-impl = ["proptest", "proptest-derive", "itertools", "zebra-test", "rand
 bench = ["zebra-test"]
 
 [dependencies]
-aes = "0.6"
+aes = "0.7.5"
 bech32 = "0.8.1"
 bigint = "4.4.3"
 bitflags = "1.2.1"
 bitvec = "0.22"
 blake2b_simd = "0.5.11"
 blake2s_simd = "0.5.11"
-bls12_381 = "0.5.0"
+bls12_381 = "0.6.0"
 bs58 = { version = "0.4", features = ["check"] }
 byteorder = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
 displaydoc = "0.2.2"
-fpe = "0.4"
+fpe = "0.5.0"
 futures = "0.3"
-group = "0.11"
+group = "0.11.0"
 halo2 = "=0.1.0-beta.1"
 hex = "0.4"
 incrementalmerkletree = "0.1.0"
-jubjub = "0.7.0"
+jubjub = "0.8.0"
 lazy_static = "1.4.0"
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
 rand_core = "0.6"
@@ -43,7 +43,7 @@ sha2 = { version = "0.9.8", features=["compress"] }
 subtle = "2.4"
 thiserror = "1"
 uint = "0.9.1"
-x25519-dalek = { version = "1.1", features = ["serde"] }
+x25519-dalek = { version = "1.2.0", features = ["serde"] }
 zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
