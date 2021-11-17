@@ -7,7 +7,7 @@ use crate::{
 
 use super::*;
 
-use std::sync::Arc;
+use std::{convert::TryFrom, sync::Arc};
 
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
@@ -15,6 +15,7 @@ use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block, Height},
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
@@ -193,7 +194,6 @@ fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
 #[test]
 fn difficulty_validation_failure() -> Result<(), Report> {
     zebra_test::init();
-    use crate::error::*;
 
     // Get a block in the mainnet, and mangle its difficulty field
     let block =
@@ -303,8 +303,6 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
 #[test]
 fn coinbase_validation_failure() -> Result<(), Report> {
     zebra_test::init();
-    use crate::error::*;
-
     let network = Network::Mainnet;
 
     // Get a block in the mainnet that is inside the founders reward period,
@@ -376,9 +374,6 @@ fn coinbase_validation_failure() -> Result<(), Report> {
 #[test]
 fn founders_reward_validation_failure() -> Result<(), Report> {
     zebra_test::init();
-    use crate::error::*;
-    use zebra_chain::transaction::Transaction;
-
     let network = Network::Mainnet;
 
     // Get a block in the mainnet that is inside the founders reward period.
@@ -390,12 +385,16 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
     let tx = block
         .transactions
         .get(0)
-        .map(|transaction| Transaction::V3 {
-            inputs: transaction.inputs().to_vec(),
-            outputs: vec![transaction.outputs()[0].clone()],
-            lock_time: transaction.lock_time(),
-            expiry_height: Height(0),
-            joinsplit_data: None,
+        .map(|transaction| {
+            let mut output = transaction.outputs()[0].clone();
+            output.value = Amount::try_from(i32::MAX).unwrap();
+            Transaction::V3 {
+                inputs: transaction.inputs().to_vec(),
+                outputs: vec![output],
+                lock_time: transaction.lock_time(),
+                expiry_height: Height(0),
+                joinsplit_data: None,
+            }
         })
         .unwrap();
 
@@ -448,9 +447,51 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
 #[test]
 fn funding_stream_validation_failure() -> Result<(), Report> {
     zebra_test::init();
-    use crate::error::*;
-    use zebra_chain::transaction::Transaction;
+    let network = Network::Mainnet;
 
+    // Get a block in the mainnet that is inside the funding stream period.
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+            .expect("block should deserialize");
+
+    // Build the new transaction with modified coinbase outputs
+    let tx = block
+        .transactions
+        .get(0)
+        .map(|transaction| {
+            let mut output = transaction.outputs()[0].clone();
+            output.value = Amount::try_from(i32::MAX).unwrap();
+            Transaction::V4 {
+                inputs: transaction.inputs().to_vec(),
+                outputs: vec![output],
+                lock_time: transaction.lock_time(),
+                expiry_height: Height(0),
+                joinsplit_data: None,
+                sapling_shielded_data: None,
+            }
+        })
+        .unwrap();
+
+    // Build new block
+    let transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = vec![Arc::new(tx)];
+    let block = Block {
+        header: block.header,
+        transactions,
+    };
+
+    // Validate it
+    let result = check::subsidy_is_valid(&block, network).unwrap_err();
+    let expected = BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::FundingStreamNotFound,
+    ));
+    assert_eq!(expected, result);
+
+    Ok(())
+}
+
+#[test]
+fn negative_fee_validation_failure() -> Result<(), Report> {
+    zebra_test::init();
     let network = Network::Mainnet;
 
     // Get a block in the mainnet that is inside the funding stream period.
@@ -481,9 +522,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
 
     // Validate it
     let result = check::subsidy_is_valid(&block, network).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::FundingStreamNotFound,
-    ));
+    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NegativeFees));
     assert_eq!(expected, result);
 
     Ok(())

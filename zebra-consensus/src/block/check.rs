@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 
 use zebra_chain::{
+    amount::{Amount, Error as AmountError, NonNegative},
     block::{Block, Hash, Header, Height},
     parameters::{Network, NetworkUpgrade},
     transaction,
@@ -101,14 +102,41 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
 
+    // Consensus rule: The total value in zatoshi of transparent outputs from a
+    // coinbase transaction, minus vbalanceSapling, minus vbalanceOrchard, MUST NOT
+    // be greater than the value in zatoshi of block subsidy plus the transaction fees
+    // paid by transactions in this block.
+    // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+    let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
+        .iter()
+        .sum::<Result<Amount<NonNegative>, AmountError>>()
+        .expect("the sum of all outputs wil lalways be positive")
+        .constrain()
+        .expect("positive value always fit in `NegativeAllowed`");
+    let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
+    let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
+
+    let block_subsidy: Amount = subsidy::general::block_subsidy(height, network)
+        .expect("a valid block subsidy for this height and network")
+        .constrain()
+        .expect("positive value always fit in `NegativeAllowed`");
+
+    // Consensus rule implementation: block fee must be at least zero.
+    let fees: Result<Amount<NonNegative>, AmountError> =
+        (transparent_value_balance - sapling_value_balance - orchard_value_balance - block_subsidy)
+            .expect("should not overflow")
+            .constrain();
+
+    if fees.is_err() {
+        Err(SubsidyError::NegativeFees)?
+    }
+
+    // Validate founders reward and funding streams
     let halving_div = subsidy::general::halving_divisor(height, network);
     let canopy_activation_height = NetworkUpgrade::Canopy
         .activation_height(network)
         .expect("Canopy activation height is known");
 
-    // TODO: the sum of the coinbase transaction outputs must be less than or equal to the block subsidy plus transaction fees
-
-    // Check founders reward and funding streams
     if height < SLOW_START_INTERVAL {
         unreachable!(
             "unsupported block height: callers should handle blocks below {:?}",
