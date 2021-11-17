@@ -22,6 +22,7 @@ use std::{
 use displaydoc::Display;
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
+use tokio::task::{spawn_blocking, JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::instrument;
 
@@ -148,7 +149,11 @@ where
     }
 }
 
-/// Initialize block and transaction verification services.
+/// Initialize block and transaction verification services,
+/// and pre-download Groth16 parameters if needed.
+///
+/// Returns a block verifier, transaction verifier,
+/// and the Groth16 parameter download task [`JoinHandle`].
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
 /// to verify blocks for is specified by `network`.
@@ -159,6 +164,9 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
+///
+/// Pre-downloads the Sapling and Sprout Groth16 parameters if needed,
+/// checks they were downloaded correctly, and loads them into Zebra.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -180,11 +188,22 @@ pub async fn init<S>(
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
     >,
+    JoinHandle<()>,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
+    // pre-download Groth16 parameters async
+
+    let groth16_download_handle = spawn_blocking(|| {
+        tracing::info!("checking if Zcash Sapling and Sprout parameters have been downloaded");
+
+        // The lazy static initializer does the download, if needed,
+        // and the file hash checks.
+        lazy_static::initialize(&crate::groth16::PARAMS);
+    });
+
     // transaction verification
 
     let script = script::Verifier::new(state_service.clone());
@@ -225,5 +244,5 @@ where
 
     let chain = Buffer::new(BoxService::new(chain), VERIFIER_BUFFER_BOUND);
 
-    (chain, transaction)
+    (chain, transaction, groth16_download_handle)
 }

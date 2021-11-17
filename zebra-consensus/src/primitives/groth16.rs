@@ -28,9 +28,7 @@ mod params;
 #[cfg(test)]
 mod tests;
 
-use params::PARAMS;
-
-pub use params::Groth16Params;
+pub use params::{Groth16Params, PARAMS};
 
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
@@ -101,6 +99,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// A Groth16 verification item, used as the request type of the service.
 pub type Item = batch::Item<Bls12>;
 
+/// A wrapper to workaround the missing `ServiceExt::map_err` method.
 pub struct ItemWrapper(Item);
 
 impl From<&Spend<PerSpendAnchor>> for ItemWrapper {

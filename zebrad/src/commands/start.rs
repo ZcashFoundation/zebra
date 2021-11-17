@@ -79,14 +79,12 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        // TODO: use ChainTipChange to get tip changes (#2374, #2710, #2711, #2712, #2713, #2714)
         let (state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
         info!("initializing verifiers");
-        // TODO: use the transaction verifier to verify mempool transactions (#2637, #2606)
-        let (chain_verifier, tx_verifier) = zebra_consensus::chain::init(
+        let (chain_verifier, tx_verifier, groth16_download_handle) = zebra_consensus::chain::init(
             config.consensus.clone(),
             config.network.network,
             state.clone(),
@@ -154,24 +152,69 @@ impl StartCmd {
             peer_set,
         ));
 
-        select! {
-            sync_result = syncer_error_future.fuse() => sync_result,
+        info!("started initial Zebra tasks");
 
-            sync_gossip_result = sync_gossip_task_handle.fuse() => sync_gossip_result
-                .expect("unexpected panic in the chain tip block gossip task")
-                .map_err(|e| eyre!(e)),
+        // select! requires its futures to be fused outside the loop
+        let mut syncer_error_future = Box::pin(syncer_error_future.fuse());
+        let mut sync_gossip_task_handle = sync_gossip_task_handle.fuse();
 
-            mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
-                .expect("unexpected panic in the mempool crawler")
-                .map_err(|e| eyre!(e)),
+        let mut mempool_crawler_task_handle = mempool_crawler_task_handle.fuse();
+        let mut mempool_queue_checker_task_handle = mempool_queue_checker_task_handle.fuse();
+        let mut tx_gossip_task_handle = tx_gossip_task_handle.fuse();
 
-            mempool_queue_result = mempool_queue_checker_task_handle.fuse() => mempool_queue_result
-                .expect("unexpected panic in the mempool queue checker")
-                .map_err(|e| eyre!(e)),
+        let mut groth16_download_handle = groth16_download_handle.fuse();
 
-            tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result
-                .expect("unexpected panic in the transaction gossip task")
-                .map_err(|e| eyre!(e)),
+        // Wait for tasks to finish
+        loop {
+            let mut exit_when_task_finishes = true;
+
+            let result = select! {
+                // We don't spawn the syncer future into a separate task yet.
+                // So syncer panics automatically propagate to the main zebrad task.
+                sync_result = syncer_error_future => sync_result
+                    .map(|_| info!("syncer task finished")),
+
+                sync_gossip_result = sync_gossip_task_handle => sync_gossip_result
+                    .expect("unexpected panic in the chain tip block gossip task")
+                    .map(|_| info!("chain tip block gossip task finished"))
+                    .map_err(|e| eyre!(e)),
+
+                mempool_crawl_result = mempool_crawler_task_handle => mempool_crawl_result
+                    .expect("unexpected panic in the mempool crawler")
+                    .map(|_| info!("mempool crawler task finished"))
+                    .map_err(|e| eyre!(e)),
+
+                mempool_queue_result = mempool_queue_checker_task_handle => mempool_queue_result
+                    .expect("unexpected panic in the mempool queue checker")
+                    .map(|_| info!("mempool queue checker task finished"))
+                    .map_err(|e| eyre!(e)),
+
+                tx_gossip_result = tx_gossip_task_handle => tx_gossip_result
+                    .expect("unexpected panic in the transaction gossip task")
+                    .map(|_| info!("transaction gossip task finished"))
+                    .map_err(|e| eyre!(e)),
+
+                // Unlike other tasks, we expect the download task to finish while Zebra is running.
+                groth16_download_result = groth16_download_handle => {
+                    groth16_download_result
+                        .unwrap_or_else(|_| panic!(
+                            "unexpected panic in the Groth16 pre-download and check task. {}",
+                            zebra_consensus::groth16::Groth16Params::failure_hint())
+                        );
+
+                    info!("Groth16 pre-download and check task finished");
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
+            };
+
+            // Stop Zebra if a task finished and returned an error,
+            // or if an ongoing task finished.
+            result?;
+
+            if exit_when_task_finishes {
+                return Ok(());
+            }
         }
     }
 }

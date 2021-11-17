@@ -18,8 +18,10 @@ impl DownloadCmd {
     /// # Panics
     ///
     /// If the downloaded or pre-existing parameter files are invalid.
-    fn download_and_verify(&self) {
-        let _ = zebra_consensus::Groth16Params::new();
+    fn download_and_check(&self) {
+        // The lazy static initializer does the download, if needed,
+        // and the file hash checks.
+        lazy_static::initialize(&zebra_consensus::groth16::PARAMS);
     }
 }
 
@@ -28,6 +30,6 @@ impl Runnable for DownloadCmd {
     fn run(&self) {
         info!("checking if Zcash Sapling and Sprout parameters have been downloaded");
 
-        self.download_and_verify();
+        self.download_and_check();
     }
 }

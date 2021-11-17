@@ -4488,6 +4488,7 @@ dependencies = [
  "gumdrop",
  "hyper",
  "inferno",
+ "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
  "once_cell",
