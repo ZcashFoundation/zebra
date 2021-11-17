@@ -29,9 +29,6 @@ RUN apt-get update && \
 
 COPY --from=builder /zebra/target/release/zebrad /
 
-# Download Zcash Sprout and Sapling parameters
-RUN curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zcash/zcash/master/zcutil/fetch-params.sh | sh
-
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
@@ -46,6 +43,9 @@ RUN printf "cache_dir = '/zebrad-cache'\n" >> /zebrad.toml
 RUN printf "[tracing]\n" >> /zebrad.toml
 RUN printf "endpoint_addr = '0.0.0.0:3000'\n" >> /zebrad.toml
 RUN cat /zebrad.toml
+
+# Pre-download Zcash Sprout and Sapling parameters
+RUN /zebrad download
 
 EXPOSE 3000 8233 18233
 

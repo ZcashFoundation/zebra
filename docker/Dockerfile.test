@@ -18,12 +18,12 @@ ENV RUSTFLAGS -O
 
 RUN rustc -V; cargo -V; rustup -V
 
-# Download Zcash Sprout and Sapling parameters
-RUN curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zcash/zcash/master/zcutil/fetch-params.sh | sh
-
 EXPOSE 8233 18233
 
 COPY . .
+
+# Pre-download Zcash Sprout and Sapling parameters
+RUN cargo run --verbose --bin zebrad download
 
 RUN cargo test --all --no-run
 

@@ -16,6 +16,10 @@ jobs:
     # The large timeout is to accommodate nightly builds
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
+
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -31,14 +35,24 @@ jobs:
       - name: Install cargo-llvm-cov cargo command
         run: cargo install cargo-llvm-cov
 
-      - name: Download Zcash Sprout and Sapling parameters
+      - name: Skip network tests on Ubuntu
+        # Ubuntu runners don't have network or DNS configured during test steps
+        if: matrix.os == 'ubuntu-latest'
+        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+
+      - name: Show env vars
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zcash/zcash/master/zcutil/fetch-params.sh | sh
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+
+      - name: Pre-download Zcash Sprout and Sapling parameters
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: run
+          args: --verbose --bin zebrad download
 
       - name: Generate code coverage
-        env:
-          ZEBRA_SKIP_NETWORK_TESTS: 1
-          CARGO_INCREMENTAL: 0
         run: cargo llvm-cov --lcov > lcov.info
 
       - name: Upload coverage report to Codecov
