@@ -47,7 +47,7 @@ jobs:
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Pre-download Zcash Sprout and Sapling parameters
-        run: cargo llvm-cov --lcov --no-report run --bin zebrad download
+        run: cargo llvm-cov --lcov --no-report run --bin zebrad -- download
 
       - name: Run Zebra tests
         run: cargo llvm-cov --lcov --no-report
