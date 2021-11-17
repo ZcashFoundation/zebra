@@ -975,6 +975,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f51c5d4ddabd36886dd3e1438cb358cdcb0d7c499cb99cb4ac2e38e18b5cb210"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1072,16 +1081,6 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
-]
-
-[[package]]
-name = "equihash"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4127688f6177e3f57521881cb1cfd90d1228214f9dc43b8efe6f6c6948cd8280"
-dependencies = [
- "blake2b_simd",
- "byteorder",
 ]
 
 [[package]]
@@ -1614,7 +1613,7 @@ dependencies = [
 [[package]]
 name = "incrementalmerkletree"
 version = "0.1.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=b7bd6246122a6e9ace8edb51553fbf5228906cbb#b7bd6246122a6e9ace8edb51553fbf5228906cbb"
+source = "git+https://github.com/zcash/incrementalmerkletree.git?rev=b7bd6246122a6e9ace8edb51553fbf5228906cbb#b7bd6246122a6e9ace8edb51553fbf5228906cbb"
 dependencies = [
  "serde",
 ]
@@ -1985,6 +1984,19 @@ checksum = "0f2d26ec3309788e423cfbf68ad1800f061638098d76a83681af979dc4eda19d"
 dependencies = [
  "adler",
  "autocfg",
+]
+
+[[package]]
+name = "minreq"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5f7db7a675c4b46b8842105b9371d6151e95fbbecd9b0e54dc2ea814397d2cc"
+dependencies = [
+ "lazy_static",
+ "log",
+ "rustls",
+ "webpki",
+ "webpki-roots 0.18.0",
 ]
 
 [[package]]
@@ -2817,7 +2829,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots",
+ "webpki-roots 0.21.1",
  "winreg",
 ]
 
@@ -4091,6 +4103,15 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91cd5736df7f12a964a5067a12c62fa38e1bd8080aff1f80bc29be7c80d19ab4"
+dependencies = [
+ "webpki",
+]
+
+[[package]]
+name = "webpki-roots"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aabe153544e473b775453675851ecc86863d2a81d786d741f6b76778f2a48940"
@@ -4215,7 +4236,7 @@ dependencies = [
  "bls12_381 0.6.0",
  "byteorder",
  "chacha20poly1305",
- "equihash 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=53d0a51d33a421cb76d3e3124d1e4c1c9036068e)",
+ "equihash",
  "ff 0.11.0",
  "fpe",
  "group 0.11.0",
@@ -4234,6 +4255,25 @@ dependencies = [
  "subtle",
  "zcash_encoding",
  "zcash_note_encryption",
+]
+
+[[package]]
+name = "zcash_proofs"
+version = "0.5.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=53d0a51d33a421cb76d3e3124d1e4c1c9036068e#53d0a51d33a421cb76d3e3124d1e4c1c9036068e"
+dependencies = [
+ "bellman",
+ "blake2b_simd",
+ "bls12_381 0.6.0",
+ "byteorder",
+ "directories",
+ "ff 0.11.0",
+ "group 0.11.0",
+ "jubjub 0.8.0",
+ "lazy_static",
+ "minreq",
+ "rand_core 0.6.3",
+ "zcash_primitives",
 ]
 
 [[package]]
@@ -4274,7 +4314,7 @@ dependencies = [
  "criterion",
  "displaydoc",
  "ed25519-zebra",
- "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "equihash",
  "fpe",
  "futures",
  "group 0.11.0",
@@ -4348,6 +4388,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber 0.2.25",
+ "zcash_proofs",
  "zebra-chain",
  "zebra-script",
  "zebra-state",
