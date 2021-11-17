@@ -182,7 +182,14 @@ impl TrustedPreallocate for Action {
         // Since a serialized Vec<AuthorizedAction> uses at least one byte for its length,
         // and the signature is required,
         // a valid max allocation can never exceed this size
-        (MAX_BLOCK_BYTES - 1) / AUTHORIZED_ACTION_SIZE
+        const MAX: u64 = (MAX_BLOCK_BYTES - 1) / AUTHORIZED_ACTION_SIZE;
+        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        // This acts as nActionsOrchard and is therefore subject to the rule.
+        // The maximum value is actually smaller due to the block size limit,
+        // but we ensure the 2^16 limit with a static assertion.
+        static_assertions::const_assert!(MAX <= (1 << 16));
+        MAX
     }
 }
 
