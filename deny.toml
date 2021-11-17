@@ -34,12 +34,6 @@ skip-tree = [
     # ticket #2953: tracing dependencies
     { name = "tracing-subscriber", version = "=0.1.6" },
 
-    # ticket #2952: cryptography dependencies
-    { name = "aes", version = "=0.6.0" },
-    { name = "bellman", version = "=0.10.0" },
-    { name = "bls12_381", version = "=0.5.0" },
-    { name = "fpe", version = "=0.4.0" },
-
     # ticket #2982: librustzcash and orchard git versions
     # Note that the equihash duplication is probably because `zcash_primitives`
     # (which imports it with a path import) is being imported as a git dependency.
@@ -61,8 +55,8 @@ skip-tree = [
     # tickets #2985 and #2391: tempdir & rand dependencies
     { name = "tempdir", version = "=0.3.7" },
 
-    # ticket #2998: base64 dependencies
-    { name = "base64", version = "=0.10.1" },
+    # ticket #2998: hdrhistogram dependencies
+    { name = "hdrhistogram", version = "=6.3.4" },
 
     # ticket #2999: http dependencies
     { name = "bytes", version = "=0.5.6" },
