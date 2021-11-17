@@ -75,8 +75,8 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl From<zebra_chain::orchard::ShieldedData> for Item {
-    fn from(shielded_data: zebra_chain::orchard::ShieldedData) -> Item {
+impl From<&zebra_chain::orchard::ShieldedData> for Item {
+    fn from(shielded_data: &zebra_chain::orchard::ShieldedData) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
@@ -108,7 +108,7 @@ impl From<zebra_chain::orchard::ShieldedData> for Item {
 
         Item {
             instances,
-            proof: orchard::circuit::Proof::new(shielded_data.proof.0),
+            proof: orchard::circuit::Proof::new(shielded_data.proof.0.clone()),
         }
     }
 }
