@@ -34,9 +34,6 @@ skip-tree = [
     # ticket #2953: tracing dependencies
     { name = "tracing-subscriber", version = "=0.1.6" },
 
-    # ticket #2982: librustzcash and orchard git versions
-    { name = "orchard", version = "=0.0.0" },
-
     # ticket #2983: criterion dependencies
     { name = "criterion", version = "=0.3.4" },
 
@@ -45,6 +42,9 @@ skip-tree = [
 
     # ticket #2981: bindgen dependencies
     { name = "rocksdb", version = "=0.16.0" },
+
+    # ticket #3063: redjubjub dependencies
+    { name = "redjubjub", version = "=0.4.0" },
 
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
@@ -61,14 +61,21 @@ skip-tree = [
     # ticket #3061: reqwest and minreq dependencies
     { name = "webpki-roots", version = "=0.18.0" },
 
+    # ticket #2980: inferno and orchard/cryptographic dependencies
+    { name = "inferno", version = "=0.10.8" },
+    { name = "orchard", version = "=0.0.0" },
+
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
     # alternative: downgrade Zebra to `bigint`
     { name = "bigint", version = "=4.4.3" },
 
     # recent major version bumps
+    # we should re-check these dependencies in February 2022
+
+    # wait for lots of crates in the cryptographic ecosystem to upgrade
+    { name = "rand", version = "=0.7.3" },
 
     # wait for lots of crates in the tokio ecosystem to upgrade
-    # we should re-check these dependencies in February 2022
     { name = "redox_syscall", version = "=0.1.57" },
     { name = "socket2", version = "=0.3.16" },
 ]
