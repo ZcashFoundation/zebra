@@ -30,6 +30,8 @@ mod tests;
 
 use params::PARAMS;
 
+pub use params::Groth16Params;
+
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
 /// This service transparently batches contemporaneous proof verifications,
