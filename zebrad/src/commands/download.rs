@@ -1,13 +1,13 @@
 //! `download` subcommand - pre-download required parameter files
 //!
-//! `zebrad start` automatically downloads required paramter files the first time it is run.
+//! `zebrad download` automatically downloads required paramter files the first time it is run.
 //!
 //! This command should be used if you're launching lots of `zebrad start` instances for testing,
 //! or you want to include the parameter files in a distribution package.
 
 use abscissa_core::{Command, Options, Runnable};
 
-/// `start` subcommand
+/// `download` subcommand
 #[derive(Command, Debug, Default, Options)]
 pub struct DownloadCmd {}
 
