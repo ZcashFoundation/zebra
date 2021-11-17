@@ -6,15 +6,7 @@ use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, 
 ///
 /// Corresponds to the Orchard 'encCiphertext's
 #[derive(Deserialize, Serialize)]
-pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub [u8; 580]);
-
-impl fmt::Debug for EncryptedNote {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("EncryptedNote")
-            .field(&hex::encode(&self.0[..]))
-            .finish()
-    }
-}
+pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 580]);
 
 // These impls all only exist because of array length restrictions.
 // TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
@@ -29,13 +21,33 @@ impl Clone for EncryptedNote {
     }
 }
 
+impl fmt::Debug for EncryptedNote {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("EncryptedNote")
+            .field(&hex::encode(&self.0[..]))
+            .finish()
+    }
+}
+
+impl Eq for EncryptedNote {}
+
+impl From<[u8; 580]> for EncryptedNote {
+    fn from(bytes: [u8; 580]) -> Self {
+        EncryptedNote(bytes)
+    }
+}
+
+impl From<EncryptedNote> for [u8; 580] {
+    fn from(enc_ciphertext: EncryptedNote) -> Self {
+        enc_ciphertext.0
+    }
+}
+
 impl PartialEq for EncryptedNote {
     fn eq(&self, other: &Self) -> bool {
         self.0[..] == other.0[..]
     }
 }
-
-impl Eq for EncryptedNote {}
 
 impl ZcashSerialize for EncryptedNote {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -56,7 +68,7 @@ impl ZcashDeserialize for EncryptedNote {
 ///
 /// Corresponds to Orchard's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
-pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub [u8; 80]);
+pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 80]);
 
 impl fmt::Debug for WrappedNoteKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -75,6 +87,18 @@ impl Clone for WrappedNoteKey {
         let mut bytes = [0; 80];
         bytes[..].copy_from_slice(&self.0[..]);
         Self(bytes)
+    }
+}
+
+impl From<[u8; 80]> for WrappedNoteKey {
+    fn from(bytes: [u8; 80]) -> Self {
+        WrappedNoteKey(bytes)
+    }
+}
+
+impl From<WrappedNoteKey> for [u8; 80] {
+    fn from(out_ciphertext: WrappedNoteKey) -> Self {
+        out_ciphertext.0
     }
 }
 

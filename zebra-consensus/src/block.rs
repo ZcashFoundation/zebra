@@ -76,6 +76,15 @@ pub enum VerifyBlockError {
     Transaction(#[from] TransactionError),
 }
 
+/// The maximum allowed number of legacy signature check operations in a block.
+///
+/// This consensus rule is not documented, so Zebra follows the `zcashd` implementation.
+/// We re-use some `zcashd` C++ script code via `zebra-script` and `zcash_script`.
+///
+/// See:
+/// https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30
+pub const MAX_BLOCK_SIGOPS: u64 = 20_000;
+
 impl<S, V> BlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -119,7 +128,6 @@ where
         // We don't include the block hash, because it's likely already in a parent span
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());
 
-        // TODO(jlusby): Error = Report, handle errors from state_service.
         async move {
             let hash = block.hash();
             // Check that this block is actually a new block.
@@ -143,6 +151,9 @@ where
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
+
+            // TODO: support block heights up to u32::MAX (#1113)
+            // In practice, these blocks are invalid anyway, because their parent block doesn't exist.
             if height > block::Height::MAX {
                 Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
             }
@@ -197,12 +208,25 @@ where
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
+            let mut legacy_sigop_count = 0;
+
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
-                result
+                let response = result
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?;
+                legacy_sigop_count += response
+                    .legacy_sigop_count()
+                    .expect("block transaction responses must have a legacy sigop count");
+            }
+
+            if legacy_sigop_count > MAX_BLOCK_SIGOPS {
+                Err(BlockError::TooManyTransparentSignatureOperations {
+                    height,
+                    hash,
+                    legacy_sigop_count,
+                })?;
             }
 
             let new_outputs = Arc::try_unwrap(known_utxos)

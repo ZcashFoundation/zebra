@@ -9,51 +9,48 @@ edition = "2018"
 proptest-impl = ["proptest", "proptest-derive", "zebra-test"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" }
-
+bincode = "1"
+chrono = "0.4.19"
 dirs = "4.0.0"
+displaydoc = "0.2.2"
+futures = "0.3.17"
 hex = "0.4.3"
 lazy_static = "1.4.0"
-regex = "1"
-serde = { version = "1", features = ["serde_derive"] }
-bincode = "1"
-
-futures = "0.3.17"
 metrics = "0.17.0"
-tower = { version = "0.4.9", features = ["buffer", "util"] }
-tracing = "0.1"
-thiserror = "1.0.30"
-tokio = { version = "1.13.0", features = ["sync"] }
-displaydoc = "0.2.2"
-rocksdb = "0.16.0"
-tempdir = "0.3.7"
-chrono = "0.4.19"
-rlimit = "0.5.4"
 # TODO: this crate is not maintained anymore. Replace it?
 # https://github.com/ZcashFoundation/zebra/issues/2523
 #
 # Pinned to a commit which includes bug fix https://github.com/jmitchell/multiset/pull/21
 # The fix should be included in multiset 0.0.6.
 multiset = { git = "https://github.com/jmitchell/multiset", rev = "91ef8550b518f75ae87ae0d8771150f259fd34d5" }
-
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3", optional = true }
+regex = "1"
+rlimit = "0.5.4"
+rocksdb = "0.16.0"
+serde = { version = "1", features = ["serde_derive"] }
+tempdir = "0.3.7"
+thiserror = "1.0.30"
+tokio = { version = "1.14.0", features = ["sync"] }
+tower = { version = "0.4.9", features = ["buffer", "util"] }
+tracing = "0.1"
+
+zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/" }
-
 color-eyre = "0.5.11"
 once_cell = "1.8"
-itertools = "0.10.1"
-spandoc = "0.2"
-tempdir = "0.3.7"
-tokio = { version = "1.13.0", features = ["full"] }
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
 # Note: if updating this, also update the workspace Cargo.toml to match.
 halo2 = "=0.1.0-beta.1"
-jubjub = "0.7.0"
-
+itertools = "0.10.1"
+jubjub = "0.8.0"
 proptest = "0.10.1"
 proptest-derive = "0.3"
+spandoc = "0.2"
+tempdir = "0.3.7"
+tokio = { version = "1.14.0", features = ["full"] }
+
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/" }

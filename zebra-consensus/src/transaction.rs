@@ -118,6 +118,10 @@ pub enum Response {
         ///
         /// https://zips.z.cash/protocol/protocol.pdf#transactions
         miner_fee: Option<Amount<NonNegative>>,
+
+        /// The number of legacy signature operations in this transaction's
+        /// transparent inputs and outputs.
+        legacy_sigop_count: u64,
     },
 
     /// A response to a mempool transaction verification request.
@@ -224,6 +228,20 @@ impl Response {
         }
     }
 
+    /// The number of legacy transparent signature operations in this transaction's
+    /// inputs and outputs.
+    ///
+    /// Zebra does not check the legacy sigop count for mempool transactions,
+    /// because it is a standard rule (not a consensus rule).
+    pub fn legacy_sigop_count(&self) -> Option<u64> {
+        match self {
+            Response::Block {
+                legacy_sigop_count, ..
+            } => Some(*legacy_sigop_count),
+            Response::Mempool { .. } => None,
+        }
+    }
+
     /// Returns true if the request is a mempool request.
     pub fn is_mempool(&self) -> bool {
         match self {
@@ -289,16 +307,14 @@ where
             // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
             //
             // https://zips.z.cash/zip-0213#specification
+
+            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(tx.clone()));
             let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     return Err(TransactionError::WrongVersion);
                 }
                 Transaction::V4 {
-                    inputs,
-                    // outputs,
-                    // lock_time,
-                    // expiry_height,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
@@ -306,13 +322,12 @@ where
                     &req,
                     network,
                     script_verifier,
-                    inputs,
+                    cached_ffi_transaction.clone(),
                     utxo_sender,
                     joinsplit_data,
                     sapling_shielded_data,
                 )?,
                 Transaction::V5 {
-                    inputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
@@ -320,7 +335,7 @@ where
                     &req,
                     network,
                     script_verifier,
-                    inputs,
+                    cached_ffi_transaction.clone(),
                     utxo_sender,
                     sapling_shielded_data,
                     orchard_shielded_data,
@@ -351,7 +366,11 @@ where
             }
 
             let rsp = match req {
-                Request::Block { .. } => Response::Block { tx_id, miner_fee },
+                Request::Block { .. } => Response::Block {
+                    tx_id,
+                    miner_fee,
+                    legacy_sigop_count: cached_ffi_transaction.legacy_sigop_count()?,
+                },
                 Request::Mempool { transaction, .. } => Response::Mempool {
                     transaction: VerifiedUnminedTx::new(
                         transaction,
@@ -389,14 +408,14 @@ where
     ///   for more information)
     /// - the `network` to consider when verifying
     /// - the `script_verifier` to use for verifying the transparent transfers
-    /// - the transparent `inputs` in the transaction
+    /// - the prepared `cached_ffi_transaction` used by the script verifier
     /// - the Sprout `joinsplit_data` shielded data in the transaction
     /// - the `sapling_shielded_data` in the transaction
     fn verify_v4_transaction(
         request: &Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
-        inputs: &[transparent::Input],
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
         utxo_sender: mpsc::UnboundedSender<script::Response>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
@@ -412,7 +431,7 @@ where
             request,
             network,
             script_verifier,
-            inputs,
+            cached_ffi_transaction,
             utxo_sender,
         )?
         .and(Self::verify_sprout_shielded_data(
@@ -471,14 +490,14 @@ where
     ///   for more information)
     /// - the `network` to consider when verifying
     /// - the `script_verifier` to use for verifying the transparent transfers
-    /// - the transparent `inputs` in the transaction
+    /// - the prepared `cached_ffi_transaction` used by the script verifier
     /// - the sapling shielded data of the transaction, if any
     /// - the orchard shielded data of the transaction, if any
     fn verify_v5_transaction(
         request: &Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
-        inputs: &[transparent::Input],
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
         utxo_sender: mpsc::UnboundedSender<script::Response>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
@@ -494,7 +513,7 @@ where
             request,
             network,
             script_verifier,
-            inputs,
+            cached_ffi_transaction,
             utxo_sender,
         )?
         .and(Self::verify_sapling_shielded_data(
@@ -508,9 +527,7 @@ where
 
         // TODO:
         // - verify orchard shielded pool (ZIP-224) (#2105)
-        // - ZIP-244 (#1874)
-        // - remaining consensus rules (#2379)
-        // - remove `should_panic` from tests
+        // - shielded input and output limits? (#2379)
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
@@ -541,13 +558,15 @@ where
         }
     }
 
-    /// Verifies if a transaction's transparent `inputs` are valid using the provided
-    /// `script_verifier`.
+    /// Verifies if a transaction's transparent inputs are valid using the provided
+    /// `script_verifier` and `cached_ffi_transaction`.
+    ///
+    /// Returns script verification responses via the `utxo_sender`.
     fn verify_transparent_inputs_and_outputs(
         request: &Request,
         network: Network,
         script_verifier: script::Verifier<ZS>,
-        inputs: &[transparent::Input],
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
         utxo_sender: mpsc::UnboundedSender<script::Response>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
@@ -557,9 +576,9 @@ where
             // Coinbase transactions don't have any PrevOut inputs.
             Ok(AsyncChecks::new())
         } else {
-            // feed all of the inputs to the script and shielded verifiers
+            // feed all of the inputs to the script verifier
             // the script_verifier also checks transparent sighashes, using its own implementation
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction));
+            let inputs = transaction.inputs();
             let known_utxos = request.known_utxos();
             let upgrade = request.upgrade(network);
 
@@ -718,6 +737,22 @@ where
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             for authorized_action in orchard_shielded_data.actions.iter().cloned() {
                 let (action, spend_auth_sig) = authorized_action.into_parts();
+
+                // Consensus rule: The proof 𝜋 MUST be valid given a primary
+                // input (cv, rtOrchard, nf, rk, cm𝑥, enableSpends, enableOutputs)
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+                //
+                // Queue the verification of the Halo2 proof for each Action
+                // description while adding the resulting future to our
+                // collection of async checks that (at a minimum) must pass for
+                // the transaction to verify.
+                async_checks.push(
+                    primitives::halo2::VERIFIER
+                        .clone()
+                        .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
+                );
+
                 // Consensus rule: The spend authorization signature
                 // MUST be a valid SpendAuthSig signature over
                 // SigHash using rk as the validating key.
