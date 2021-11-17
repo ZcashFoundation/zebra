@@ -3,30 +3,39 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, prelude::*};
+use tokio::task::JoinHandle;
 
-use crate::{meta_addr::MetaAddrChange, AddressBook};
+use crate::{meta_addr::MetaAddrChange, AddressBook, BoxError, Config};
 
 /// The `AddressBookUpdater` hooks into incoming message streams for each peer
 /// and lets the owner of the sender handle update the address book. For
 /// example, it can be used to record per-connection last-seen timestamps, or
 /// add new initial peers to the address book.
-pub struct AddressBookUpdater {}
+#[derive(Debug, Eq, PartialEq)]
+pub struct AddressBookUpdater;
 
 impl AddressBookUpdater {
     /// Spawn a new [`AddressBookUpdater`] task, updating a new [`AddressBook`]
-    /// configured with a `local_listener`.
+    /// configured with Zebra's actual `local_listener` address.
     ///
-    /// Returns handles for the transmission channel for timestamp events, and
-    /// the address book.
+    /// Returns handles for:
+    /// - the transmission channel for address book update events,
+    /// - the address book, and
+    /// - the address book updater task.
     pub fn spawn(
+        config: &Config,
         local_listener: SocketAddr,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
         mpsc::Sender<MetaAddrChange>,
+        JoinHandle<Result<(), BoxError>>,
     ) {
         use tracing::Level;
-        const TIMESTAMP_WORKER_BUFFER_SIZE: usize = 100;
-        let (worker_tx, mut worker_rx) = mpsc::channel(TIMESTAMP_WORKER_BUFFER_SIZE);
+
+        // Create an mpsc channel for peerset address book updates,
+        // based on the maximum number of inbound and outbound peers.
+        let (worker_tx, mut worker_rx) = mpsc::channel(config.peerset_total_connection_limit());
+
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
             local_listener,
             span!(Level::TRACE, "timestamp collector"),
@@ -44,9 +53,12 @@ impl AddressBookUpdater {
                     .expect("mutex should be unpoisoned")
                     .update(event);
             }
-        };
-        tokio::spawn(worker.boxed());
 
-        (address_book, worker_tx)
+            Ok(())
+        };
+
+        let address_book_updater_task_handle = tokio::spawn(worker.boxed());
+
+        (address_book, worker_tx, address_book_updater_task_handle)
     }
 }
