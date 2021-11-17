@@ -47,13 +47,13 @@ jobs:
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Pre-download Zcash Sprout and Sapling parameters
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: run
-          args: --verbose --bin zebrad download
+        run: cargo llvm-cov --lcov --no-report run --bin zebrad download
 
-      - name: Generate code coverage
-        run: cargo llvm-cov --lcov > lcov.info
+      - name: Run Zebra tests
+        run: cargo llvm-cov --lcov --no-report
+
+      - name: Generate coverage report
+        run: cargo llvm-cov --lcov --no-run --output-path lcov.info
 
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v2.1.0
