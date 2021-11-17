@@ -72,6 +72,10 @@ impl SaplingParams {
     pub fn new() -> SaplingParams {
         let params_dir =
             zcash_proofs::default_params_folder().expect("unable to find user home directory");
+        let failure_hint = format!(
+            "Hint: try deleting {:?}, then running 'zebrad download' to re-download the parameters",
+            params_dir
+        );
 
         // TODO: Sprout
 
@@ -86,9 +90,11 @@ impl SaplingParams {
         // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
         if !spend_path.exists() || !output_path.exists() {
             tracing::info!("downloading Zcash Sapling parameters");
-            zcash_proofs::download_parameters().expect("error downloading parameter files");
+            zcash_proofs::download_parameters()
+                .unwrap_or_else(|_| panic!("error downloading parameter files. {}", failure_hint));
         }
 
+        // TODO: if loading fails, log a message including `failure_hint`
         tracing::info!("checking and loading Zcash Sapling parameters");
         let parameters = zcash_proofs::load_parameters(&spend_path, &output_path, None);
 
