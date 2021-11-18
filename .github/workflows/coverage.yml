@@ -51,7 +51,7 @@ jobs:
       - name: Fetch path to Zcash parameters
         working-directory: ./zebra-consensus
         shell: bash
-        run: echo "ZCASH_PARAMS=$(cargo llvm-cov --lcov --no-report run --example get-params-path)" >> $GITHUB_ENV
+        run: echo "ZCASH_PARAMS=$(cargo llvm-cov --lcov --no-report --quiet --output-path /dev/null run --example get-params-path)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
         uses: actions/cache@v2
