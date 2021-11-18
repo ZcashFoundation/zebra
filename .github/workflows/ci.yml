@@ -198,7 +198,7 @@ jobs:
           command: build
           args: --verbose --release
 
-  clippy-cargo-lock:
+  clippy-deps:
     name: Clippy (stable)
     timeout-minutes: 30
     runs-on: ubuntu-latest
@@ -242,7 +242,20 @@ jobs:
           command: check
           args: --locked --all-features --all-targets
 
-  fmt-deps:
+      # Edit zebra/deny.toml to allow duplicate dependencies
+      - name: Check for dependent crates with different versions
+        uses: EmbarkStudios/cargo-deny-action@v1.2.6
+        with:
+          command: check bans
+          args: --all-features --workspace
+
+      - name: Check crate sources
+        uses: EmbarkStudios/cargo-deny-action@v1.2.6
+        with:
+          command: check sources
+          args: --all-features --workspace
+
+  fmt:
     name: Rustfmt
     timeout-minutes: 30
     runs-on: ubuntu-latest
@@ -276,16 +289,3 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
-
-      # Edit zebra/deny.toml to allow duplicates
-      - name: Check for dependent crates with different versions
-        uses: EmbarkStudios/cargo-deny-action@v1.2.6
-        with:
-          command: check bans
-          args: --all-features --workspace
-
-      - name: Check crate sources
-        uses: EmbarkStudios/cargo-deny-action@v1.2.6
-        with:
-          command: check sources
-          args: --all-features --workspace
