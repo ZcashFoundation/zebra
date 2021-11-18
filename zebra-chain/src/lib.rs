@@ -22,9 +22,6 @@ extern crate serde_big_array;
 #[macro_use]
 extern crate bitflags;
 
-#[macro_use]
-extern crate static_assertions;
-
 pub mod amount;
 pub mod block;
 pub mod chain_tip;
