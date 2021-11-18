@@ -40,14 +40,14 @@ This release also includes an upgrade to the latest version of tokio (1.14.0).
 
 ### Fixed
 
-- Stop asking users to report peer errors, fix a common peer error (#3054)
-- Fix typos (#3055)
-- Depend on a multiset git commit that includes a bug fix (#3033)
+- Remove unused connection errors (#3054)
 - Fix listener address conflicts in network tests (#3031)
 
 ### Security
 
 - Security: Avoid reconnecting to peers that are likely unreachable (#3030)
+- Check for duplicate crate dependencies in CI (#2986)
+- Security: Limit number of addresses sent to peers to avoid address book pollution (#3007)
 
 ## [Zebra 1.0.0-beta.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.0) - 2021-10-29
 
