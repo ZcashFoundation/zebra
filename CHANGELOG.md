@@ -6,16 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.1) - TODO:Add release date
 
-Zebra's latest beta continues to work towards our goal of having Zebra act as a fully participating and validating node by:
+Zebra's latest beta implements a number of consensus rules which will be needed for Zebra to fully validate all of the Zcash network consensus rules, including those which will activate with NU5.
 
-- Fully validating Orchard proofs, note commitment trees & anchors,
-- Fully validating Sprout and Sapling note commitment trees and anchors,
-- Support parsing of addrv2 messages as per ZIP-155,
-- Calculate block subsidies
+With this release we are also fixing a number of security issues that could pose a DDoS risk or otherwise negatively impact other nodes on the network.
 
-We have also fixed a number of security issues that could pose a DDoS risk or otherwise negatively impact other nodes on the network.
-
-This release also includes an upgrade to the latest version of tokio (1.14.0).
+Finally, this release includes an upgrade to the latest version of tokio (1.14.0).
 
 ### Added
 
