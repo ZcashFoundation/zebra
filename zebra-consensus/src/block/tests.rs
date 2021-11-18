@@ -1,7 +1,5 @@
 //! Tests for block verification
 
-use super::*;
-
 use std::{convert::TryFrom, sync::Arc};
 
 use chrono::Utc;
@@ -28,6 +26,8 @@ use crate::{
     parameters::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
     script, transaction,
 };
+
+use super::*;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<
     Vec<(Arc<Block>, Result<block::Hash, ExpectedTranscriptError>)>,
