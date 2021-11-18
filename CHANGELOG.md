@@ -13,7 +13,7 @@ Zebra's latest beta continues to work towards our goal of having Zebra act as a 
 - Support parsing of addrv2 messages as per ZIP-155,
 - Calculate block subsidies
 
-We have also fixed a number of security issues that could pose a DDoS risk or otherwise negatively impact other nodes on the network. 
+We have also fixed a number of security issues that could pose a DDoS risk or otherwise negatively impact other nodes on the network.
 
 This release also includes an upgrade to the latest version of tokio (1.14.0).
 
@@ -31,7 +31,7 @@ This release also includes an upgrade to the latest version of tokio (1.14.0).
 ### Changed
 
 - Upgrade crypto deps (#3059)
-- Update to Tokio 1.13.0 (#2933, #2994)
+- Upgrade to Tokio 1.14.0 (#2933, #2994, #3062)
 - Make `services` field in `MetaAddr` optional (#2976)
 
 #### Documentation
@@ -40,6 +40,8 @@ This release also includes an upgrade to the latest version of tokio (1.14.0).
 
 ### Fixed
 
+- Implement graceful shutdown for the peer set (#3071)
+- Check for panics in the address book updater task (#3064)
 - Remove unused connection errors (#3054)
 - Fix listener address conflicts in network tests (#3031)
 
