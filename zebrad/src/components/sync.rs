@@ -1,3 +1,7 @@
+//! The syncer downloads and verifies large numbers of blocks from peers to Zebra.
+//!
+//! It is used when Zebra is a long way behind the current chain tip.
+
 use std::{collections::HashSet, pin::Pin, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
@@ -69,7 +73,12 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 /// Once these malicious blocks start failing validation, the syncer will cancel all
 /// the pending download and verify tasks, drop all the blocks, and start a new
 /// ObtainTips with a new set of peers.
-const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+
+/// The default for the user-specified lookahead limit.
+///
+/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 5;
 
 /// Controls how long we wait for a tips response to return.
 ///
