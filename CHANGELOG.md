@@ -14,20 +14,25 @@ Finally, this release includes an upgrade to the latest version of tokio (1.14.0
 
 ### Added
 
-- Verify Halo2 proofs as part of V5 transaction verification (#2645, #3039)
 - Check per-block limits on transparent signature operations (#3049)
 - Calculate Block Subsidy and Funding Streams (#3017, #3040)
+- Add unused seed peers to the Address Book (#2974, #3019)
+
+#### Network Upgrade 5
+
+- Verify Halo2 proofs as part of V5 transaction verification (#2645, #3039)
 - ZIP-155: Parse `addrv2` in Zebra (#3008, #3014, #3020, #3021, #3022, #3032)
 - ZIP 212: validate Sapling and Orchard output of coinbase transactions (#3029)
 - Validate Orchard flags in v5 (#3035)
-- Add unused seed peers to the Address Book (#2974, #3019)
+
+#### Documentation
+
 - Mempool Documentation (#2978)
 
 ### Changed
 
 - Upgrade crypto deps (#3059)
 - Upgrade to Tokio 1.14.0 (#2933, #2994, #3062)
-- Make `services` field in `MetaAddr` optional (#2976)
 
 #### Documentation
 
