@@ -409,10 +409,11 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let result = check::subsidy_is_valid(&block, network).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(
+    let result = check::subsidy_is_valid(&block, network);
+    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
         SubsidyError::FoundersRewardNotFound,
-    ));
+    )));
+
     assert_eq!(expected, result);
 
     Ok(())
@@ -483,10 +484,10 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let result = check::subsidy_is_valid(&block, network).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(
+    let result = check::subsidy_is_valid(&block, network);
+    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
         SubsidyError::FundingStreamNotFound,
-    ));
+    )));
     assert_eq!(expected, result);
 
     Ok(())
@@ -524,8 +525,10 @@ fn negative_fee_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let result = check::subsidy_is_valid(&block, network).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NegativeFees));
+    let result = check::subsidy_is_valid(&block, network);
+    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::NegativeFees,
+    )));
     assert_eq!(expected, result);
 
     Ok(())
