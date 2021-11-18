@@ -55,12 +55,6 @@ jobs:
         if: matrix.os != 'macOS-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
 
-      - name: Show env vars
-        run: |
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-
       - name: Change target output directory on Windows
         # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
         # larger C: drive.
