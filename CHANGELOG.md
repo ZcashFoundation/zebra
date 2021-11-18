@@ -30,32 +30,13 @@ This release also includes an upgrade to the latest version of tokio (1.14.0).
 
 ### Changed
 
-- Bump tokio from 1.13.0 to 1.14.0 (#3062)
 - Upgrade crypto deps (#3059)
-- Bump serde\_json from 1.0.69 to 1.0.70 (#3058)
-- Simplify preallocate tests (#3032)
-- Refactor addr v1 serialization using a separate AddrV1 type (#3021)
-- Bump serde\_json from 1.0.68 to 1.0.69 (#3034)
-- Move MetaAddr serialization into zebra\_network::protocol::external (#3020)
-- Replace read\_compactsize and write\_compactsize with CompactSizeMessage  (#3014)
-- Bump actions/checkout from 2.3.5 to 2.4.0 (#3009)
-- Re-enable duplicate dependency checking for `inferno` (#3013)
-- Bump vergen from 5.1.16 to 5.1.17 (#3010)
-- Bump inferno from 0.10.7 to 0.10.8 (#3011)
-- Some tweaks of the README (#3006)
-- Truncate inbound `Peers` response further (#3007)
-- Bump owo-colors from 3.0.1 to 3.1.0 (#3003)
-- Update to Tokio 1.13.0 (#2994)
-- Update README when tagging a new release (#3001)
-- Update README troubleshooting and beta scope (#2996)
+- Update to Tokio 1.13.0 (#2933, #2994)
 - Make `services` field in `MetaAddr` optional (#2976)
-- Increase maximum request delay for `inbound` tests (#2977)
-- Use `broadcast::Receiver::recv` instead of `next` (#2933)
 
-### Removed
+#### Documentation
 
-- deny.toml: skip orchard and equihash instead of zcash\_primitives (#3044)
-- Disable an unreliable network test on macOS (#2997)
+- README Updates (#2996, #3006)
 
 ### Fixed
 
