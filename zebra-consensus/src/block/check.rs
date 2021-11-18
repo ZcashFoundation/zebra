@@ -110,7 +110,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
         .iter()
         .sum::<Result<Amount<NonNegative>, AmountError>>()
-        .expect("the sum of all outputs wil lalways be positive")
+        .expect("the sum of all outputs will always be positive")
         .constrain()
         .expect("positive value always fit in `NegativeAllowed`");
     let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
