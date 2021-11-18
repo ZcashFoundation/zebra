@@ -1142,7 +1142,7 @@ async fn add_initial_peers_is_rate_limited() {
 
     let before = Instant::now();
 
-    let (initial_peers_task_handle, peerset_rx) =
+    let (initial_peers_task_handle, peerset_rx, address_book_updater_task_handle) =
         spawn_add_initial_peers(PEER_COUNT, outbound_connector).await;
     let connections = peerset_rx.take(PEER_COUNT).collect::<Vec<_>>().await;
 
@@ -1161,6 +1161,19 @@ async fn add_initial_peers_is_rate_limited() {
         matches!(initial_peers_result, Ok(Ok(_))),
         "unexpected error or panic in add_initial_peers task: {:?}",
         initial_peers_result,
+    );
+
+    // Check for panics or errors in the address book updater task.
+    let updater_result = address_book_updater_task_handle.now_or_never();
+    assert!(
+        matches!(updater_result, None)
+            || matches!(updater_result, Some(Err(ref join_error)) if join_error.is_cancelled())
+            // The task method only returns one kind of error.
+            // We can't check for error equality due to type erasure,
+            // and we can't downcast due to ownership.
+            || matches!(updater_result, Some(Ok(Err(ref _all_senders_closed)))),
+        "unexpected error or panic in address book updater task: {:?}",
+        updater_result,
     );
 }
 
@@ -1501,13 +1514,15 @@ where
 /// Connects to IP addresses in the IPv4 localhost range.
 /// Does not open a local listener port.
 ///
-/// Returns the task [`JoinHandle`], and the peer set receiver.
+/// Returns the initial peers task [`JoinHandle`], the peer set receiver,
+/// and the address book updater task join handle.
 async fn spawn_add_initial_peers<C>(
     peer_count: usize,
     outbound_connector: C,
 ) -> (
     JoinHandle<Result<ActiveConnectionCounter, BoxError>>,
     mpsc::Receiver<PeerChange>,
+    JoinHandle<Result<(), BoxError>>,
 )
 where
     C: Service<
@@ -1542,10 +1557,11 @@ where
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(peer_count + 1);
 
-    let (_address_book, address_book_updater) = AddressBookUpdater::spawn(unused_v4);
+    let (_address_book, address_book_updater, address_book_updater_guard) =
+        AddressBookUpdater::spawn(&config, unused_v4);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);
 
-    (add_task_handle, peerset_rx)
+    (add_task_handle, peerset_rx, address_book_updater_guard)
 }
