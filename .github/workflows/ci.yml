@@ -48,15 +48,12 @@ jobs:
           echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Skip network tests on Ubuntu
-        # Ubuntu runners don't have network or DNS configured during test steps
-        if: matrix.os == 'ubuntu-latest'
+      - name: Skip network tests on Ubuntu and Windows
+        # Ubuntu runners don't have network or DNS configured during test steps.
+        # Windows runners have an unreliable network.
+        shell: bash
+        if: matrix.os != 'macOS-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
-
-      - name: Skip network tests on Windows
-        # Windows runners have an unreliable network
-        if: matrix.os == 'windows-latest'
-        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Show env vars
         run: |
@@ -73,11 +70,30 @@ jobs:
           mkdir C:\zebra-target
           echo "CARGO_TARGET_DIR=C:\zebra-target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Pre-download Zcash Sprout and Sapling parameters
-        uses: actions-rs/cargo@v1.0.3
+      # Modified from:
+      # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33
+      - name: Fetch path to Zcash parameters
+        working-directory: ./zebra-consensus
+        shell: bash
+        run: echo "ZCASH_PARAMS=$(cargo run --example get-params-path)" >> $GITHUB_ENV
+      - name: Cache Zcash parameters
+        id: cache-params
+        uses: actions/cache@v2
         with:
-          command: run
-          args: --verbose --bin zebrad download
+          path: ${{ env.ZCASH_PARAMS }}
+          key: ${{ runner.os }}-params
+      - name: Fetch Zcash parameters
+        if: steps.cache-params.outputs.cache-hit != 'true'
+        working-directory: ./zebra-consensus
+        run: cargo run --example download-params
+
+      - name: Show env vars
+        run: |
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run tests
         uses: actions-rs/cargo@v1.0.3
@@ -138,7 +154,9 @@ jobs:
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run build without features enabled
@@ -175,7 +193,9 @@ jobs:
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Build
@@ -208,7 +228,9 @@ jobs:
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run clippy
@@ -250,7 +272,9 @@ jobs:
       - name: Show env vars
         run: |
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
             echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Check rustfmt
