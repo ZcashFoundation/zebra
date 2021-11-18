@@ -4,6 +4,52 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.1) - TODO:Add release date
+
+## Changes
+
+- Verify Halo2 proofs as part of V5 transaction verification (#3039)
+- Async Halo2 verifier service (#2645)
+- Bump tokio from 1.13.0 to 1.14.0 (#3062)
+- Upgrade crypto deps (#3059)
+- Bump serde\_json from 1.0.69 to 1.0.70 (#3058)
+- Check MAX\_BLOCK\_SIGOPS in the block verifier (#3049)
+- Stop asking users to report peer errors, fix a common peer error (#3054)
+- Fix typos (#3055)
+- Validate funding stream addresses (#3040)
+- Parse received addrv2 messages (#3022)
+- ZIP 212: validate Sapling and Orchard output of coinbase transactions (#3029)
+- Depend on a multiset git commit that includes a bug fix (#3033)
+- Security: Avoid reconnecting to peers that are likely unreachable (#3030)
+- Simplify preallocate tests (#3032)
+- deny.toml: skip orchard and equihash instead of zcash\_primitives (#3044)
+- Refactor addr v1 serialization using a separate AddrV1 type (#3021)
+- Validate funding stream amounts in coinbase transaction (#3017)
+- validate orchard flags in v5 (#3035)
+- Bump serde\_json from 1.0.68 to 1.0.69 (#3034)
+- Fix listener address conflicts in network tests (#3031)
+- Fix verbose add\_initial\_peers logs (#3019)
+- Move MetaAddr serialization into zebra\_network::protocol::external (#3020)
+- Replace read\_compactsize and write\_compactsize with CompactSizeMessage  (#3014)
+- Bump actions/checkout from 2.3.5 to 2.4.0 (#3009)
+- Re-enable duplicate dependency checking for `inferno` (#3013)
+- Create CompactSize64 for non-message-length fields (#3008)
+- Add unused seed peers to the AddressBook (#2974)
+- Bump vergen from 5.1.16 to 5.1.17 (#3010)
+- Bump inferno from 0.10.7 to 0.10.8 (#3011)
+- Some tweaks of the README (#3006)
+- Truncate inbound `Peers` response further (#3007)
+- Bump owo-colors from 3.0.1 to 3.1.0 (#3003)
+- Update to Tokio 1.13.0 (#2994)
+- Update README when tagging a new release (#3001)
+- Disable an unreliable network test on macOS (#2997)
+- Update README troubleshooting and beta scope (#2996)
+- Make `services` field in `MetaAddr` optional (#2976)
+- Check for duplicate crate dependencies in CI (#2986)
+- Mempool doc (#2978)
+- Increase maximum request delay for `inbound` tests (#2977)
+- Use `broadcast::Receiver::recv` instead of `next` (#2933)
+
 ## [Zebra 1.0.0-beta.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.0) - 2021-10-29
 
 This is the first beta release of Zebra. Today the mempool work is fully finished and compatible with [ZIP-401](https://zips.z.cash/zip-0401) and several security issues in the network stack are fixed. In addition to that we improved our documentation specially in the `zebrad` crate while we increased our test coverage. Finally, we get started with the task of upgrading Tokio to version 1.
