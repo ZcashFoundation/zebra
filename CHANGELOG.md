@@ -19,18 +19,14 @@ This release also includes an upgrade to the latest version of tokio (1.14.0).
 
 ### Added
 
-- Verify Halo2 proofs as part of V5 transaction verification (#3039)
-- Async Halo2 verifier service (#2645)
-- Check MAX\_BLOCK\_SIGOPS in the block verifier (#3049)
-- Validate funding stream addresses (#3040)
-- Parse received addrv2 messages (#3022)
+- Verify Halo2 proofs as part of V5 transaction verification (#2645, #3039)
+- Check per-block limits on transparent signature operations (#3049)
+- Calculate Block Subsidy and Funding Streams (#3017, #3040)
+- ZIP-155: Parse `addrv2` in Zebra (#3008, #3014, #3020, #3021, #3022, #3032)
 - ZIP 212: validate Sapling and Orchard output of coinbase transactions (#3029)
-- Validate funding stream amounts in coinbase transaction (#3017)
-- validate orchard flags in v5 (#3035)
-- Create CompactSize64 for non-message-length fields (#3008)
-- Add unused seed peers to the AddressBook (#2974)
-- Check for duplicate crate dependencies in CI (#2986)
-- Mempool doc (#2978)
+- Validate Orchard flags in v5 (#3035)
+- Add unused seed peers to the Address Book (#2974, #3019)
+- Mempool Documentation (#2978)
 
 ### Changed
 
@@ -67,7 +63,6 @@ This release also includes an upgrade to the latest version of tokio (1.14.0).
 - Fix typos (#3055)
 - Depend on a multiset git commit that includes a bug fix (#3033)
 - Fix listener address conflicts in network tests (#3031)
-- Fix verbose add\_initial\_peers logs (#3019)
 
 ### Security
 
