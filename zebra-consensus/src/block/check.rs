@@ -122,14 +122,10 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         .expect("positive value always fit in `NegativeAllowed`");
 
     // Consensus rule implementation: block fee must be at least zero.
-    let fees: Result<Amount<NonNegative>, AmountError> =
-        (transparent_value_balance - sapling_value_balance - orchard_value_balance - block_subsidy)
-            .expect("should not overflow")
-            .constrain();
-
-    if fees.is_err() {
-        Err(SubsidyError::NegativeFees)?
-    }
+    (transparent_value_balance - sapling_value_balance - orchard_value_balance - block_subsidy)
+        .expect("should not overflow")
+        .constrain::<NonNegative>()
+        .map_err(|_| SubsidyError::NegativeFees)?;
 
     // Validate founders reward and funding streams
     let halving_div = subsidy::general::halving_divisor(height, network);
