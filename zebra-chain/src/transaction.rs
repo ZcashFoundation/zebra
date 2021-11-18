@@ -651,7 +651,28 @@ impl Transaction {
         }
     }
 
-    /// Access the note commitments in this transaction, regardless of version.
+    /// Returns the Sprout note commitments in this transaction.
+    pub fn sprout_note_commitments(
+        &self,
+    ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
+        match self {
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Returns the Sapling note commitments in this transaction, regardless of version.
     pub fn sapling_note_commitments(&self) -> Box<dyn Iterator<Item = &jubjub::Fq> + '_> {
         // This function returns a boxed iterator because the different
         // transaction variants end up having different iterator types

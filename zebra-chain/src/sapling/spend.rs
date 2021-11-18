@@ -276,7 +276,15 @@ impl TrustedPreallocate for SpendPrefixInTransactionV5 {
         // Since a serialized Vec<Spend> uses at least one byte for its length,
         // and the associated fields are required,
         // a valid max allocation can never exceed this size
-        (MAX_BLOCK_BYTES - 1) / SHARED_ANCHOR_SPEND_SIZE
+        const MAX: u64 = (MAX_BLOCK_BYTES - 1) / SHARED_ANCHOR_SPEND_SIZE;
+        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        // This acts as nSpendsSapling and is therefore subject to the rule.
+        // The maximum value is actually smaller due to the block size limit,
+        // but we ensure the 2^16 limit with a static assertion.
+        // (The check is not required pre-NU5, but it doesn't cause problems.)
+        static_assertions::const_assert!(MAX < (1 << 16));
+        MAX
     }
 }
 

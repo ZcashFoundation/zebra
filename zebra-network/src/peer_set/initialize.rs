@@ -95,7 +95,8 @@ where
 
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (address_book, address_book_updater) = AddressBookUpdater::spawn(listen_addr);
+    let (address_book, address_book_updater, address_book_updater_guard) =
+        AddressBookUpdater::spawn(&config, listen_addr);
 
     // Create a broadcast channel for peer inventory advertisements.
     // If it reaches capacity, this channel drops older inventory advertisements.
@@ -191,9 +192,13 @@ where
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
 
-    // We need to await candidates.update() here, because zcashd only sends one
-    // `addr` message per connection, and if we only have one initial peer we
-    // need to ensure that its `addr` message is used by the crawler.
+    // We need to await candidates.update() here,
+    // because zcashd rate-limits `addr`/`addrv2` messages per connection,
+    // and if we only have one initial peer,
+    // we need to ensure that its `Response::Addr` is used by the crawler.
+    //
+    // TODO: cache the most recent `Response::Addr` returned by each peer.
+    //       If the request times out, return the cached response to the caller.
 
     info!(
         ?active_initial_peer_count,
@@ -221,7 +226,9 @@ where
     );
     let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
 
-    handle_tx.send(vec![listen_guard, crawl_guard]).unwrap();
+    handle_tx
+        .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
+        .unwrap();
 
     (peer_set, address_book)
 }
