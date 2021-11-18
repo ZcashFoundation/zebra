@@ -8,7 +8,7 @@
 #![deny(clippy::await_holding_lock)]
 #![forbid(unsafe_code)]
 // Each lazy_static variable uses additional recursion
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 use color_eyre::section::PanicMessage;
 use once_cell::sync::Lazy;
