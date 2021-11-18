@@ -224,7 +224,7 @@ impl TrustedPreallocate for OutputInTransactionV4 {
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.
         // (The check is not required pre-NU5, but it doesn't cause problems.)
-        static_assertions::const_assert!(MAX <= (1 << 16));
+        static_assertions::const_assert!(MAX < (1 << 16));
         MAX
     }
 }
