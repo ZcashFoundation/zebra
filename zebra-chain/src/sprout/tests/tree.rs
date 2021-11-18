@@ -136,7 +136,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     }
 
     // Load the Genesis note commitment tree root.
-    let genesis_anchor = tree::Root(
+    let genesis_anchor = tree::Root::from(
         **sprout_roots
             .get(&genesis_height)
             .expect("test vector exists"),
@@ -156,7 +156,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     );
 
     // Load the note commitment tree root of `next_block`.
-    let next_block_anchor = tree::Root(
+    let next_block_anchor = tree::Root::from(
         **sprout_roots
             .get(&(genesis_height + next_height))
             .expect("test vector exists"),
