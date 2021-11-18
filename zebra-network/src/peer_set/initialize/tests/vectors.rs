@@ -1167,7 +1167,11 @@ async fn add_initial_peers_is_rate_limited() {
     let updater_result = address_book_updater_task_handle.now_or_never();
     assert!(
         matches!(updater_result, None)
-            || matches!(updater_result, Some(Err(ref e)) if e.is_cancelled()),
+            || matches!(updater_result, Some(Err(ref join_error)) if join_error.is_cancelled())
+            // The task method only returns one kind of error.
+            // We can't check for error equality due to type erasure,
+            // and we can't downcast due to ownership.
+            || matches!(updater_result, Some(Ok(Err(ref _all_senders_closed)))),
         "unexpected error or panic in address book updater task: {:?}",
         updater_result,
     );

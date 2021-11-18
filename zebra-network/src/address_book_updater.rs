@@ -3,6 +3,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, prelude::*};
+use thiserror::Error;
 use tokio::task::JoinHandle;
 
 use crate::{meta_addr::MetaAddrChange, AddressBook, BoxError, Config};
@@ -13,6 +14,10 @@ use crate::{meta_addr::MetaAddrChange, AddressBook, BoxError, Config};
 /// add new initial peers to the address book.
 #[derive(Debug, Eq, PartialEq)]
 pub struct AddressBookUpdater;
+
+#[derive(Copy, Clone, Debug, Error, Eq, PartialEq, Hash)]
+#[error("all address book updater senders are closed")]
+pub struct AllAddressBookUpdaterSendersClosed;
 
 impl AddressBookUpdater {
     /// Spawn a new [`AddressBookUpdater`] task, updating a new [`AddressBook`]
@@ -38,7 +43,7 @@ impl AddressBookUpdater {
 
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
             local_listener,
-            span!(Level::TRACE, "timestamp collector"),
+            span!(Level::TRACE, "address book updater"),
         )));
         let worker_address_book = address_book.clone();
 
@@ -54,7 +59,7 @@ impl AddressBookUpdater {
                     .update(event);
             }
 
-            Ok(())
+            Err(AllAddressBookUpdaterSendersClosed.into())
         };
 
         let address_book_updater_task_handle = tokio::spawn(worker.boxed());
