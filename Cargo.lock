@@ -4347,6 +4347,7 @@ dependencies = [
  "serde-big-array",
  "sha2",
  "spandoc",
+ "static_assertions",
  "subtle",
  "thiserror",
  "tracing",
