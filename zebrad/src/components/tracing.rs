@@ -1,3 +1,5 @@
+//! Tracing and logging infrastructure for Zebra.
+
 mod component;
 mod endpoint;
 mod flame;

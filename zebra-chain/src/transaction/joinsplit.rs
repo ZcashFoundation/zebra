@@ -23,7 +23,7 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     ///
     /// Storing this separately from `rest` ensures that it is impossible
     /// to construct an invalid `JoinSplitData` with no `JoinSplit`s.
-    ///`
+    ///
     /// However, it's not necessary to access or process `first` and `rest`
     /// separately, as the [`JoinSplitData::joinsplits`] method provides an
     /// iterator over all of the `JoinSplit`s.
