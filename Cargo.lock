@@ -4268,7 +4268,7 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.1.6-alpha.0"
-source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=0cb1aa5dd159cb205e5cae9683ca976df60b6b21#0cb1aa5dd159cb205e5cae9683ca976df60b6b21"
+source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=b59c7dd515e4283007be3af08731ca2d12db7b54#b59c7dd515e4283007be3af08731ca2d12db7b54"
 dependencies = [
  "bindgen 0.58.1",
  "blake2b_simd",
