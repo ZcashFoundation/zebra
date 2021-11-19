@@ -18,6 +18,7 @@ Finally, this release includes an upgrade to the latest version of tokio (1.14.0
 - Sprout note commitment trees (#3051)
 - Check per-block limits on transparent signature operations (#3049)
 - Calculate Block Subsidy and Funding Streams (#3017, #3040)
+- Check for duplicate crate dependencies in CI (#2986)
 - Add unused seed peers to the Address Book (#2974, #3019)
 
 #### Network Upgrade 5
@@ -51,7 +52,6 @@ Finally, this release includes an upgrade to the latest version of tokio (1.14.0
 ### Security
 
 - Security: Avoid reconnecting to peers that are likely unreachable (#3030)
-- Check for duplicate crate dependencies in CI (#2986)
 - Security: Limit number of addresses sent to peers to avoid address book pollution (#3007)
 
 ## [Zebra 1.0.0-beta.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.0) - 2021-10-29
