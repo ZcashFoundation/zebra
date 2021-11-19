@@ -51,7 +51,8 @@ jobs:
       - name: Fetch path to Zcash parameters
         working-directory: ./zebra-consensus
         shell: bash
-        run: echo "ZCASH_PARAMS=$(cargo llvm-cov --lcov --no-report --quiet --output-path /dev/null run --example get-params-path)" >> $GITHUB_ENV
+        # cargo-llvm-cov doesn't have a silent mode, so we have to extract the path from stderr
+        run: echo "ZCASH_PARAMS=$(cargo llvm-cov --lcov --no-report run --example get-params-path 2>&1 >/dev/null | tail -1)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
         uses: actions/cache@v2
@@ -61,7 +62,7 @@ jobs:
       - name: Fetch Zcash parameters
         if: steps.cache-params.outputs.cache-hit != 'true'
         working-directory: ./zebra-consensus
-        run: cargo llvm-cov --lcov --no-report run --example get-params-path
+        run: cargo llvm-cov --lcov --no-report run --example download-params
 
       - name: Show env vars
         run: |
