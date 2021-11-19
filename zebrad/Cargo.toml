@@ -16,10 +16,11 @@ zebra-network = { path = "../zebra-network" }
 zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
+chrono = "0.4"
 gumdrop = "0.7"
+lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-chrono = "0.4"
 
 hyper = { version = "0.14.15", features = ["full"] }
 futures = "0.3"

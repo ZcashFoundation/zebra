@@ -13,16 +13,19 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 blake2b_simd = "0.5.11"
 bellman = "0.11.1"
 bls12_381 = "0.6.0"
-chrono = "0.4.19"
-displaydoc = "0.2.2"
-halo2 = "=0.1.0-beta.1"
 jubjub = "0.8.0"
-lazy_static = "1.4.0"
-once_cell = "1.8"
+rand = "0.8"
+
+halo2 = "=0.1.0-beta.1"
 # TODO: replace with upstream orchard when these changes are merged
 # https://github.com/ZcashFoundation/zebra/issues/3056
 orchard = "0.0.0"
-rand = "0.8"
+
+chrono = "0.4.19"
+dirs = "4.0.0"
+displaydoc = "0.2.2"
+lazy_static = "1.4.0"
+once_cell = "1.8"
 serde = { version = "1", features = ["serde_derive"] }
 
 futures = "0.3.17"
@@ -34,12 +37,14 @@ tower = { version = "0.4.9", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
 
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e", features = ["local-prover", "multicore", "download-params"] }
+
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
+
 zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
-wagyu-zcash-parameters = "0.2.0"
 
 proptest = { version = "0.10", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }

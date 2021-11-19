@@ -588,7 +588,8 @@ async fn setup(
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
-    let (block_verifier, _transaction_verifier) =
+    // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
+    let (block_verifier, _transaction_verifier, _groth16_download_handle) =
         zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
             .await;
 
