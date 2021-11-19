@@ -62,18 +62,21 @@ where
 #[tokio::test]
 async fn verify_sapling_groth16() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390)
-    let mut spend_verifier = Fallback::new(
-        Batch::new(
-            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
-            crate::primitives::MAX_BATCH_SIZE,
-            crate::primitives::MAX_BATCH_LATENCY,
-        ),
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.spend.vk)))
-            }) as fn(_) -> _,
-        ),
-    );
+    let mut spend_verifier =
+        Fallback::new(
+            Batch::new(
+                Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
+                crate::primitives::MAX_BATCH_SIZE,
+                crate::primitives::MAX_BATCH_LATENCY,
+            ),
+            tower::service_fn(
+                (|item: Item| {
+                    ready(item.verify_single(&prepare_verifying_key(
+                        &GROTH16_PARAMETERS.sapling.spend.vk,
+                    )))
+                }) as fn(_) -> _,
+            ),
+        );
     let mut output_verifier = Fallback::new(
         Batch::new(
             Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
@@ -82,7 +85,9 @@ async fn verify_sapling_groth16() {
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(
+                    &GROTH16_PARAMETERS.sapling.output.vk,
+                )))
             }) as fn(_) -> _,
         ),
     );
@@ -158,7 +163,9 @@ async fn correctly_err_on_invalid_output_proof() {
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(
+                    &GROTH16_PARAMETERS.sapling.output.vk,
+                )))
             }) as fn(_) -> _,
         ),
     );
