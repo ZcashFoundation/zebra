@@ -9,7 +9,7 @@ use std::{
 };
 
 use bellman::{
-    groth16::{batch, prepare_verifying_key, VerifyingKey},
+    groth16::{batch, VerifyingKey},
     VerificationError,
 };
 use bls12_381::Bls12;
@@ -40,31 +40,28 @@ pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
 /// handle.
 pub static SPEND_VERIFIER: Lazy<
     Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
-> =
-    Lazy::new(|| {
-        Fallback::new(
-            Batch::new(
-                Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
-                super::MAX_BATCH_SIZE,
-                super::MAX_BATCH_LATENCY,
-            ),
-            // We want to fallback to individual verification if batch verification
-            // fails, so we need a Service to use. The obvious way to do this would
-            // be to write a closure that returns an async block. But because we
-            // have to specify the type of a static, we need to be able to write the
-            // type of the closure and its return value, and both closures and async
-            // blocks have eldritch types whose names cannot be written. So instead,
-            // we use a Ready to avoid an async block and cast the closure to a
-            // function (which is possible because it doesn't capture any state).
-            tower::service_fn(
-                (|item: Item| {
-                    ready(item.verify_single(&prepare_verifying_key(
-                        &GROTH16_PARAMETERS.sapling.spend.vk,
-                    )))
-                }) as fn(_) -> _,
-            ),
-        )
-    });
+> = Lazy::new(|| {
+    Fallback::new(
+        Batch::new(
+            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
+            super::MAX_BATCH_SIZE,
+            super::MAX_BATCH_LATENCY,
+        ),
+        // We want to fallback to individual verification if batch verification
+        // fails, so we need a Service to use. The obvious way to do this would
+        // be to write a closure that returns an async block. But because we
+        // have to specify the type of a static, we need to be able to write the
+        // type of the closure and its return value, and both closures and async
+        // blocks have eldritch types whose names cannot be written. So instead,
+        // we use a Ready to avoid an async block and cast the closure to a
+        // function (which is possible because it doesn't capture any state).
+        tower::service_fn(
+            (|item: Item| {
+                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key))
+            }) as fn(_) -> _,
+        ),
+    )
+});
 
 /// Global batch verification context for Groth16 proofs of Output statements.
 ///
@@ -93,9 +90,7 @@ pub static OUTPUT_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(
-                    &GROTH16_PARAMETERS.sapling.output.vk,
-                )))
+                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key))
             }) as fn(_) -> _,
         ),
     )
