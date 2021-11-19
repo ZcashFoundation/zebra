@@ -28,7 +28,7 @@ mod params;
 #[cfg(test)]
 mod tests;
 
-pub use params::{Groth16Params, PARAMS};
+pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
 
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
@@ -43,7 +43,7 @@ pub static SPEND_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&PARAMS.sapling.spend.vk),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -57,7 +57,7 @@ pub static SPEND_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.spend.vk)))
+                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.spend.vk)))
             }) as fn(_) -> _,
         ),
     )
@@ -76,7 +76,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&PARAMS.sapling.output.vk),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -90,7 +90,7 @@ pub static OUTPUT_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.output.vk)))
             }) as fn(_) -> _,
         ),
     )

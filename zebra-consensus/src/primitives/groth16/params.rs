@@ -16,30 +16,30 @@ lazy_static::lazy_static! {
     /// # Panics
     ///
     /// If the downloaded or pre-existing parameter files are invalid.
-    pub static ref PARAMS: Groth16Params = Groth16Params::new();
+    pub static ref GROTH16_PARAMETERS: Groth16Parameters = Groth16Parameters::new();
 }
 
 /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
 #[non_exhaustive]
-pub struct Groth16Params {
+pub struct Groth16Parameters {
     /// The Sapling circuit Groth16 parameters.
-    pub sapling: SaplingParams,
+    pub sapling: SaplingParameters,
 }
 
-impl Groth16Params {
+impl Groth16Parameters {
     /// Download if needed, cache, check, and load the Sprout and Sapling Groth16 parameters.
     ///
     /// # Panics
     ///
     /// If the downloaded or pre-existing parameter files are invalid.
-    fn new() -> Groth16Params {
-        Groth16Params {
-            sapling: SaplingParams::new(),
+    fn new() -> Groth16Parameters {
+        Groth16Parameters {
+            sapling: SaplingParameters::new(),
         }
     }
 
-    /// Returns the path to the Groth16 parameters folder.
-    pub fn params_folder() -> PathBuf {
+    /// Returns the path to the Groth16 parameters directory.
+    pub fn directory() -> PathBuf {
         zcash_proofs::default_params_folder().expect("unable to find user home directory")
     }
 
@@ -47,14 +47,14 @@ impl Groth16Params {
     pub fn failure_hint() -> String {
         format!(
             "Hint: try deleting {:?}, then running 'zebrad download' to re-download the parameters",
-            Groth16Params::params_folder(),
+            Groth16Parameters::directory(),
         )
     }
 }
 
 /// Groth16 Zero-Knowledge Proof spend and output parameters for the Sapling circuit.
 #[non_exhaustive]
-pub struct SaplingParams {
+pub struct SaplingParameters {
     pub spend: groth16::Parameters<Bls12>,
     pub spend_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 
@@ -62,18 +62,18 @@ pub struct SaplingParams {
     pub output_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 }
 
-impl SaplingParams {
+impl SaplingParameters {
     /// Download if needed, cache, check, and load the Sapling Groth16 parameters.
     ///
     /// # Panics
     ///
     /// If the downloaded or pre-existing parameter files are invalid.
-    fn new() -> SaplingParams {
+    fn new() -> SaplingParameters {
         // TODO: Sprout
 
-        let params_folder = Groth16Params::params_folder();
-        let spend_path = params_folder.join("sapling-spend.params");
-        let output_path = params_folder.join("sapling-output.params");
+        let params_directory = Groth16Parameters::directory();
+        let spend_path = params_directory.join("sapling-spend.params");
+        let output_path = params_directory.join("sapling-output.params");
 
         // Download parameters if needed.
         //
@@ -83,7 +83,7 @@ impl SaplingParams {
             zcash_proofs::download_parameters().unwrap_or_else(|_| {
                 panic!(
                     "error downloading parameter files. {}",
-                    Groth16Params::failure_hint()
+                    Groth16Parameters::failure_hint()
                 )
             });
         }
@@ -92,7 +92,7 @@ impl SaplingParams {
         tracing::info!("checking and loading Zcash Sapling parameters");
         let parameters = zcash_proofs::load_parameters(&spend_path, &output_path, None);
 
-        SaplingParams {
+        SaplingParameters {
             spend: parameters.spend_params,
             spend_prepared_verifying_key: parameters.spend_vk,
             output: parameters.output_params,

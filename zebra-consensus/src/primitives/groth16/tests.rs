@@ -64,25 +64,25 @@ async fn verify_sapling_groth16() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390)
     let mut spend_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&PARAMS.sapling.spend.vk),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
             crate::primitives::MAX_BATCH_SIZE,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.spend.vk)))
+                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.spend.vk)))
             }) as fn(_) -> _,
         ),
     );
     let mut output_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&PARAMS.sapling.output.vk),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             crate::primitives::MAX_BATCH_SIZE,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.output.vk)))
             }) as fn(_) -> _,
         ),
     );
@@ -152,13 +152,13 @@ async fn correctly_err_on_invalid_output_proof() {
     // Also, since we expect these to fail, we don't want to slow down the communal verifiers.
     let mut output_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&PARAMS.sapling.output.vk),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             crate::primitives::MAX_BATCH_SIZE,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(&GROTH16_PARAMETERS.sapling.output.vk)))
             }) as fn(_) -> _,
         ),
     );

@@ -203,7 +203,7 @@ impl StartCmd {
                     groth16_download_result
                         .unwrap_or_else(|_| panic!(
                             "unexpected panic in the Groth16 pre-download and check task. {}",
-                            zebra_consensus::groth16::Groth16Params::failure_hint())
+                            zebra_consensus::groth16::Groth16Parameters::failure_hint())
                         );
 
                     info!("Groth16 pre-download and check task finished");
