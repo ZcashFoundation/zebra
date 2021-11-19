@@ -14,6 +14,8 @@ Finally, this release includes an upgrade to the latest version of tokio (1.14.0
 
 ### Added
 
+- Check Shielded Input and Output Limits (#3069, #3076)
+- Sprout note commitment trees (#3051)
 - Check per-block limits on transparent signature operations (#3049)
 - Calculate Block Subsidy and Funding Streams (#3017, #3040)
 - Add unused seed peers to the Address Book (#2974, #3019)
@@ -40,6 +42,7 @@ Finally, this release includes an upgrade to the latest version of tokio (1.14.0
 
 ### Fixed
 
+- Stop downloading unnecessary blocks in Zebra acceptance tests (#3072)
 - Implement graceful shutdown for the peer set (#3071)
 - Check for panics in the address book updater task (#3064)
 - Remove unused connection errors (#3054)
