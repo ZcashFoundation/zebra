@@ -1,3 +1,10 @@
+//! The inbound service handles requests from Zebra's peers.
+//!
+//! It downloads and verifies gossiped blocks and mempool transactions,
+//! when Zebra is close to the chain tip.
+//!
+//! It also responds to peer requests for blocks, transactions, and peer addresses.
+
 use std::{
     future::Future,
     pin::Pin,
@@ -128,6 +135,10 @@ pub struct Inbound {
 }
 
 impl Inbound {
+    /// Create a new inbound service.
+    ///
+    /// The address book and peer set use the newly created inbound service.
+    /// So they are sent via the `network_setup` channel after initialization.
     pub fn new(
         network_setup: oneshot::Receiver<NetworkSetupData>,
         state: State,

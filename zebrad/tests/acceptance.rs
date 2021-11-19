@@ -46,7 +46,10 @@ use zebra_test::{
     net::random_known_port,
     prelude::*,
 };
-use zebrad::config::ZebradConfig;
+use zebrad::{
+    components::{mempool, sync},
+    config::{SyncSection, ZebradConfig},
+};
 
 /// The amount of time we wait after launching `zebrad`.
 ///
@@ -54,18 +57,41 @@ use zebrad::config::ZebradConfig;
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 
+/// Returns a config with:
+/// - a Zcash listener on an unused port on IPv4 localhost, and
+/// - an ephemeral state,
+/// - the minimum syncer lookahead limit, and
+/// - shorter task intervals, to improve test coverage.
 fn default_test_config() -> Result<ZebradConfig> {
-    let auto_port_ipv4_local = zebra_network::Config {
+    const TEST_DURATION: Duration = Duration::from_secs(30);
+
+    let network = zebra_network::Config {
+        // The OS automatically chooses an unused port.
         listen_addr: "127.0.0.1:0".parse()?,
-        crawl_new_peer_interval: Duration::from_secs(30),
+        crawl_new_peer_interval: TEST_DURATION,
         ..zebra_network::Config::default()
     };
-    let local_ephemeral = ZebradConfig {
+
+    let sync = SyncSection {
+        // Avoid downloading unnecessary blocks.
+        lookahead_limit: sync::MIN_LOOKAHEAD_LIMIT,
+        ..SyncSection::default()
+    };
+
+    let mempool = mempool::Config {
+        eviction_memory_time: TEST_DURATION,
+        ..mempool::Config::default()
+    };
+
+    let config = ZebradConfig {
+        network,
         state: zebra_state::Config::ephemeral(),
-        network: auto_port_ipv4_local,
+        sync,
+        mempool,
         ..ZebradConfig::default()
     };
-    Ok(local_ephemeral)
+
+    Ok(config)
 }
 
 fn persistent_test_config() -> Result<ZebradConfig> {
@@ -949,6 +975,7 @@ fn sync_until(
 fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
     config.state.cache_dir = "/zebrad-cache".into();
+    config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
     Ok(config)
 }
 
