@@ -167,6 +167,9 @@ where
 ///
 /// Pre-downloads the Sapling and Sprout Groth16 parameters if needed,
 /// checks they were downloaded correctly, and loads them into Zebra.
+/// (The transaction verifier automatically downloads the parameters on first use.
+/// But the parameter downloads can take around 10 minutes.
+/// So we pre-download the parameters, to avoid verification timeouts.)
 ///
 /// This function should only be called once for a particular state service.
 ///
