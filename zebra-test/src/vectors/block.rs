@@ -193,6 +193,10 @@ lazy_static! {
             (1_116_000, BLOCK_TESTNET_1116000_BYTES.as_ref()),
             (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
             (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
+            // Nu5
+            (1_599_199, BLOCK_TESTNET_1599199_BYTES.as_ref()),
+            (1_599_200, BLOCK_TESTNET_1599200_BYTES.as_ref()),
+            (1_599_201, BLOCK_TESTNET_1599201_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Testnet final sapling roots, indexed by height
@@ -739,6 +743,20 @@ lazy_static! {
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1326100_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("2b30b19f4254709fe365bd0b381b2e3d9d0c933eb4dba4dd1d07f0f6e196a183")
         .expect("final root bytes are in valid hex representation").rev();
+
+    // Nu5 transition
+    // for i in 1599199 1599200 1599201; do
+    //     zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
+    // done
+    pub static ref BLOCK_TESTNET_1599199_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-599-199.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1599200_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-599-200.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1599201_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-599-201.txt").trim())
+        .expect("Block bytes are in valid hex representation");
 }
 
 #[cfg(test)]
