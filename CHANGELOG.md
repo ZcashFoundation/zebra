@@ -31,7 +31,7 @@ Finally, this release includes an upgrade to the latest version of tokio (1.14.0
 
 ### Changed
 
-- Upgrade crypto deps (#3059)
+- Upgrade cryptographic library dependencies (#3059)
 - Upgrade to Tokio 1.14.0 (#2933, #2994, #3062)
 
 #### Documentation
