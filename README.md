@@ -84,16 +84,12 @@ all applicable consensus rules as of NU5 activation.
 Currently, Zebra does not validate the following Zcash consensus rules:
 
 #### NU5
-- ZIP-155 - Parse addrv2 in Zebra
+
 - Full validation of Orchard transactions from NU5 onwards
-   - Check that at least one of enableSpendsOrchard or enableOutputsOrchard is set
    - Validation of Orchard anchors (root of the Orchard note commitment tree)
-   - Validation of Halo2 proofs
 
 #### NU4 - Canopy
-- Calculation of Block Subsidy and Funding streams
 - Validation of coinbase miner subsidy and miner fees
-- Validation of shielded outputs for coinbase transactions (ZIP-212/ZIP-213)
 
 #### NU1 - Sapling
 - Validation of Sapling anchors (root of the Sapling note commitment tree)
@@ -126,7 +122,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.0 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.1 zebrad`
 4. Run `zebrad start` (see [Running Zebra](user/run.md) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -201,12 +197,9 @@ See our [roadmap](#future-work) for details.
 
 There are a few bugs in Zebra that we're still working on fixing:
 - [When Zebra receives an unexpected network message from a peer, it disconnects from that peer #2107](https://github.com/ZcashFoundation/zebra/issues/2107)
-- [A Zebra instance could be used to pollute the peer addresses of other nodes #1889](https://github.com/ZcashFoundation/zebra/issues/1889)
 - [Zebra's address book can use all available memory #1873](https://github.com/ZcashFoundation/zebra/issues/1873)
-- [Zebra's address book can be flooded or taken over #1869](https://github.com/ZcashFoundation/zebra/issues/1869)
 - [Zebra does not evict pre-upgrade peers from the peer set across a network upgrade #706](https://github.com/ZcashFoundation/zebra/issues/706)
 - [Zebra accepts non-minimal height encodings #2226](https://github.com/ZcashFoundation/zebra/issues/2226)
-- [Zebra nodes continually try to contact peers that always fail #1865](https://github.com/ZcashFoundation/zebra/issues/1865)
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently
