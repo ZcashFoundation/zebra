@@ -53,16 +53,16 @@ in terms of speed and resistance to denial of service attacks, for example.
 
 These are some of the advantages or benefits of Zebra:
 
-- Better performance: since it was implemented from scratch in an async, parallelized way, Zebra 
+- Better performance: since it was implemented from scratch in an async, parallelized way, Zebra
   is currently faster than `zcashd`.
 - Better security: since it is developed in a memory-safe language (Rust), Zebra
-  is less likely to be affected by memory-safety and correctness security bugs that 
+  is less likely to be affected by memory-safety and correctness security bugs that
   could compromise the environment where it is run.
 - Better governance: with a new node deployment, there will be more developers
   who can implement different features for the Zcash network.
 - Dev accessibility: supports more developers, which gives new developers
   options for contributing to Zcash protocol development.
-- Runtime safety: with an independeny implementation, the detection of consensus bugs 
+- Runtime safety: with an independent implementation, the detection of consensus bugs
   can happen quicker, reducing the risk of consensus splits.
 - Spec safety: with several node implementations, it is much easier to notice
   bugs and ambiguity in protocol specification.
@@ -78,7 +78,7 @@ Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashF
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 
-The goals of the beta release series are for Zebra to act as a fully validating Zcash node for 
+The goals of the beta release series are for Zebra to act as a fully validating Zcash node for
 all applicable consensus rules as of NU5 activation.
 
 Currently, Zebra does not validate the following Zcash consensus rules:
