@@ -71,11 +71,9 @@ impl SaplingParams {
     fn new() -> SaplingParams {
         // TODO: Sprout
 
-        let mut spend_path = Groth16Params::params_folder();
-        spend_path.push("sapling-spend.params");
-
-        let mut output_path = Groth16Params::params_folder();
-        output_path.push("sapling-output.params");
+        let params_folder = Groth16Params::params_folder();
+        let spend_path = params_folder.join("sapling-spend.params");
+        let output_path = params_folder.join("sapling-output.params");
 
         // Download parameters if needed.
         //
