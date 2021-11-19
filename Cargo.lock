@@ -1155,9 +1155,9 @@ dependencies = [
 
 [[package]]
 name = "fpe"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcf3e40fc9accc7218e082db8a75aeea244b8f5db73e591774ef93b4276365e6"
+checksum = "cd910db5f9ca4dc3116f8c46367825807aa2b942f72565f16b4be0b208a00a9e"
 dependencies = [
  "block-modes",
  "cipher",
@@ -1557,9 +1557,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.14"
+version = "0.14.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b91bb1f221b6ea1f1e4371216b70f40748774c2fb5971b450c07773fb92d26b"
+checksum = "436ec0091e4f20e655156a30a0df3770fe2900aa301e548e08446ec794b6953c"
 dependencies = [
  "bytes 1.1.0",
  "futures-channel",
@@ -3147,9 +3147,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.70"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e277c495ac6cd1a01a58d0a0c574568b4d1ddf14f59965c6a58b8d96400b54f3"
+checksum = "063bf466a64011ac24040a49009724ee60a57da1b437617ceb32e53ad61bfb19"
 dependencies = [
  "itoa",
  "ryu",
@@ -3617,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -3637,7 +3637,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "futures-core",
  "pin-project 0.4.28",
@@ -4307,7 +4307,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "aes",
  "bech32",
@@ -4347,6 +4347,7 @@ dependencies = [
  "serde-big-array",
  "sha2",
  "spandoc",
+ "static_assertions",
  "subtle",
  "thiserror",
  "tracing",
@@ -4364,7 +4365,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4405,7 +4406,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4441,7 +4442,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4454,7 +4455,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -4488,7 +4489,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "color-eyre",
  "futures",
@@ -4511,7 +4512,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4526,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "abscissa_core",
  "atty",

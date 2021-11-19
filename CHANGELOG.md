@@ -4,6 +4,56 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.1) - 2021-11-19
+
+Zebra's latest beta implements a number of consensus rules which will be needed for Zebra to fully validate all of the Zcash network consensus rules, including those which will activate with NU5.
+
+With this release we are also fixing a number of security issues that could pose a DDoS risk or otherwise negatively impact other nodes on the network.
+
+Finally, this release includes an upgrade to the latest version of tokio (1.14.0).
+
+### Added
+
+- Check Shielded Input and Output Limits (#3069, #3076)
+- Sprout note commitment trees (#3051)
+- Check per-block limits on transparent signature operations (#3049)
+- Calculate Block Subsidy and Funding Streams (#3017, #3040)
+- Check for duplicate crate dependencies in CI (#2986)
+- Add unused seed peers to the Address Book (#2974, #3019)
+
+#### Network Upgrade 5
+
+- Verify Halo2 proofs as part of V5 transaction verification (#2645, #3039)
+- ZIP-155: Parse `addrv2` in Zebra (#3008, #3014, #3020, #3021, #3022, #3032)
+- ZIP 212: validate Sapling and Orchard output of coinbase transactions (#3029)
+- Validate Orchard flags in v5 (#3035)
+
+#### Documentation
+
+- Mempool Documentation (#2978)
+
+### Changed
+
+- Upgrade cryptographic library dependencies (#3059)
+- Upgrade to Tokio 1.14.0 (#2933, #2994, #3062)
+
+#### Documentation
+
+- README Updates (#2996, #3006)
+
+### Fixed
+
+- Stop downloading unnecessary blocks in Zebra acceptance tests (#3072)
+- Implement graceful shutdown for the peer set (#3071)
+- Check for panics in the address book updater task (#3064)
+- Remove unused connection errors (#3054)
+- Fix listener address conflicts in network tests (#3031)
+
+### Security
+
+- Security: Avoid reconnecting to peers that are likely unreachable (#3030)
+- Security: Limit number of addresses sent to peers to avoid address book pollution (#3007)
+
 ## [Zebra 1.0.0-beta.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.0) - 2021-10-29
 
 This is the first beta release of Zebra. Today the mempool work is fully finished and compatible with [ZIP-401](https://zips.z.cash/zip-0401) and several security issues in the network stack are fixed. In addition to that we improved our documentation specially in the `zebrad` crate while we increased our test coverage. Finally, we get started with the task of upgrading Tokio to version 1.
