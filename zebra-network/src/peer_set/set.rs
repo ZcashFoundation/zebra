@@ -108,7 +108,12 @@ pub struct CancelClientWork;
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
 pub struct PeerSet<D>
 where
-    D: Discover<Key = SocketAddr>,
+    D: Discover<Key = SocketAddr> + Unpin,
+    D::Service: Service<Request, Response = Response> + Load,
+    D::Error: Into<BoxError>,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
+    <D::Service as Service<Request>>::Future: Send + 'static,
+    <D::Service as Load>::Metric: Debug,
 {
     discover: D,
     /// A preselected index for a ready service.
@@ -137,6 +142,20 @@ where
     address_book: Arc<std::sync::Mutex<AddressBook>>,
     /// The configured limit for inbound and outbound connections.
     peerset_total_connection_limit: usize,
+}
+
+impl<D> Drop for PeerSet<D>
+where
+    D: Discover<Key = SocketAddr> + Unpin,
+    D::Service: Service<Request, Response = Response> + Load,
+    D::Error: Into<BoxError>,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
+    <D::Service as Service<Request>>::Future: Send + 'static,
+    <D::Service as Load>::Metric: Debug,
+{
+    fn drop(&mut self) {
+        self.shut_down_tasks_and_channels()
+    }
 }
 
 impl<D> PeerSet<D>
@@ -220,11 +239,35 @@ where
             Poll::Ready(None) => Err("all peer set background tasks have exited".into()),
         };
 
+        self.shut_down_tasks_and_channels();
+
+        exit_error
+    }
+
+    /// Shut down:
+    /// - services by dropping the service lists
+    /// - background tasks via their join handles or cancel handles
+    /// - channels by closing the channel
+    fn shut_down_tasks_and_channels(&mut self) {
+        // Drop services and cancel their background tasks.
+        self.preselected_p2c_index = None;
+        self.ready_services = IndexMap::new();
+
+        for (_peer_key, handle) in self.cancel_handles.drain() {
+            let _ = handle.send(CancelClientWork);
+        }
+        self.unready_services = FuturesUnordered::new();
+
+        // Close the MorePeers channel for all senders,
+        // so we don't add more peers to a shut down peer set.
+        self.demand_signal.close_channel();
+
+        // Shut down background tasks.
         for guard in self.guards.iter() {
             guard.abort();
         }
 
-        exit_error
+        // TODO: implement graceful shutdown for InventoryRegistry
     }
 
     fn poll_unready(&mut self, cx: &mut Context<'_>) {
