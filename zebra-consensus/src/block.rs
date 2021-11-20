@@ -203,6 +203,7 @@ where
                         transaction: transaction.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
+                        time: block.header.time,
                     });
                 async_checks.push(rsp);
             }

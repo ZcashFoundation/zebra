@@ -9,6 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use chrono::{DateTime, Utc};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt, TryFutureExt,
@@ -80,6 +81,8 @@ pub enum Request {
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         /// The height of the block containing this transaction.
         height: block::Height,
+        /// The time that the block was mined.
+        time: DateTime<Utc>,
     },
     /// Verify the supplied transaction as part of the mempool.
     ///
