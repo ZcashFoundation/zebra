@@ -188,6 +188,14 @@ impl Request {
         }
     }
 
+    /// The block time used for lock time consensus rules validation.
+    pub fn block_time(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Request::Block { time, .. } => Some(*time),
+            Request::Mempool { .. } => None,
+        }
+    }
+
     /// The network upgrade to consider for the verification.
     ///
     /// This is based on the block height from the request, and the supplied `network`.
