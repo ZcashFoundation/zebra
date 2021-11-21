@@ -283,10 +283,10 @@ where
 
                 // The tasks have been sent, but not consumed.
                 Ok(handles) => {
-                    // Currently, the peer set treats no backgound tasks as an error.
+                    // Currently, the peer set treats an empty background task set as an error.
                     //
                     // TODO: refactor `handle_rx` and `guards` into an enum
-                    //       representing the background task state: Waiting/Running/Shutdown.
+                    //       for the background task state: Waiting/Running/Shutdown.
                     assert!(
                         !handles.is_empty(),
                         "the peer set requires at least one background task"
@@ -304,7 +304,7 @@ where
                 // Correctness: the peer set must receive at least one task.
                 //
                 // TODO: refactor `handle_rx` and `guards` into an enum
-                //       representing the background task state: Waiting/Running/Shutdown.
+                //       for the background task state: Waiting/Running/Shutdown.
                 Err(TryRecvError::Closed) => {
                     Some(Err("all peer set background tasks have exited".into()))
                 }
@@ -339,7 +339,7 @@ where
             guard.abort();
         }
 
-        // TODO: implement graceful shutdown for InventoryRegistry
+        // TODO: implement graceful shutdown for InventoryRegistry (#1678)
     }
 
     fn poll_unready(&mut self, cx: &mut Context<'_>) {
