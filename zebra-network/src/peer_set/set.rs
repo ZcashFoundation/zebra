@@ -239,40 +239,79 @@ where
     /// If any background task exits, shuts down all other background tasks,
     /// and returns an error.
     fn poll_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxError> {
-        if self.guards.is_empty() {
-            match self.handle_rx.try_recv() {
-                Ok(handles) => {
-                    for handle in handles {
-                        self.guards.push(handle);
-                    }
-                }
-                Err(TryRecvError::Closed) => unreachable!(
-                    "try_recv will never be called if the futures have already been received"
-                ),
-                Err(TryRecvError::Empty) => return Ok(()),
-            }
+        if let Some(result) = self.receive_tasks_if_needed() {
+            return result;
         }
 
-        let exit_error = match Pin::new(&mut self.guards).poll_next(cx) {
-            Poll::Pending => return Ok(()),
+        match Pin::new(&mut self.guards).poll_next(cx) {
+            // All background tasks are still running.
+            Poll::Pending => Ok(()),
+
             Poll::Ready(Some(res)) => {
                 info!(
                     background_tasks = %self.guards.len(),
                     "a peer set background task exited, shutting down other peer set tasks"
                 );
 
+                self.shut_down_tasks_and_channels();
+
                 // Flatten the join result and inner result,
                 // then turn Ok() task exits into errors.
                 res.map_err(Into::into)
+                    // TODO: replace with Result::flatten when it stabilises (#70142)
                     .and_then(convert::identity)
                     .and(Err("a peer set background task exited".into()))
             }
-            Poll::Ready(None) => Err("all peer set background tasks have exited".into()),
-        };
 
-        self.shut_down_tasks_and_channels();
+            Poll::Ready(None) => {
+                self.shut_down_tasks_and_channels();
+                Err("all peer set background tasks have exited".into())
+            }
+        }
+    }
 
-        exit_error
+    /// Receive background tasks, if they've been sent on the channel,
+    /// but not consumed yet.
+    ///
+    /// Returns a result representing the current task state,
+    /// or `None` if the background tasks should be polled to check their state.
+    fn receive_tasks_if_needed(&mut self) -> Option<Result<(), BoxError>> {
+        if self.guards.is_empty() {
+            match self.handle_rx.try_recv() {
+                // The tasks haven't been sent yet.
+                Err(TryRecvError::Empty) => Some(Ok(())),
+
+                // The tasks have been sent, but not consumed.
+                Ok(handles) => {
+                    // Currently, the peer set treats no backgound tasks as an error.
+                    //
+                    // TODO: refactor `handle_rx` and `guards` into an enum
+                    //       representing the background task state: Waiting/Running/Shutdown.
+                    assert!(
+                        !handles.is_empty(),
+                        "the peer set requires at least one background task"
+                    );
+
+                    for handle in handles {
+                        self.guards.push(handle);
+                    }
+
+                    None
+                }
+
+                // The tasks have been sent and consumed, but then they exited.
+                //
+                // Correctness: the peer set must receive at least one task.
+                //
+                // TODO: refactor `handle_rx` and `guards` into an enum
+                //       representing the background task state: Waiting/Running/Shutdown.
+                Err(TryRecvError::Closed) => {
+                    Some(Err("all peer set background tasks have exited".into()))
+                }
+            }
+        } else {
+            None
+        }
     }
 
     /// Shut down:
@@ -294,10 +333,11 @@ where
         self.demand_signal.close_channel();
 
         // Shut down background tasks.
+        self.handle_rx.close();
+        self.receive_tasks_if_needed();
         for guard in self.guards.iter() {
             guard.abort();
         }
-        self.handle_rx.close();
 
         // TODO: implement graceful shutdown for InventoryRegistry
     }
