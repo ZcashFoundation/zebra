@@ -297,6 +297,7 @@ where
         for guard in self.guards.iter() {
             guard.abort();
         }
+        self.handle_rx.close();
 
         // TODO: implement graceful shutdown for InventoryRegistry
     }
