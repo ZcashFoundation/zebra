@@ -50,6 +50,41 @@ proptest! {
         );
         prop_assert_eq!(result.unwrap().tx_id(), transaction_id);
     }
+
+    /// Test if having [`u32::MAX`] as the sequence number of all inputs disables the lock time.
+    #[test]
+    fn lock_time_is_ignored_because_of_sequence_numbers(
+        (network, block_height) in sapling_onwards_strategy(),
+        block_time in datetime_full(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+        lock_time in any::<LockTime>(),
+    ) {
+        zebra_test::init();
+
+        let (mut transaction, known_utxos) = mock_transparent_transaction(
+            network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            lock_time,
+        );
+
+        for input in transaction.inputs_mut() {
+            input.set_sequence(u32::MAX);
+        }
+
+        let transaction_id = transaction.unmined_id();
+
+        let result = validate(transaction, block_height, block_time, known_utxos, network);
+
+        prop_assert!(
+            result.is_ok(),
+            "Unexpected validation error: {}",
+            result.unwrap_err()
+        );
+        prop_assert_eq!(result.unwrap().tx_id(), transaction_id);
+    }
 }
 
 /// Generate an arbitrary block height after the Sapling activation height on an arbitrary network.
