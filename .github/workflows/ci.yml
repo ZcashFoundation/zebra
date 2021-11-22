@@ -49,11 +49,23 @@ jobs:
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Skip network tests on Ubuntu and Windows
-        # Ubuntu runners don't have network or DNS configured during test steps.
+        # Ubuntu runners don't have reliable network or DNS during test steps.
         # Windows runners have an unreliable network.
         shell: bash
         if: matrix.os != 'macOS-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+
+      - name: Minimise proptest cases on macOS and Windows
+        # We set cases to 1, because some tests already run 1 case by default.
+        # We keep maximum shrink iterations at the default value, because it only happens on failure.
+        #
+        # Windows compilation and tests are slower than other platforms.
+        # macOS runners do extra network tests, so they take longer.
+        shell: bash
+        if: matrix.os != 'ubuntu-latest'
+        run: |
+             echo "PROPTEST_CASES=1" >> $GITHUB_ENV
+             echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
 
       - name: Change target output directory on Windows
         # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
@@ -83,26 +95,22 @@ jobs:
 
       - name: Show env vars
         run: |
+            echo "Test env vars:"
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
+            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run tests
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
           args: --verbose --all
-
-      - name: Run tests with fake activation heights
-        uses: actions-rs/cargo@v1.0.3
-        env:
-          TEST_FAKE_ACTIVATION_HEIGHTS:
-        with:
-          command: test
-          # Note: this only runs the zebra-state crate tests, because re-running all the test binaries is slow on Windows
-          args: --verbose --package zebra-state --lib -- with_fake_activation_heights
 
       # Explicitly run any tests that are usually #[ignored]
 
@@ -114,6 +122,63 @@ jobs:
           command: test
           # Note: this only runs the zebrad acceptance tests, because re-running all the test binaries is slow on Windows
           args: --verbose --package zebrad --test acceptance sync_large_checkpoints_ -- --ignored
+
+  test-fake-activation-heights:
+    name: Build (+${{ matrix.rust }}) zebra-state with fake activation heights on ubuntu-latest
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable]
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: full
+
+    steps:
+      - uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
+          override: true
+
+      - uses: Swatinem/rust-cache@v1
+
+      - name: cargo fetch
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: fetch
+
+      - name: Show env vars
+        run: |
+            echo "Test env vars:"
+            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
+            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
+            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
+            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
+
+      # This test changes zebra-chain's activation heights,
+      # which can recompile all the Zebra crates,
+      # so we want its build products to be cached separately.
+      #
+      # Also, we don't want to accidentally use the fake heights in other tests.
+      - name: Run tests with fake activation heights
+        uses: actions-rs/cargo@v1.0.3
+        env:
+          TEST_FAKE_ACTIVATION_HEIGHTS: ""
+        with:
+          command: test
+          # Note: this only runs the zebra-state crate tests,
+          # because re-running all the test binaries can be slow
+          args: --verbose --package zebra-state --lib -- with_fake_activation_heights
 
   build-chain-no-features:
     name: Build (+${{ matrix.rust }}) zebra-chain w/o features on ubuntu-latest
@@ -147,11 +212,11 @@ jobs:
 
       - name: Show env vars
         run: |
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run build without features enabled
         working-directory: ./zebra-chain
@@ -186,11 +251,11 @@ jobs:
 
       - name: Show env vars
         run: |
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Build
         uses: actions-rs/cargo@v1.0.3
@@ -198,7 +263,7 @@ jobs:
           command: build
           args: --verbose --release
 
-  clippy-cargo-lock:
+  clippy-deps:
     name: Clippy (stable)
     timeout-minutes: 30
     runs-on: ubuntu-latest
@@ -221,11 +286,11 @@ jobs:
 
       - name: Show env vars
         run: |
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run clippy
         uses: actions-rs/clippy-check@v1.0.7
@@ -242,7 +307,20 @@ jobs:
           command: check
           args: --locked --all-features --all-targets
 
-  fmt-deps:
+      # Edit zebra/deny.toml to allow duplicate dependencies
+      - name: Check for dependent crates with different versions
+        uses: EmbarkStudios/cargo-deny-action@v1.2.6
+        with:
+          command: check bans
+          args: --all-features --workspace
+
+      - name: Check crate sources
+        uses: EmbarkStudios/cargo-deny-action@v1.2.6
+        with:
+          command: check sources
+          args: --all-features --workspace
+
+  fmt:
     name: Rustfmt
     timeout-minutes: 30
     runs-on: ubuntu-latest
@@ -265,27 +343,14 @@ jobs:
 
       - name: Show env vars
         run: |
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Check rustfmt
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fmt
           args: --all -- --check
-
-      # Edit zebra/deny.toml to allow duplicates
-      - name: Check for dependent crates with different versions
-        uses: EmbarkStudios/cargo-deny-action@v1.2.6
-        with:
-          command: check bans
-          args: --all-features --workspace
-
-      - name: Check crate sources
-        uses: EmbarkStudios/cargo-deny-action@v1.2.6
-        with:
-          command: check sources
-          args: --all-features --workspace
