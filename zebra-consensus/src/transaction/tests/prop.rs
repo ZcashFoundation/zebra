@@ -85,6 +85,36 @@ proptest! {
         );
         prop_assert_eq!(result.unwrap().tx_id(), transaction_id);
     }
+
+    /// Test if a transaction locked at a certain block height is rejected.
+    #[test]
+    fn transaction_is_rejected_based_on_lock_height(
+        (network, block_height) in sapling_onwards_strategy(),
+        block_time in datetime_full(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+        relative_unlock_height in 0.0..1.0,
+    ) {
+        zebra_test::init();
+
+        let unlock_height = scale_block_height(block_height, None, relative_unlock_height);
+        let lock_time = LockTime::Height(unlock_height);
+
+        let (transaction, known_utxos) = mock_transparent_transaction(
+            network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            lock_time,
+        );
+
+        let result = validate(transaction, block_height, block_time, known_utxos, network);
+
+        prop_assert_eq!(
+            result,
+            Err(TransactionError::LockedUntilAfterBlockHeight(unlock_height))
+        );
+    }
 }
 
 /// Generate an arbitrary block height after the Sapling activation height on an arbitrary network.
