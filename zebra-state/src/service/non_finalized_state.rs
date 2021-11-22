@@ -202,10 +202,18 @@ impl NonFinalizedState {
             &parent_chain.spent_utxos,
             finalized_state,
         )?;
+
         check::prepared_block_commitment_is_valid_for_chain_history(
             &prepared,
             self.network,
             &parent_chain.history_tree,
+        )?;
+
+        // TODO: if this returns an error, zebrad panics elsewhere?
+        check::anchors::anchors_refer_to_earlier_treestates(
+            finalized_state,
+            &parent_chain,
+            &prepared,
         )?;
 
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
