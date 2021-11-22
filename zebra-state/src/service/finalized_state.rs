@@ -604,6 +604,24 @@ impl FinalizedState {
         self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
     }
 
+    // /// Returns `true` if the finalized state contains `sprout_anchor`.
+    // pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
+    //     let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+    //     self.db.zs_contains(sprout_anchors, &sprout_anchor)
+    // }
+
+    /// Returns `true` if the finalized state contains `sapling_anchor`.
+    pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
+        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
+        self.db.zs_contains(sapling_anchors, &sapling_anchor)
+    }
+
+    /// Returns `true` if the finalized state contains `orchard_anchor`.
+    pub fn contains_orchard_anchor(&self, orchard_anchor: &orchard::tree::Root) -> bool {
+        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
+        self.db.zs_contains(orchard_anchors, &orchard_anchor)
+    }
+
     /// Returns the finalized hash for a given `block::Height` if it is present.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
