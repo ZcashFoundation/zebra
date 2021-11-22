@@ -22,8 +22,9 @@ panic = "abort"
 
 [patch.crates-io]
 
-# TODO: replace with upstream orchard when these changes are merged (#2982)
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "465afd162ed40427a7452ac151d5b1c4bc5866ea" }
+# TODO: replace with upstream orchard when these changes are merged
+# https://github.com/ZcashFoundation/zebra/issues/3056
+orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
 
 # TODO: replace with upstream librustzcash when these changes are merged (#2982)
 zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
