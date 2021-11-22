@@ -1,12 +1,13 @@
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use proptest::prelude::*;
+use proptest::{collection::vec, prelude::*};
 use tower::ServiceExt;
 
 use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
+    serialization::arbitrary::datetime_full,
     transaction::{LockTime, Transaction},
     transparent,
 };
@@ -16,6 +17,40 @@ use crate::{error::TransactionError, script, transaction};
 
 /// The maximum number of transparent inputs to include in a mock transaction.
 const MAX_TRANSPARENT_INPUTS: usize = 10;
+
+proptest! {
+    /// Test if a transaction that has a zero value as the lock time is always unlocked.
+    #[test]
+    fn zero_lock_time_is_always_unlocked(
+        (network, block_height) in sapling_onwards_strategy(),
+        block_time in datetime_full(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+    ) {
+        zebra_test::init();
+
+        let zero_lock_time = LockTime::Height(block::Height(0));
+
+        let (transaction, known_utxos) = mock_transparent_transaction(
+            network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            zero_lock_time,
+        );
+
+        let transaction_id = transaction.unmined_id();
+
+        let result = validate(transaction, block_height, block_time, known_utxos, network);
+
+        prop_assert!(
+            result.is_ok(),
+            "Unexpected validation error: {}",
+            result.unwrap_err()
+        );
+        prop_assert_eq!(result.unwrap().tx_id(), transaction_id);
+    }
+}
 
 /// Generate an arbitrary block height after the Sapling activation height on an arbitrary network.
 ///
