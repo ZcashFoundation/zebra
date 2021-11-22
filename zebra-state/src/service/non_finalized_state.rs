@@ -125,6 +125,7 @@ impl NonFinalizedState {
     /// Commit block to the non-finalized state, on top of:
     /// - an existing chain's tip, or
     /// - a newly forked chain.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_block(
         &mut self,
         prepared: PreparedBlock,
@@ -164,6 +165,7 @@ impl NonFinalizedState {
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
@@ -187,6 +189,7 @@ impl NonFinalizedState {
 
     /// Contextually validate `prepared` using `finalized_state`.
     /// If validation succeeds, push `prepared` onto `parent_chain`.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, parent_chain, prepared))]
     fn validate_and_commit(
         &self,
         parent_chain: Chain,
