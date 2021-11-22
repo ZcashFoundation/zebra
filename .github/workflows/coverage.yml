@@ -58,7 +58,7 @@ jobs:
         # cargo-llvm-cov doesn't have a silent mode, so we have to extract the path from stderr
         run: echo "ZCASH_PARAMS=$(cargo llvm-cov --lcov --no-report run --example get-params-path 2>&1 >/dev/null | tail -1)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
-        id: cache-params
+        id: cache-sprout-and-sapling-params
         uses: actions/cache@v2
         with:
           path: ${{ env.ZCASH_PARAMS }}
