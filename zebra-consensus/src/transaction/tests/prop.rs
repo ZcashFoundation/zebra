@@ -1,6 +1,8 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
+use chrono::{DateTime, Utc};
 use proptest::prelude::*;
+use tower::ServiceExt;
 
 use zebra_chain::{
     block,
@@ -10,6 +12,7 @@ use zebra_chain::{
 };
 
 use super::mock_transparent_transfer;
+use crate::{error::TransactionError, script, transaction};
 
 /// The maximum number of transparent inputs to include in a mock transaction.
 const MAX_TRANSPARENT_INPUTS: usize = 10;
@@ -209,4 +212,35 @@ fn scale_block_height(
     let new_height_value = (height_range * scale + min_height_value).floor();
 
     block::Height(new_height_value as u32)
+}
+
+/// Validate a `transaction` using a [`transaction::Verifier`] and return the result.
+///
+/// Configures an asynchronous runtime to run the verifier, sets it up and then uses it verify a
+/// `transaction` using the provided parameters.
+fn validate(
+    transaction: Transaction,
+    height: block::Height,
+    block_time: DateTime<Utc>,
+    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    network: Network,
+) -> Result<transaction::Response, TransactionError> {
+    zebra_test::RUNTIME.block_on(async {
+        // Initialize the verifier
+        let state_service =
+            tower::service_fn(|_| async { unreachable!("State service should not be called") });
+        let script_verifier = script::Verifier::new(state_service);
+        let verifier = transaction::Verifier::new(network, script_verifier);
+
+        // Test the transaction verifier
+        verifier
+            .clone()
+            .oneshot(transaction::Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(known_utxos),
+                height,
+                time: block_time,
+            })
+            .await
+    })
 }
