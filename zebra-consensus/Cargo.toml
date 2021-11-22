@@ -10,7 +10,7 @@ default = []
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-blake2b_simd = "0.5.11"
+blake2b_simd = "1.0.0"
 bellman = "0.11.1"
 bls12_381 = "0.6.0"
 jubjub = "0.8.0"
