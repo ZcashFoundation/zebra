@@ -16,15 +16,16 @@ zebra-network = { path = "../zebra-network" }
 zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
+chrono = "0.4"
 gumdrop = "0.7"
+lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
-chrono = "0.4"
 
 hyper = { version = "0.14.15", features = ["full"] }
 futures = "0.3"
 tokio = { version = "1.14.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tower = { version = "0.4.9", features = ["hedge", "limit"] }
+tower = { version = "0.4.11", features = ["hedge", "limit"] }
 pin-project = "1.0.7"
 
 color-eyre = { version = "0.5.11", features = ["issue-url"] }

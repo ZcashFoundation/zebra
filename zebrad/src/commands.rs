@@ -1,11 +1,12 @@
 //! Zebrad Subcommands
 
+mod download;
 mod generate;
 mod start;
 mod version;
 
 use self::ZebradCmd::*;
-use self::{generate::GenerateCmd, start::StartCmd, version::VersionCmd};
+use self::{download::DownloadCmd, generate::GenerateCmd, start::StartCmd, version::VersionCmd};
 
 use crate::config::ZebradConfig;
 
@@ -20,6 +21,10 @@ pub const CONFIG_FILE: &str = "zebrad.toml";
 /// Zebrad Subcommands
 #[derive(Command, Debug, Options)]
 pub enum ZebradCmd {
+    /// The `download` subcommand
+    #[options(help = "pre-download required parameter files")]
+    Download(DownloadCmd),
+
     /// The `generate` subcommand
     #[options(help = "generate a skeleton configuration")]
     Generate(GenerateCmd),
@@ -45,7 +50,7 @@ impl ZebradCmd {
         match self {
             // List all the commands, so new commands have to make a choice here
             Start(_) => true,
-            Generate(_) | Help(_) | Version(_) => false,
+            Download(_) | Generate(_) | Help(_) | Version(_) => false,
         }
     }
 }
@@ -53,6 +58,7 @@ impl ZebradCmd {
 impl Runnable for ZebradCmd {
     fn run(&self) {
         match self {
+            Download(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
             ZebradCmd::Help(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),

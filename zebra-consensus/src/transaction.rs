@@ -342,6 +342,8 @@ where
                 )?,
             };
 
+            // If the Groth16 parameter download hangs,
+            // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
 
             let mut spent_utxos = HashMap::new();

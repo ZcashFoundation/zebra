@@ -18,17 +18,17 @@ use once_cell::sync::Lazy;
 use rand::thread_rng;
 use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
+
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
+
 use zebra_chain::sapling::{Output, PerSpendAnchor, Spend};
 
-mod hash_reader;
 mod params;
 #[cfg(test)]
 mod tests;
 
-use self::hash_reader::HashReader;
-use params::PARAMS;
+pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
 
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
@@ -40,28 +40,31 @@ use params::PARAMS;
 /// handle.
 pub static SPEND_VERIFIER: Lazy<
     Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
-> = Lazy::new(|| {
-    Fallback::new(
-        Batch::new(
-            Verifier::new(&PARAMS.sapling.spend.vk),
-            super::MAX_BATCH_SIZE,
-            super::MAX_BATCH_LATENCY,
-        ),
-        // We want to fallback to individual verification if batch verification
-        // fails, so we need a Service to use. The obvious way to do this would
-        // be to write a closure that returns an async block. But because we
-        // have to specify the type of a static, we need to be able to write the
-        // type of the closure and its return value, and both closures and async
-        // blocks have eldritch types whose names cannot be written. So instead,
-        // we use a Ready to avoid an async block and cast the closure to a
-        // function (which is possible because it doesn't capture any state).
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.spend.vk)))
-            }) as fn(_) -> _,
-        ),
-    )
-});
+> =
+    Lazy::new(|| {
+        Fallback::new(
+            Batch::new(
+                Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
+                super::MAX_BATCH_SIZE,
+                super::MAX_BATCH_LATENCY,
+            ),
+            // We want to fallback to individual verification if batch verification
+            // fails, so we need a Service to use. The obvious way to do this would
+            // be to write a closure that returns an async block. But because we
+            // have to specify the type of a static, we need to be able to write the
+            // type of the closure and its return value, and both closures and async
+            // blocks have eldritch types whose names cannot be written. So instead,
+            // we use a Ready to avoid an async block and cast the closure to a
+            // function (which is possible because it doesn't capture any state).
+            tower::service_fn(
+                (|item: Item| {
+                    ready(item.verify_single(&prepare_verifying_key(
+                        &GROTH16_PARAMETERS.sapling.spend.vk,
+                    )))
+                }) as fn(_) -> _,
+            ),
+        )
+    });
 
 /// Global batch verification context for Groth16 proofs of Output statements.
 ///
@@ -76,7 +79,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&PARAMS.sapling.output.vk),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
@@ -90,7 +93,9 @@ pub static OUTPUT_VERIFIER: Lazy<
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&prepare_verifying_key(&PARAMS.sapling.output.vk)))
+                ready(item.verify_single(&prepare_verifying_key(
+                    &GROTH16_PARAMETERS.sapling.output.vk,
+                )))
             }) as fn(_) -> _,
         ),
     )
@@ -99,6 +104,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// A Groth16 verification item, used as the request type of the service.
 pub type Item = batch::Item<Bls12>;
 
+/// A wrapper to workaround the missing `ServiceExt::map_err` method.
 pub struct ItemWrapper(Item);
 
 impl From<&Spend<PerSpendAnchor>> for ItemWrapper {
