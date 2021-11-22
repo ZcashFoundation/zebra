@@ -22,11 +22,18 @@ panic = "abort"
 
 [patch.crates-io]
 
-# TODO: replace with upstream orchard when these changes are merged
-# https://github.com/ZcashFoundation/zebra/issues/3056
-orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
+# TODO: replace with upstream orchard when these changes are merged (#2982)
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "465afd162ed40427a7452ac151d5b1c4bc5866ea" }
 
-# TODO: remove these after a new librustzcash release.
+# TODO: replace with upstream librustzcash when these changes are merged (#2982)
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
+
+# Use the ZcashFoundation fork where possible, to avoid duplicate dependencies
+equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
+zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
+zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
+
+# TODO: remove these after a new librustzcash release (#2982)
 
 # These are librustzcash git requirements specified in its workspace Cargo.toml,
 # that we must replicate here
@@ -34,13 +41,15 @@ incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.
 # Replaced by the ZcashFoundation fork above
 #orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
 
+# Replaced by the ZcashFoundation fork above
+#
 # These are librustzcash file requirements specified in its workspace Cargo.toml,
 # that we must replace with git requirements
-zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+#zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 
 # These patches are not strictly required,
 # but they help avoid duplicate dependencies
-equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+#equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+#zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+#zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
