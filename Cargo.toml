@@ -22,17 +22,18 @@ panic = "abort"
 
 [patch.crates-io]
 
-# TODO: replace with upstream orchard when these changes are merged
-# https://github.com/ZcashFoundation/zebra/issues/3056
+# TODO: replace with upstream orchard (#3056)
 orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
 
-# TODO: replace with upstream librustzcash when these changes are merged (#2982)
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
+# TODO: replace with upstream librustzcash when these changes are merged (#3037)
+#       zcash_proofs patch doesn't work, maybe because of features?
+#zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "1bfffb60b7427bd0333fbc395d2a8ba838082c9b" }
 
 # Use the ZcashFoundation fork where possible, to avoid duplicate dependencies
-equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
-zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
-zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "36f3ac751dd8882ca2656fdd38745ab59f4cbccc" }
+equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "1bfffb60b7427bd0333fbc39" }
+zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "1bfffb60b7427bd0333fbc39" }
+zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "1bfffb60b7427bd0333fbc39" }
+zcash_history = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "1bfffb60b7427bd0333fbc39" }
 
 # TODO: remove these after a new librustzcash release (#2982)
 
@@ -51,6 +52,6 @@ incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.
 # These patches are not strictly required,
 # but they help avoid duplicate dependencies
 #equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
-zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+#zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 #zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
 #zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
