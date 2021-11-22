@@ -1,9 +1,17 @@
+use std::{collections::HashMap, convert::TryInto};
+
 use proptest::prelude::*;
 
 use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
+    transparent,
 };
+
+use super::mock_transparent_transfer;
+
+/// The maximum number of transparent inputs to include in a mock transaction.
+const MAX_TRANSPARENT_INPUTS: usize = 10;
 
 /// Generate an arbitrary block height after the Sapling activation height on an arbitrary network.
 ///
@@ -24,6 +32,52 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
         (start_height_value..=end_height_value)
             .prop_map(move |height_value| (network, block::Height(height_value)))
     })
+}
+
+/// Create multiple mock transparent transfers.
+///
+/// Creates one mock transparent transfer per item in the `relative_source_heights` vector. Each
+/// item represents a relative scale (in the range `0.0..1.0`) representing the scale to obtain a
+/// block height between the genesis block and the specified `block_height`. Each block height is
+/// then used as the height for the source of the UTXO that will be spent by the transfer.
+///
+/// The function returns a list of inputs and outputs to be included in a mock transaction, as well
+/// as a [`HashMap`] of source UTXOs to be sent to the transaction verifier.
+///
+/// # Panics
+///
+/// This will panic if there are more than [`u32::MAX`] items in `relative_source_heights`. Ideally
+/// the tests should use a number of items at most [`MAX_TRANSPARENT_INPUTS`].
+fn mock_transparent_transfers(
+    relative_source_heights: Vec<f64>,
+    block_height: block::Height,
+) -> (
+    Vec<transparent::Input>,
+    Vec<transparent::Output>,
+    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) {
+    let transfer_count = relative_source_heights.len();
+    let mut inputs = Vec::with_capacity(transfer_count);
+    let mut outputs = Vec::with_capacity(transfer_count);
+    let mut known_utxos = HashMap::with_capacity(transfer_count);
+
+    for (index, relative_source_height) in relative_source_heights.into_iter().enumerate() {
+        let fake_source_fund_height =
+            scale_block_height(None, block_height, relative_source_height);
+
+        let outpoint_index = index
+            .try_into()
+            .expect("too many mock transparent transfers requested");
+
+        let (input, output, new_utxos) =
+            mock_transparent_transfer(fake_source_fund_height, true, outpoint_index);
+
+        inputs.push(input);
+        outputs.push(output);
+        known_utxos.extend(new_utxos);
+    }
+
+    (inputs, outputs, known_utxos)
 }
 
 /// Selects a [`block::Height`] between `min_height` and `max_height` using the `scale` factor.
