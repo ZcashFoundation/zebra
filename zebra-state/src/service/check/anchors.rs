@@ -22,7 +22,7 @@ use crate::{
 /// > the output Sprout treestate of a previous block.[^sprout]
 ///
 /// > The anchor of each JoinSplit description in a transaction MUST refer to
-/// > either some earlier block’s nal Sprout treestate, or to the interstitial
+/// > either some earlier block’s final Sprout treestate, or to the interstitial
 /// > output treestate of any prior JoinSplit description in the same transaction.[^sprout]
 ///
 /// > The anchor of each Spend description MUST refer to some earlier
