@@ -2,8 +2,8 @@
 //!
 //! # Implementation
 //!
-//! The [`PeerSet`] implementation is adapted from the one in the [Tower Balance][tower-balance] crate, and as
-//! described in that crate's documentation, it
+//! The [`PeerSet`] implementation is adapted from the one in the [Tower Balance][tower-balance] crate.
+//! As described in that crate's documentation, it:
 //!
 //! > Distributes requests across inner services using the [Power of Two Choices][p2c].
 //! >
@@ -16,11 +16,11 @@
 //! > > The maximum load variance between any two servers is bound by `ln(ln(n))` where
 //! > > `n` is the number of servers in the cluster.
 //!
-//! This should work well for many network requests, but not all of them: some
-//! requests, e.g., a request for some particular inventory item, can only be
-//! made to a subset of connected peers, e.g., the ones that have recently
-//! advertised that inventory hash, and other requests require specialized logic
-//! (e.g., transaction diffusion).
+//! The Power of Two Choices should work well for many network requests, but not all of them.
+//! Some requests should only be made to a subset of connected peers.
+//! For example, a request for a particular inventory item
+//! should be made to a peer that has recently advertised that inventory hash.
+//! Other requests require broadcasts, such as transaction diffusion.
 //!
 //! Implementing this specialized routing logic inside the `PeerSet` -- so that
 //! it continues to abstract away "the rest of the network" into one endpoint --
