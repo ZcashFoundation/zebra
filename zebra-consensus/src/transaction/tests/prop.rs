@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use proptest::{collection::vec, prelude::*};
 use tower::ServiceExt;
 
@@ -173,6 +173,47 @@ proptest! {
             relative_source_fund_heights,
             transaction_version,
             lock_time,
+        );
+
+        let transaction_id = transaction.unmined_id();
+
+        let result = validate(transaction, block_height, block_time, known_utxos, network);
+
+        prop_assert!(
+            result.is_ok(),
+            "Unexpected validation error: {}",
+            result.unwrap_err()
+        );
+        prop_assert_eq!(result.unwrap().tx_id(), transaction_id);
+    }
+
+    /// Test if transaction unlocked at a previous block time is accepted.
+    #[test]
+    fn transaction_with_lock_time_is_accepted(
+        (network, block_height) in sapling_onwards_strategy(),
+        first_datetime in datetime_u32(),
+        second_datetime in datetime_u32(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+    ) {
+        zebra_test::init();
+
+        let (unlock_time, block_time) = if first_datetime < second_datetime {
+            (first_datetime, second_datetime)
+        } else if first_datetime > second_datetime {
+            (second_datetime, first_datetime)
+        } else if first_datetime == chrono::MAX_DATETIME {
+            (first_datetime - Duration::nanoseconds(1), first_datetime)
+        } else {
+            (first_datetime, first_datetime + Duration::nanoseconds(1))
+        };
+
+        let (transaction, known_utxos) = mock_transparent_transaction(
+            network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            LockTime::Time(unlock_time),
         );
 
         let transaction_id = transaction.unmined_id();
