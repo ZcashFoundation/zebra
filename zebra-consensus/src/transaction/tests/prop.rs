@@ -7,7 +7,7 @@ use tower::ServiceExt;
 use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
-    serialization::arbitrary::datetime_full,
+    serialization::arbitrary::{datetime_full, datetime_u32},
     transaction::{LockTime, Transaction},
     transparent,
 };
@@ -113,6 +113,39 @@ proptest! {
         prop_assert_eq!(
             result,
             Err(TransactionError::LockedUntilAfterBlockHeight(unlock_height))
+        );
+    }
+
+    /// Test if a transaction locked at a certain block time is rejected.
+    #[test]
+    fn transaction_is_rejected_based_on_lock_time(
+        (network, block_height) in sapling_onwards_strategy(),
+        first_datetime in datetime_u32(),
+        second_datetime in datetime_u32(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+    ) {
+        zebra_test::init();
+
+        let (unlock_time, block_time) = if first_datetime >= second_datetime {
+            (first_datetime, second_datetime)
+        } else {
+            (second_datetime, first_datetime)
+        };
+
+        let (transaction, known_utxos) = mock_transparent_transaction(
+            network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            LockTime::Time(unlock_time),
+        );
+
+        let result = validate(transaction, block_height, block_time, known_utxos, network);
+
+        prop_assert_eq!(
+            result,
+            Err(TransactionError::LockedUntilAfterBlockTime(unlock_time))
         );
     }
 }
