@@ -277,7 +277,7 @@ pub fn coinbase_expiry_height(
             // Consensus rule: [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight
             // MUST be less than or equal to 499999999.
             else if let Some(expiry) = coinbase.expiry_height() {
-                if expiry > Height::MAX_COINBASE_EXPIRATION_PRE_NU5 {
+                if expiry > Height::MAX_EXPIRY_HEIGHT {
                     return Err(TransactionError::CoinbaseExpiration)?;
                 }
             }
