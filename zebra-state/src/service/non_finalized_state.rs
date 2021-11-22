@@ -30,7 +30,7 @@ use crate::{
     ValidateContextError,
 };
 
-use self::chain::Chain;
+pub(crate) use self::chain::Chain;
 
 use super::{check, finalized_state::FinalizedState};
 
