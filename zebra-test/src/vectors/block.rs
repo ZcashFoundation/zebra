@@ -220,8 +220,8 @@ lazy_static! {
             (1_116_000, BLOCK_TESTNET_1116000_BYTES.as_ref()),
             (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
             (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
-            // Nu5
             (1_599_199, BLOCK_TESTNET_1599199_BYTES.as_ref()),
+            // Nu5
             (1_599_200, BLOCK_TESTNET_1599200_BYTES.as_ref()),
             (1_599_201, BLOCK_TESTNET_1599201_BYTES.as_ref()),
         ].iter().cloned().collect();
