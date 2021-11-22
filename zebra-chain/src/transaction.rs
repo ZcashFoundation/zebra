@@ -515,6 +515,29 @@ impl Transaction {
 
     // sprout
 
+    /// Returns the Sprout `JoinSplit`s in this transaction, regardless of version.
+    pub fn sprout_joinsplits(
+        &self,
+    ) -> Box<dyn Iterator<Item = &sprout::JoinSplit<Groth16Proof>> + '_> {
+        match self {
+            // JoinSplits with Groth16 Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.joinsplits()),
+
+            // No JoinSplits / JoinSplits with BCTV14 proofs
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
     /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
     pub fn joinsplit_count(&self) -> usize {
         match self {
