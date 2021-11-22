@@ -246,7 +246,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0944d18a9a37691b87733b39c9360c9950af9aa5f97e2455bc108d8eb64fc1c1"
 dependencies = [
  "bitvec",
- "blake2s_simd",
+ "blake2s_simd 0.5.11",
  "byteorder",
  "crossbeam-channel 0.5.1",
  "ff 0.11.0",
@@ -387,6 +387,17 @@ checksum = "9e461a7034e85b211a4acb57ee2e6730b32912b06c08cc242243c39fc21ae6a2"
 dependencies = [
  "arrayref",
  "arrayvec 0.5.2",
+ "constant_time_eq",
+]
+
+[[package]]
+name = "blake2s_simd"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db539cc2b5f6003621f1cd9ef92d7ded8ea5232c7de0f9faa2de251cd98730d4"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.1",
  "constant_time_eq",
 ]
 
@@ -4232,7 +4243,7 @@ dependencies = [
  "bip0039",
  "bitvec",
  "blake2b_simd",
- "blake2s_simd",
+ "blake2s_simd 0.5.11",
  "bls12_381 0.6.0",
  "byteorder",
  "chacha20poly1305",
@@ -4305,7 +4316,7 @@ dependencies = [
  "bitflags",
  "bitvec",
  "blake2b_simd",
- "blake2s_simd",
+ "blake2s_simd 1.0.0",
  "bls12_381 0.6.0",
  "bs58",
  "byteorder",
