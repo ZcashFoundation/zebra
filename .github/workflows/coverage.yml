@@ -35,12 +35,20 @@ jobs:
       - name: Install cargo-llvm-cov cargo command
         run: cargo install cargo-llvm-cov
 
-      - name: Skip network tests on Ubuntu and Windows
-        # Ubuntu runners don't have network or DNS configured during test steps.
-        # Windows runners have an unreliable network.
+      - name: Skip network tests on Ubuntu
+        # Ubuntu runners don't have reliable network or DNS during test steps.
         shell: bash
-        if: matrix.os != 'macOS-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+
+      - name: Minimise proptest cases in Coverage tests
+        # We set cases to 1, because some tests already run 1 case by default.
+        # We set maximum shrink iterations to 0, because we don't expect failures in these tests.
+        #
+        # Coverage tests are much slower than other tests, particularly in hot loops.
+        shell: bash
+        run: |
+             echo "PROPTEST_CASES=1" >> $GITHUB_ENV
+             echo "PROPTEST_MAX_SHRINK_ITERS=0" >> $GITHUB_ENV
 
       # Modified from:
       # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33
@@ -62,11 +70,16 @@ jobs:
 
       - name: Show env vars
         run: |
+            echo "Test env vars:"
             echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
             echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
+            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
+            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
+            echo "Common env vars:"
+            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
+            echo "Build env vars:"
             echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
             echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
 
       - name: Run Zebra tests
         run: cargo llvm-cov --lcov --no-report
