@@ -148,6 +148,44 @@ proptest! {
             Err(TransactionError::LockedUntilAfterBlockTime(unlock_time))
         );
     }
+
+    /// Test if a transaction unlocked at an earlier block time is accepted.
+    #[test]
+    fn transaction_with_lock_height_is_accepted(
+        (network, block_height) in sapling_onwards_strategy(),
+        block_time in datetime_full(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+        relative_unlock_height in 0.0..1.0,
+    ) {
+        zebra_test::init();
+
+        // Because `scale_block_height` uses the range `[min, max)`, with `max` being
+        // non-inclusive, we have to use `block_height + 1` as the upper bound in order to test
+        // verifying at a block height equal to the lock height.
+        let exclusive_max_height = block::Height(block_height.0 + 1);
+        let unlock_height = scale_block_height(None, exclusive_max_height, relative_unlock_height);
+        let lock_time = LockTime::Height(unlock_height);
+
+        let (transaction, known_utxos) = mock_transparent_transaction(
+            network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            lock_time,
+        );
+
+        let transaction_id = transaction.unmined_id();
+
+        let result = validate(transaction, block_height, block_time, known_utxos, network);
+
+        prop_assert!(
+            result.is_ok(),
+            "Unexpected validation error: {}",
+            result.unwrap_err()
+        );
+        prop_assert_eq!(result.unwrap().tx_id(), transaction_id);
+    }
 }
 
 /// Generate an arbitrary block height after the Sapling activation height on an arbitrary network.
