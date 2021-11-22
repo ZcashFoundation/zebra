@@ -34,6 +34,35 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
     })
 }
 
+/// Sanitize a transaction version so that it is supported at the specified `block_height` of the
+/// `network`.
+///
+/// The `transaction_version` might be reduced if it is not supported by the network upgrade active
+/// at the `block_height` of the specified `network`.
+fn sanitize_transaction_version(
+    network: Network,
+    transaction_version: u8,
+    block_height: block::Height,
+) -> (u8, NetworkUpgrade) {
+    let network_upgrade = NetworkUpgrade::current(network, block_height);
+
+    let max_version = {
+        use NetworkUpgrade::*;
+
+        match network_upgrade {
+            Genesis => 1,
+            BeforeOverwinter => 2,
+            Overwinter => 3,
+            Sapling | Blossom | Heartwood | Canopy => 4,
+            Nu5 => 5,
+        }
+    };
+
+    let sanitized_version = transaction_version.min(max_version);
+
+    (sanitized_version, network_upgrade)
+}
+
 /// Create multiple mock transparent transfers.
 ///
 /// Creates one mock transparent transfer per item in the `relative_source_heights` vector. Each
