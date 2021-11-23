@@ -357,8 +357,8 @@ where
                 // Unready -> Ready
                 Poll::Ready(Some(Ok((key, svc)))) => {
                     trace!(?key, "service became ready");
-                    let _cancel = self.cancel_handles.remove(&key);
-                    assert!(_cancel.is_some(), "missing cancel handle");
+                    let cancel = self.cancel_handles.remove(&key);
+                    assert!(cancel.is_some(), "missing cancel handle");
                     self.ready_services.insert(key, svc);
                 }
 
@@ -379,8 +379,8 @@ where
                     let error = e.into();
                     debug!(%error, "service failed while unready, dropping service");
 
-                    let _cancel = self.cancel_handles.remove(&key);
-                    assert!(_cancel.is_some(), "missing cancel handle");
+                    let cancel = self.cancel_handles.remove(&key);
+                    assert!(cancel.is_some(), "missing cancel handle");
                 }
             }
         }
