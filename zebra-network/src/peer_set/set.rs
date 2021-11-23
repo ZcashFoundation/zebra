@@ -463,12 +463,12 @@ where
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
-    fn select_p2c_peer_from_list(&self, mut ready_service_list: HashSet<D::Key>) -> Option<D::Key> {
+    fn select_p2c_peer_from_list(&self, ready_service_list: HashSet<D::Key>) -> Option<D::Key> {
         match ready_service_list.len() {
             0 => None,
             1 => Some(
                 ready_service_list
-                    .drain()
+                    .into_iter()
                     .next()
                     .expect("just checked there is one service"),
             ),
@@ -480,12 +480,12 @@ where
                     let a = idxs.index(0);
                     let b = idxs.index(1);
 
-                    let a = ready_service_list
-                        .drain()
+                    let a = *ready_service_list
+                        .iter()
                         .nth(a)
                         .expect("sample returns valid indexes");
-                    let b = ready_service_list
-                        .drain()
+                    let b = *ready_service_list
+                        .iter()
                         .nth(b)
                         .expect("sample returns valid indexes");
 
