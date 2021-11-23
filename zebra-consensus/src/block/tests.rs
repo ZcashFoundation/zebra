@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, MAX_MONEY},
     block::{
         self,
         tests::generate::{large_multi_transaction_block, large_single_transaction_block},
@@ -494,40 +494,54 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
 }
 
 #[test]
-fn negative_fee_validation_failure() -> Result<(), Report> {
+fn miner_fees_validation_success() -> Result<(), Report> {
+    zebra_test::init();
+
+    miner_fees_validation_for_network(Network::Mainnet)?;
+    miner_fees_validation_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (&height, block) in block_iter {
+        if Height(height) > SLOW_START_SHIFT {
+            let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
+
+            // fake the miner fee to a big amount
+            let miner_fees = Amount::try_from(MAX_MONEY / 2).unwrap();
+
+            // Validate
+            let result = check::miner_fees_are_valid(&block, network, miner_fees);
+            assert!(result.is_ok());
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn miner_fees_validation_failure() -> Result<(), Report> {
     zebra_test::init();
     let network = Network::Mainnet;
 
-    // Get a block in the mainnet that is inside the funding stream period.
     let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
             .expect("block should deserialize");
 
-    // Build the new transaction with modified coinbase outputs
-    let tx = block
-        .transactions
-        .get(0)
-        .map(|transaction| Transaction::V4 {
-            inputs: transaction.inputs().to_vec(),
-            outputs: vec![transaction.outputs()[0].clone()],
-            lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
-            expiry_height: Height(0),
-            joinsplit_data: None,
-            sapling_shielded_data: None,
-        })
-        .unwrap();
+    // fake the miner fee to a small amount
+    let miner_fees = Amount::zero();
 
-    // Build new block
-    let transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = vec![Arc::new(tx)];
-    let block = Block {
-        header: block.header,
-        transactions,
-    };
+    // Validate
+    let result = check::miner_fees_are_valid(&block, network, miner_fees);
 
-    // Validate it
-    let result = check::subsidy_is_valid(&block, network);
     let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::NegativeFees,
+        SubsidyError::InvalidMinerFees,
     )));
     assert_eq!(expected, result);
 

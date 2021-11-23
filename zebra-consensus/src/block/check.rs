@@ -95,37 +95,12 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
     header.solution.check(header)
 }
 
-/// Returns `Ok(())` if the block subsidy and miner fees in `block` are valid for `network`
+/// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
-
-    // Consensus rule: The total value in zatoshi of transparent outputs from a
-    // coinbase transaction, minus vbalanceSapling, minus vbalanceOrchard, MUST NOT
-    // be greater than the value in zatoshi of block subsidy plus the transaction fees
-    // paid by transactions in this block.
-    // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-    let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
-        .iter()
-        .sum::<Result<Amount<NonNegative>, AmountError>>()
-        .expect("the sum of all outputs will always be positive")
-        .constrain()
-        .expect("positive value always fit in `NegativeAllowed`");
-    let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
-    let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
-
-    let block_subsidy: Amount = subsidy::general::block_subsidy(height, network)
-        .expect("a valid block subsidy for this height and network")
-        .constrain()
-        .expect("positive value always fit in `NegativeAllowed`");
-
-    // Consensus rule implementation: block fee must be at least zero.
-    (transparent_value_balance - sapling_value_balance - orchard_value_balance - block_subsidy)
-        .expect("should not overflow")
-        .constrain::<NonNegative>()
-        .map_err(|_| SubsidyError::NegativeFees)?;
 
     // Validate founders reward and funding streams
     let halving_div = subsidy::general::halving_divisor(height, network);
@@ -183,6 +158,46 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // Future halving, with no founders reward or funding streams
         Ok(())
     }
+}
+
+/// Returns `Ok(())` if the miner fees consensus rule is valid.
+///
+/// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+pub fn miner_fees_are_valid(
+    block: &Block,
+    network: Network,
+    block_miner_fees: Amount<NonNegative>,
+) -> Result<(), BlockError> {
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+    let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
+
+    let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
+        .iter()
+        .sum::<Result<Amount<NonNegative>, AmountError>>()
+        .expect("the sum of all outputs will always be positive")
+        .constrain()
+        .expect("positive value always fit in `NegativeAllowed`");
+    let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
+    let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
+
+    let block_subsidy = subsidy::general::block_subsidy(height, network)
+        .expect("a valid block subsidy for this height and network");
+
+    // Consensus rule: The total value in zatoshi of transparent outputs from a
+    // coinbase transaction, minus vbalanceSapling, minus vbalanceOrchard, MUST NOT
+    // be greater than the value in zatoshi of block subsidy plus the transaction fees
+    // paid by transactions in this block.
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
+        .expect("left side of the consensus rule equation should not overflow");
+    let right = (block_subsidy + block_miner_fees)
+        .expect("right side of the consensus rule equation should not overflow");
+
+    if left > right {
+        return Err(SubsidyError::InvalidMinerFees)?;
+    }
+
+    Ok(())
 }
 
 /// Returns `Ok(())` if `header.time` is less than or equal to
