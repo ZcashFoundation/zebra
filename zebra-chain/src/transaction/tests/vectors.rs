@@ -499,11 +499,18 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
         .expect("a valid height")
         .0;
 
-    // skip blocks that are before overwinter as they will not have a valid consensus branch id
-    let blocks_after_overwinter =
-        block_iter.skip_while(|(height, _)| **height < overwinter_activation_height);
+    let nu5_activation_height = NetworkUpgrade::Nu5
+        .activation_height(network)
+        .unwrap_or(Height::MAX_EXPIRY_HEIGHT)
+        .0;
 
-    for (height, original_bytes) in blocks_after_overwinter {
+    // skip blocks that are before overwinter as they will not have a valid consensus branch id
+    // skip blocks equal or greater Nu5 activation as they are already v5 transactions
+    let blocks_after_overwinter_and_before_nu5 = block_iter
+        .skip_while(|(height, _)| **height < overwinter_activation_height)
+        .take_while(|(height, _)| **height < nu5_activation_height);
+
+    for (height, original_bytes) in blocks_after_overwinter_and_before_nu5 {
         let original_block = original_bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
