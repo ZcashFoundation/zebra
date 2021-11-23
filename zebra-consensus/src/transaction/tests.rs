@@ -272,6 +272,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
                 height: canopy
                     .activation_height(network)
                     .expect("Canopy activation height is specified"),
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -323,6 +324,7 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
             height: nu5
                 .activation_height(network)
                 .expect("NU5 activation height is specified"),
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -372,6 +374,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -418,6 +421,7 @@ async fn v4_coinbase_transaction_is_accepted() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -468,6 +472,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -518,6 +523,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -584,6 +590,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height: transaction_block_height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -655,6 +662,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height: transaction_block_height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -709,6 +717,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -758,6 +767,7 @@ async fn v5_coinbase_transaction_is_accepted() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -810,6 +820,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -862,6 +873,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
             height: transaction_block_height,
+            time: chrono::MAX_DATETIME,
         })
         .await;
 
@@ -931,6 +943,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height: transaction_block_height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -984,6 +997,7 @@ fn v4_with_unsigned_sprout_transfer_is_rejected() {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height: transaction_block_height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -1032,6 +1046,7 @@ fn v4_with_sapling_spends() {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
                 height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -1076,6 +1091,7 @@ fn v4_with_duplicate_sapling_spends() {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
                 height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -1122,6 +1138,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
                 height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -1169,6 +1186,7 @@ fn v5_with_sapling_spends() {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -1216,6 +1234,7 @@ fn v5_with_duplicate_sapling_spends() {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
@@ -1279,6 +1298,7 @@ fn v5_with_duplicate_orchard_action() {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height,
+                time: chrono::MAX_DATETIME,
             })
             .await;
 
