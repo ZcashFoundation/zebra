@@ -444,8 +444,8 @@ where
         }
     }
 
-    /// Adds a busy service to the unready list.
-    /// Also adds a cancel handle for the service's current request.
+    /// Adds a busy service to the unready list,
+    /// and adds a cancel handle for the service's current request.
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
         let (tx, rx) = oneshot::channel();
         self.cancel_handles.insert(key, tx);
