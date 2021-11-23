@@ -198,11 +198,13 @@ where
     S::Future: Send + 'static,
 {
     // Pre-download Groth16 parameters in a separate thread.
-    // This thread must be launched first, so the download doesn't happen on the startup thread.
 
+    // Give other tasks priority, before spawning the download task.
+    tokio::task::yield_now().await;
+
+    // The parameter download thread must be launched before initializing any verifiers.
+    // Otherwise, the download might happen on the startup thread.
     let groth16_download_handle = spawn_blocking(|| {
-        tracing::info!("checking if Zcash Sapling and Sprout parameters have been downloaded");
-
         // The lazy static initializer does the download, if needed,
         // and the file hash checks.
         lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
