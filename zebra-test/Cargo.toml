@@ -17,7 +17,7 @@ regex = "1.4.6"
 
 tokio = { version = "1.14.0", features = ["full"] }
 tower = { version = "0.4.11", features = ["util"] }
-futures = "0.3.17"
+futures = "0.3.18"
 
 color-eyre = "0.5.11"
 owo-colors = "3.1.0"
