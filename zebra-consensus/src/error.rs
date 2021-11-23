@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{block, orchard, sapling, sprout, transparent};
+use zebra_chain::{amount, block, orchard, sapling, sprout, transparent};
 
 use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
 
@@ -228,5 +228,12 @@ pub enum BlockError {
         height: zebra_chain::block::Height,
         hash: zebra_chain::block::Hash,
         legacy_sigop_count: u64,
+    },
+
+    #[error("summing miner fees for block {height:?} {hash:?} failed: {source:?}")]
+    SummingMinerFees {
+        height: zebra_chain::block::Height,
+        hash: zebra_chain::block::Hash,
+        source: amount::Error,
     },
 }
