@@ -8,10 +8,11 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::components::mempool::Config as MempoolSection;
 use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
+
+use crate::components::{mempool::Config as MempoolSection, sync};
 
 /// Configuration for `zebrad`.
 ///
@@ -180,7 +181,7 @@ impl Default for SyncSection {
     fn default() -> Self {
         Self {
             max_concurrent_block_requests: 50,
-            lookahead_limit: 2_000,
+            lookahead_limit: sync::DEFAULT_LOOKAHEAD_LIMIT,
         }
     }
 }

@@ -22,6 +22,7 @@ use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block},
     parameters::Network,
     transparent,
@@ -175,7 +176,7 @@ where
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
-            // Field validity and structure checks
+            // Quick field validity and structure checks
             let now = Utc::now();
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
@@ -184,10 +185,19 @@ where
                 .transactions
                 .get(0)
                 .expect("must have coinbase transaction");
-            // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
-            tx::check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)?;
             check::subsidy_is_valid(&block, network)?;
 
+            // Validate `nExpiryHeight` consensus rules
+            // TODO: check non-coinbase transaction expiry against the block height (#2387)
+            //       check the maximum expiry height for non-coinbase transactions (#2387)
+            check::coinbase_expiry_height(&height, coinbase_tx, network)?;
+
+            // Now do the slower checks
+
+            // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
+            tx::check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)?;
+
+            // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
@@ -203,12 +213,17 @@ where
                         transaction: transaction.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
+                        time: block.header.time,
                     });
                 async_checks.push(rsp);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
+            // Get the transaction results back from the transaction verifier.
+
+            // Sum up some block totals from the transaction responses.
             let mut legacy_sigop_count = 0;
+            let mut block_miner_fees = Ok(Amount::zero());
 
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
@@ -216,10 +231,25 @@ where
                 let response = result
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?;
+
+                assert!(
+                    matches!(response, tx::Response::Block { .. }),
+                    "unexpected response from transaction verifier: {:?}",
+                    response
+                );
+
                 legacy_sigop_count += response
                     .legacy_sigop_count()
                     .expect("block transaction responses must have a legacy sigop count");
+
+                // Coinbase transactions consume the miner fee,
+                // so they don't add any value to the block's total miner fee.
+                if let Some(miner_fee) = response.miner_fee() {
+                    block_miner_fees += miner_fee;
+                }
             }
+
+            // Check the summed block totals
 
             if legacy_sigop_count > MAX_BLOCK_SIGOPS {
                 Err(BlockError::TooManyTransparentSignatureOperations {
@@ -229,10 +259,18 @@ where
                 })?;
             }
 
+            // TODO: check miner subsidy and miner fees (#1162)
+            let _block_miner_fees =
+                block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
+                    height,
+                    hash,
+                    source: amount_error,
+                })?;
+
+            // Finally, submit the block for contextual verification.
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            // Finally, submit the block for contextual verification.
             let prepared_block = zs::PreparedBlock {
                 block,
                 hash,

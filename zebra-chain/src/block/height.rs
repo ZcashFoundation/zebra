@@ -48,6 +48,14 @@ impl Height {
     /// `Height::MAX.0` can't be used in match range patterns, use this
     /// alias instead.
     pub const MAX_AS_U32: u32 = Self::MAX.0;
+
+    /// The maximum expiration Height that is allowed in all transactions
+    /// previous to Nu5 and in non-coinbase transactions from Nu5 activation height
+    /// and above.
+    ///
+    /// TODO: This is currently the same as `Height::MAX` but that change in #1113.
+    /// Remove this TODO when that happens.
+    pub const MAX_EXPIRY_HEIGHT: Height = Height(499_999_999);
 }
 
 impl Add<Height> for Height {

@@ -9,6 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use chrono::{DateTime, Utc};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt, TryFutureExt,
@@ -80,6 +81,8 @@ pub enum Request {
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         /// The height of the block containing this transaction.
         height: block::Height,
+        /// The time that the block was mined.
+        time: DateTime<Utc>,
     },
     /// Verify the supplied transaction as part of the mempool.
     ///
@@ -185,6 +188,14 @@ impl Request {
         }
     }
 
+    /// The block time used for lock time consensus rules validation.
+    pub fn block_time(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Request::Block { time, .. } => Some(*time),
+            Request::Mempool { .. } => None,
+        }
+    }
+
     /// The network upgrade to consider for the verification.
     ///
     /// This is based on the block height from the request, and the supplied `network`.
@@ -282,6 +293,10 @@ where
             let (utxo_sender, mut utxo_receiver) = mpsc::unbounded_channel();
 
             // Do basic checks first
+            if let Some(block_time) = req.block_time() {
+                check::lock_time_has_passed(&tx, req.height(), block_time)?;
+            }
+
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
 
@@ -342,6 +357,8 @@ where
                 )?,
             };
 
+            // If the Groth16 parameter download hangs,
+            // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
 
             let mut spent_utxos = HashMap::new();

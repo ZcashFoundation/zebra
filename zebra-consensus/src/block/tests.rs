@@ -16,7 +16,7 @@ use zebra_chain::{
     },
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
-    transaction::{arbitrary::transaction_to_fake_v5, Transaction},
+    transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_script::CachedFfiTransaction;
@@ -394,7 +394,7 @@ fn founders_reward_validation_failure() -> Result<(), Report> {
             Transaction::V3 {
                 inputs: transaction.inputs().to_vec(),
                 outputs: vec![output],
-                lock_time: transaction.lock_time(),
+                lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
                 expiry_height: Height(0),
                 joinsplit_data: None,
             }
@@ -510,7 +510,7 @@ fn negative_fee_validation_failure() -> Result<(), Report> {
         .map(|transaction| Transaction::V4 {
             inputs: transaction.inputs().to_vec(),
             outputs: vec![transaction.outputs()[0].clone()],
-            lock_time: transaction.lock_time(),
+            lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
             expiry_height: Height(0),
             joinsplit_data: None,
             sapling_shielded_data: None,
@@ -702,4 +702,35 @@ fn legacy_sigops_count_for_historic_blocks() {
         // Test that historic blocks pass the sigops check.
         assert!(legacy_sigop_count <= MAX_BLOCK_SIGOPS);
     }
+}
+
+#[test]
+fn coinbase_height_validation() -> Result<(), Report> {
+    zebra_test::init();
+
+    coinbase_height_for_network(Network::Mainnet)?;
+    coinbase_height_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn coinbase_height_for_network(network: Network) -> Result<(), Report> {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    for (&height, block) in block_iter {
+        let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
+
+        // Validate
+        let result = check::coinbase_expiry_height(
+            &Height(height),
+            block.transactions.get(0).unwrap(),
+            network,
+        );
+        assert!(result.is_ok());
+    }
+
+    Ok(())
 }

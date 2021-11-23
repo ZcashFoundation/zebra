@@ -262,7 +262,15 @@ pub(crate) const SHARED_ANCHOR_SPEND_SIZE: u64 = SHARED_ANCHOR_SPEND_PREFIX_SIZE
 /// The maximum number of sapling spends in a valid Zcash on-chain transaction V4.
 impl TrustedPreallocate for Spend<PerSpendAnchor> {
     fn max_allocation() -> u64 {
-        (MAX_BLOCK_BYTES - 1) / ANCHOR_PER_SPEND_SIZE
+        const MAX: u64 = (MAX_BLOCK_BYTES - 1) / ANCHOR_PER_SPEND_SIZE;
+        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        // This acts as nSpendsSapling and is therefore subject to the rule.
+        // The maximum value is actually smaller due to the block size limit,
+        // but we ensure the 2^16 limit with a static assertion.
+        // (The check is not required pre-NU5, but it doesn't cause problems.)
+        static_assertions::const_assert!(MAX < (1 << 16));
+        MAX
     }
 }
 

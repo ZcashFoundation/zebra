@@ -1,32 +1,60 @@
-use std::io::{self, BufReader};
+//! Downloading, checking, and loading Groth16 Sapling and Sprout parameters.
+
+use std::path::PathBuf;
 
 use bellman::groth16;
 use bls12_381::Bls12;
 
-use super::HashReader;
-
-const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
-const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
-
 lazy_static::lazy_static! {
-    pub static ref PARAMS: Groth16Params = Groth16Params::new();
+    /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
+    ///
+    /// When this static is accessed:
+    /// - the parameters are downloded if needed, then cached to a shared directory,
+    /// - the file hashes are checked, for both newly downloaded and previously cached files,
+    /// - the parameters are loaded into Zebra.
+    ///
+    /// # Panics
+    ///
+    /// If the downloaded or pre-existing parameter files are invalid.
+    pub static ref GROTH16_PARAMETERS: Groth16Parameters = Groth16Parameters::new();
 }
 
+/// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
 #[non_exhaustive]
-pub struct Groth16Params {
-    pub sapling: SaplingParams,
+pub struct Groth16Parameters {
+    /// The Sapling circuit Groth16 parameters.
+    pub sapling: SaplingParameters,
 }
 
-impl Groth16Params {
-    fn new() -> Self {
-        Self {
-            sapling: SaplingParams::new(),
+impl Groth16Parameters {
+    /// Download if needed, cache, check, and load the Sprout and Sapling Groth16 parameters.
+    ///
+    /// # Panics
+    ///
+    /// If the downloaded or pre-existing parameter files are invalid.
+    fn new() -> Groth16Parameters {
+        Groth16Parameters {
+            sapling: SaplingParameters::new(),
         }
+    }
+
+    /// Returns the path to the Groth16 parameters directory.
+    pub fn directory() -> PathBuf {
+        zcash_proofs::default_params_folder().expect("unable to find user home directory")
+    }
+
+    /// Returns a hint that helps users recover from parameter download failures.
+    pub fn failure_hint() -> String {
+        format!(
+            "Hint: try deleting {:?}, then running 'zebrad download' to re-download the parameters",
+            Groth16Parameters::directory(),
+        )
     }
 }
 
+/// Groth16 Zero-Knowledge Proof spend and output parameters for the Sapling circuit.
 #[non_exhaustive]
-pub struct SaplingParams {
+pub struct SaplingParameters {
     pub spend: groth16::Parameters<Bls12>,
     pub spend_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 
@@ -34,50 +62,41 @@ pub struct SaplingParams {
     pub output_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 }
 
-impl SaplingParams {
-    fn new() -> Self {
-        let (spend, output) = wagyu_zcash_parameters::load_sapling_parameters();
-        let spend_fs = BufReader::with_capacity(1024 * 1024, &spend[..]);
-        let output_fs = BufReader::with_capacity(1024 * 1024, &output[..]);
+impl SaplingParameters {
+    /// Download if needed, cache, check, and load the Sapling Groth16 parameters.
+    ///
+    /// # Panics
+    ///
+    /// If the downloaded or pre-existing parameter files are invalid.
+    fn new() -> SaplingParameters {
+        // TODO: Sprout
 
-        Self::read(spend_fs, output_fs)
-            .expect("reading parameters from wagyu zcash parameter's vec will always succeed")
-    }
+        let params_directory = Groth16Parameters::directory();
+        let spend_path = params_directory.join("sapling-spend.params");
+        let output_path = params_directory.join("sapling-output.params");
 
-    fn read<R: io::Read>(spend_fs: R, output_fs: R) -> Result<Self, io::Error> {
-        let mut spend_fs = HashReader::new(spend_fs);
-        let mut output_fs = HashReader::new(output_fs);
+        // Download parameters if needed.
+        //
+        // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
+        if !spend_path.exists() || !output_path.exists() {
+            tracing::info!("downloading Zcash Sapling parameters");
+            zcash_proofs::download_parameters().unwrap_or_else(|_| {
+                panic!(
+                    "error downloading parameter files. {}",
+                    Groth16Parameters::failure_hint()
+                )
+            });
+        }
 
-        // Deserialize params
-        let spend = groth16::Parameters::<Bls12>::read(&mut spend_fs, false)?;
-        let output = groth16::Parameters::<Bls12>::read(&mut output_fs, false)?;
+        // TODO: if loading fails, log a message including `failure_hint`
+        tracing::info!("checking and loading Zcash Sapling parameters");
+        let parameters = zcash_proofs::load_parameters(&spend_path, &output_path, None);
 
-        // There is extra stuff (the transcript) at the end of the parameter file which is
-        // used to verify the parameter validity, but we're not interested in that. We do
-        // want to read it, though, so that the BLAKE2b computed afterward is consistent
-        // with `b2sum` on the files.
-        let mut sink = io::sink();
-        io::copy(&mut spend_fs, &mut sink)?;
-        io::copy(&mut output_fs, &mut sink)?;
-
-        assert!(
-            spend_fs.into_hash() == SAPLING_SPEND_HASH,
-            "Sapling spend parameter is not correct."
-        );
-        assert!(
-            output_fs.into_hash() == SAPLING_OUTPUT_HASH,
-            "Sapling output parameter is not correct."
-        );
-
-        // Prepare verifying keys
-        let spend_prepared_verifying_key = groth16::prepare_verifying_key(&spend.vk);
-        let output_prepared_verifying_key = groth16::prepare_verifying_key(&output.vk);
-
-        Ok(Self {
-            spend,
-            spend_prepared_verifying_key,
-            output,
-            output_prepared_verifying_key,
-        })
+        SaplingParameters {
+            spend: parameters.spend_params,
+            spend_prepared_verifying_key: parameters.spend_vk,
+            output: parameters.output_params,
+            output_prepared_verifying_key: parameters.output_vk,
+        }
     }
 }

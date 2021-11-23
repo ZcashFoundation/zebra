@@ -42,7 +42,7 @@ use zebra_state::{ChainTipChange, TipAction};
 
 use crate::components::sync::SyncStatus;
 
-mod config;
+pub mod config;
 mod crawler;
 pub mod downloads;
 mod error;

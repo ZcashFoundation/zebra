@@ -50,8 +50,8 @@
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
-use futures::{select, FutureExt};
-use tokio::sync::oneshot;
+use futures::FutureExt;
+use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 
 use crate::{
@@ -79,19 +79,18 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        // TODO: use ChainTipChange to get tip changes (#2374, #2710, #2711, #2712, #2713, #2714)
         let (state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
         info!("initializing verifiers");
-        // TODO: use the transaction verifier to verify mempool transactions (#2637, #2606)
-        let (chain_verifier, tx_verifier) = zebra_consensus::chain::init(
-            config.consensus.clone(),
-            config.network.network,
-            state.clone(),
-        )
-        .await;
+        let (chain_verifier, tx_verifier, mut groth16_download_handle) =
+            zebra_consensus::chain::init(
+                config.consensus.clone(),
+                config.network.network,
+                state.clone(),
+            )
+            .await;
 
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
@@ -133,7 +132,7 @@ impl StartCmd {
 
         let syncer_error_future = syncer.sync();
 
-        let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
+        let mut sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
             sync_status.clone(),
             chain_tip_change.clone(),
             peer_set.clone(),
@@ -154,25 +153,91 @@ impl StartCmd {
             peer_set,
         ));
 
-        select! {
-            sync_result = syncer_error_future.fuse() => sync_result,
+        info!("started initial Zebra tasks");
 
-            sync_gossip_result = sync_gossip_task_handle.fuse() => sync_gossip_result
-                .expect("unexpected panic in the chain tip block gossip task")
-                .map_err(|e| eyre!(e)),
+        // TODO: spawn the syncer task, after making the PeerSet sync and send
+        //       turn these tasks into a FuturesUnordered?
 
-            mempool_crawl_result = mempool_crawler_task_handle.fuse() => mempool_crawl_result
-                .expect("unexpected panic in the mempool crawler")
-                .map_err(|e| eyre!(e)),
+        // ongoing futures & tasks
+        pin!(syncer_error_future);
+        pin!(mempool_crawler_task_handle);
+        pin!(mempool_queue_checker_task_handle);
+        pin!(tx_gossip_task_handle);
 
-            mempool_queue_result = mempool_queue_checker_task_handle.fuse() => mempool_queue_result
-                .expect("unexpected panic in the mempool queue checker")
-                .map_err(|e| eyre!(e)),
+        // startup tasks
+        let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
+        pin!(groth16_download_handle_fused);
 
-            tx_gossip_result = tx_gossip_task_handle.fuse() => tx_gossip_result
-                .expect("unexpected panic in the transaction gossip task")
-                .map_err(|e| eyre!(e)),
-        }
+        // Wait for tasks to finish
+        let exit_status = loop {
+            let mut exit_when_task_finishes = true;
+
+            let result = select! {
+                // We don't spawn the syncer future into a separate task yet.
+                // So syncer panics automatically propagate to the main zebrad task.
+                sync_result = &mut syncer_error_future => sync_result
+                    .map(|_| info!("syncer task exited")),
+
+                sync_gossip_result = &mut sync_gossip_task_handle => sync_gossip_result
+                    .expect("unexpected panic in the chain tip block gossip task")
+                    .map(|_| info!("chain tip block gossip task exited"))
+                    .map_err(|e| eyre!(e)),
+
+                mempool_crawl_result = &mut mempool_crawler_task_handle => mempool_crawl_result
+                    .expect("unexpected panic in the mempool crawler")
+                    .map(|_| info!("mempool crawler task exited"))
+                    .map_err(|e| eyre!(e)),
+
+                mempool_queue_result = &mut mempool_queue_checker_task_handle => mempool_queue_result
+                    .expect("unexpected panic in the mempool queue checker")
+                    .map(|_| info!("mempool queue checker task exited"))
+                    .map_err(|e| eyre!(e)),
+
+                tx_gossip_result = &mut tx_gossip_task_handle => tx_gossip_result
+                    .expect("unexpected panic in the transaction gossip task")
+                    .map(|_| info!("transaction gossip task exited"))
+                    .map_err(|e| eyre!(e)),
+
+                // Unlike other tasks, we expect the download task to finish while Zebra is running.
+                groth16_download_result = &mut groth16_download_handle_fused => {
+                    groth16_download_result
+                        .unwrap_or_else(|_| panic!(
+                            "unexpected panic in the Groth16 pre-download and check task. {}",
+                            zebra_consensus::groth16::Groth16Parameters::failure_hint())
+                        );
+
+                    info!("Groth16 pre-download and check task finished");
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
+            };
+
+            // Stop Zebra if a task finished and returned an error,
+            // or if an ongoing task exited.
+            if let Err(err) = result {
+                break Err(err);
+            }
+
+            if exit_when_task_finishes {
+                break Ok(());
+            }
+        };
+
+        info!("exiting Zebra because an ongoing task exited: stopping other tasks");
+
+        // futures
+        std::mem::drop(syncer_error_future);
+
+        // ongoing tasks
+        sync_gossip_task_handle.abort();
+        mempool_crawler_task_handle.abort();
+        mempool_queue_checker_task_handle.abort();
+        tx_gossip_task_handle.abort();
+
+        // startup tasks
+        groth16_download_handle.abort();
+
+        exit_status
     }
 }
 

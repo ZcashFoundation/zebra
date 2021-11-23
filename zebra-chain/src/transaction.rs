@@ -318,13 +318,49 @@ impl Transaction {
     }
 
     /// Get this transaction's lock time.
-    pub fn lock_time(&self) -> LockTime {
-        match self {
-            Transaction::V1 { lock_time, .. } => *lock_time,
-            Transaction::V2 { lock_time, .. } => *lock_time,
-            Transaction::V3 { lock_time, .. } => *lock_time,
-            Transaction::V4 { lock_time, .. } => *lock_time,
-            Transaction::V5 { lock_time, .. } => *lock_time,
+    pub fn lock_time(&self) -> Option<LockTime> {
+        let lock_time = match self {
+            Transaction::V1 { lock_time, .. }
+            | Transaction::V2 { lock_time, .. }
+            | Transaction::V3 { lock_time, .. }
+            | Transaction::V4 { lock_time, .. }
+            | Transaction::V5 { lock_time, .. } => *lock_time,
+        };
+
+        // `zcashd` checks that the block height is greater than the lock height.
+        // This check allows the genesis block transaction, which would otherwise be invalid.
+        // (Or have to use a lock time.)
+        //
+        // It matches the `zcashd` check here:
+        // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720
+        if lock_time == LockTime::unlocked() {
+            return None;
+        }
+
+        // Consensus rule:
+        //
+        // > The transaction must be finalized: either its locktime must be in the past (or less
+        // > than or equal to the current block height), or all of its sequence numbers must be
+        // > 0xffffffff.
+        //
+        // In `zcashd`, this rule applies to both coinbase and prevout input sequence numbers.
+        //
+        // Unlike Bitcoin, Zcash allows transactions with no transparent inputs. These transactions
+        // only have shielded inputs. Surprisingly, the `zcashd` implementation ignores the lock
+        // time in these transactions. `zcashd` only checks the lock time when it finds a
+        // transparent input sequence number that is not `u32::MAX`.
+        //
+        // https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions
+        let has_sequence_number_enabling_lock_time = self
+            .inputs()
+            .iter()
+            .map(transparent::Input::sequence)
+            .any(|sequence_number| sequence_number != u32::MAX);
+
+        if has_sequence_number_enabling_lock_time {
+            Some(lock_time)
+        } else {
+            None
         }
     }
 

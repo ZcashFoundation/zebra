@@ -59,6 +59,7 @@ pub use checkpoint::MAX_CHECKPOINT_BYTE_COUNT;
 pub use checkpoint::MAX_CHECKPOINT_HEIGHT_GAP;
 pub use config::Config;
 pub use error::BlockError;
+pub use primitives::groth16;
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
