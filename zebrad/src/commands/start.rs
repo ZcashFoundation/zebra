@@ -84,15 +84,6 @@ impl StartCmd {
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new().buffer(20).service(state_service);
 
-        info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, mut groth16_download_handle) =
-            zebra_consensus::chain::init(
-                config.consensus.clone(),
-                config.network.network,
-                state.clone(),
-            )
-            .await;
-
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
@@ -105,6 +96,15 @@ impl StartCmd {
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
+
+        info!("initializing verifiers");
+        let (chain_verifier, tx_verifier, mut groth16_download_handle) =
+            zebra_consensus::chain::init(
+                config.consensus.clone(),
+                config.network.network,
+                state.clone(),
+            )
+            .await;
 
         info!("initializing syncer");
         let (syncer, sync_status) = ChainSync::new(
