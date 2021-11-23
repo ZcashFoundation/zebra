@@ -459,7 +459,7 @@ where
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
     fn preselect_p2c_peer(&self) -> Option<D::Key> {
-        self.select_p2c_peer_from_list(self.ready_services.keys().cloned().collect())
+        self.select_p2c_peer_from_list(self.ready_services.keys().copied().collect())
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
@@ -548,7 +548,7 @@ where
             .inventory_registry
             .peers(&hash)
             .filter(|&key| self.ready_services.contains_key(key))
-            .cloned()
+            .copied()
             .collect();
 
         // # Security
