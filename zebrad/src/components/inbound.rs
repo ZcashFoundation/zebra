@@ -16,8 +16,7 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
 };
-use oneshot::error::TryRecvError;
-use tokio::sync::oneshot;
+use tokio::sync::oneshot::{self, error::TryRecvError};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
 use zebra_network as zn;
@@ -39,35 +38,50 @@ mod tests;
 
 use downloads::Downloads as BlockDownloads;
 
-type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
-type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
-type Mempool = Buffer<BoxService<mp::Request, mp::Response, mp::BoxError>, mp::Request>;
-type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
-type InboundBlockDownloads = BlockDownloads<Timeout<Outbound>, Timeout<BlockVerifier>, State>;
-
-pub type NetworkSetupData = (Outbound, Arc<std::sync::Mutex<AddressBook>>, Mempool);
-
 /// A security parameter to return only 1/3 of available addresses as a
 /// response to a `Peers` request.
 const FRAC_OF_AVAILABLE_ADDRESS: f64 = 1. / 3.;
 
-/// Tracks the internal state of the [`Inbound`] service during network setup.
-pub enum Setup {
-    /// Waiting for network setup to complete.
-    ///
-    /// Requests that depend on Zebra's internal network setup are ignored.
-    /// Other requests are answered.
-    AwaitingNetwork {
-        /// A oneshot channel used to receive the address_book and outbound services
-        /// after the network is set up.
-        network_setup: oneshot::Receiver<NetworkSetupData>,
+type BlockDownloadPeerSet =
+    Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
+type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type Mempool = Buffer<BoxService<mp::Request, mp::Response, mp::BoxError>, mp::Request>;
+type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
+type GossipedBlockDownloads =
+    BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<BlockVerifier>, State>;
 
-        /// A service that verifies downloaded blocks. Given to `block_downloads`
-        /// after the network is set up.
-        block_verifier: BlockVerifier,
+/// The services used by the [`Inbound`] service.
+pub struct InboundSetupData {
+    /// A shared list of peer addresses.
+    pub address_book: Arc<std::sync::Mutex<AddressBook>>,
+
+    /// A service that can be used to download gossiped blocks.
+    pub block_download_peer_set: BlockDownloadPeerSet,
+
+    /// A service that verifies downloaded blocks.
+    ///
+    /// Given to `Inbound.block_downloads` after the required services are set up.
+    pub block_verifier: BlockVerifier,
+
+    /// A service that manages transactions in the memory pool.
+    pub mempool: Mempool,
+
+    /// A service that manages cached blockchain state.
+    pub state: State,
+}
+
+/// Tracks the internal state of the [`Inbound`] service during setup.
+pub enum Setup {
+    /// Waiting for service setup to complete.
+    ///
+    /// All requests are ignored.
+    Pending {
+        /// A oneshot channel used to receive required services,
+        /// after they are set up.
+        setup: oneshot::Receiver<InboundSetupData>,
     },
 
-    /// Network setup is complete.
+    /// Setup is complete.
     ///
     /// All requests are answered.
     Initialized {
@@ -75,24 +89,29 @@ pub enum Setup {
         address_book: Arc<std::sync::Mutex<zn::AddressBook>>,
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
-        block_downloads: Pin<Box<InboundBlockDownloads>>,
+        block_downloads: Pin<Box<GossipedBlockDownloads>>,
 
         /// A service that manages transactions in the memory pool.
         mempool: Mempool,
+
+        /// A service that manages cached blockchain state.
+        state: State,
     },
 
-    /// Temporary state used in the service's internal network initialization
-    /// code.
+    /// Temporary state used in the inbound service's internal initialization code.
     ///
-    /// If this state occurs outside the service initialization code, the
-    /// service panics.
+    /// If this state occurs outside the service initialization code, the service panics.
     FailedInit,
 
-    /// Network setup failed, because the setup channel permanently failed.
+    /// Setup failed, because the setup channel permanently failed.
     /// The service keeps returning readiness errors for every request.
-    FailedRecv { error: SharedRecvError },
+    FailedRecv {
+        /// The original channel error.
+        error: SharedRecvError,
+    },
 }
 
+/// A wrapper around `Arc<TryRecvError>` that implements `Error`.
 #[derive(thiserror::Error, Debug, Clone)]
 #[error(transparent)]
 pub struct SharedRecvError(Arc<TryRecvError>);
@@ -112,51 +131,46 @@ impl From<TryRecvError> for SharedRecvError {
 ///
 /// - supplying network data like peer addresses to other nodes;
 /// - supplying chain data like blocks to other nodes;
-/// - performing transaction diffusion;
-/// - performing block diffusion.
+/// - supplying mempool transactions to other nodes;
+/// - receiving gossiped transactions; and
+/// - receiving gossiped blocks.
 ///
 /// Because the `Inbound` service is responsible for participating in the gossip
 /// protocols used for transaction and block diffusion, there is a potential
-/// overlap with the `ChainSync` component.
+/// overlap with the `ChainSync` and `Mempool` components.
 ///
-/// The division of responsibility is that the `ChainSync` component is
-/// *internally driven*, periodically polling the network to check whether it is
-/// behind the current tip, while the `Inbound` service is *externally driven*,
-/// responding to block gossip by attempting to download and validate advertised
-/// blocks.
+/// The division of responsibility is that:
+///
+/// The `ChainSync` and `Mempool` components are *internally driven*,
+/// periodically polling the network to check for new blocks or transactions.
+///
+/// The `Inbound` service is *externally driven*, responding to block gossip
+/// by attempting to download and validate advertised blocks.
+///
+/// Gossiped transactions are forwarded to the mempool downloader,
+/// which unifies polled and gossiped transactions into a single download list.
 pub struct Inbound {
-    /// Provides network-dependent services, if they are available.
+    /// Provides service dependencies, if they are available.
     ///
-    /// Some services are unavailable until Zebra has completed network setup.
-    network_setup: Setup,
-
-    /// A service that manages cached blockchain state.
-    state: State,
+    /// Some services are unavailable until Zebra has completed setup.
+    setup: Setup,
 }
 
 impl Inbound {
     /// Create a new inbound service.
     ///
-    /// The address book and peer set use the newly created inbound service.
-    /// So they are sent via the `network_setup` channel after initialization.
-    pub fn new(
-        network_setup: oneshot::Receiver<NetworkSetupData>,
-        state: State,
-        block_verifier: BlockVerifier,
-    ) -> Self {
-        Self {
-            network_setup: Setup::AwaitingNetwork {
-                network_setup,
-                block_verifier,
-            },
-            state,
+    /// Dependent services are sent via the `setup` channel after initialization.
+    pub fn new(setup: oneshot::Receiver<InboundSetupData>) -> Inbound {
+        Inbound {
+            setup: Setup::Pending { setup },
         }
     }
 
+    /// Remove `self.setup`, temporarily replacing it with an invalid state.
     fn take_setup(&mut self) -> Setup {
-        let mut network_setup = Setup::FailedInit;
-        std::mem::swap(&mut self.network_setup, &mut network_setup);
-        network_setup
+        let mut setup = Setup::FailedInit;
+        std::mem::swap(&mut self.setup, &mut setup);
+        setup
     }
 }
 
@@ -167,25 +181,30 @@ impl Service<zn::Request> for Inbound {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Check whether the network setup is finished, but don't wait for it to
+        // Check whether the setup is finished, but don't wait for it to
         // become ready before reporting readiness. We expect to get it "soon",
         // and reporting unreadiness might cause unwanted load-shedding, since
         // the load-shed middleware is unable to distinguish being unready due
         // to load from being unready while waiting on setup.
 
-        // Every network_setup state handler must provide a result
+        // Every setup variant handler must provide a result
         let result;
 
-        self.network_setup = match self.take_setup() {
-            Setup::AwaitingNetwork {
-                mut network_setup,
-                block_verifier,
-            } => match network_setup.try_recv() {
-                Ok((outbound, address_book, mempool)) => {
+        self.setup = match self.take_setup() {
+            Setup::Pending { mut setup } => match setup.try_recv() {
+                Ok(setup_data) => {
+                    let InboundSetupData {
+                        address_book,
+                        block_download_peer_set,
+                        block_verifier,
+                        mempool,
+                        state,
+                    } = setup_data;
+
                     let block_downloads = Box::pin(BlockDownloads::new(
-                        Timeout::new(outbound.clone(), BLOCK_DOWNLOAD_TIMEOUT),
+                        Timeout::new(block_download_peer_set.clone(), BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
-                        self.state.clone(),
+                        state.clone(),
                     ));
 
                     result = Ok(());
@@ -193,27 +212,25 @@ impl Service<zn::Request> for Inbound {
                         address_book,
                         block_downloads,
                         mempool,
+                        state,
                     }
                 }
                 Err(TryRecvError::Empty) => {
                     // There's no setup data yet, so keep waiting for it
                     result = Ok(());
-                    Setup::AwaitingNetwork {
-                        network_setup,
-                        block_verifier,
-                    }
+                    Setup::Pending { setup }
                 }
                 Err(error @ TryRecvError::Closed) => {
-                    // Mark the service as failed, because network setup failed
-                    error!(?error, "inbound network setup failed");
+                    // Mark the service as failed, because setup failed
+                    error!(?error, "inbound setup failed");
                     let error: SharedRecvError = error.into();
                     result = Err(error.clone().into());
                     Setup::FailedRecv { error }
                 }
             },
-            // Make sure previous network setups were left in a valid state
+            // Make sure previous setups were left in a valid state
             Setup::FailedInit => unreachable!("incomplete previous Inbound initialization"),
-            // If network setup failed, report service failure
+            // If setup failed, report service failure
             Setup::FailedRecv { error } => {
                 result = Err(error.clone().into());
                 Setup::FailedRecv { error }
@@ -223,6 +240,7 @@ impl Service<zn::Request> for Inbound {
                 address_book,
                 mut block_downloads,
                 mempool,
+                state,
             } => {
                 while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
 
@@ -231,12 +249,13 @@ impl Service<zn::Request> for Inbound {
                     address_book,
                     block_downloads,
                     mempool,
+                    state,
                 }
             }
         };
 
-        // Make sure we're leaving the network setup in a valid state
-        if matches!(self.network_setup, Setup::FailedInit) {
+        // Make sure we're leaving the setup in a valid state
+        if matches!(self.setup, Setup::FailedInit) {
             unreachable!("incomplete Inbound initialization after poll_ready state handling");
         }
 
@@ -258,38 +277,46 @@ impl Service<zn::Request> for Inbound {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
+        let (address_book, block_downloads, mempool, state) = match &mut self.setup {
+            Setup::Initialized {
+                address_book,
+                block_downloads,
+                mempool,
+                state,
+            } => (address_book, block_downloads, mempool, state),
+            _ => {
+                debug!("ignoring request from remote peer during setup");
+                return async { Ok(zn::Response::Nil) }.boxed();
+            }
+        };
+
         match req {
             zn::Request::Peers => {
-                if let Setup::Initialized { address_book, .. } = &self.network_setup {
-                    // # Security
-                    //
-                    // We truncate the list to not reveal our entire peer set in one call.
-                    // But we don't monitor repeated requests and the results are shuffled,
-                    // a crawler could just send repeated queries and get the full list.
-                    //
-                    // # Correctness
-                    //
-                    // Briefly hold the address book threaded mutex while
-                    // cloning the address book. Then sanitize after releasing
-                    // the lock.
-                    let peers = address_book.lock().unwrap().clone();
+                // # Security
+                //
+                // We truncate the list to not reveal our entire peer set in one call.
+                // But we don't monitor repeated requests and the results are shuffled,
+                // a crawler could just send repeated queries and get the full list.
+                //
+                // # Correctness
+                //
+                // Briefly hold the address book threaded mutex while
+                // cloning the address book. Then sanitize after releasing
+                // the lock.
+                let peers = address_book.lock().unwrap().clone();
 
-                    // Send a sanitized response
-                    let mut peers = peers.sanitized();
+                // Send a sanitized response
+                let mut peers = peers.sanitized();
 
-                    // Truncate the list
-                    let truncate_at = MAX_ADDRS_IN_MESSAGE
-                        .min((peers.len() as f64 * FRAC_OF_AVAILABLE_ADDRESS).ceil() as usize);
-                    peers.truncate(truncate_at);
+                // Truncate the list
+                let truncate_at = MAX_ADDRS_IN_MESSAGE
+                    .min((peers.len() as f64 * FRAC_OF_AVAILABLE_ADDRESS).ceil() as usize);
+                peers.truncate(truncate_at);
 
-                    if !peers.is_empty() {
-                        async { Ok(zn::Response::Peers(peers)) }.boxed()
-                    } else {
-                        info!("ignoring `Peers` request from remote peer because our address book is empty");
-                        async { Ok(zn::Response::Nil) }.boxed()
-                    }
+                if !peers.is_empty() {
+                    async { Ok(zn::Response::Peers(peers)) }.boxed()
                 } else {
-                    info!("ignoring `Peers` request from remote peer during network setup");
+                    info!("ignoring `Peers` request from remote peer because our address book is empty");
                     async { Ok(zn::Response::Nil) }.boxed()
                 }
             }
@@ -306,7 +333,7 @@ impl Service<zn::Request> for Inbound {
                 hashes
                     .into_iter()
                     .map(|hash| zs::Request::Block(hash.into()))
-                    .map(|request| self.state.clone().oneshot(request))
+                    .map(|request| state.clone().oneshot(request))
                     .collect::<futures::stream::FuturesOrdered<_>>()
                     .try_filter_map(|response| async move {
                         Ok(match response {
@@ -329,102 +356,60 @@ impl Service<zn::Request> for Inbound {
                     .boxed()
             }
             zn::Request::TransactionsById(transactions) => {
-                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
-                    let request = mempool::Request::TransactionsById(transactions);
-                    mempool.clone().oneshot(request).map_ok(|resp| match resp {
-                        mempool::Response::Transactions(transactions) if transactions.is_empty() => zn::Response::Nil,
-                        mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
-                        _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
-                    })
+                let request = mempool::Request::TransactionsById(transactions);
+                mempool.clone().oneshot(request).map_ok(|resp| match resp {
+                    mempool::Response::Transactions(transactions) if transactions.is_empty() => zn::Response::Nil,
+                    mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
+                    _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
+                })
                     .boxed()
-                } else {
-                    info!(
-                        transaction_hash_count = ?transactions.len(),
-                        "ignoring `TransactionsById` request from remote peer during network setup"
-                    );
-                    async { Ok(zn::Response::Nil) }.boxed()
-                }
             }
             zn::Request::FindBlocks { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
-                self.state.clone().oneshot(request).map_ok(|resp| match resp {
-                        zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
-                        zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
-                        _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
-                    })
-                .boxed()
+                state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
+                    zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
+                    _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
+                })
+                    .boxed()
             }
             zn::Request::FindHeaders { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHeaders { known_blocks, stop };
-                self.state.clone().oneshot(request).map_ok(|resp| match resp {
-                        zs::Response::BlockHeaders(headers) if headers.is_empty() => zn::Response::Nil,
-                        zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
-                        _ => unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response"),
-                    })
-                .boxed()
+                state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::Response::BlockHeaders(headers) if headers.is_empty() => zn::Response::Nil,
+                    zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
+                    _ => unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response"),
+                })
+                    .boxed()
             }
             zn::Request::PushTransaction(transaction) => {
-                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
-                    mempool
-                        .clone()
-                        .oneshot(mempool::Request::Queue(vec![transaction.into()]))
-                        // The response just indicates if processing was queued or not; ignore it
-                        .map_ok(|_resp| zn::Response::Nil)
-                        .boxed()
-                } else {
-                    info!(
-                        ?transaction.id,
-                        "ignoring `PushTransaction` request from remote peer during network setup"
-                    );
-                    async { Ok(zn::Response::Nil) }.boxed()
-                }
+                mempool
+                    .clone()
+                    .oneshot(mempool::Request::Queue(vec![transaction.into()]))
+                    // The response just indicates if processing was queued or not; ignore it
+                    .map_ok(|_resp| zn::Response::Nil)
+                    .boxed()
             }
             zn::Request::AdvertiseTransactionIds(transactions) => {
-                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
-                    let transactions = transactions.into_iter().map(Into::into).collect();
-                    mempool
-                        .clone()
-                        .oneshot(mempool::Request::Queue(transactions))
-                        // The response just indicates if processing was queued or not; ignore it
-                        .map_ok(|_resp| zn::Response::Nil)
-                        .boxed()
-                } else {
-                    // Peers send a lot of these when we first connect to them.
-                    debug!(
-                        "ignoring `AdvertiseTransactionIds` request from remote peer during network setup"
-                    );
-                    async { Ok(zn::Response::Nil) }.boxed()
-                }
+                let transactions = transactions.into_iter().map(Into::into).collect();
+                mempool
+                    .clone()
+                    .oneshot(mempool::Request::Queue(transactions))
+                    // The response just indicates if processing was queued or not; ignore it
+                    .map_ok(|_resp| zn::Response::Nil)
+                    .boxed()
             }
             zn::Request::AdvertiseBlock(hash) => {
-                if let Setup::Initialized {
-                    block_downloads, ..
-                } = &mut self.network_setup
-                {
-                    block_downloads.download_and_verify(hash);
-                } else {
-                    // Peers send a lot of these when we first connect to them.
-                    debug!(
-                        ?hash,
-                        "ignoring `AdvertiseBlock` request from remote peer during network setup"
-                    );
-                }
+                block_downloads.download_and_verify(hash);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             zn::Request::MempoolTransactionIds => {
-                if let Setup::Initialized { mempool, .. } = &mut self.network_setup {
-                    mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
-                        mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
-                        mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
-                        _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
-                    })
+                mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
+                    mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
+                    mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
+                    _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
+                })
                     .boxed()
-                } else {
-                    info!(
-                        "ignoring `MempoolTransactionIds` request from remote peer during network setup"
-                    );
-                    async { Ok(zn::Response::Nil) }.boxed()
-                }
             }
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");
