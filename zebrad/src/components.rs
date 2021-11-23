@@ -5,7 +5,7 @@
 //! component and dependency injection models are designed to work together, but
 //! don't fit the async context well.
 
-mod inbound;
+pub mod inbound;
 #[allow(missing_docs)]
 pub mod mempool;
 pub mod metrics;

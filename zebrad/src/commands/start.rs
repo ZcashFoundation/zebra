@@ -56,6 +56,7 @@ use tower::{builder::ServiceBuilder, util::BoxService};
 
 use crate::{
     components::{
+        inbound::InboundSetupData,
         mempool::{self, Mempool},
         sync,
         tokio::{RuntimeRun, TokioComponent},
@@ -100,24 +101,24 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(20)
-            .service(Inbound::new(
-                setup_rx,
-                state.clone(),
-                chain_verifier.clone(),
-            ));
+            .service(Inbound::new(setup_rx));
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing syncer");
-        let (syncer, sync_status) =
-            ChainSync::new(&config, peer_set.clone(), state.clone(), chain_verifier);
+        let (syncer, sync_status) = ChainSync::new(
+            &config,
+            peer_set.clone(),
+            state.clone(),
+            chain_verifier.clone(),
+        );
 
         info!("initializing mempool");
         let (mempool, mempool_transaction_receiver) = Mempool::new(
             &config.mempool,
             peer_set.clone(),
-            state,
+            state.clone(),
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip,
@@ -126,8 +127,15 @@ impl StartCmd {
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new().buffer(20).service(mempool);
 
+        let setup_data = InboundSetupData {
+            address_book,
+            block_download_peer_set: peer_set.clone(),
+            block_verifier: chain_verifier,
+            mempool: mempool.clone(),
+            state,
+        };
         setup_tx
-            .send((peer_set.clone(), address_book, mempool.clone()))
+            .send(setup_data)
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
         let syncer_error_future = syncer.sync();
