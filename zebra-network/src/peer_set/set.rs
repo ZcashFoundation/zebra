@@ -132,7 +132,8 @@ where
     /// This is handled by [`PeerSet::take_ready_service`] and [`PeerSet::route_all`].
     preselected_p2c_peer: Option<D::Key>,
 
-    /// Stores gossiped inventory from connected peers.
+    /// Stores gossiped inventory hashes from connected peers.
+    ///
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
@@ -296,9 +297,7 @@ where
                         "the peer set requires at least one background task"
                     );
 
-                    for handle in handles {
-                        self.guards.push(handle);
-                    }
+                    self.guards.extend(handles);
 
                     None
                 }
