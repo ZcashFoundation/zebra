@@ -468,7 +468,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
             Transaction::V4 {
                 inputs: transaction.inputs().to_vec(),
                 outputs: vec![output],
-                lock_time: transaction.lock_time(),
+                lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
                 expiry_height: Height(0),
                 joinsplit_data: None,
                 sapling_shielded_data: None,
