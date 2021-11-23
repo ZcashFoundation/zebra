@@ -197,7 +197,8 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    // pre-download Groth16 parameters async
+    // Pre-download Groth16 parameters in a separate thread.
+    // This thread must be launched first, so the download doesn't happen on the startup thread.
 
     let groth16_download_handle = spawn_blocking(|| {
         tracing::info!("checking if Zcash Sapling and Sprout parameters have been downloaded");

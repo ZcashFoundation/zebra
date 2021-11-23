@@ -24,6 +24,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
+        inbound::InboundSetupData,
         mempool::{self, gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -661,15 +662,18 @@ async fn setup(
 
     let inbound_service = ServiceBuilder::new()
         .load_shed()
-        .service(super::Inbound::new(
-            setup_rx,
-            state_service.clone(),
-            block_verifier.clone(),
-        ));
+        .service(super::Inbound::new(setup_rx));
     let inbound_service = BoxService::new(inbound_service);
     let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
 
-    let r = setup_tx.send((buffered_peer_set, address_book, mempool_service.clone()));
+    let setup_data = InboundSetupData {
+        address_book,
+        block_download_peer_set: buffered_peer_set,
+        block_verifier,
+        mempool: mempool_service.clone(),
+        state: state_service.clone(),
+    };
+    let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
