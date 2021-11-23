@@ -5,9 +5,10 @@
 //! implement, and ensures that we don't reject blocks or transactions
 //! for a non-enumerated reason.
 
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{orchard, sapling, sprout, transparent};
+use zebra_chain::{block, orchard, sapling, sprout, transparent};
 
 use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
 
@@ -55,6 +56,13 @@ pub enum TransactionError {
 
     #[error("coinbase inputs MUST NOT exist in mempool")]
     CoinbaseInMempool,
+
+    #[error("transaction is locked until after block height {}", _0.0)]
+    LockedUntilAfterBlockHeight(block::Height),
+
+    #[error("transaction is locked until after block time {0}")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    LockedUntilAfterBlockTime(DateTime<Utc>),
 
     #[error("coinbase expiration height is invalid")]
     CoinbaseExpiration,
