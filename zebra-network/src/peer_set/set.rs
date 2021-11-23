@@ -43,7 +43,7 @@
 //! [tower-balance]: https://crates.io/crates/tower-balance
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert,
     fmt::Debug,
     future::Future,
@@ -458,14 +458,18 @@ where
         });
     }
 
-    /// Performs P2C on inner services to select a ready service.
-    fn preselect_p2c_peer(&mut self) -> Option<D::Key> {
-        match self.ready_services.len() {
+    /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
+    fn preselect_p2c_peer(&self) -> Option<D::Key> {
+        self.select_p2c_peer_from_list(self.ready_services.keys().cloned().collect())
+    }
+
+    /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
+    fn select_p2c_peer_from_list(&self, mut ready_service_list: HashSet<D::Key>) -> Option<D::Key> {
+        match ready_service_list.len() {
             0 => None,
             1 => Some(
-                *self
-                    .ready_services
-                    .keys()
+                ready_service_list
+                    .drain()
                     .next()
                     .expect("just checked there is one service"),
             ),
@@ -477,35 +481,34 @@ where
                     let a = idxs.index(0);
                     let b = idxs.index(1);
 
-                    let a = self
-                        .ready_services
-                        .keys()
+                    let a = ready_service_list
+                        .drain()
                         .nth(a)
                         .expect("sample returns valid indexes");
-                    let b = self
-                        .ready_services
-                        .keys()
+                    let b = ready_service_list
+                        .drain()
                         .nth(b)
                         .expect("sample returns valid indexes");
 
                     (a, b)
                 };
 
-                let a_load = self.query_load(a).expect("sample returns valid indexes");
-                let b_load = self.query_load(b).expect("sample returns valid indexes");
+                let a_load = self.query_load(&a).expect("supplied services are ready");
+                let b_load = self.query_load(&b).expect("supplied services are ready");
 
                 let selected = if a_load <= b_load { a } else { b };
 
                 trace!(
-                    a.key = ?*a,
+                    a.key = ?a,
                     a.load = ?a_load,
-                    b.key = ?*b,
+                    b.key = ?b,
                     b.load = ?b_load,
-                    selected = ?*selected,
+                    selected = ?selected,
+                    ?len,
                     "selected service by p2c"
                 );
 
-                Some(*selected)
+                Some(selected)
             }
         }
     }
@@ -542,11 +545,22 @@ where
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
-        let peer = self
+        let inventory_peer_list = self
             .inventory_registry
             .peers(&hash)
-            .find(|&key| self.ready_services.contains_key(key))
-            .cloned();
+            .filter(|&key| self.ready_services.contains_key(key))
+            .cloned()
+            .collect();
+
+        // # Security
+        //
+        // Choose a random, less-loaded peer with the inventory.
+        //
+        // If we chose the first peer in HashMap order,
+        // peers would be able to influence our choice by switching addresses.
+        // But we need the choice to be random,
+        // so that a peer can't provide all our inventory responses.
+        let peer = self.select_p2c_peer_from_list(inventory_peer_list);
 
         match peer.and_then(|key| self.take_ready_service(&key)) {
             Some(mut svc) => {
