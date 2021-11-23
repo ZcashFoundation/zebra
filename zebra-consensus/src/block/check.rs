@@ -248,3 +248,48 @@ pub fn merkle_root_validity(
 
     Ok(())
 }
+
+/// Returns `Ok(())` if the expiry height for the coinbase transaction is valid
+/// according to specifications [7.1] and [ZIP-203].
+///
+/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// [ZIP-203]: https://zips.z.cash/zip-0203
+pub fn coinbase_expiry_height(
+    height: &Height,
+    coinbase: &transaction::Transaction,
+    network: Network,
+) -> Result<(), BlockError> {
+    match NetworkUpgrade::Nu5.activation_height(network) {
+        // If Nu5 does not have a height, apply the pre-Nu5 rule.
+        None => validate_expiry_height_max(coinbase.expiry_height()),
+        Some(activation_height) => {
+            // Conesnsus rule: from NU5 activation, the nExpiryHeight field of a
+            // coinbase transaction MUST be set equal to the block height.
+            if *height >= activation_height {
+                match coinbase.expiry_height() {
+                    None => Err(TransactionError::CoinbaseExpiration)?,
+                    Some(expiry) => {
+                        if expiry != *height {
+                            return Err(TransactionError::CoinbaseExpiration)?;
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            // Consensus rule: [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight
+            // MUST be less than or equal to 499999999.
+            validate_expiry_height_max(coinbase.expiry_height())
+        }
+    }
+}
+
+/// Validate the consensus rule: nExpiryHeight MUST be less than or equal to 499999999.
+fn validate_expiry_height_max(expiry_height: Option<Height>) -> Result<(), BlockError> {
+    if let Some(expiry) = expiry_height {
+        if expiry > Height::MAX_EXPIRY_HEIGHT {
+            return Err(TransactionError::CoinbaseExpiration)?;
+        }
+    }
+
+    Ok(())
+}

@@ -188,6 +188,9 @@ where
             tx::check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)?;
             check::subsidy_is_valid(&block, network)?;
 
+            // Validate `nExpiryHeight` consensus rules
+            check::coinbase_expiry_height(&height, coinbase_tx, network)?;
+
             let mut async_checks = FuturesUnordered::new();
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(

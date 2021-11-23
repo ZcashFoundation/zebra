@@ -64,6 +64,9 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     LockedUntilAfterBlockTime(DateTime<Utc>),
 
+    #[error("coinbase expiration height is invalid")]
+    CoinbaseExpiration,
+
     #[error("coinbase transaction failed subsidy validation")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Subsidy(#[from] SubsidyError),

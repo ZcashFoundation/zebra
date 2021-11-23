@@ -801,7 +801,7 @@ pub fn transaction_to_fake_v5(
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
-            expiry_height: block::Height(0),
+            expiry_height: height,
             sapling_shielded_data: None,
             orchard_shielded_data: None,
         },
@@ -815,7 +815,7 @@ pub fn transaction_to_fake_v5(
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
-            expiry_height: block::Height(0),
+            expiry_height: height,
             sapling_shielded_data: None,
             orchard_shielded_data: None,
         },
@@ -823,14 +823,13 @@ pub fn transaction_to_fake_v5(
             inputs,
             outputs,
             lock_time,
-            expiry_height,
             ..
         } => V5 {
             network_upgrade: block_nu,
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
-            expiry_height: *expiry_height,
+            expiry_height: height,
             sapling_shielded_data: None,
             orchard_shielded_data: None,
         },
@@ -838,7 +837,6 @@ pub fn transaction_to_fake_v5(
             inputs,
             outputs,
             lock_time,
-            expiry_height,
             sapling_shielded_data,
             ..
         } => V5 {
@@ -846,7 +844,7 @@ pub fn transaction_to_fake_v5(
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
             lock_time: *lock_time,
-            expiry_height: *expiry_height,
+            expiry_height: height,
             sapling_shielded_data: sapling_shielded_data
                 .clone()
                 .map(sapling_shielded_v4_to_fake_v5)
