@@ -151,6 +151,13 @@ impl fmt::Display for Input {
 }
 
 impl Input {
+    /// Returns the input's sequence number.
+    pub fn sequence(&self) -> u32 {
+        match self {
+            Input::PrevOut { sequence, .. } | Input::Coinbase { sequence, .. } => *sequence,
+        }
+    }
+
     /// If this is a `PrevOut` input, returns this input's outpoint.
     /// Otherwise, returns `None`.
     pub fn outpoint(&self) -> Option<OutPoint> {
