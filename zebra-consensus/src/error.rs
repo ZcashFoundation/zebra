@@ -28,6 +28,9 @@ pub enum SubsidyError {
 
     #[error("miner fees are invalid")]
     InvalidMinerFees,
+
+    #[error("a sum of amounts overflowed")]
+    SumOverflow,
 }
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]

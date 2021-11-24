@@ -174,7 +174,7 @@ pub fn miner_fees_are_valid(
     let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
         .iter()
         .sum::<Result<Amount<NonNegative>, AmountError>>()
-        .expect("the sum of all outputs will always be positive")
+        .map_err(|_| SubsidyError::SumOverflow)?
         .constrain()
         .expect("positive value always fit in `NegativeAllowed`");
     let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
@@ -189,9 +189,8 @@ pub fn miner_fees_are_valid(
     // paid by transactions in this block.
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
-        .expect("left side of the consensus rule equation should not overflow");
-    let right = (block_subsidy + block_miner_fees)
-        .expect("right side of the consensus rule equation should not overflow");
+        .map_err(|_| SubsidyError::SumOverflow)?;
+    let right = (block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 
     if left > right {
         return Err(SubsidyError::InvalidMinerFees)?;
