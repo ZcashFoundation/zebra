@@ -1,10 +1,6 @@
 //! Checks for whether cited anchors are previously-computed note commitment
 //! tree roots.
 
-use std::ops::Deref;
-
-use zebra_chain::transaction::Transaction::*;
-
 use crate::{
     service::{finalized_state::FinalizedState, non_finalized_state::Chain},
     PreparedBlock, ValidateContextError,
@@ -44,26 +40,6 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
     for transaction in prepared.block.transactions.iter() {
-        let (
-            _joinsplit_data,
-            orchard_shielded_data,
-        ) = match transaction.deref() {
-            V4 {
-                joinsplit_data,
-                ..
-            } => (joinsplit_data, &None),
-            V5 {
-                orchard_shielded_data,
-                ..
-            } => (
-                &None,
-                orchard_shielded_data,
-            ),
-            V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-            ),
-        };
-
         // Sprout JoinSplits, with interstitial treestates to check as well
         //
         // The FIRST JOINSPLIT in a transaction MUST refer to the output treestate
@@ -90,21 +66,17 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // Sapling Spends
         //
         // MUST refer to some earlier block’s final Sapling treestate.
-        if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-            for spend in transaction.sapling_spends_per_anchor() {
-                tracing::debug!(?spend.per_spend_anchor, "observed sapling anchor");
+        if transaction.has_sapling_shielded_data() {
+            for anchor in transaction.sapling_anchors() {
+                tracing::debug!(?anchor, "observed sapling anchor");
 
-                if !parent_chain
-                    .sapling_anchors
-                    .contains(&spend.per_spend_anchor)
-                    && !finalized_state.contains_sapling_anchor(&spend.per_spend_anchor)
+                if !parent_chain.sapling_anchors.contains(&anchor)
+                    && !finalized_state.contains_sapling_anchor(&anchor)
                 {
-                    return Err(ValidateContextError::UnknownSaplingAnchor {
-                        anchor: spend.per_spend_anchor,
-                    });
+                    return Err(ValidateContextError::UnknownSaplingAnchor { anchor });
                 }
 
-                tracing::debug!(?spend.per_spend_anchor, "validated sapling anchor");
+                tracing::debug!(?anchor, "validated sapling anchor");
             }
         }
 
