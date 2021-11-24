@@ -70,7 +70,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // of a previous block.
 
         // if let Some(sprout_shielded_data) = joinsplit_data {
-        //     for joinsplit in transaction.sprout_joinsplits() {
+        //     for joinsplit in transaction.sprout_groth16_joinsplits() {
         //         if !parent_chain.sprout_anchors.contains(joinsplit.anchor)
         //             && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
         //         {
@@ -90,26 +90,28 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // Sapling Spends
         //
         // MUST refer to some earlier block’s final Sapling treestate.
-        for spend in transaction.sapling_spends_per_anchor() {
-            tracing::debug!(?spend.per_spend_anchor, "observed sapling anchor");
+        if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
+            for spend in transaction.sapling_spends_per_anchor() {
+                tracing::debug!(?spend.per_spend_anchor, "observed sapling anchor");
 
-            if !parent_chain
-                .sapling_anchors
-                .contains(&spend.per_spend_anchor)
-                && !finalized_state.contains_sapling_anchor(&spend.per_spend_anchor)
-            {
-                return Err(ValidateContextError::UnknownSaplingAnchor {
-                    anchor: spend.per_spend_anchor,
-                });
+                if !parent_chain
+                    .sapling_anchors
+                    .contains(&spend.per_spend_anchor)
+                    && !finalized_state.contains_sapling_anchor(&spend.per_spend_anchor)
+                {
+                    return Err(ValidateContextError::UnknownSaplingAnchor {
+                        anchor: spend.per_spend_anchor,
+                    });
+                }
+
+                tracing::debug!(?spend.per_spend_anchor, "validated sapling anchor");
             }
-
-            tracing::debug!(?spend.per_spend_anchor, "validated sapling anchor");
         }
 
         // Orchard Actions
         //
         // MUST refer to some earlier block’s final Orchard treestate.
-        if let Some(orchard_shielded_data) = orchard_shielded_data {
+        if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
             tracing::debug!(?orchard_shielded_data.shared_anchor, "observed orchard anchor");
 
             if !parent_chain

@@ -4,6 +4,12 @@
 //! The `value_balance` change is handled using the default zero value.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
+use std::{
+    cmp::{max, Eq, PartialEq},
+    fmt::{self, Debug},
+};
+
+use itertools::Itertools;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{de::DeserializeOwned, Serialize};
@@ -19,11 +25,6 @@ use crate::{
         Output, Spend, ValueCommitment,
     },
     serialization::{AtLeastOne, TrustedPreallocate},
-};
-
-use std::{
-    cmp::{max, Eq, PartialEq},
-    fmt::{self, Debug},
 };
 
 /// Per-Spend Sapling anchors, used in Transaction V4 and the
@@ -205,6 +206,15 @@ where
     AnchorV: AnchorVariant + Clone,
     Spend<PerSpendAnchor>: From<(Spend<AnchorV>, AnchorV::Shared)>,
 {
+    /// Iterate over the [`Spend`]s for this transaction, returning deduplicated
+    /// [`tree::Root`]s, regardless of the underlying transaction version.
+    pub fn anchors(&self) -> impl Iterator<Item = tree::Root> + '_ {
+        self.spends_per_anchor()
+            .map(|spend| spend.per_spend_anchor)
+            .sorted()
+            .dedup()
+    }
+
     /// Iterate over the [`Spend`]s for this transaction, returning
     /// `Spend<PerSpendAnchor>` regardless of the underlying transaction version.
     ///

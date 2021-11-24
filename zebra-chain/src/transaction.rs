@@ -515,8 +515,8 @@ impl Transaction {
 
     // sprout
 
-    /// Returns the Sprout `JoinSplit`s in this transaction, regardless of version.
-    pub fn sprout_joinsplits(
+    /// Returns the Sprout `JoinSplit<Groth16Proof>`s in this transaction, regardless of version.
+    pub fn sprout_groth16_joinsplits(
         &self,
     ) -> Box<dyn Iterator<Item = &sprout::JoinSplit<Groth16Proof>> + '_> {
         match self {
