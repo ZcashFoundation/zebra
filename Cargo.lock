@@ -4394,7 +4394,6 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
- "indexmap",
  "lazy_static",
  "metrics",
  "pin-project 1.0.7",
