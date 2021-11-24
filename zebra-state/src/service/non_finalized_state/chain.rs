@@ -716,8 +716,8 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
-            for cm_u in joinsplit_data.note_commitments() {
-                self.sprout_note_commitment_tree.append(*cm_u)?;
+            for cm in joinsplit_data.note_commitments() {
+                self.sprout_note_commitment_tree.append(*cm)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(
