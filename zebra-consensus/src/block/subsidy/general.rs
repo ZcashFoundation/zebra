@@ -118,6 +118,11 @@ mod test {
     use super::*;
     use color_eyre::Report;
 
+    use crate::block::subsidy::{
+        founders_reward::founders_reward,
+        funding_streams::{funding_stream_values, height_for_first_halving},
+    };
+
     #[test]
     fn halving_test() -> Result<(), Report> {
         zebra_test::init();
@@ -307,8 +312,8 @@ mod test {
     }
 
     fn miner_subsidy_for_network(network: Network) -> Result<(), Report> {
-        use crate::block::subsidy::founders_reward::founders_reward;
         let blossom_height = Blossom.activation_height(network).unwrap();
+        let first_halving_height = height_for_first_halving(network);
 
         // Miner reward before Blossom is 80% of the total block reward
         // 80*12.5/100 = 10 ZEC
@@ -330,8 +335,17 @@ mod test {
             miner_subsidy(blossom_height, network, Some(founders_amount))
         );
 
-        // TODO: After first halving, miner will get 2.5 ZEC per mined block
-        // but we need funding streams code to get this number
+        // After first halving, miner will get 2.5 ZEC per mined block (not counting fees)
+        let funding_stream_values = funding_stream_values(first_halving_height, network)?
+            .iter()
+            .map(|row| row.1)
+            .sum::<Result<Amount<NonNegative>, Error>>()
+            .unwrap();
+
+        assert_eq!(
+            Amount::try_from(250_000_000),
+            miner_subsidy(first_halving_height, network, Some(funding_stream_values))
+        );
 
         // TODO: After second halving, there will be no funding streams, and
         // miners will get all the block reward

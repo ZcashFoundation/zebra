@@ -53,7 +53,7 @@ pub fn funding_stream_values(
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-fn height_for_first_halving(network: Network) -> Height {
+pub fn height_for_first_halving(network: Network) -> Height {
     // First halving on Mainnet is at Canopy
     // while in Testnet is at block constant height of `1_116_000`
     // https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams

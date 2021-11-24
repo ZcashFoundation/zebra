@@ -1157,7 +1157,7 @@ impl Transaction {
     /// and added to sapling pool.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+    pub fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let sapling_value_balance = match self {
             Transaction::V4 {
                 sapling_shielded_data: Some(sapling_shielded_data),
@@ -1224,7 +1224,7 @@ impl Transaction {
     /// and added to orchard pool.
     ///
     /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-    fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+    pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let orchard_value_balance = self
             .orchard_shielded_data()
             .map(|shielded_data| shielded_data.value_balance)

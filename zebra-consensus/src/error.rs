@@ -25,6 +25,12 @@ pub enum SubsidyError {
 
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
+
+    #[error("miner fees are invalid")]
+    InvalidMinerFees,
+
+    #[error("a sum of amounts overflowed")]
+    SumOverflow,
 }
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
