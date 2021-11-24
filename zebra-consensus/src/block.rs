@@ -187,9 +187,7 @@ where
                 .expect("must have coinbase transaction");
             check::subsidy_is_valid(&block, network)?;
 
-            // Validate `nExpiryHeight` consensus rules
-            // TODO: check non-coinbase transaction expiry against the block height (#2387)
-            //       check the maximum expiry height for non-coinbase transactions (#2387)
+            // Validate `nExpiryHeight` coinbase consensus rules
             check::coinbase_expiry_height(&height, coinbase_tx, network)?;
 
             // Now do the slower checks
@@ -204,7 +202,12 @@ where
                 &block,
                 &transaction_hashes,
             ));
-            for transaction in &block.transactions {
+            for (n, transaction) in block.transactions.iter().enumerate() {
+                // Validate `nExpiryHeight` for non coinbase transactions
+                if n > 0 {
+                    check::non_coinbase_expiry_height(&height, transaction)?;
+                }
+
                 let rsp = transaction_verifier
                     .ready()
                     .await

@@ -305,10 +305,10 @@ pub fn coinbase_expiry_height(
             // coinbase transaction MUST be set equal to the block height.
             if *height >= activation_height {
                 match coinbase.expiry_height() {
-                    None => Err(TransactionError::CoinbaseExpiration)?,
+                    None => Err(TransactionError::TransactionExpiration)?,
                     Some(expiry) => {
                         if expiry != *height {
-                            return Err(TransactionError::CoinbaseExpiration)?;
+                            return Err(TransactionError::TransactionExpiration)?;
                         }
                     }
                 }
@@ -321,11 +321,45 @@ pub fn coinbase_expiry_height(
     }
 }
 
+/// Returns `Ok(())` if the expiry height for a non coinbase transaction is valid
+/// according to specifications [7.1] and [ZIP-203].
+///
+/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// [ZIP-203]: https://zips.z.cash/zip-0203
+pub fn non_coinbase_expiry_height(
+    height: &Height,
+    transaction: &transaction::Transaction,
+) -> Result<(), BlockError> {
+    if transaction.is_overwintered() {
+        let expiry_height = transaction.expiry_height();
+
+        validate_expiry_height_max(expiry_height)?;
+        validate_expiry_height_mined(expiry_height, height)?;
+    }
+    Ok(())
+}
+
 /// Validate the consensus rule: nExpiryHeight MUST be less than or equal to 499999999.
 fn validate_expiry_height_max(expiry_height: Option<Height>) -> Result<(), BlockError> {
     if let Some(expiry) = expiry_height {
         if expiry > Height::MAX_EXPIRY_HEIGHT {
-            return Err(TransactionError::CoinbaseExpiration)?;
+            return Err(TransactionError::TransactionExpiration)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate the consensus rule: If a transaction is not a coinbase transaction
+/// and its nExpiryHeight field is nonzero, then it MUST NOT be mined at a block
+/// height greater than its nExpiryHeight.
+fn validate_expiry_height_mined(
+    expiry_height: Option<Height>,
+    height: &Height,
+) -> Result<(), BlockError> {
+    if let Some(expiry) = expiry_height {
+        if *height > expiry {
+            return Err(TransactionError::TransactionExpiration)?;
         }
     }
 
