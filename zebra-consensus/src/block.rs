@@ -259,7 +259,6 @@ where
                 })?;
             }
 
-            // TODO: check miner subsidy and miner fees (#1162)
             let block_miner_fees =
                 block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
                     height,
