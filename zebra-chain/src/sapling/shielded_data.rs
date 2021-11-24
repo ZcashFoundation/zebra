@@ -209,6 +209,7 @@ where
     /// Iterate over the [`Spend`]s for this transaction, returning deduplicated
     /// [`tree::Root`]s, regardless of the underlying transaction version.
     pub fn anchors(&self) -> impl Iterator<Item = tree::Root> + '_ {
+        // TODO: use TransferData::shared_anchor to improve performance for V5 transactions
         self.spends_per_anchor()
             .map(|spend| spend.per_spend_anchor)
             .sorted()
