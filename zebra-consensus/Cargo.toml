@@ -38,7 +38,7 @@ tracing-futures = "0.2.5"
 orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
 
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "b7ff7b69f9fc5feca899e2cd0977d433a568e0c1", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "76f1c1549c74010c9be744379b60567eb88c93d4", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
