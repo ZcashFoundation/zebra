@@ -11,7 +11,10 @@ use futures::{
 };
 use tower::Service;
 
-use crate::protocol::internal::{Request, Response};
+use crate::protocol::{
+    external::types::Version,
+    internal::{Request, Response},
+};
 
 use super::{ErrorSlot, PeerError, SharedPeerError};
 
@@ -28,6 +31,9 @@ pub struct Client {
     ///
     /// `None` unless the connection or client have errored.
     pub(crate) error_slot: ErrorSlot,
+
+    /// The peer connection's protocol version.
+    pub(crate) version: Version,
 }
 
 /// A message from the `peer::Client` to the `peer::Server`.

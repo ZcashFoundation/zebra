@@ -792,6 +792,7 @@ where
                 shutdown_tx: Some(shutdown_tx),
                 server_tx: server_tx.clone(),
                 error_slot: slot.clone(),
+                version: remote_version,
             };
 
             let (peer_tx, peer_rx) = peer_conn.split();

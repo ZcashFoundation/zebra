@@ -45,7 +45,7 @@ use crate::{
         set::MorePeers,
         ActiveConnectionCounter, CandidateSet,
     },
-    protocol::types::PeerServices,
+    protocol::{external::types::Version, types::PeerServices},
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -359,6 +359,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Fake the connection closing.
@@ -431,6 +432,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -550,6 +552,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Fake the connection closing.
@@ -624,6 +627,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -775,6 +779,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             shutdown_tx: Some(shutdown_tx),
             server_tx,
             error_slot,
+            version: Version(1),
         };
 
         // Actually close the connection.
@@ -851,6 +856,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -979,6 +985,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             shutdown_tx: Some(shutdown_tx),
             server_tx,
             error_slot,
+            version: Version(1),
         };
 
         // Actually close the connection.
@@ -1055,6 +1062,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
