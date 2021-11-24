@@ -83,11 +83,11 @@ jobs:
         shell: bash
         run: echo "ZCASH_PARAMS=$(cargo run --example get-params-path)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
-        id: cache-sprout-and-sapling-params
+        id: cache-params
         uses: actions/cache@v2
         with:
           path: ${{ env.ZCASH_PARAMS }}
-          key: ${{ runner.os }}-params
+          key: ${{ runner.os }}-sprout-and-sapling-params
       - name: Fetch Zcash parameters
         if: steps.cache-params.outputs.cache-hit != 'true'
         working-directory: ./zebra-consensus
