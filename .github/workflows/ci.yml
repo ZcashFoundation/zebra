@@ -11,8 +11,10 @@ jobs:
 
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
-    # The large timeout is to accommodate Windows builds
-    timeout-minutes: 75
+    # The large timeout is to accommodate:
+    # - Windows builds (75 minutes, typically 30-50 minutes)
+    # - parameter downloads (40 minutes, but only when the cache expires)
+    timeout-minutes: 115
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
