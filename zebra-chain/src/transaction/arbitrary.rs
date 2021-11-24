@@ -62,7 +62,7 @@ impl Transaction {
             transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
-            option::of(any::<JoinSplitData<Bctv14Proof>>()),
+            option::weighted(0.1, any::<JoinSplitData<Bctv14Proof>>()),
         )
             .prop_map(
                 |(inputs, outputs, lock_time, joinsplit_data)| Transaction::V2 {
@@ -82,7 +82,7 @@ impl Transaction {
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             any::<block::Height>(),
-            option::of(any::<JoinSplitData<Bctv14Proof>>()),
+            option::weighted(0.1, any::<JoinSplitData<Bctv14Proof>>()),
         )
             .prop_map(
                 |(inputs, outputs, lock_time, expiry_height, joinsplit_data)| Transaction::V3 {
@@ -103,8 +103,8 @@ impl Transaction {
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             any::<block::Height>(),
-            option::of(any::<JoinSplitData<Groth16Proof>>()),
-            option::of(any::<sapling::ShieldedData<sapling::PerSpendAnchor>>()),
+            option::weighted(0.1, any::<JoinSplitData<Groth16Proof>>()),
+            option::weighted(0.1, any::<sapling::ShieldedData<sapling::PerSpendAnchor>>()),
         )
             .prop_map(
                 |(
@@ -134,8 +134,8 @@ impl Transaction {
             any::<block::Height>(),
             transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
-            option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData>()),
+            option::weighted(0.1, any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
+            option::weighted(0.1, any::<orchard::ShieldedData>()),
         )
             .prop_map(
                 move |(
