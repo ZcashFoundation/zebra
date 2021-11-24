@@ -28,13 +28,13 @@ orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e2
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
 #
 # This zcash_proofs patch doesn't work, maybe because of features?
-#zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "76f1c1549c74010c9be744379b60567eb88c93d4" }
+#zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "49bab1eae66d34e007c3ff5240a8bb09eaf28570" }
 
 # Use the ZcashFoundation fork where possible, to avoid duplicate dependencies
-equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "76f1c1549c74010c9be744379b60567eb88c93d4" }
-zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "76f1c1549c74010c9be744379b60567eb88c93d4" }
-zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "76f1c1549c74010c9be744379b60567eb88c93d4" }
-zcash_history = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "76f1c1549c74010c9be744379b60567eb88c93d4" }
+equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "49bab1eae66d34e007c3ff5240a8bb09eaf28570" }
+zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "49bab1eae66d34e007c3ff5240a8bb09eaf28570" }
+zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "49bab1eae66d34e007c3ff5240a8bb09eaf28570" }
+zcash_history = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "49bab1eae66d34e007c3ff5240a8bb09eaf28570" }
 
 # TODO: remove these after a new librustzcash release (#2982)
 
