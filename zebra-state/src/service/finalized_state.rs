@@ -32,6 +32,9 @@ use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, Tran
 
 use super::QueuedFinalized;
 
+#[cfg(test)]
+use crate::PreparedBlock;
+
 /// The finalized part of the chain state, stored in the db.
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
@@ -735,6 +738,40 @@ impl FinalizedState {
         let mut batch = rocksdb::WriteBatch::default();
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
         batch.zs_insert(value_pool_cf, (), fake_value_pool);
+        self.db.write(batch).unwrap();
+    }
+
+    /// Artificially prime the note commitment tree anchor sets with anchors
+    /// referenced in a block, for testing purposes _only_.
+    #[cfg(test)]
+    pub fn populate_with_anchors(&self, prepared: &PreparedBlock) {
+        let mut batch = rocksdb::WriteBatch::default();
+
+        // let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
+        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
+
+        for transaction in prepared.block.transactions.iter() {
+            // // Sprout
+            // if let Some(sprout_shielded_data) = transaction.joinsplit_data {
+            //     for joinsplit in transaction.sprout_groth16_joinsplits() {
+            //         batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
+            //     }
+            // }
+
+            // Sapling
+            if transaction.has_sapling_shielded_data() {
+                for anchor in transaction.sapling_anchors() {
+                    batch.zs_insert(sapling_anchors, anchor, ());
+                }
+            }
+
+            // Orchard
+            if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
+                batch.zs_insert(orchard_anchors, orchard_shielded_data.shared_anchor, ());
+            }
+        }
+
         self.db.write(batch).unwrap();
     }
 }
