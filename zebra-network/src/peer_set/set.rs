@@ -664,7 +664,7 @@ where
         let half_ready_peers = (self.ready_services.len() + 1) / 2;
         let fanout_peers = min(constants::MAX_REQUEST_FANOUT, half_ready_peers);
 
-        self.route_multiple(req, fanout_peers)
+        self.route_multiple(req.clone(), fanout_peers)
             .map(|results| {
                 let responses: Vec<Response> = results
                     .iter()
@@ -674,8 +674,7 @@ where
                 let first_error = results.into_iter().find_map(Result::err);
 
                 if !responses.is_empty() {
-                    // TODO: combine the responses
-                    Ok(responses.first().unwrap().clone())
+                    Ok(combine_fanout_responses(req, responses))
                 } else if let Some(first_error) = first_error {
                     // We could return a list of errors, but one should be enough
                     Err(first_error)
@@ -755,6 +754,28 @@ where
                 num_peers, num_ready, num_unready, address_metrics,
             );
         }
+    }
+}
+
+/// Combines `responses` into a single fanout response.
+fn combine_fanout_responses(req: Request, responses: Vec<Response>) -> Response {
+    match req {
+        Request::Peers => {
+            let response_vectors = responses.into_iter().map(|response| {
+                if let Response::Peers(peers) = response {
+                    assert_eq!(
+                        peers.len(),
+                        1,
+                        "each client response must contain a single inner vector"
+                    );
+                    peers.first().unwrap().clone()
+                } else {
+                    unreachable!("unexpected response to peers request");
+                }
+            });
+            Response::Peers(response_vectors.collect())
+        }
+        _ => unreachable!("unexpected fanout request type"),
     }
 }
 
@@ -863,6 +884,9 @@ where
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_) => self.route_broadcast(req),
             Request::AdvertiseBlock(_) => self.route_broadcast(req),
+
+            // Send fanouts to a few peers
+            Request::Peers => self.route_fanout(req),
 
             // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),

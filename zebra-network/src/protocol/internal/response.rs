@@ -25,8 +25,12 @@ pub enum Response {
     /// and sometimes sends `notfound`.
     Nil,
 
-    /// A list of peers, used to respond to `GetPeers`.
-    Peers(Vec<MetaAddr>),
+    /// A list of peers from each response in the fanout.
+    /// Used to respond to `GetPeers`.
+    ///
+    /// At the `Client` level, there is only one inner list.
+    /// At the `PeerSet` level, each inner list represents one peer's response.
+    Peers(Vec<Vec<MetaAddr>>),
 
     /// A list of blocks.
     Blocks(Vec<Arc<Block>>),
