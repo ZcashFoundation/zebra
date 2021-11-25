@@ -4290,6 +4290,7 @@ version = "1.0.0-beta.1"
 dependencies = [
  "aes",
  "bech32",
+ "bellman",
  "bigint",
  "bitflags",
  "bitvec",

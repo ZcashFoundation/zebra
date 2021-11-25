@@ -1,11 +1,12 @@
-use std::io;
+use std::{convert::TryInto, io};
 
+use bellman::gadgets::multipack;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::MAX_BLOCK_BYTES,
-    primitives::{x25519, Bctv14Proof, Groth16Proof, ZkSnarkProof},
+    primitives::{ed25519, x25519, Bctv14Proof, Groth16Proof, ZkSnarkProof},
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
@@ -13,6 +14,35 @@ use crate::{
 };
 
 use super::{commitment, note, tree};
+
+/// Compute the [h_{Sig} hash function][1] which is used in JoinSplit descriptions.
+///
+/// `random_seed`: the random seed from the JoinSplit description.
+/// `nf1`: the first nullifier from the JoinSplit description.
+/// `nf2`: the second nullifier from the JoinSplit description.
+/// `joinsplit_pub_key`: the JoinSplit public validation key from the transaction.
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#hsigcrh
+pub(super) fn h_sig(
+    random_seed: &[u8],
+    nf1: &[u8],
+    nf2: &[u8],
+    joinsplit_pub_key: &[u8],
+) -> [u8; 32] {
+    let h_sig: [u8; 32] = blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"ZcashComputehSig")
+        .to_state()
+        .update(random_seed)
+        .update(nf1)
+        .update(nf2)
+        .update(joinsplit_pub_key)
+        .finalize()
+        .as_bytes()
+        .try_into()
+        .expect("32 byte array");
+    h_sig
+}
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
@@ -88,6 +118,55 @@ impl<P: ZkSnarkProof> JoinSplit<P> {
             .expect("constrain::NegativeAllowed is always valid");
 
         (vpub_new - vpub_old).expect("subtraction of two valid amounts is a valid NegativeAllowed")
+    }
+
+    /// Encodes the primary inputs for the proof statement as Bls12_381 base
+    /// field elements, to match bellman::groth16::verify_proof.
+    ///
+    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
+    ///
+    /// `joinsplit_pub_key`: the JoinSplit public validation key for this JoinSplit, from
+    /// the transaction. (All JoinSplits in a transaction share the same validation key.)
+    ///
+    /// This is not yet officially documented; see the reference implementation:
+    /// https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166
+    pub fn primary_inputs(
+        &self,
+        joinsplit_pub_key: &ed25519::VerificationKeyBytes,
+    ) -> Vec<jubjub::Fq> {
+        let rt: [u8; 32] = self.anchor.into();
+        let mac1: [u8; 32] = (&self.vmacs[0]).into();
+        let mac2: [u8; 32] = (&self.vmacs[1]).into();
+        let nf1: [u8; 32] = (&self.nullifiers[0]).into();
+        let nf2: [u8; 32] = (&self.nullifiers[1]).into();
+        let cm1: [u8; 32] = (&self.commitments[0]).into();
+        let cm2: [u8; 32] = (&self.commitments[1]).into();
+        let vpub_old = self.vpub_old.to_bytes();
+        let vpub_new = self.vpub_new.to_bytes();
+
+        let h_sig = h_sig(
+            &self.random_seed[..],
+            &nf1[..],
+            &nf2[..],
+            joinsplit_pub_key.as_ref(),
+        );
+
+        // Prepare the public input for the verifier
+        let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
+        public_input.extend(rt);
+        public_input.extend(h_sig);
+        public_input.extend(nf1);
+        public_input.extend(mac1);
+        public_input.extend(nf2);
+        public_input.extend(mac2);
+        public_input.extend(cm1);
+        public_input.extend(cm2);
+        public_input.extend(vpub_old);
+        public_input.extend(vpub_new);
+
+        let public_input = multipack::bytes_to_bits(&public_input);
+
+        multipack::compute_multipacking(&public_input)
     }
 }
 

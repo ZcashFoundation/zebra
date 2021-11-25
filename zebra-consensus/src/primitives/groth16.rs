@@ -22,7 +22,11 @@ use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::sapling::{Output, PerSpendAnchor, Spend};
+use zebra_chain::{
+    primitives::{ed25519, Groth16Proof},
+    sapling::{Output, PerSpendAnchor, Spend},
+    sprout::JoinSplit,
+};
 
 mod params;
 #[cfg(test)]
@@ -96,6 +100,32 @@ pub static OUTPUT_VERIFIER: Lazy<
     )
 });
 
+/// Global batch verification context for Groth16 proofs of JoinSplit statements.
+///
+/// This service does not yet batch verifications, see
+/// https://github.com/ZcashFoundation/zebra/issues/3127
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>> =
+    Lazy::new(|| {
+        // We need a Service to use. The obvious way to do this would
+        // be to write a closure that returns an async block. But because we
+        // have to specify the type of a static, we need to be able to write the
+        // type of the closure and its return value, and both closures and async
+        // blocks have eldritch types whose names cannot be written. So instead,
+        // we use a Ready to avoid an async block and cast the closure to a
+        // function (which is possible because it doesn't capture any state).
+        tower::service_fn(
+            (|item: Item| {
+                ready(
+                    item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key),
+                )
+            }) as fn(_) -> _,
+        )
+    });
+
 /// A Groth16 verification item, used as the request type of the service.
 pub type Item = batch::Item<Bls12>;
 
@@ -116,6 +146,17 @@ impl From<&Output> for ItemWrapper {
         Self(Item::from((
             bellman::groth16::Proof::read(&output.zkproof.0[..]).unwrap(),
             output.primary_inputs(),
+        )))
+    }
+}
+
+impl From<(&ed25519::VerificationKeyBytes, &JoinSplit<Groth16Proof>)> for ItemWrapper {
+    fn from(
+        (pub_key, joinsplit): (&ed25519::VerificationKeyBytes, &JoinSplit<Groth16Proof>),
+    ) -> Self {
+        Self(Item::from((
+            bellman::groth16::Proof::read(&joinsplit.zkproof.0[..]).unwrap(),
+            joinsplit.primary_inputs(pub_key),
         )))
     }
 }
