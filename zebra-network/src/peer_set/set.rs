@@ -57,7 +57,7 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    future::TryFutureExt,
+    future::{FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
 };
@@ -72,6 +72,7 @@ use tower::{
 };
 
 use crate::{
+    constants,
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
         InventoryRegistry,
@@ -129,7 +130,7 @@ where
     /// If this is `Some(addr)`, `addr` must be a key for a peer in `ready_services`.
     /// If that peer is removed from `ready_services`, we must set the preselected peer to `None`.
     ///
-    /// This is handled by [`PeerSet::take_ready_service`] and [`PeerSet::route_all`].
+    /// This is handled by [`PeerSet::take_ready_service`].
     preselected_p2c_peer: Option<D::Key>,
 
     /// Stores gossiped inventory hashes from connected peers.
@@ -576,8 +577,18 @@ where
         }
     }
 
-    /// Routes a request to all ready peers, ignoring return values.
-    fn route_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+    /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
+    fn route_multiple(
+        &mut self,
+        req: Request,
+        max_peers: usize,
+    ) -> impl Future<Output = Vec<Result<Response, <<D as Discover>::Service as Service<Request>>::Error>>>
+    {
+        assert!(
+            max_peers > 0,
+            "requests must be routed to at least one peer"
+        );
+
         // This is not needless: otherwise, we'd hold a &mut reference to self.ready_services,
         // blocking us from passing &mut self to push_unready.
         let ready_services = std::mem::take(&mut self.ready_services);
@@ -585,7 +596,8 @@ where
 
         let futs = FuturesUnordered::new();
         for (key, mut svc) in ready_services {
-            futs.push(svc.call(req.clone()).map_err(|_| ()));
+            // TODO: do we need a shorter timeout for fanout requests?
+            futs.push(svc.call(req.clone()));
             self.push_unready(key, svc);
         }
 
@@ -594,11 +606,48 @@ where
             tracing::debug!(
                 ok.len = results.iter().filter(|r| r.is_ok()).count(),
                 err.len = results.iter().filter(|r| r.is_err()).count(),
-                "sent peer request broadcast"
+                "sent peer request to multiple peers"
             );
+            results
+        }
+        .boxed()
+    }
+
+    /// Broadcasts the same request to lots of ready peers, ignoring return values.
+    fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Round up, so that if we have one ready peer, it gets the request
+        let half_ready_peers = (self.ready_services.len() + 1) / 2;
+
+        // Broadcasts ignore the response
+        let fut = self.route_multiple(req, half_ready_peers);
+
+        async move {
+            let _ = fut.await;
             Ok(Response::Nil)
         }
         .boxed()
+    }
+
+    /// Fans out the same request to a few ready peers, ignoring return values.
+    fn route_fanout(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Fanouts combine the responses
+        self.route_multiple(req, constants::MAX_REQUEST_FANOUT)
+            .map(|results| {
+                let responses: Vec<Response> =
+                    results.iter().filter_map(|result| result.ok()).collect();
+                let first_error = results.into_iter().find_map(Result::err);
+
+                if !responses.is_empty() {
+                    // TODO: combine the responses
+                    Ok(responses.first().unwrap().clone())
+                } else if let Some(first_error) = first_error {
+                    // We could return an error list, but the first one should be enough
+                    Err(first_error)
+                } else {
+                    unreachable!("expected at least one peer result")
+                }
+            })
+            .boxed()
     }
 
     /// Logs the peer set size.
@@ -775,9 +824,9 @@ where
                 self.route_inv(req, hash)
             }
 
-            // Broadcast advertisements to all peers
-            Request::AdvertiseTransactionIds(_) => self.route_all(req),
-            Request::AdvertiseBlock(_) => self.route_all(req),
+            // Broadcast advertisements to lots of peers
+            Request::AdvertiseTransactionIds(_) => self.route_broadcast(req),
+            Request::AdvertiseBlock(_) => self.route_broadcast(req),
 
             // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),

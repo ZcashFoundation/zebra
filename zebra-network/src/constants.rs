@@ -107,19 +107,15 @@ pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 /// peer addresses are sent at least `MIN_PEER_GET_ADDR_INTERVAL` apart.
 pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(10);
 
-/// The number of GetAddr requests sent when crawling for new peers.
+/// The maximum number of peers to use for a fanout request.
+///
+/// [`PeerSet::call`] chooses which request types to fan out.
 ///
 /// ## SECURITY
 ///
 /// The fanout should be greater than 2, so that Zebra avoids getting a majority
 /// of its initial address book entries from a single peer.
-///
-/// Zebra regularly crawls for new peers, initiating a new crawl every
-/// [`crawl_new_peer_interval`](crate::config::Config.crawl_new_peer_interval).
-///
-/// TODO: limit the number of addresses that Zebra uses from a single peer
-///       response (#1869)
-pub const GET_ADDR_FANOUT: usize = 3;
+pub const MAX_REQUEST_FANOUT: usize = 3;
 
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///
