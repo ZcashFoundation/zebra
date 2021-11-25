@@ -161,9 +161,9 @@ impl StartCmd {
             peer_set,
         ));
 
-        info!("started initial Zebra tasks");
+        info!("spawned initial Zebra tasks");
 
-        // TODO: spawn the syncer task, after making the PeerSet sync and send
+        // TODO: spawn the syncer task, after making the PeerSet marker::Sync and marker::Send
         //       turn these tasks into a FuturesUnordered?
 
         // ongoing futures & tasks
