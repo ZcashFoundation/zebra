@@ -293,7 +293,7 @@ pub fn merkle_root_validity(
 /// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 /// [ZIP-203]: https://zips.z.cash/zip-0203
 pub fn coinbase_expiry_height(
-    height: &Height,
+    block_height: &Height,
     coinbase: &transaction::Transaction,
     network: Network,
 ) -> Result<(), BlockError> {
@@ -303,11 +303,11 @@ pub fn coinbase_expiry_height(
         Some(activation_height) => {
             // Conesnsus rule: from NU5 activation, the nExpiryHeight field of a
             // coinbase transaction MUST be set equal to the block height.
-            if *height >= activation_height {
+            if *block_height >= activation_height {
                 match coinbase.expiry_height() {
                     None => Err(TransactionError::TransactionExpiration)?,
                     Some(expiry) => {
-                        if expiry != *height {
+                        if expiry != *block_height {
                             return Err(TransactionError::TransactionExpiration)?;
                         }
                     }
@@ -327,14 +327,14 @@ pub fn coinbase_expiry_height(
 /// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 /// [ZIP-203]: https://zips.z.cash/zip-0203
 pub fn non_coinbase_expiry_height(
-    height: &Height,
+    block_height: &Height,
     transaction: &transaction::Transaction,
 ) -> Result<(), BlockError> {
     if transaction.is_overwintered() {
         let expiry_height = transaction.expiry_height();
 
         validate_expiry_height_max(expiry_height)?;
-        validate_expiry_height_mined(expiry_height, height)?;
+        validate_expiry_height_mined(expiry_height, block_height)?;
     }
     Ok(())
 }
@@ -355,10 +355,10 @@ fn validate_expiry_height_max(expiry_height: Option<Height>) -> Result<(), Block
 /// height greater than its nExpiryHeight.
 fn validate_expiry_height_mined(
     expiry_height: Option<Height>,
-    height: &Height,
+    block_height: &Height,
 ) -> Result<(), BlockError> {
     if let Some(expiry) = expiry_height {
-        if *height > expiry {
+        if *block_height > expiry {
             return Err(TransactionError::TransactionExpiration)?;
         }
     }
