@@ -13,9 +13,6 @@ byteorder = "1.4"
 bytes = "1.1.0"
 chrono = "0.4"
 hex = "0.4"
-# indexmap has rayon support for parallel iteration,
-# which we don't use, so disable it to drop the dependencies.
-indexmap = { version = "1.7", default-features = false }
 lazy_static = "1.4.0"
 pin-project = "1.0.7"
 rand = "0.8"
