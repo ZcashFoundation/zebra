@@ -112,13 +112,19 @@ fn push_history_tree_chain() -> Result<()> {
     Ok(())
 }
 
-/// Check that a forked genesis chain is the same as a chain that had the same blocks appended.
+/// Checks that a forked genesis chain is the same as a chain that had the same
+/// blocks appended.
 ///
-/// Also check that:
-/// - there are no transparent spends in the chain from the genesis block,
-///   because genesis transparent outputs are ignored
-/// - transactions only spend transparent outputs from earlier in the block or chain
-/// - chain value balances are non-negative
+/// In other words, this test checks that we get the same chain if we:
+/// - fork the original chain, then push some blocks, or
+/// - push the same blocks to the original chain.
+///
+/// Also checks that:
+/// - There are no transparent spends in the chain from the genesis block,
+///   because genesis transparent outputs are ignored.
+/// - Transactions only spend transparent outputs from earlier in the block or
+///   chain.
+/// - Chain value balances are non-negative.
 #[test]
 fn forked_equals_pushed_genesis() -> Result<()> {
     zebra_test::init();
@@ -129,51 +135,67 @@ fn forked_equals_pushed_genesis() -> Result<()> {
                                .and_then(|v| v.parse().ok())
                                .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
     |((chain, fork_at_count, network, empty_tree) in PreparedChain::default())| {
-
         prop_assert!(empty_tree.is_none());
 
-        // use `fork_at_count` as the fork tip
-        let fork_tip_hash = chain[fork_at_count - 1].hash;
-
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), empty_tree.clone(), ValueBalance::zero());
-        let mut partial_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), empty_tree.clone(), ValueBalance::zero());
-
+        // This chain will be used to check if the blocks in the forked chain
+        // correspond to the blocks in the original chain before the fork.
+        let mut partial_chain = Chain::new(
+            network,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            empty_tree.clone(),
+            ValueBalance::zero(),
+        );
         for block in chain.iter().take(fork_at_count).cloned() {
-            let block =
-                ContextuallyValidBlock::with_block_and_spent_utxos(
-                    block,
-                    partial_chain.unspent_utxos(),
-                )?;
-            partial_chain = partial_chain.push(block).expect("partial chain push is valid");
+            let block = ContextuallyValidBlock::with_block_and_spent_utxos(
+                block,
+                partial_chain.unspent_utxos(),
+            )?;
+            partial_chain = partial_chain
+                .push(block)
+                .expect("partial chain push is valid");
         }
 
+        // This chain will be forked.
+        let mut full_chain = Chain::new(
+            network,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            empty_tree.clone(),
+            ValueBalance::zero(),
+        );
         for block in chain.iter().cloned() {
             let block =
-                ContextuallyValidBlock::with_block_and_spent_utxos(
-                    block,
-                    full_chain.unspent_utxos(),
-                )?;
-                full_chain = full_chain.push(block.clone()).expect("full chain push is valid");
+                ContextuallyValidBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
+            full_chain = full_chain
+                .push(block.clone())
+                .expect("full chain push is valid");
 
-                // check some other properties of generated chains
-                if block.height == block::Height(0) {
-                    prop_assert_eq!(
-                        block
-                            .block
-                            .transactions
-                            .iter()
-                            .flat_map(|t| t.inputs())
-                            .filter_map(|i| i.outpoint())
-                            .count(),
-                        0,
-                        "unexpected transparent prevout input at height {:?}: \
-                         genesis transparent outputs must be ignored, \
-                         so there can not be any spends in the genesis block",
-                        block.height,
-                    );
-                }
+            // Check some other properties of generated chains.
+            if block.height == block::Height(0) {
+                prop_assert_eq!(
+                    block
+                        .block
+                        .transactions
+                        .iter()
+                        .flat_map(|t| t.inputs())
+                        .filter_map(|i| i.outpoint())
+                        .count(),
+                    0,
+                    "unexpected transparent prevout input at height {:?}: \
+                            genesis transparent outputs must be ignored, \
+                            so there can not be any spends in the genesis block",
+                    block.height,
+                );
             }
+        }
 
+        // Use [`fork_at_count`] as the fork tip.
+        let fork_tip_hash = chain[fork_at_count - 1].hash;
+
+        // Fork the chain.
         let mut forked = full_chain
             .fork(
                 fork_tip_hash,
@@ -185,18 +207,18 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             .expect("fork works")
             .expect("hash is present");
 
-        // the first check is redundant, but it's useful for debugging
+        // This check is redundant, but it's useful for debugging.
         prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
+
+        // Check that the blocks in the forked chain correspond to the blocks in
+        // the original chain.
         prop_assert!(forked.eq_internal_state(&partial_chain));
 
         // Re-add blocks to the fork and check if we arrive at the
-        // same original full chain
+        // same original full chain.
         for block in chain.iter().skip(fork_at_count).cloned() {
             let block =
-                ContextuallyValidBlock::with_block_and_spent_utxos(
-                    block,
-                    forked.unspent_utxos(),
-                )?;
+                ContextuallyValidBlock::with_block_and_spent_utxos(block, forked.unspent_utxos())?;
             forked = forked.push(block).expect("forked chain push is valid");
         }
 
