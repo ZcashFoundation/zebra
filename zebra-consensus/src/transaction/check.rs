@@ -308,18 +308,28 @@ pub fn coinbase_expiry_height(
     coinbase: &Transaction,
     network: Network,
 ) -> Result<(), TransactionError> {
+    let expiry_height = coinbase.expiry_height();
+
     match NetworkUpgrade::Nu5.activation_height(network) {
         // If Nu5 does not have a height, apply the pre-Nu5 rule.
-        None => validate_expiry_height_max(coinbase.expiry_height()),
+        None => validate_expiry_height_max(expiry_height, true, block_height, coinbase),
         Some(activation_height) => {
-            // Conesnsus rule: from NU5 activation, the nExpiryHeight field of a
+            // Consensus rule: from NU5 activation, the nExpiryHeight field of a
             // coinbase transaction MUST be set equal to the block height.
             if *block_height >= activation_height {
-                match coinbase.expiry_height() {
-                    None => Err(TransactionError::TransactionExpiration)?,
+                match expiry_height {
+                    None => Err(TransactionError::CoinbaseExpiryBlockHeight {
+                        expiry_height,
+                        block_height: *block_height,
+                        transaction_hash: coinbase.hash(),
+                    })?,
                     Some(expiry) => {
                         if expiry != *block_height {
-                            return Err(TransactionError::TransactionExpiration)?;
+                            return Err(TransactionError::CoinbaseExpiryBlockHeight {
+                                expiry_height,
+                                block_height: *block_height,
+                                transaction_hash: coinbase.hash(),
+                            })?;
                         }
                     }
                 }
@@ -327,7 +337,7 @@ pub fn coinbase_expiry_height(
             }
             // Consensus rule: [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight
             // MUST be less than or equal to 499999999.
-            validate_expiry_height_max(coinbase.expiry_height())
+            validate_expiry_height_max(expiry_height, true, block_height, coinbase)
         }
     }
 }
@@ -344,17 +354,30 @@ pub fn non_coinbase_expiry_height(
     if transaction.is_overwintered() {
         let expiry_height = transaction.expiry_height();
 
-        validate_expiry_height_max(expiry_height)?;
-        validate_expiry_height_mined(expiry_height, block_height)?;
+        validate_expiry_height_max(expiry_height, false, block_height, transaction)?;
+        validate_expiry_height_mined(expiry_height, block_height, transaction)?;
     }
     Ok(())
 }
 
 /// Validate the consensus rule: nExpiryHeight MUST be less than or equal to 499999999.
-fn validate_expiry_height_max(expiry_height: Option<Height>) -> Result<(), TransactionError> {
-    if let Some(expiry) = expiry_height {
-        if expiry > Height::MAX_EXPIRY_HEIGHT {
-            return Err(TransactionError::TransactionExpiration)?;
+///
+/// The remaining arguments are not used for validation,
+/// they are only used to create errors.
+fn validate_expiry_height_max(
+    expiry_height: Option<Height>,
+    is_coinbase: bool,
+    block_height: &Height,
+    transaction: &Transaction,
+) -> Result<(), TransactionError> {
+    if let Some(expiry_height) = expiry_height {
+        if expiry_height > Height::MAX_EXPIRY_HEIGHT {
+            return Err(TransactionError::MaximumExpiryHeight {
+                expiry_height,
+                is_coinbase,
+                block_height: *block_height,
+                transaction_hash: transaction.hash(),
+            })?;
         }
     }
 
@@ -364,13 +387,20 @@ fn validate_expiry_height_max(expiry_height: Option<Height>) -> Result<(), Trans
 /// Validate the consensus rule: If a transaction is not a coinbase transaction
 /// and its nExpiryHeight field is nonzero, then it MUST NOT be mined at a block
 /// height greater than its nExpiryHeight.
+///
+/// The `transaction` is only used to create errors.
 fn validate_expiry_height_mined(
     expiry_height: Option<Height>,
     block_height: &Height,
+    transaction: &Transaction,
 ) -> Result<(), TransactionError> {
-    if let Some(expiry) = expiry_height {
-        if *block_height > expiry {
-            return Err(TransactionError::TransactionExpiration)?;
+    if let Some(expiry_height) = expiry_height {
+        if *block_height > expiry_height {
+            return Err(TransactionError::ExpiredTransaction {
+                expiry_height,
+                block_height: *block_height,
+                transaction_hash: transaction.hash(),
+            })?;
         }
     }
 
