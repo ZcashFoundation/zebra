@@ -43,6 +43,7 @@
 //! [tower-balance]: https://crates.io/crates/tower-balance
 
 use std::{
+    cmp::min,
     collections::{HashMap, HashSet},
     convert,
     fmt::Debug,
@@ -108,10 +109,10 @@ pub struct CancelClientWork;
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
 pub struct PeerSet<D>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
+    D: Discover<Key = SocketAddr> + Unpin + 'static,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + Clone + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
@@ -176,10 +177,10 @@ where
 
 impl<D> Drop for PeerSet<D>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
+    D: Discover<Key = SocketAddr> + Unpin + 'static,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + Clone + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
@@ -190,10 +191,10 @@ where
 
 impl<D> PeerSet<D>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
+    D: Discover<Key = SocketAddr> + Unpin + 'static,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + Clone + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
@@ -460,16 +461,16 @@ where
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
     fn preselect_p2c_peer(&self) -> Option<D::Key> {
-        self.select_p2c_peer_from_list(self.ready_services.keys().copied().collect())
+        self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
-    fn select_p2c_peer_from_list(&self, ready_service_list: HashSet<D::Key>) -> Option<D::Key> {
+    fn select_p2c_peer_from_list(&self, ready_service_list: &HashSet<D::Key>) -> Option<D::Key> {
         match ready_service_list.len() {
             0 => None,
             1 => Some(
-                ready_service_list
-                    .into_iter()
+                *ready_service_list
+                    .iter()
                     .next()
                     .expect("just checked there is one service"),
             ),
@@ -511,6 +512,18 @@ where
                 Some(selected)
             }
         }
+    }
+
+    /// Randomly chooses `max_peers` ready services, ignoring service load.
+    ///
+    /// The chosen peers are unique, but their order is not fully random.
+    fn select_random_ready_peers(&self, max_peers: usize) -> Vec<D::Key> {
+        use rand::seq::IteratorRandom;
+
+        self.ready_services
+            .keys()
+            .copied()
+            .choose_multiple(&mut rand::thread_rng(), max_peers)
     }
 
     /// Accesses a ready endpoint by `key` and returns its current load.
@@ -560,7 +573,7 @@ where
         // peers would be able to influence our choice by switching addresses.
         // But we need the choice to be random,
         // so that a peer can't provide all our inventory responses.
-        let peer = self.select_p2c_peer_from_list(inventory_peer_list);
+        let peer = self.select_p2c_peer_from_list(&inventory_peer_list);
 
         match peer.and_then(|key| self.take_ready_service(&key)) {
             Some(mut svc) => {
@@ -578,26 +591,36 @@ where
     }
 
     /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
+    ///
+    /// `max_peers` must be at least one, and at most the number of ready peers.
     fn route_multiple(
         &mut self,
         req: Request,
         max_peers: usize,
-    ) -> impl Future<Output = Vec<Result<Response, <<D as Discover>::Service as Service<Request>>::Error>>>
-    {
+    ) -> impl Future<Output = Vec<Result<Response, BoxError>>> {
         assert!(
             max_peers > 0,
             "requests must be routed to at least one peer"
         );
+        assert!(
+            max_peers <= self.ready_services.len(),
+            "requests can only be routed to ready peers"
+        );
 
-        // This is not needless: otherwise, we'd hold a &mut reference to self.ready_services,
-        // blocking us from passing &mut self to push_unready.
-        let ready_services = std::mem::take(&mut self.ready_services);
-        self.preselected_p2c_peer = None; // All services are now unready.
+        // # Security
+        //
+        // We choose peers randomly, ignoring load.
+        // This avoids favouring malicious peers, because peers can influence their own load.
+        //
+        // The order of peers isn't completely random,
+        // but peer request order is not security-sensitive.
 
         let futs = FuturesUnordered::new();
-        for (key, mut svc) in ready_services {
-            // TODO: do we need a shorter timeout for fanout requests?
-            futs.push(svc.call(req.clone()));
+        for key in self.select_random_ready_peers(max_peers) {
+            let mut svc = self
+                .take_ready_service(&key)
+                .expect("selected peers are ready");
+            futs.push(svc.call(req.clone()).map_err(Into::into));
             self.push_unready(key, svc);
         }
 
@@ -628,20 +651,33 @@ where
         .boxed()
     }
 
-    /// Fans out the same request to a few ready peers, ignoring return values.
+    /// Fans out the same request to a few ready peers,
+    /// combining successful responses into a single response,
+    /// and ignoring errors.
+    ///
+    /// But if all requests return an error, returns an error from an arbitrary peer.
     fn route_fanout(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        // Fanouts combine the responses
-        self.route_multiple(req, constants::MAX_REQUEST_FANOUT)
+        // TODO: does each individual fanout request need a smaller timeout,
+        //       to avoid stalling all the requests when a single peer doesn't respond?
+
+        // Limit the fanout to half the ready peers, and to the fanout maximum.
+        let half_ready_peers = (self.ready_services.len() + 1) / 2;
+        let fanout_peers = min(constants::MAX_REQUEST_FANOUT, half_ready_peers);
+
+        self.route_multiple(req, fanout_peers)
             .map(|results| {
-                let responses: Vec<Response> =
-                    results.iter().filter_map(|result| result.ok()).collect();
+                let responses: Vec<Response> = results
+                    .iter()
+                    .filter_map(|result| result.as_ref().ok())
+                    .cloned()
+                    .collect();
                 let first_error = results.into_iter().find_map(Result::err);
 
                 if !responses.is_empty() {
                     // TODO: combine the responses
                     Ok(responses.first().unwrap().clone())
                 } else if let Some(first_error) = first_error {
-                    // We could return an error list, but the first one should be enough
+                    // We could return a list of errors, but one should be enough
                     Err(first_error)
                 } else {
                     unreachable!("expected at least one peer result")
@@ -724,10 +760,10 @@ where
 
 impl<D> Service<Request> for PeerSet<D>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
+    D: Discover<Key = SocketAddr> + Unpin + 'static,
     D::Service: Service<Request, Response = Response> + Load,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
+    <D::Service as Service<Request>>::Error: Into<BoxError> + Clone + 'static,
     <D::Service as Service<Request>>::Future: Send + 'static,
     <D::Service as Load>::Metric: Debug,
 {
