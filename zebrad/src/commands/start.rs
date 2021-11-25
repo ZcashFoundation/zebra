@@ -19,6 +19,9 @@
 //!    * verifies blocks using zebra-chain, then stores verified blocks in zebra-state
 //!    * verifies mempool and block transactions using zebra-chain and zebra-script,
 //!      and returns verified mempool transactions for mempool storage
+//!  * Groth16 Parameters Download Task
+//!    * downloads the Sprout and Sapling Groth16 circuit parameter files
+//!    * finishes when the download is complete and the download file hashes have been checked
 //!  * Inbound Service
 //!    * handles requests from peers for network data, chain data, and mempool transactions
 //!    * spawns download and verify tasks for each gossiped block
