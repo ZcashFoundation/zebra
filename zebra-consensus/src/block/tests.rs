@@ -740,11 +740,16 @@ fn transaction_expiration_height_for_network(network: Network) -> Result<(), Rep
         for (n, transaction) in block.transactions.iter().enumerate() {
             if n == 0 {
                 // coinbase
-                let result = check::coinbase_expiry_height(&Height(height), transaction, network);
+                let result = transaction::check::coinbase_expiry_height(
+                    &Height(height),
+                    transaction,
+                    network,
+                );
                 assert!(result.is_ok());
             } else {
                 // non coinbase
-                let result = check::non_coinbase_expiry_height(&Height(height), transaction);
+                let result =
+                    transaction::check::non_coinbase_expiry_height(&Height(height), transaction);
                 assert!(result.is_ok());
             }
         }
