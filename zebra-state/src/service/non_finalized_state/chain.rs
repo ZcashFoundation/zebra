@@ -758,6 +758,9 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            // The `_u` here indicates that the Sapling note commitment is
+            // specified only by the `u`-coordinate of the Jubjub curve
+            // point `(u, v)`.
             for cm_u in sapling_shielded_data.note_commitments() {
                 self.sapling_note_commitment_tree.append(*cm_u)?;
             }
