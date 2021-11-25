@@ -45,7 +45,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // The FIRST JOINSPLIT in a transaction MUST refer to the output treestate
         // of a previous block.
 
-        // if let Some(sprout_shielded_data) = joinsplit_data {
+        // if let Some(sprout_shielded_data) = transaction.joinsplit_data {
         //     for joinsplit in transaction.sprout_groth16_joinsplits() {
         //         if !parent_chain.sprout_anchors.contains(joinsplit.anchor)
         //             && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)

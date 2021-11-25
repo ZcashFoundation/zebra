@@ -32,9 +32,6 @@ use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, Tran
 
 use super::QueuedFinalized;
 
-#[cfg(test)]
-use crate::PreparedBlock;
-
 /// The finalized part of the chain state, stored in the db.
 pub struct FinalizedState {
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
@@ -744,26 +741,22 @@ impl FinalizedState {
     /// Artificially prime the note commitment tree anchor sets with anchors
     /// referenced in a block, for testing purposes _only_.
     #[cfg(test)]
-    pub fn populate_with_anchors(&self, prepared: &PreparedBlock) {
+    pub fn populate_with_anchors(&self, block: &Block) {
         let mut batch = rocksdb::WriteBatch::default();
 
         // let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
 
-        for transaction in prepared.block.transactions.iter() {
-            // // Sprout
-            // if let Some(sprout_shielded_data) = transaction.joinsplit_data {
-            //     for joinsplit in transaction.sprout_groth16_joinsplits() {
-            //         batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
-            //     }
+        for transaction in block.transactions.iter() {
+            // Sprout
+            // for joinsplit in transaction.sprout_groth16_joinsplits() {
+            //     batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
             // }
 
             // Sapling
-            if transaction.has_sapling_shielded_data() {
-                for anchor in transaction.sapling_anchors() {
-                    batch.zs_insert(sapling_anchors, anchor, ());
-                }
+            for anchor in transaction.sapling_anchors() {
+                batch.zs_insert(sapling_anchors, anchor, ());
             }
 
             // Orchard
