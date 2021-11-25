@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     collections::HashMap,
     convert::{TryFrom, TryInto},
     sync::Arc,
@@ -301,6 +302,10 @@ async fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
 
 async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
     let nu5 = NetworkUpgrade::Nu5;
+    let nu5_activation_height = nu5
+        .activation_height(network)
+        .expect("NU5 activation height is specified");
+
     let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
@@ -317,13 +322,16 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
 
     let expected_hash = transaction.unmined_id();
 
+    let fake_block_height = max(
+        nu5_activation_height,
+        transaction.expiry_height().unwrap_or(nu5_activation_height),
+    );
+
     let result = verifier
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
-            height: nu5
-                .activation_height(network)
-                .expect("NU5 activation height is specified"),
+            height: fake_block_height,
             time: chrono::MAX_DATETIME,
         })
         .await;
