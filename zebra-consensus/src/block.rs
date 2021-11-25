@@ -259,13 +259,13 @@ where
                 })?;
             }
 
-            // TODO: check miner subsidy and miner fees (#1162)
-            let _block_miner_fees =
+            let block_miner_fees =
                 block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
                     height,
                     hash,
                     source: amount_error,
                 })?;
+            check::miner_fees_are_valid(&block, network, block_miner_fees)?;
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::try_unwrap(known_utxos)
