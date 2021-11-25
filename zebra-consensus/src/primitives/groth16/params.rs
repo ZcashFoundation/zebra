@@ -58,33 +58,47 @@ impl Groth16Parameters {
     ///
     /// If the downloaded or pre-existing parameter files are invalid.
     fn new() -> Groth16Parameters {
-        tracing::info!("downloading Zcash Sapling parameters if needed");
-        let sapling_paths =
-            zcash_proofs::download_sapling_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "error downloading Sapling parameter files: {:?}. {}",
-                        error,
-                        Groth16Parameters::failure_hint()
-                    )
-                });
+        let params_directory = Groth16Parameters::directory();
+        let sapling_spend_path = params_directory.join(zcash_proofs::SAPLING_SPEND_NAME);
+        let sapling_output_path = params_directory.join(zcash_proofs::SAPLING_OUTPUT_NAME);
+        let sprout_path = params_directory.join(zcash_proofs::SPROUT_NAME);
 
-        tracing::info!("downloading Zcash Sprout parameters if needed");
-        let sprout_path =
-            zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "error downloading Sprout parameter files: {:?}. {}",
-                        error,
-                        Groth16Parameters::failure_hint()
-                    )
-                });
+        // TODO: instead of the path check, add a zcash_proofs argument to skip hashing existing files
+        //       (we check them on load anyway)
+        if !sapling_spend_path.exists() || !sapling_output_path.exists() {
+            tracing::info!("downloading Zcash Sapling parameters");
+            let new_sapling_paths =
+                zcash_proofs::download_sapling_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "error downloading Sapling parameter files: {:?}. {}",
+                            error,
+                            Groth16Parameters::failure_hint()
+                        )
+                    });
+            assert_eq!(sapling_spend_path, new_sapling_paths.spend);
+            assert_eq!(sapling_output_path, new_sapling_paths.output);
+        }
+
+        if !sprout_path.exists() {
+            tracing::info!("downloading Zcash Sprout parameters");
+            let new_sprout_path =
+                zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "error downloading Sprout parameter files: {:?}. {}",
+                            error,
+                            Groth16Parameters::failure_hint()
+                        )
+                    });
+            assert_eq!(sprout_path, new_sprout_path);
+        }
 
         // TODO: if loading fails, log a message including `failure_hint`
         tracing::info!("checking and loading Zcash Sapling and Sprout parameters");
         let parameters = zcash_proofs::load_parameters(
-            &sapling_paths.spend,
-            &sapling_paths.output,
+            &sapling_spend_path,
+            &sapling_output_path,
             Some(&sprout_path),
         );
 
