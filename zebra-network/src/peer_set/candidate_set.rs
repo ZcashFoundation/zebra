@@ -1,6 +1,5 @@
-use std::{cmp::min, sync::Arc};
+use std::sync::Arc;
 
-use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
 
@@ -136,15 +135,7 @@ where
         }
     }
 
-    /// Update the peer set from the network, using the default fanout limit.
-    ///
-    /// See [`update_initial`][Self::update_initial] for details.
-    pub async fn update(&mut self) -> Result<(), BoxError> {
-        self.update_timeout(None).await
-    }
-
-    /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`.
+    /// Update the peer set from the network.
     ///
     /// - Ask a few live [`Responded`] peers to send us more peers.
     /// - Process all completed peer responses, adding new peers in the
@@ -152,8 +143,7 @@ where
     ///
     /// ## Correctness
     ///
-    /// Pass the initial peer set size as `fanout_limit` during initialization,
-    /// so that Zebra does not send duplicate requests to the same peer.
+    /// The [`PeerSet`] makes sure Zebra does not send duplicate requests to the same peer.
     ///
     /// The crawler exits when update returns an error, so it must only return
     /// errors on permanent failures.
@@ -176,15 +166,7 @@ where
     /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
     /// [`Failed`]: crate::PeerAddrState::Failed
     /// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
-    pub async fn update_initial(&mut self, fanout_limit: usize) -> Result<(), BoxError> {
-        self.update_timeout(Some(fanout_limit)).await
-    }
-
-    /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`, and imposing a timeout on the entire fanout.
-    ///
-    /// See [`update_initial`][Self::update_initial] for details.
-    async fn update_timeout(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
+    pub async fn update(&mut self) -> Result<(), BoxError> {
         // SECURITY
         //
         // Rate limit sending `GetAddr` messages to peers.
@@ -196,11 +178,8 @@ where
             // - we're waiting on a handshake to complete so there are peers, or
             // - another task that handles or adds peers is waiting on this task
             //   to complete.
-            if let Ok(fanout_result) = timeout(
-                constants::MIN_PEER_GET_ADDR_INTERVAL,
-                self.update_fanout(fanout_limit),
-            )
-            .await
+            if let Ok(fanout_result) =
+                timeout(constants::FANOUT_REQUEST_TIMEOUT, self.update_fanout()).await
             {
                 fanout_result?;
             } else {
@@ -214,52 +193,39 @@ where
         Ok(())
     }
 
-    /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`.
+    /// Update the peer set from the network.
     ///
-    /// See [`update_initial`][Self::update_initial]  for details.
+    /// See [`update`][Self::update]  for details.
     ///
     /// # Correctness
     ///
     /// This function does not have a timeout.
-    /// Use [`update_timeout`][Self::update_timeout] instead.
-    async fn update_fanout(&mut self, fanout_limit: Option<usize>) -> Result<(), BoxError> {
+    /// Use [`update`][Self::update] instead.
+    async fn update_fanout(&mut self) -> Result<(), BoxError> {
         // Opportunistically crawl the network on every update call to ensure
         // we're actively fetching peers. Continue independently of whether we
         // actually receive any peers, but always ask the network for more.
         //
-        // Because requests are load-balanced across existing peers, we can make
-        // multiple requests concurrently, which will be randomly assigned to
-        // existing peers, but we don't make too many because update may be
-        // called while the peer set is already loaded.
-        let mut responses = FuturesUnordered::new();
-        let fanout_limit = fanout_limit
-            .map(|fanout_limit| min(fanout_limit, constants::GET_ADDR_FANOUT))
-            .unwrap_or(constants::GET_ADDR_FANOUT);
-        debug!(?fanout_limit, "sending GetPeers requests");
-        // TODO: launch each fanout in its own task (might require tokio 1.6)
-        for _ in 0..fanout_limit {
-            let peer_service = self.peer_service.ready().await?;
-            responses.push(peer_service.call(Request::Peers));
-        }
-        while let Some(rsp) = responses.next().await {
-            match rsp {
-                Ok(Response::Peers(addrs)) => {
-                    trace!(
-                        addr_count = ?addrs.len(),
-                        ?addrs,
-                        "got response to GetPeers"
-                    );
-                    let addrs = validate_addrs(addrs, DateTime32::now());
-                    self.send_addrs(addrs);
-                }
-                Err(e) => {
-                    // since we do a fanout, and new updates are triggered by
-                    // each demand, we can ignore errors in individual responses
-                    trace!(?e, "got error in GetPeers request");
-                }
-                Ok(_) => unreachable!("Peers requests always return Peers responses"),
+        // The peer set automatically limits the number of fanout peers,
+        // based on the number of ready peers.
+        debug!("sending GetPeers requests");
+
+        match self.peer_service.ready().await?.call(Request::Peers).await {
+            Ok(Response::Peers(addrs)) => {
+                trace!(
+                    addr_count = ?addrs.len(),
+                    ?addrs,
+                    "got response to GetPeers"
+                );
+                let addrs = validate_addrs(addrs, DateTime32::now());
+                self.send_addrs(addrs);
             }
+            Err(e) => {
+                // since we do a fanout, and new updates are triggered by
+                // each demand, we can ignore errors in individual responses
+                trace!(?e, "got error in GetPeers request");
+            }
+            Ok(_) => unreachable!("Peers requests always return Peers responses"),
         }
 
         Ok(())

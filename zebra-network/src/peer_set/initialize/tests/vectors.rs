@@ -1185,9 +1185,14 @@ async fn add_initial_peers_deadlock() {
     // that the peers fill up `PEERSET_INITIAL_TARGET_SIZE`, fill up the channel
     // for sending unused peers to the `AddressBook`, and so that there are
     // still some extra peers left.
-    const PEER_COUNT: usize = 200;
+    const PEER_COUNT: usize = 150;
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
-    const TIME_LIMIT: Duration = Duration::from_secs(10);
+    const TIME_LIMIT: Duration = Duration::from_secs(23);
+
+    assert!(
+        TIME_LIMIT > constants::FANOUT_REQUEST_TIMEOUT,
+        "time limit allows a fanout request"
+    );
 
     zebra_test::init();
 
@@ -1219,6 +1224,15 @@ async fn add_initial_peers_deadlock() {
 
         ..Config::default()
     };
+
+    assert!(
+        PEER_COUNT > config.peerset_total_connection_limit(),
+        "actual channels will be full"
+    );
+    assert!(
+        PEER_COUNT > Config::default().peerset_total_connection_limit(),
+        "default channels will be full"
+    );
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 

@@ -18,7 +18,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::super::{validate_addrs, CandidateSet};
 use crate::{
-    constants::{GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
+    constants::MIN_PEER_GET_ADDR_INTERVAL,
     types::{MetaAddr, PeerServices},
     AddressBook, Request, Response,
 };
@@ -198,9 +198,9 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     runtime.block_on(async move {
         time::pause();
 
-        // Call `update_initial` first
+        // Call `update` first
         candidate_set
-            .update_initial(GET_ADDR_FANOUT)
+            .update()
             .await
             .expect("Call to CandidateSet::update should not fail");
 
@@ -253,21 +253,19 @@ fn mock_gossiped_peers(last_seen_times: impl IntoIterator<Item = DateTime<Utc>>)
         .collect()
 }
 
-/// Verify that a batch of fanned out requests are sent by the candidate set.
+/// Verify that the fanned out request is sent by the candidate set.
 ///
 /// # Panics
 ///
-/// This will panic (causing the test to fail) if more or less requests are received than the
-/// expected [`GET_ADDR_FANOUT`] amount.
+/// This will panic (causing the test to fail) if no request is sent,
+/// or the wrong request type is sent.
 async fn verify_fanned_out_requests(
     peer_service: &mut MockService<Request, Response, PanicAssertion>,
 ) {
-    for _ in 0..GET_ADDR_FANOUT {
-        peer_service
-            .expect_request_that(|request| matches!(request, Request::Peers))
-            .await
-            .respond(Response::Peers(vec![]));
-    }
+    peer_service
+        .expect_request_that(|request| matches!(request, Request::Peers))
+        .await
+        .respond(Response::Peers(vec![]));
 
     peer_service.expect_no_requests().await;
 }

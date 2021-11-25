@@ -117,6 +117,11 @@ pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(10);
 /// of its initial address book entries from a single peer.
 pub const MAX_REQUEST_FANOUT: usize = 3;
 
+/// The timeout for fanout requests.
+///
+/// This is longer than the request timeout, to allow multiple requests time to complete.
+pub const FANOUT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20 + 2);
+
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///
 /// `addr`:
@@ -246,6 +251,9 @@ mod tests {
 
         assert!(HANDSHAKE_TIMEOUT <= REQUEST_TIMEOUT,
                 "Handshakes are requests, so the handshake timeout can't be longer than the timeout for all requests.");
+        assert!(FANOUT_REQUEST_TIMEOUT > REQUEST_TIMEOUT,
+                "Fanouts wait for the results of multiple requests, so the fanout timeout must be longer.");
+
         // This check is particularly important on testnet, which has a small
         // number of peers, which are often slow.
         assert!(EWMA_DEFAULT_RTT > REQUEST_TIMEOUT,

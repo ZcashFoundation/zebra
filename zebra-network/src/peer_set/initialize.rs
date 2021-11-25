@@ -204,7 +204,7 @@ where
         ?active_initial_peer_count,
         "sending initial request for peers"
     );
-    let _ = candidates.update_initial(active_initial_peer_count).await;
+    let _ = candidates.update().await;
 
     // Compute remaining connections to open.
     let demand_count = config
