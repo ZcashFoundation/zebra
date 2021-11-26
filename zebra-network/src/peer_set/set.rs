@@ -130,7 +130,8 @@ where
     /// If this is `Some(addr)`, `addr` must be a key for a peer in `ready_services`.
     /// If that peer is removed from `ready_services`, we must set the preselected peer to `None`.
     ///
-    /// This is handled by [`PeerSet::take_ready_service`].
+    /// This is handled by [`PeerSet::take_ready_service`] and
+    /// [`PeerSet::disconnect_from_outdated_peers`].
     preselected_p2c_peer: Option<D::Key>,
 
     /// Stores gossiped inventory hashes from connected peers.
@@ -411,6 +412,26 @@ where
                     self.push_unready(key, svc);
                 }
             }
+        }
+    }
+
+    /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
+    fn disconnect_from_outdated_peers(&mut self) {
+        if let Some(minimum_version) = self.minimum_peer_version.changed() {
+            // TODO: Remove when the code base migrates to Rust 2021 edition (#2709).
+            let preselected_p2c_peer = &mut self.preselected_p2c_peer;
+
+            self.ready_services.retain(|address, peer| {
+                if peer.version() >= minimum_version {
+                    true
+                } else {
+                    if *preselected_p2c_peer == Some(*address) {
+                        *preselected_p2c_peer = None;
+                    }
+
+                    false
+                }
+            });
         }
     }
 
@@ -746,6 +767,7 @@ where
 
         // Update peer statuses
         let _ = self.poll_discover(cx)?;
+        self.disconnect_from_outdated_peers();
         self.inventory_registry.poll_inventory(cx)?;
         self.poll_unready(cx);
 
