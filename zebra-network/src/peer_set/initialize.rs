@@ -31,7 +31,7 @@ use crate::{
     address_book_updater::AddressBookUpdater,
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
-    peer::{self, HandshakeRequest, OutboundConnectorRequest},
+    peer::{self, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest},
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -121,7 +121,7 @@ where
             .with_address_book_updater(address_book_updater.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
-            .with_latest_chain_tip(latest_chain_tip)
+            .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)
             .finish()
             .expect("configured all required parameters");
@@ -158,6 +158,7 @@ where
         handle_rx,
         inv_receiver,
         address_book.clone(),
+        MinimumPeerVersion::new(latest_chain_tip, config.network),
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
