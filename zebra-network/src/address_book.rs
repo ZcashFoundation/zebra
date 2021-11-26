@@ -287,8 +287,7 @@ impl AddressBook {
     /// Returns peers in reconnection attempt order, including recently connected peers.
     pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
-        self.reconnection_peers()
-            .chain(self.maybe_connected_peers())
+        self.by_addr.values().cloned()
     }
 
     /// Return an iterator over peers that are due for a reconnection attempt,
