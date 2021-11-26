@@ -307,6 +307,13 @@ where
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
             }
 
+            // Validate `nExpiryHeight` consensus rules
+            if tx.has_any_coinbase_inputs() {
+                check::coinbase_expiry_height(&req.height(), &tx, network)?;
+            } else {
+                check::non_coinbase_expiry_height(&req.height(), &tx)?;
+            }
+
             // [Canopy onward]: `vpub_old` MUST be zero.
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::disabled_add_to_sprout_pool(&tx, req.height(), network)?;
