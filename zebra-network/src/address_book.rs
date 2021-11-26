@@ -96,6 +96,7 @@ impl AddressBook {
     pub fn new(local_listener: SocketAddr, span: Span) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
+        let now = Instant::now();
 
         let mut new_book = AddressBook {
             by_addr: BTreeMap::default(),
@@ -104,7 +105,7 @@ impl AddressBook {
             last_address_log: None,
         };
 
-        new_book.update_metrics();
+        new_book.update_metrics(now);
         new_book
     }
 
@@ -119,6 +120,10 @@ impl AddressBook {
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
     ) -> AddressBook {
+        let constructor_span = span.clone();
+        let _guard = constructor_span.enter();
+        let now = Instant::now();
+
         let mut new_book = AddressBook::new(local_listener, span);
 
         let addrs = addrs
@@ -131,7 +136,7 @@ impl AddressBook {
             .map(|meta_addr| (meta_addr.addr, meta_addr));
         new_book.by_addr.extend(addrs);
 
-        new_book.update_metrics();
+        new_book.update_metrics(now);
         new_book
     }
 
@@ -195,6 +200,7 @@ impl AddressBook {
     /// peers.
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         let _guard = self.span.enter();
+        let now = Instant::now();
 
         let previous = self.by_addr.get(&change.addr()).cloned();
         let updated = change.apply_to_meta_addr(previous);
@@ -229,7 +235,7 @@ impl AddressBook {
 
             self.by_addr.insert(updated.addr, updated);
             std::mem::drop(_guard);
-            self.update_metrics();
+            self.update_metrics(now);
         }
 
         updated
@@ -244,6 +250,8 @@ impl AddressBook {
     #[allow(dead_code)]
     fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
+        let now = Instant::now();
+
         trace!(
             ?removed_addr,
             total_peers = self.by_addr.len(),
@@ -252,7 +260,7 @@ impl AddressBook {
 
         if let Some(entry) = self.by_addr.remove(&removed_addr) {
             std::mem::drop(_guard);
-            self.update_metrics();
+            self.update_metrics(now);
             Some(entry)
         } else {
             None
@@ -369,7 +377,7 @@ impl AddressBook {
     }
 
     /// Update the metrics for this address book.
-    fn update_metrics(&mut self) {
+    fn update_metrics(&mut self, now: Instant) {
         let _guard = self.span.enter();
 
         let m = self.address_metrics();
@@ -393,11 +401,11 @@ impl AddressBook {
         );
 
         std::mem::drop(_guard);
-        self.log_metrics(&m);
+        self.log_metrics(&m, now);
     }
 
     /// Log metrics for this address book
-    fn log_metrics(&mut self, m: &AddressMetrics) {
+    fn log_metrics(&mut self, m: &AddressMetrics, now: Instant) {
         let _guard = self.span.enter();
 
         trace!(
@@ -413,18 +421,18 @@ impl AddressBook {
         // every request, use the trace-level logs, or the metrics exporter.
         if let Some(last_address_log) = self.last_address_log {
             // Avoid duplicate address logs
-            if Instant::now().duration_since(last_address_log).as_secs() < 60 {
+            if now.saturating_duration_since(last_address_log).as_secs() < 60 {
                 return;
             }
         } else {
             // Suppress initial logs until the peer set has started up.
             // There can be multiple address changes before the first peer has
             // responded.
-            self.last_address_log = Some(Instant::now());
+            self.last_address_log = Some(now);
             return;
         }
 
-        self.last_address_log = Some(Instant::now());
+        self.last_address_log = Some(now);
         // if all peers have failed
         if m.responded
             + m.attempt_pending
