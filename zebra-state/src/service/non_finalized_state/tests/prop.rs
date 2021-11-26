@@ -210,7 +210,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // This check is redundant, but it's useful for debugging.
         prop_assert_eq!(forked.blocks.len(), partial_chain.blocks.len());
 
-        // Check that the blocks in the forked chain correspond to the blocks in
+        // Check that the entire internal state of the forked chain corresponds to the state of
         // the original chain.
         prop_assert!(forked.eq_internal_state(&partial_chain));
 
