@@ -1,12 +1,7 @@
 //! The `AddressBook` manages information about what peers exist, when they were
 //! seen, and what services they provide.
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    iter::Extend,
-    net::SocketAddr,
-    time::Instant,
-};
+use std::{collections::BTreeMap, iter::Extend, net::SocketAddr, time::Instant};
 
 use tracing::Span;
 
@@ -53,8 +48,11 @@ mod tests;
 /// - the canonical address of any connection.
 #[derive(Clone, Debug)]
 pub struct AddressBook {
-    /// Each known peer address has a matching `MetaAddr`.
-    by_addr: HashMap<SocketAddr, MetaAddr>,
+    /// Peer listener addresses, suitable for outbound connections,
+    /// in connection attempt order.
+    ///
+    /// Some peers in this list might have open outbound or inbound connections.
+    by_addr: BTreeMap<SocketAddr, MetaAddr>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -100,7 +98,7 @@ impl AddressBook {
         let _guard = constructor_span.enter();
 
         let mut new_book = AddressBook {
-            by_addr: HashMap::default(),
+            by_addr: BTreeMap::default(),
             local_listener: canonical_socket_addr(local_listener),
             span,
             last_address_log: None,
@@ -286,8 +284,7 @@ impl AddressBook {
 
     /// Return an iterator over all peers.
     ///
-    /// Returns peers in reconnection attempt order, then recently live peers in
-    /// an arbitrary order.
+    /// Returns peers in reconnection attempt order, including recently connected peers.
     pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
         self.reconnection_peers()
@@ -299,18 +296,15 @@ impl AddressBook {
     pub fn reconnection_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
-        // TODO: optimise, if needed, or get rid of older peers
-
         // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
         self.by_addr
             .values()
             .filter(|peer| peer.is_ready_for_connection_attempt())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
             .cloned()
     }
 
-    /// Return an iterator over all the peers in `state`, in arbitrary order.
+    /// Return an iterator over all the peers in `state`,
+    /// in reconnection attempt order, including recently connected peers.
     pub fn state_peers(&'_ self, state: PeerAddrState) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
@@ -320,8 +314,8 @@ impl AddressBook {
             .cloned()
     }
 
-    /// Return an iterator over peers that might be connected, in arbitrary
-    /// order.
+    /// Return an iterator over peers that might be connected,
+    /// in reconnection attempt order.
     pub fn maybe_connected_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
@@ -331,7 +325,8 @@ impl AddressBook {
             .cloned()
     }
 
-    /// Return an iterator over peers we've seen recently, in arbitrary order.
+    /// Return an iterator over peers we've seen recently,
+    /// in reconnection attempt order.
     pub fn recently_live_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
