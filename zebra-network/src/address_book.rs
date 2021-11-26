@@ -316,7 +316,8 @@ impl AddressBook {
     ) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
-        // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
+        // Skip live peers, and peers pending a reconnect attempt.
+        // The peers are already stored in sorted order.
         self.by_addr
             .values()
             .filter(move |peer| peer.is_ready_for_connection_attempt(instant_now, chrono_now))
