@@ -15,6 +15,9 @@ use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// Workaround for format string identifier rules.
+const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
+
 #[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
@@ -70,8 +73,36 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     LockedUntilAfterBlockTime(DateTime<Utc>),
 
-    #[error("coinbase expiration height is invalid")]
-    CoinbaseExpiration,
+    #[error(
+        "coinbase expiry {expiry_height:?} must be the same as the block {block_height:?} \
+         after NU5 activation, failing transaction: {transaction_hash:?}"
+    )]
+    CoinbaseExpiryBlockHeight {
+        expiry_height: Option<zebra_chain::block::Height>,
+        block_height: zebra_chain::block::Height,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
+
+    #[error(
+        "expiry {expiry_height:?} must be less than the maximum {MAX_EXPIRY_HEIGHT:?} \
+         coinbase: {is_coinbase}, block: {block_height:?}, failing transaction: {transaction_hash:?}"
+    )]
+    MaximumExpiryHeight {
+        expiry_height: zebra_chain::block::Height,
+        is_coinbase: bool,
+        block_height: zebra_chain::block::Height,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
+
+    #[error(
+        "transaction must not be mined at a block {block_height:?} \
+         greater than its expiry {expiry_height:?}, failing transaction {transaction_hash:?}"
+    )]
+    ExpiredTransaction {
+        expiry_height: zebra_chain::block::Height,
+        block_height: zebra_chain::block::Height,
+        transaction_hash: zebra_chain::transaction::Hash,
+    },
 
     #[error("coinbase transaction failed subsidy validation")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
