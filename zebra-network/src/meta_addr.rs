@@ -7,6 +7,7 @@ use std::{
     time::Instant,
 };
 
+use chrono::Utc;
 use zebra_chain::serialization::DateTime32;
 
 use crate::{
@@ -434,10 +435,10 @@ impl MetaAddr {
     /// connection. Therefore, if the last-seen timestamp is older than
     /// [`constants::MIN_PEER_RECONNECTION_DELAY`] ago, we know we should have
     /// disconnected from it. Otherwise, we could potentially be connected to it.
-    pub fn has_connection_recently_responded(&self) -> bool {
+    pub fn has_connection_recently_responded(&self, now: chrono::DateTime<Utc>) -> bool {
         if let Some(last_response) = self.last_response {
             // Recent times and future times are considered live
-            last_response.saturating_elapsed()
+            last_response.saturating_elapsed(now)
                 <= constants::MIN_PEER_RECONNECTION_DELAY
                     .try_into()
                     .expect("unexpectedly large constant")
@@ -451,12 +452,12 @@ impl MetaAddr {
     ///
     /// Returns `true` if this peer was recently attempted, or has a connection
     /// attempt in progress.
-    pub fn was_connection_recently_attempted(&self) -> bool {
+    pub fn was_connection_recently_attempted(&self, now: Instant) -> bool {
         if let Some(last_attempt) = self.last_attempt {
             // Recent times and future times are considered live.
             // Instants are monotonic, so `now` should always be later than `last_attempt`,
             // except for synthetic data in tests.
-            last_attempt.elapsed() <= constants::MIN_PEER_RECONNECTION_DELAY
+            now.saturating_duration_since(last_attempt) <= constants::MIN_PEER_RECONNECTION_DELAY
         } else {
             // If there has never been any attempt, it can't possibly be live
             false
@@ -466,10 +467,10 @@ impl MetaAddr {
     /// Have we recently had a failed connection to this peer?
     ///
     /// Returns `true` if this peer has recently failed.
-    pub fn has_connection_recently_failed(&self) -> bool {
+    pub fn has_connection_recently_failed(&self, now: Instant) -> bool {
         if let Some(last_failure) = self.last_failure {
             // Recent times and future times are considered live
-            last_failure.elapsed() <= constants::MIN_PEER_RECONNECTION_DELAY
+            now.saturating_duration_since(last_failure) <= constants::MIN_PEER_RECONNECTION_DELAY
         } else {
             // If there has never been any failure, it can't possibly be recent
             false
@@ -483,12 +484,12 @@ impl MetaAddr {
     ///
     /// [`constants::MAX_PEER_ACTIVE_FOR_GOSSIP`] represents the maximum time since a peer was seen
     /// to still be considered reachable.
-    pub fn is_active_for_gossip(&self) -> bool {
+    pub fn is_active_for_gossip(&self, now: chrono::DateTime<Utc>) -> bool {
         if let Some(last_seen) = self.last_seen() {
             // Correctness: `last_seen` shouldn't ever be in the future, either because we set the
             // time or because another peer's future time was sanitized when it was added to the
             // address book
-            last_seen.saturating_elapsed() <= constants::MAX_PEER_ACTIVE_FOR_GOSSIP
+            last_seen.saturating_elapsed(now) <= constants::MAX_PEER_ACTIVE_FOR_GOSSIP
         } else {
             // Peer has never responded and does not have a gossiped last seen time
             false
@@ -496,12 +497,16 @@ impl MetaAddr {
     }
 
     /// Is this address ready for a new outbound connection attempt?
-    pub fn is_ready_for_connection_attempt(&self) -> bool {
+    pub fn is_ready_for_connection_attempt(
+        &self,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> bool {
         self.last_known_info_is_valid_for_outbound()
-            && !self.has_connection_recently_responded()
-            && !self.was_connection_recently_attempted()
-            && !self.has_connection_recently_failed()
-            && self.is_probably_reachable()
+            && !self.has_connection_recently_responded(chrono_now)
+            && !self.was_connection_recently_attempted(instant_now)
+            && !self.has_connection_recently_failed(instant_now)
+            && self.is_probably_reachable(chrono_now)
     }
 
     /// Is the [`SocketAddr`] we have for this peer valid for outbound
@@ -545,8 +550,8 @@ impl MetaAddr {
     /// itself seen the peer. If the reported last seen time is a long time ago or `None`, then the local
     /// node will attempt to connect the peer once, and if that attempt fails it won't
     /// try to connect ever again. (The state can't be `Failed` until after the first connection attempt.)
-    pub fn is_probably_reachable(&self) -> bool {
-        self.last_connection_state != PeerAddrState::Failed || self.last_seen_is_recent()
+    pub fn is_probably_reachable(&self, now: chrono::DateTime<Utc>) -> bool {
+        self.last_connection_state != PeerAddrState::Failed || self.last_seen_is_recent(now)
     }
 
     /// Was this peer last seen recently?
@@ -554,9 +559,9 @@ impl MetaAddr {
     /// Returns `true` if this peer was last seen at most
     /// [`MAX_RECENT_PEER_AGE`][constants::MAX_RECENT_PEER_AGE] ago.
     /// Returns false if the peer is outdated, or it has no last seen time.
-    pub fn last_seen_is_recent(&self) -> bool {
+    pub fn last_seen_is_recent(&self, now: chrono::DateTime<Utc>) -> bool {
         match self.last_seen() {
-            Some(last_seen) => last_seen.saturating_elapsed() <= constants::MAX_RECENT_PEER_AGE,
+            Some(last_seen) => last_seen.saturating_elapsed(now) <= constants::MAX_RECENT_PEER_AGE,
             None => false,
         }
     }

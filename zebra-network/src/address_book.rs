@@ -3,6 +3,7 @@
 
 use std::{collections::BTreeMap, iter::Extend, net::SocketAddr, time::Instant};
 
+use chrono::Utc;
 use tracing::Span;
 
 use crate::{
@@ -96,7 +97,9 @@ impl AddressBook {
     pub fn new(local_listener: SocketAddr, span: Span) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
-        let now = Instant::now();
+
+        let instant_now = Instant::now();
+        let chrono_now = Utc::now();
 
         let mut new_book = AddressBook {
             by_addr: BTreeMap::default(),
@@ -105,7 +108,7 @@ impl AddressBook {
             last_address_log: None,
         };
 
-        new_book.update_metrics(now);
+        new_book.update_metrics(instant_now, chrono_now);
         new_book
     }
 
@@ -122,7 +125,9 @@ impl AddressBook {
     ) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
-        let now = Instant::now();
+
+        let instant_now = Instant::now();
+        let chrono_now = Utc::now();
 
         let mut new_book = AddressBook::new(local_listener, span);
 
@@ -136,7 +141,7 @@ impl AddressBook {
             .map(|meta_addr| (meta_addr.addr, meta_addr));
         new_book.by_addr.extend(addrs);
 
-        new_book.update_metrics(now);
+        new_book.update_metrics(instant_now, chrono_now);
         new_book
     }
 
@@ -150,7 +155,7 @@ impl AddressBook {
     }
 
     /// Get the contents of `self` in random order with sanitized timestamps.
-    pub fn sanitized(&self) -> Vec<MetaAddr> {
+    pub fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
 
@@ -173,7 +178,7 @@ impl AddressBook {
             // This prevents Zebra from gossiping nodes that are likely unreachable. Gossiping such
             // nodes impacts the network health, because connection attempts end up being wasted on
             // peers that are less likely to respond.
-            .filter(MetaAddr::is_active_for_gossip)
+            .filter(|addr| addr.is_active_for_gossip(now))
             .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
         peers
@@ -200,7 +205,9 @@ impl AddressBook {
     /// peers.
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         let _guard = self.span.enter();
-        let now = Instant::now();
+
+        let instant_now = Instant::now();
+        let chrono_now = Utc::now();
 
         let previous = self.by_addr.get(&change.addr()).cloned();
         let updated = change.apply_to_meta_addr(previous);
@@ -210,7 +217,7 @@ impl AddressBook {
             ?updated,
             ?previous,
             total_peers = self.by_addr.len(),
-            recent_peers = self.recently_live_peers().count(),
+            recent_peers = self.recently_live_peers(chrono_now).count(),
         );
 
         if let Some(updated) = updated {
@@ -235,7 +242,7 @@ impl AddressBook {
 
             self.by_addr.insert(updated.addr, updated);
             std::mem::drop(_guard);
-            self.update_metrics(now);
+            self.update_metrics(instant_now, chrono_now);
         }
 
         updated
@@ -250,17 +257,19 @@ impl AddressBook {
     #[allow(dead_code)]
     fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
-        let now = Instant::now();
+
+        let instant_now = Instant::now();
+        let chrono_now = Utc::now();
 
         trace!(
             ?removed_addr,
             total_peers = self.by_addr.len(),
-            recent_peers = self.recently_live_peers().count(),
+            recent_peers = self.recently_live_peers(chrono_now).count(),
         );
 
         if let Some(entry) = self.by_addr.remove(&removed_addr) {
             std::mem::drop(_guard);
-            self.update_metrics(now);
+            self.update_metrics(instant_now, chrono_now);
             Some(entry)
         } else {
             None
@@ -268,14 +277,14 @@ impl AddressBook {
     }
 
     /// Returns true if the given [`SocketAddr`] has recently sent us a message.
-    pub fn recently_live_addr(&self, addr: &SocketAddr) -> bool {
+    pub fn recently_live_addr(&self, addr: &SocketAddr, now: chrono::DateTime<Utc>) -> bool {
         let _guard = self.span.enter();
         match self.by_addr.get(addr) {
             None => false,
             // NeverAttempted, Failed, and AttemptPending peers should never be live
             Some(peer) => {
                 peer.last_connection_state == PeerAddrState::Responded
-                    && peer.has_connection_recently_responded()
+                    && peer.has_connection_recently_responded(now)
             }
         }
     }
@@ -300,13 +309,17 @@ impl AddressBook {
 
     /// Return an iterator over peers that are due for a reconnection attempt,
     /// in reconnection attempt order.
-    pub fn reconnection_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
+    pub fn reconnection_peers(
+        &'_ self,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         // Skip live peers, and peers pending a reconnect attempt, then sort using BTreeSet
         self.by_addr
             .values()
-            .filter(|peer| peer.is_ready_for_connection_attempt())
+            .filter(move |peer| peer.is_ready_for_connection_attempt(instant_now, chrono_now))
             .cloned()
     }
 
@@ -323,23 +336,30 @@ impl AddressBook {
 
     /// Return an iterator over peers that might be connected,
     /// in reconnection attempt order.
-    pub fn maybe_connected_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
+    pub fn maybe_connected_peers(
+        &'_ self,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
             .values()
-            .filter(|peer| !peer.is_ready_for_connection_attempt())
+            .filter(move |peer| !peer.is_ready_for_connection_attempt(instant_now, chrono_now))
             .cloned()
     }
 
     /// Return an iterator over peers we've seen recently,
     /// in reconnection attempt order.
-    pub fn recently_live_peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
+    pub fn recently_live_peers(
+        &'_ self,
+        now: chrono::DateTime<Utc>,
+    ) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
             .values()
-            .filter(move |peer| self.recently_live_addr(&peer.addr))
+            .filter(move |peer| self.recently_live_addr(&peer.addr, now))
             .cloned()
     }
 
@@ -349,7 +369,7 @@ impl AddressBook {
     }
 
     /// Returns metrics for the addresses in this address book.
-    pub fn address_metrics(&self) -> AddressMetrics {
+    pub fn address_metrics(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
         let responded = self.state_peers(PeerAddrState::Responded).count();
         let never_attempted_gossiped = self
             .state_peers(PeerAddrState::NeverAttemptedGossiped)
@@ -360,7 +380,7 @@ impl AddressBook {
         let failed = self.state_peers(PeerAddrState::Failed).count();
         let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
-        let recently_live = self.recently_live_peers().count();
+        let recently_live = self.recently_live_peers(now).count();
         let recently_stopped_responding = responded
             .checked_sub(recently_live)
             .expect("all recently live peers must have responded");
@@ -377,10 +397,10 @@ impl AddressBook {
     }
 
     /// Update the metrics for this address book.
-    fn update_metrics(&mut self, now: Instant) {
+    fn update_metrics(&mut self, instant_now: Instant, chrono_now: chrono::DateTime<Utc>) {
         let _guard = self.span.enter();
 
-        let m = self.address_metrics();
+        let m = self.address_metrics(chrono_now);
 
         // TODO: rename to address_book.[state_name]
         metrics::gauge!("candidate_set.responded", m.responded as f64);
@@ -401,7 +421,7 @@ impl AddressBook {
         );
 
         std::mem::drop(_guard);
-        self.log_metrics(&m, now);
+        self.log_metrics(&m, instant_now);
     }
 
     /// Log metrics for this address book
