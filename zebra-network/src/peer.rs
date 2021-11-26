@@ -10,6 +10,8 @@ mod connector;
 mod error;
 /// Performs peer handshakes.
 mod handshake;
+/// Tracks the load on a `Client` service.
+mod load_tracked_client;
 
 use client::{ClientRequest, ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 
@@ -18,3 +20,4 @@ pub use connection::Connection;
 pub use connector::{Connector, OutboundConnectorRequest};
 pub use error::{ErrorSlot, HandshakeError, PeerError, SharedPeerError};
 pub use handshake::{ConnectedAddr, Handshake, HandshakeRequest};
+pub use load_tracked_client::LoadTrackedClient;
