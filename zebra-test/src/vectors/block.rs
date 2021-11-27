@@ -29,8 +29,8 @@ lazy_static! {
 
     /// Continuous mainnet blocks, indexed by height
     ///
-    /// Contains the continuous blockchain from genesis onwards.
-    /// Stops at the first gap in the chain.
+    /// Contains the continuous blockchain from genesis onwards.  Stops at the
+    /// first gap in the chain.
     pub static ref CONTINUOUS_MAINNET_BLOCKS: BTreeMap<u32, &'static [u8]> = MAINNET_BLOCKS
         .iter()
         .enumerate()
@@ -40,8 +40,8 @@ lazy_static! {
 
     /// Continuous testnet blocks, indexed by height
     ///
-    /// Contains the continuous blockchain from genesis onwards.
-    /// Stops at the first gap in the chain.
+    /// Contains the continuous blockchain from genesis onwards.  Stops at the
+    /// first gap in the chain.
     pub static ref CONTINUOUS_TESTNET_BLOCKS: BTreeMap<u32, &'static [u8]> = TESTNET_BLOCKS
         .iter()
         .enumerate()
@@ -86,6 +86,7 @@ lazy_static! {
             // Sapling
             (419_200, BLOCK_MAINNET_419200_BYTES.as_ref()),
             (419_201, BLOCK_MAINNET_419201_BYTES.as_ref()),
+            (419_202, BLOCK_MAINNET_419202_BYTES.as_ref()),
 
             // A bad version field
             (434_873, BLOCK_MAINNET_434873_BYTES.as_ref()),
@@ -116,7 +117,8 @@ lazy_static! {
 
     /// Mainnet final Sprout roots, indexed by height.
     ///
-    /// If there are no Sprout inputs or outputs in a block, the final Sprout root is the same as the previous block.
+    /// If there are no Sprout inputs or outputs in a block, the final Sprout root is the same as
+    /// the previous block.
     pub static ref MAINNET_FINAL_SPROUT_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
             // Genesis
             (0, SPROUT_FINAL_ROOT_MAINNET_0_BYTES.as_ref().try_into().unwrap()),
@@ -129,14 +131,15 @@ lazy_static! {
             (347_501, SPROUT_FINAL_ROOT_MAINNET_347501_BYTES.as_ref().try_into().unwrap()),
         ].iter().cloned().collect();
 
-    /// Mainnet final sapling roots, indexed by height
+    /// Mainnet final Sapling roots, indexed by height
     ///
-    /// Pre-sapling roots are all-zeroes.
-    /// If there are no sapling inputs or outputs in a block, the final sapling root is the same as the previous block.
+    /// Pre-Sapling roots are all-zeroes.  If there are no Sapling Outputs in a block, the final
+    /// Sapling root is the same as the previous block.
     pub static ref MAINNET_FINAL_SAPLING_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
             // Sapling
             (419_200, SAPLING_FINAL_ROOT_MAINNET_419200_BYTES.as_ref().try_into().unwrap()),
             (419_201, SAPLING_FINAL_ROOT_MAINNET_419201_BYTES.as_ref().try_into().unwrap()),
+            (419_202, SAPLING_FINAL_ROOT_MAINNET_419202_BYTES.as_ref().try_into().unwrap()),
             // A bad version field
             (434_873, SAPLING_FINAL_ROOT_MAINNET_434873_BYTES.as_ref().try_into().unwrap()),
             (653_599, SAPLING_FINAL_ROOT_MAINNET_653599_BYTES.as_ref().try_into().unwrap()),
@@ -228,7 +231,8 @@ lazy_static! {
 
     /// Testnet final Sprout roots, indexed by height.
     ///
-    /// If there are no Sprout inputs or outputs in a block, the final Sprout root is the same as the previous block.
+    /// If there are no Sprout inputs or outputs in a block, the final Sprout root is the same as
+    /// the previous block.
     pub static ref TESTNET_FINAL_SPROUT_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
         // Genesis
         (0, SPROUT_FINAL_ROOT_TESTNET_0_BYTES.as_ref().try_into().unwrap()),
@@ -236,10 +240,10 @@ lazy_static! {
         (2259, SPROUT_FINAL_ROOT_TESTNET_2259_BYTES.as_ref().try_into().unwrap()),
     ].iter().cloned().collect();
 
-    /// Testnet final sapling roots, indexed by height
+    /// Testnet final Sapling roots, indexed by height
     ///
-    /// Pre-sapling roots are all-zeroes.
-    /// If there are no sapling inputs or outputs in a block, the final sapling root is the same as the previous block.
+    /// Pre-sapling roots are all-zeroes.  If there are no Sapling Outputs in a block, the final
+    /// sapling root is the same as the previous block.
     pub static ref TESTNET_FINAL_SAPLING_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
             // Sapling
             (280_000, SAPLING_FINAL_ROOT_TESTNET_280000_BYTES.as_ref().try_into().unwrap()),
@@ -390,7 +394,7 @@ lazy_static! {
         .expect("Block bytes are in valid hex representation");
 
     // Sapling transition
-    // for i in 419199 419200 419201; do
+    // for i in 419199 419200 419201 419202; do
     //     zcash-cli getblock $i 0 > block-main-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
     // done
     //
@@ -412,11 +416,17 @@ lazy_static! {
     pub static ref BLOCK_MAINNET_419201_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-419-201.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_419202_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-419-202.txt").trim())
+        .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_MAINNET_419200_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb")
         .expect("final root bytes are in valid hex representation").rev();
     pub static ref SAPLING_FINAL_ROOT_MAINNET_419201_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("638d7e5ba37ab7921c51a4f3ae1b32d71c605a0ed9be7477928111a637f7421b")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_419202_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("54393f89293c8af01eb985398f5a984c446dd2974bf6ab63fdacbaf32d27a107")
         .expect("final root bytes are in valid hex representation").rev();
 
     // this one has a bad version field
