@@ -76,8 +76,8 @@ fn check_sapling_anchors() {
     // convert the coinbase transaction to a version that the non-finalized state will accept
     block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-    // Prime finalized state with the Sapling start + 2, which has the first
-    // Sapling note commitment
+    // Exercise Sapling anchor checking with Sapling start + 2, which refers to the note commitment
+    // tree as of the last transaction of the previous block
     let block_419202 = zebra_test::vectors::BLOCK_MAINNET_419202_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
