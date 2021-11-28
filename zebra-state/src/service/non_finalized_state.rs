@@ -189,7 +189,7 @@ impl NonFinalizedState {
 
     /// Contextually validate `prepared` using `finalized_state`.
     /// If validation succeeds, push `prepared` onto `parent_chain`.
-    #[tracing::instrument(level = "debug", skip(self, finalized_state, parent_chain, prepared))]
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, parent_chain))]
     fn validate_and_commit(
         &self,
         parent_chain: Chain,
