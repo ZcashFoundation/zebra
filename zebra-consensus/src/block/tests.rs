@@ -719,16 +719,16 @@ fn legacy_sigops_count_for_historic_blocks() {
 }
 
 #[test]
-fn coinbase_height_validation() -> Result<(), Report> {
+fn transaction_expiration_height_validation() -> Result<(), Report> {
     zebra_test::init();
 
-    coinbase_height_for_network(Network::Mainnet)?;
-    coinbase_height_for_network(Network::Testnet)?;
+    transaction_expiration_height_for_network(Network::Mainnet)?;
+    transaction_expiration_height_for_network(Network::Testnet)?;
 
     Ok(())
 }
 
-fn coinbase_height_for_network(network: Network) -> Result<(), Report> {
+fn transaction_expiration_height_for_network(network: Network) -> Result<(), Report> {
     let block_iter = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
@@ -737,13 +737,22 @@ fn coinbase_height_for_network(network: Network) -> Result<(), Report> {
     for (&height, block) in block_iter {
         let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
 
-        // Validate
-        let result = check::coinbase_expiry_height(
-            &Height(height),
-            block.transactions.get(0).unwrap(),
-            network,
-        );
-        assert!(result.is_ok());
+        for (n, transaction) in block.transactions.iter().enumerate() {
+            if n == 0 {
+                // coinbase
+                let result = transaction::check::coinbase_expiry_height(
+                    &Height(height),
+                    transaction,
+                    network,
+                );
+                assert!(result.is_ok());
+            } else {
+                // non coinbase
+                let result =
+                    transaction::check::non_coinbase_expiry_height(&Height(height), transaction);
+                assert!(result.is_ok());
+            }
+        }
     }
 
     Ok(())

@@ -187,11 +187,6 @@ where
                 .expect("must have coinbase transaction");
             check::subsidy_is_valid(&block, network)?;
 
-            // Validate `nExpiryHeight` consensus rules
-            // TODO: check non-coinbase transaction expiry against the block height (#2387)
-            //       check the maximum expiry height for non-coinbase transactions (#2387)
-            check::coinbase_expiry_height(&height, coinbase_tx, network)?;
-
             // Now do the slower checks
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
