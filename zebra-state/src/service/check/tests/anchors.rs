@@ -112,5 +112,5 @@ fn check_sapling_anchors() {
         });
 
     let block2 = Arc::new(block2).prepare();
-    assert!(state.validate_and_commit(block2).is_ok());
+    assert_eq!(state.validate_and_commit(block2), Ok(()));
 }
