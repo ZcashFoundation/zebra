@@ -109,7 +109,7 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     },
-    /// An NU5 transaction (`version = 5`), which supports Orchard and Sapling (but not Sprout).
+    /// A `version = 5` transaction , which supports Orchard, Sapling, and transparent, but not Sprout.
     V5 {
         /// The Network Upgrade for this transaction.
         ///
