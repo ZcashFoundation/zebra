@@ -514,7 +514,7 @@ where
                             // &mut self. This is a sign that we don't properly
                             // factor the state required for inbound and
                             // outbound requests.
-                            let request_msg = match self.state {
+                            let mut request_msg = match self.state {
                                 State::AwaitingResponse {
                                     ref mut handler, ..
                                 } => span.in_scope(|| handler.process_message(peer_msg)),
@@ -524,30 +524,44 @@ where
                                                   self.client_rx,
                                 ),
                             };
+
+                            // Check whether the handler is finished
+                            // processing messages and update the state.
+                            self.state = match self.state {
+                                State::AwaitingResponse {
+                                    handler: Handler::Finished(response),
+                                    tx,
+                                    ..
+                                } => {
+                                    let _ = tx.send(response.map_err(Into::into));
+                                    State::AwaitingRequest
+                                }
+                                pending @ State::AwaitingResponse { .. } => {
+                                    // Drop the un-consumed request message,
+                                    // because we can't process multiple messages at the same time.
+                                    info!(
+                                        new_request = %request_msg
+                                            .as_ref()
+                                            .map(|m| m.to_string())
+                                            .unwrap_or("None".into()),
+                                        awaiting_response = %pending,
+                                        "ignoring new request while awaiting a response"
+                                    );
+                                    request_msg = None;
+                                    pending
+                                },
+                                _ => unreachable!(
+                                    "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
+                                    self.client_rx
+                                ),
+                            };
+
                             // If the message was not consumed, check whether it
                             // should be handled as a request.
                             if let Some(msg) = request_msg {
                                 // do NOT instrument with the request span, this is
                                 // independent work
                                 self.handle_message_as_request(msg).await;
-                            } else {
-                                // Otherwise, check whether the handler is finished
-                                // processing messages and update the state.
-                                self.state = match self.state {
-                                    State::AwaitingResponse {
-                                        handler: Handler::Finished(response),
-                                        tx,
-                                        ..
-                                    } => {
-                                        let _ = tx.send(response.map_err(Into::into));
-                                        State::AwaitingRequest
-                                    }
-                                    pending @ State::AwaitingResponse { .. } => pending,
-                                    _ => unreachable!(
-                                        "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
-                                        self.client_rx
-                                    ),
-                                };
                             }
                         }
                         Either::Left((Either::Right(_), _peer_fut)) => {
