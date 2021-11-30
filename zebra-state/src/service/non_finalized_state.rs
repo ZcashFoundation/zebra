@@ -208,7 +208,6 @@ impl NonFinalizedState {
             &parent_chain.history_tree,
         )?;
 
-        // TODO: if this returns an error, zebrad panics elsewhere?
         check::anchors::anchors_refer_to_earlier_treestates(
             finalized_state,
             &parent_chain,
