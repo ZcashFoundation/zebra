@@ -44,24 +44,23 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         //
         // The FIRST JOINSPLIT in a transaction MUST refer to the output treestate
         // of a previous block.
-
-        // if let Some(sprout_shielded_data) = transaction.joinsplit_data {
-        //     for joinsplit in transaction.sprout_groth16_joinsplits() {
-        //         if !parent_chain.sprout_anchors.contains(joinsplit.anchor)
-        //             && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
-        //         {
-        //             if !(joinsplit == &sprout_shielded_data.first) {
-        //                 // TODO: check interstitial treestates of the earlier JoinSplits
-        //                 // in this transaction against this anchor
-        //                 unimplemented!()
-        //             } else {
-        //                 return Err(ValidateContextError::UnknownSproutAnchor {
-        //                     anchor: joinsplit.anchor,
-        //                 });
-        //             }
-        //         }
-        //     }
-        // }
+        if transaction.has_sprout_joinsplit_data() {
+            for (n, joinsplit) in transaction.sprout_groth16_joinsplits().enumerate() {
+                if !parent_chain.sprout_anchors.contains(&joinsplit.anchor)
+                    && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
+                {
+                    if !(n == 0) {
+                        // TODO: check interstitial treestates of the earlier JoinSplits
+                        // in this transaction against this anchor
+                        unimplemented!()
+                    } else {
+                        return Err(ValidateContextError::UnknownSproutAnchor {
+                            anchor: joinsplit.anchor,
+                        });
+                    }
+                }
+            }
+        }
 
         // Sapling Spends
         //

@@ -612,6 +612,22 @@ impl Transaction {
         }
     }
 
+    /// Return if the transaction has any Sprout JoinSplit data.
+    pub fn has_sprout_joinsplit_data(&self) -> bool {
+        match self {
+            // No JoinSplits
+            Transaction::V1 { .. } | Transaction::V5 { .. } => false,
+
+            // JoinSplits-on-BCTV14
+            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
+                joinsplit_data.is_some()
+            }
+
+            // JoinSplits-on-Groth16
+            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
+        }
+    }
+
     // sapling
 
     /// Access the deduplicated [`sapling::tree::Root`]s in this transaction,
@@ -1039,7 +1055,7 @@ impl Transaction {
                     .joinsplits_mut()
                     .map(|joinsplit| &mut joinsplit.vpub_old),
             ),
-            // JoinSplits with Groth Proofs
+            // JoinSplits with Groth16 Proofs
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..

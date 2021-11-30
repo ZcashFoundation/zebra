@@ -60,9 +60,9 @@ pub struct Chain {
     pub(crate) history_tree: HistoryTree,
 
     /// The Sprout anchors created by `blocks`.
-    pub(super) sprout_anchors: HashMultiSet<sprout::tree::Root>,
+    pub(crate) sprout_anchors: HashMultiSet<sprout::tree::Root>,
     /// The Sprout anchors created by each block in `blocks`.
-    pub(super) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
+    pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
     /// The Sapling anchors created by `blocks`.
     pub(crate) sapling_anchors: HashMultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.

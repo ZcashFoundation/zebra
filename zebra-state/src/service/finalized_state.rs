@@ -632,11 +632,11 @@ impl FinalizedState {
         self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
     }
 
-    // /// Returns `true` if the finalized state contains `sprout_anchor`.
-    // pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
-    //     let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-    //     self.db.zs_contains(sprout_anchors, &sprout_anchor)
-    // }
+    /// Returns `true` if the finalized state contains `sprout_anchor`.
+    pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        self.db.zs_contains(sprout_anchors, &sprout_anchor)
+    }
 
     /// Returns `true` if the finalized state contains `sapling_anchor`.
     pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
