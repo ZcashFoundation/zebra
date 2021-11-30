@@ -109,7 +109,7 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     },
-    /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
+    /// A `version = 5` transaction , which supports Orchard, Sapling, and transparent, but not Sprout.
     V5 {
         /// The Network Upgrade for this transaction.
         ///
@@ -515,6 +515,29 @@ impl Transaction {
 
     // sprout
 
+    /// Returns the Sprout `JoinSplit<Groth16Proof>`s in this transaction, regardless of version.
+    pub fn sprout_groth16_joinsplits(
+        &self,
+    ) -> Box<dyn Iterator<Item = &sprout::JoinSplit<Groth16Proof>> + '_> {
+        match self {
+            // JoinSplits with Groth16 Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.joinsplits()),
+
+            // No JoinSplits / JoinSplits with BCTV14 proofs
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
     /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
     pub fn joinsplit_count(&self) -> usize {
         match self {
@@ -590,6 +613,37 @@ impl Transaction {
     }
 
     // sapling
+
+    /// Access the deduplicated [`sapling::tree::Root`]s in this transaction,
+    /// regardless of version.
+    pub fn sapling_anchors(&self) -> Box<dyn Iterator<Item = sapling::tree::Root> + '_> {
+        // This function returns a boxed iterator because the different
+        // transaction variants end up having different iterator types
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.anchors()),
+
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.anchors()),
+
+            // No Spends
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+        }
+    }
 
     /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,
     /// returning `Spend<PerSpendAnchor>` regardless of the underlying
@@ -692,18 +746,36 @@ impl Transaction {
         &self,
     ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
         match self {
+            // Return [`NoteCommitment`]s with [`Bctv14Proof`]s.
             Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => Box::new(joinsplit_data.note_commitments()),
 
-            Transaction::V1 { .. }
-            | Transaction::V2 {
+            // Return [`NoteCommitment`]s with [`Groth16Proof`]s.
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+
+            // Return an empty iterator.
+            Transaction::V2 {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V1 { .. }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
         }
     }

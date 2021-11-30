@@ -16,7 +16,7 @@ mod tests;
 
 /// The number of times Zebra will retry each initial peer's DNS resolution,
 /// before checking if any other initial peers have returned addresses.
-const MAX_SINGLE_PEER_RETRIES: usize = 2;
+const MAX_SINGLE_PEER_RETRIES: usize = 1;
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Serialize)]

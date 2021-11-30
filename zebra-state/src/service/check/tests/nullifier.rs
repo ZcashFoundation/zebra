@@ -73,6 +73,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
@@ -141,6 +145,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -194,6 +202,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -247,6 +259,10 @@ proptest! {
             .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -305,6 +321,10 @@ proptest! {
         block2.transactions.push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let mut previous_mem = state.mem.clone();
 
         let block1_hash;
@@ -386,6 +406,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
@@ -438,6 +462,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -486,6 +514,10 @@ proptest! {
             .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -538,6 +570,11 @@ proptest! {
         block2.transactions.push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+        state.disk.populate_with_anchors(&block2);
+
         let mut previous_mem = state.mem.clone();
 
         let block1_hash;
@@ -613,6 +650,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
@@ -665,6 +706,10 @@ proptest! {
         block1.transactions.push(transaction.into());
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -717,6 +762,10 @@ proptest! {
             .extend([transaction1.into(), transaction2.into()]);
 
         let (mut state, genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
@@ -773,6 +822,11 @@ proptest! {
         block2.transactions.push(transaction2.into());
 
         let (mut state, _genesis) = new_state_with_mainnet_genesis();
+
+        // Allows anchor checks to pass
+        state.disk.populate_with_anchors(&block1);
+        state.disk.populate_with_anchors(&block2);
+
         let mut previous_mem = state.mem.clone();
 
         let block1_hash;

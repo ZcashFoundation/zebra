@@ -28,6 +28,7 @@ fn construct_empty() {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         ValueBalance::zero(),
     );
 }
@@ -43,8 +44,10 @@ fn construct_single() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         ValueBalance::fake_populated_pool(),
     );
+
     chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
 
     assert_eq!(1, chain.blocks.len());
@@ -68,6 +71,7 @@ fn construct_many() -> Result<()> {
 
     let mut chain = Chain::new(
         Network::Mainnet,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -96,12 +100,14 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         ValueBalance::fake_populated_pool(),
     );
     lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_spent_utxos())?;
 
     let mut bigger_chain = Chain::new(
         Network::Mainnet,
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
