@@ -214,6 +214,9 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
+    #[error("error in Sprout note commitment tree")]
+    SproutNoteCommitmentTreeError(#[from] zebra_chain::sprout::tree::NoteCommitmentTreeError),
+
     #[error("error in Sapling note commitment tree")]
     SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
 
@@ -225,6 +228,18 @@ pub enum ValidateContextError {
 
     #[error("block contains an invalid commitment")]
     InvalidBlockCommitment(#[from] block::CommitmentError),
+
+    #[error("unknown Sprout anchor: {anchor:?}")]
+    #[non_exhaustive]
+    UnknownSproutAnchor { anchor: sprout::tree::Root },
+
+    #[error("unknown Sapling anchor: {anchor:?}")]
+    #[non_exhaustive]
+    UnknownSaplingAnchor { anchor: sapling::tree::Root },
+
+    #[error("unknown Orchard anchor: {anchor:?}")]
+    #[non_exhaustive]
+    UnknownOrchardAnchor { anchor: orchard::tree::Root },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

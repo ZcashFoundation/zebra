@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 
 use zebra_chain::{
     block,
@@ -180,4 +180,37 @@ pub enum Request {
     ///
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
+}
+
+impl fmt::Display for Request {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&match self {
+            Request::Peers => "Peers".to_string(),
+            Request::Ping(_) => "Ping".to_string(),
+
+            Request::BlocksByHash(hashes) => {
+                format!("BlocksByHash {{ hashes: {} }}", hashes.len())
+            }
+            Request::TransactionsById(ids) => format!("TransactionsById {{ ids: {} }}", ids.len()),
+
+            Request::FindBlocks { known_blocks, stop } => format!(
+                "FindBlocks {{ known_blocks: {}, stop: {} }}",
+                known_blocks.len(),
+                if stop.is_some() { "Some" } else { "None" },
+            ),
+            Request::FindHeaders { known_blocks, stop } => format!(
+                "FindHeaders {{ known_blocks: {}, stop: {} }}",
+                known_blocks.len(),
+                if stop.is_some() { "Some" } else { "None" },
+            ),
+
+            Request::PushTransaction(_) => "PushTransaction".to_string(),
+            Request::AdvertiseTransactionIds(ids) => {
+                format!("AdvertiseTransactionIds {{ ids: {} }}", ids.len())
+            }
+
+            Request::AdvertiseBlock(_) => "AdvertiseBlock".to_string(),
+            Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+        })
+    }
 }
