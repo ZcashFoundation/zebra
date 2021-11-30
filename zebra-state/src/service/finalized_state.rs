@@ -53,6 +53,8 @@ pub struct FinalizedState {
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
         let (path, db_options) = config.db_config(network);
+        // Note: The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+        // be incremented each time the database format (column, serialization, etc) changes.
         let column_families = vec![
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
@@ -62,8 +64,10 @@ impl FinalizedState {
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "sapling_note_commitment_tree",
                 db_options.clone(),
@@ -256,9 +260,12 @@ impl FinalizedState {
         let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
 
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
 
+        let sprout_note_commitment_tree_cf =
+            self.db.cf_handle("sprout_note_commitment_tree").unwrap();
         let sapling_note_commitment_tree_cf =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf =
@@ -298,6 +305,7 @@ impl FinalizedState {
 
         // Read the current note commitment trees. If there are no blocks in the
         // state, these will contain the empty trees.
+        let mut sprout_note_commitment_tree = self.sprout_note_commitment_tree();
         let mut sapling_note_commitment_tree = self.sapling_note_commitment_tree();
         let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
         let mut history_tree = self.history_tree();
@@ -344,6 +352,11 @@ impl FinalizedState {
                 // used too early (e.g. the Orchard tree before Nu5 activates)
                 // since the block validation will make sure only appropriate
                 // transactions are allowed in a block.
+                batch.zs_insert(
+                    sprout_note_commitment_tree_cf,
+                    height,
+                    sprout_note_commitment_tree,
+                );
                 batch.zs_insert(
                     sapling_note_commitment_tree_cf,
                     height,
@@ -406,6 +419,9 @@ impl FinalizedState {
                     batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
                 }
 
+                for sprout_note_commitment in transaction.sprout_note_commitments() {
+                    sprout_note_commitment_tree.append(*sprout_note_commitment)?;
+                }
                 for sapling_note_commitment in transaction.sapling_note_commitments() {
                     sapling_note_commitment_tree.append(*sapling_note_commitment)?;
                 }
@@ -414,6 +430,7 @@ impl FinalizedState {
                 }
             }
 
+            let sprout_root = sprout_note_commitment_tree.root();
             let sapling_root = sapling_note_commitment_tree.root();
             let orchard_root = orchard_note_commitment_tree.root();
 
@@ -421,25 +438,36 @@ impl FinalizedState {
 
             // Compute the new anchors and index them
             // Note: if the root hasn't changed, we write the same value again.
+            batch.zs_insert(sprout_anchors, sprout_root, ());
             batch.zs_insert(sapling_anchors, sapling_root, ());
             batch.zs_insert(orchard_anchors, orchard_root, ());
 
             // Update the trees in state
             if let Some(h) = finalized_tip_height {
+                batch.zs_delete(sprout_note_commitment_tree_cf, h);
                 batch.zs_delete(sapling_note_commitment_tree_cf, h);
                 batch.zs_delete(orchard_note_commitment_tree_cf, h);
                 batch.zs_delete(history_tree_cf, h);
             }
+
+            batch.zs_insert(
+                sprout_note_commitment_tree_cf,
+                height,
+                sprout_note_commitment_tree,
+            );
+
             batch.zs_insert(
                 sapling_note_commitment_tree_cf,
                 height,
                 sapling_note_commitment_tree,
             );
+
             batch.zs_insert(
                 orchard_note_commitment_tree_cf,
                 height,
                 orchard_note_commitment_tree,
             );
+
             if let Some(history_tree) = history_tree.as_ref() {
                 batch.zs_insert(history_tree_cf, height, history_tree);
             }
@@ -624,6 +652,21 @@ impl FinalizedState {
             })
     }
 
+    /// Returns the Sprout note commitment tree of the finalized tip
+    /// or the empty tree if the state is empty.
+    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
+        let height = match self.finalized_tip_height() {
+            Some(h) => h,
+            None => return Default::default(),
+        };
+
+        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+
+        self.db
+            .zs_get(sprout_note_commitment_tree, &height)
+            .expect("Sprout note commitment tree must exist if there is a finalized tip")
+    }
+
     /// Returns the Sapling note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
@@ -631,11 +674,13 @@ impl FinalizedState {
             Some(h) => h,
             None => return Default::default(),
         };
+
         let sapling_note_commitment_tree =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+
         self.db
             .zs_get(sapling_note_commitment_tree, &height)
-            .expect("note commitment tree must exist if there is a finalized tip")
+            .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the Orchard note commitment tree of the finalized tip
@@ -645,11 +690,13 @@ impl FinalizedState {
             Some(h) => h,
             None => return Default::default(),
         };
+
         let orchard_note_commitment_tree =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+
         self.db
             .zs_get(orchard_note_commitment_tree, &height)
-            .expect("note commitment tree must exist if there is a finalized tip")
+            .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the ZIP-221 history tree of the finalized tip or `None`

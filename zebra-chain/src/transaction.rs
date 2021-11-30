@@ -109,7 +109,7 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     },
-    /// A `version = 5` transaction, which supports `Sapling` and `Orchard`.
+    /// A `version = 5` transaction , which supports Orchard, Sapling, and transparent, but not Sprout.
     V5 {
         /// The Network Upgrade for this transaction.
         ///
@@ -692,18 +692,36 @@ impl Transaction {
         &self,
     ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
         match self {
+            // Return [`NoteCommitment`]s with [`Bctv14Proof`]s.
             Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => Box::new(joinsplit_data.note_commitments()),
 
-            Transaction::V1 { .. }
-            | Transaction::V2 {
+            // Return [`NoteCommitment`]s with [`Groth16Proof`]s.
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+
+            // Return an empty iterator.
+            Transaction::V2 {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V1 { .. }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
         }
     }

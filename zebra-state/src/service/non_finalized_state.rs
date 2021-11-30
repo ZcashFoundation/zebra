@@ -17,13 +17,10 @@ use zebra_chain::{
     history_tree::HistoryTree,
     orchard,
     parameters::Network,
-    sapling,
+    sapling, sprout,
     transaction::{self, Transaction},
     transparent,
 };
-
-#[cfg(test)]
-use zebra_chain::sprout;
 
 use crate::{
     request::ContextuallyValidBlock, FinalizedBlock, HashOrHeight, PreparedBlock,
@@ -135,6 +132,7 @@ impl NonFinalizedState {
 
         let parent_chain = self.parent_chain(
             parent_hash,
+            finalized_state.sprout_note_commitment_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
@@ -171,6 +169,7 @@ impl NonFinalizedState {
     ) -> Result<(), ValidateContextError> {
         let chain = Chain::new(
             self.network,
+            finalized_state.sprout_note_commitment_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
@@ -397,6 +396,7 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -412,6 +412,7 @@ impl NonFinalizedState {
                         chain
                             .fork(
                                 parent_hash,
+                                sprout_note_commitment_tree.clone(),
                                 sapling_note_commitment_tree.clone(),
                                 orchard_note_commitment_tree.clone(),
                                 history_tree.clone(),
