@@ -54,7 +54,7 @@ impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
         let (path, db_options) = config.db_config(network);
         // Note: The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-        // be incremented each time the [`column_families`] vector changes.
+        // be incremented each time the database format (column, serialization, etc) changes.
         let column_families = vec![
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
