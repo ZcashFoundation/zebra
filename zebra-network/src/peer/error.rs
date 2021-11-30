@@ -50,10 +50,6 @@ pub enum PeerError {
     // TODO: stop closing connections on these errors (#2107)
     //       log info or debug logs instead
     //
-    /// A peer sent us a message we don't support.
-    #[error("Remote peer sent an unsupported message type: {0}")]
-    UnsupportedMessage(&'static str),
-
     /// We requested data that the peer couldn't find.
     #[error("Remote peer could not find items: {0:?}")]
     NotFound(Vec<InventoryHash>),

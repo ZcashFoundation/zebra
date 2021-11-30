@@ -858,9 +858,14 @@ where
             Message::FilterLoad { .. }
             | Message::FilterAdd { .. }
             | Message::FilterClear { .. } => {
-                self.fail_with(PeerError::UnsupportedMessage(
-                    "got BIP111 message without advertising NODE_BLOOM",
-                ));
+                // # Security
+                //
+                // Zcash connections are not authenticated, so malicious nodes can send fake messages,
+                // with connected peers' IP addresses in the IP header.
+                //
+                // Since we can't verify their source, Zebra needs to ignore unexpected messages,
+                // because closing the connection could cause a denial of service or eclipse attack.
+                debug!("got BIP111 message without advertising NODE_BLOOM");
                 return;
             }
             // Zebra crawls the network proactively, to prevent
