@@ -5,7 +5,7 @@ use zebra_chain::{
 
 use crate::meta_addr::MetaAddr;
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -45,4 +45,25 @@ pub enum Response {
     /// v4 transactions use a legacy transaction ID, and
     /// v5 transactions use a witnessed transaction ID.
     TransactionIds(Vec<UnminedTxId>),
+}
+
+impl fmt::Display for Response {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&match self {
+            Response::Nil => "Nil".to_string(),
+
+            Response::Peers(peers) => format!("Peers {{ peers: {} }}", peers.len()),
+
+            Response::Blocks(blocks) => format!("Blocks {{ blocks: {} }}", blocks.len()),
+            Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
+            Response::BlockHeaders(headers) => {
+                format!("BlockHeaders {{ headers: {} }}", headers.len())
+            }
+
+            Response::Transactions(transactions) => {
+                format!("Transactions {{ transactions: {} }}", transactions.len())
+            }
+            Response::TransactionIds(ids) => format!("TransactionIds {{ ids: {} }}", ids.len()),
+        })
+    }
 }

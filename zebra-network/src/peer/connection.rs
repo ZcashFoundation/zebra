@@ -7,7 +7,7 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{collections::HashSet, pin::Pin, sync::Arc};
+use std::{collections::HashSet, fmt, pin::Pin, sync::Arc};
 
 use futures::{
     future::{self, Either},
@@ -48,7 +48,7 @@ pub(super) enum Handler {
     FindBlocks,
     FindHeaders,
     BlocksByHash {
-        hashes: HashSet<block::Hash>,
+        pending_hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
     },
     TransactionsById {
@@ -56,6 +56,39 @@ pub(super) enum Handler {
         transactions: Vec<UnminedTx>,
     },
     MempoolTransactionIds,
+}
+
+impl fmt::Display for Handler {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&match self {
+            Handler::Finished(Ok(response)) => format!("Finished({})", response),
+            Handler::Finished(Err(error)) => format!("Finished({})", error),
+
+            Handler::Ping(_) => "Ping".to_string(),
+            Handler::Peers => "Peers".to_string(),
+
+            Handler::FindBlocks => "FindBlocks".to_string(),
+            Handler::FindHeaders => "FindHeaders".to_string(),
+            Handler::BlocksByHash {
+                pending_hashes,
+                blocks,
+            } => format!(
+                "BlocksByHash {{ pending_hashes: {}, blocks: {} }}",
+                pending_hashes.len(),
+                blocks.len()
+            ),
+
+            Handler::TransactionsById {
+                pending_ids,
+                transactions,
+            } => format!(
+                "TransactionsById {{ pending_ids: {}, transactions: {} }}",
+                pending_ids.len(),
+                transactions.len()
+            ),
+            Handler::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+        })
+    }
 }
 
 impl Handler {
@@ -185,7 +218,7 @@ impl Handler {
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523
             (
                 Handler::BlocksByHash {
-                    mut hashes,
+                    mut pending_hashes,
                     mut blocks,
                 },
                 Message::Block(block),
@@ -194,13 +227,16 @@ impl Handler {
                 //   - the block messages are sent in a single continuous batch
                 //   - missing blocks are silently skipped
                 //     (there is no `NotFound` message at the end of the batch)
-                if hashes.remove(&block.hash()) {
+                if pending_hashes.remove(&block.hash()) {
                     // we are in the middle of the continuous block messages
                     blocks.push(block);
-                    if hashes.is_empty() {
+                    if pending_hashes.is_empty() {
                         Handler::Finished(Ok(Response::Blocks(blocks)))
                     } else {
-                        Handler::BlocksByHash { hashes, blocks }
+                        Handler::BlocksByHash {
+                            pending_hashes,
+                            blocks,
+                        }
                     }
                 } else {
                     // We got a block we didn't ask for.
@@ -223,13 +259,22 @@ impl Handler {
                         // TODO: is it really an error if we ask for a block hash, but the peer
                         // doesn't know it? Should we close the connection on that kind of error?
                         // Should we fake a NotFound response here? (#1515)
-                        let items = hashes.iter().map(|h| InventoryHash::Block(*h)).collect();
+                        let items = pending_hashes
+                            .iter()
+                            .map(|h| InventoryHash::Block(*h))
+                            .collect();
                         Handler::Finished(Err(PeerError::NotFound(items)))
                     }
                 }
             }
             // peers are allowed to return this response, but `zcashd` never does
-            (Handler::BlocksByHash { hashes, blocks }, Message::NotFound(items)) => {
+            (
+                Handler::BlocksByHash {
+                    pending_hashes,
+                    blocks,
+                },
+                Message::NotFound(items),
+            ) => {
                 // assumptions:
                 //   - the peer eventually returns a block or a `NotFound` entry
                 //     for each hash
@@ -247,13 +292,13 @@ impl Handler {
                     })
                     .cloned()
                     .collect();
-                if missing_blocks != hashes {
-                    trace!(?items, ?missing_blocks, ?hashes);
+                if missing_blocks != pending_hashes {
+                    trace!(?items, ?missing_blocks, ?pending_hashes);
                     // if these errors are noisy, we should replace them with debugs
                     error!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
                 }
                 if missing_blocks.len() != items.len() {
-                    trace!(?items, ?missing_blocks, ?hashes);
+                    trace!(?items, ?missing_blocks, ?pending_hashes);
                     error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
                 }
 
@@ -310,6 +355,18 @@ pub(super) enum State {
     },
     /// A failure has occurred and we are shutting down the connection.
     Failed,
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&match self {
+            State::AwaitingRequest => "AwaitingRequest".to_string(),
+            State::AwaitingResponse { handler, .. } => {
+                format!("AwaitingResponse({})", handler)
+            }
+            State::Failed => "Failed".to_string(),
+        })
+    }
 }
 
 /// The state associated with a peer connection.
@@ -673,7 +730,7 @@ where
                         AwaitingResponse {
                             handler: Handler::BlocksByHash {
                                 blocks: Vec::with_capacity(hashes.len()),
-                                hashes,
+                                pending_hashes: hashes,
                             },
                             tx,
                             span,
