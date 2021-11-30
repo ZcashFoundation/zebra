@@ -197,7 +197,7 @@ where
             // - another task that handles or adds peers is waiting on this task
             //   to complete.
             if let Ok(fanout_result) = timeout(
-                constants::MIN_PEER_GET_ADDR_INTERVAL,
+                constants::PEER_GET_ADDR_TIMEOUT,
                 self.update_fanout(fanout_limit),
             )
             .await
@@ -205,7 +205,7 @@ where
                 fanout_result?;
             } else {
                 // update must only return an error for permanent failures
-                info!("timeout waiting for the peer service to become ready");
+                info!("timeout waiting for peer service readiness or peer responses");
             }
 
             self.min_next_crawl = Instant::now() + constants::MIN_PEER_GET_ADDR_INTERVAL;
