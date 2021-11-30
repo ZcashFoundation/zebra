@@ -64,13 +64,13 @@ pub struct Chain {
     /// The Sprout anchors created by each block in `blocks`.
     pub(super) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
     /// The Sapling anchors created by `blocks`.
-    pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
+    pub(crate) sapling_anchors: HashMultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
-    pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
+    pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// The Orchard anchors created by `blocks`.
-    pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
+    pub(crate) orchard_anchors: HashMultiSet<orchard::tree::Root>,
     /// The Orchard anchors created by each block in `blocks`.
-    pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
+    pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The Sprout nullifiers revealed by `blocks`.
     pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
@@ -523,6 +523,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         let sapling_root = self.sapling_note_commitment_tree.root();
         self.sapling_anchors.insert(sapling_root);
         self.sapling_anchors_by_height.insert(height, sapling_root);
+
         let orchard_root = self.orchard_note_commitment_tree.root();
         self.orchard_anchors.insert(orchard_root);
         self.orchard_anchors_by_height.insert(height, orchard_root);

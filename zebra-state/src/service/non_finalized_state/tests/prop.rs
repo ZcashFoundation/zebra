@@ -476,6 +476,9 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
         prop_assert!(state.eq_internal_state(&state));
 
         if let Some(first_block) = chain.next() {
+            // Allows anchor checks to pass
+            finalized_state.populate_with_anchors(&first_block.block);
+
             let result = state.commit_new_chain(first_block, &finalized_state);
             prop_assert_eq!(
                 result,
@@ -486,6 +489,9 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
         }
 
         for block in chain {
+            // Allows anchor checks to pass
+            finalized_state.populate_with_anchors(&block.block);
+
             let result = state.commit_block(block.clone(), &finalized_state);
             prop_assert_eq!(
                 result,

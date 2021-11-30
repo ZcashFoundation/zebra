@@ -81,7 +81,7 @@ pub struct Position(pub(crate) u64);
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {

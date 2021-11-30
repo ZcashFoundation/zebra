@@ -632,6 +632,24 @@ impl FinalizedState {
         self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
     }
 
+    // /// Returns `true` if the finalized state contains `sprout_anchor`.
+    // pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
+    //     let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+    //     self.db.zs_contains(sprout_anchors, &sprout_anchor)
+    // }
+
+    /// Returns `true` if the finalized state contains `sapling_anchor`.
+    pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
+        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
+        self.db.zs_contains(sapling_anchors, &sapling_anchor)
+    }
+
+    /// Returns `true` if the finalized state contains `orchard_anchor`.
+    pub fn contains_orchard_anchor(&self, orchard_anchor: &orchard::tree::Root) -> bool {
+        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
+        self.db.zs_contains(orchard_anchors, &orchard_anchor)
+    }
+
     /// Returns the finalized hash for a given `block::Height` if it is present.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
@@ -764,6 +782,36 @@ impl FinalizedState {
         let mut batch = rocksdb::WriteBatch::default();
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
         batch.zs_insert(value_pool_cf, (), fake_value_pool);
+        self.db.write(batch).unwrap();
+    }
+
+    /// Artificially prime the note commitment tree anchor sets with anchors
+    /// referenced in a block, for testing purposes _only_.
+    #[cfg(test)]
+    pub fn populate_with_anchors(&self, block: &Block) {
+        let mut batch = rocksdb::WriteBatch::default();
+
+        // let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
+        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
+
+        for transaction in block.transactions.iter() {
+            // Sprout
+            // for joinsplit in transaction.sprout_groth16_joinsplits() {
+            //     batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
+            // }
+
+            // Sapling
+            for anchor in transaction.sapling_anchors() {
+                batch.zs_insert(sapling_anchors, anchor, ());
+            }
+
+            // Orchard
+            if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
+                batch.zs_insert(orchard_anchors, orchard_shielded_data.shared_anchor, ());
+            }
+        }
+
         self.db.write(batch).unwrap();
     }
 }

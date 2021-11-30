@@ -27,7 +27,7 @@ use crate::{
     ValidateContextError,
 };
 
-use self::chain::Chain;
+pub(crate) use self::chain::Chain;
 
 use super::{check, finalized_state::FinalizedState};
 
@@ -122,6 +122,7 @@ impl NonFinalizedState {
     /// Commit block to the non-finalized state, on top of:
     /// - an existing chain's tip, or
     /// - a newly forked chain.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_block(
         &mut self,
         prepared: PreparedBlock,
@@ -162,6 +163,7 @@ impl NonFinalizedState {
 
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
@@ -186,6 +188,7 @@ impl NonFinalizedState {
 
     /// Contextually validate `prepared` using `finalized_state`.
     /// If validation succeeds, push `prepared` onto `parent_chain`.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, parent_chain))]
     fn validate_and_commit(
         &self,
         parent_chain: Chain,
@@ -198,10 +201,17 @@ impl NonFinalizedState {
             &parent_chain.spent_utxos,
             finalized_state,
         )?;
+
         check::prepared_block_commitment_is_valid_for_chain_history(
             &prepared,
             self.network,
             &parent_chain.history_tree,
+        )?;
+
+        check::anchors::anchors_refer_to_earlier_treestates(
+            finalized_state,
+            &parent_chain,
+            &prepared,
         )?;
 
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
