@@ -42,7 +42,7 @@ pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
-const FANOUT: usize = 4;
+const FANOUT: usize = 3;
 
 /// Controls how many times we will retry each block download.
 ///

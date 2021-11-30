@@ -306,12 +306,14 @@ impl Mempool {
 
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
-    fn update_state(&mut self) {
+    ///
+    /// Returns `true` if the state changed.
+    fn update_state(&mut self) -> bool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
         if self.is_enabled() == is_close_to_tip {
             // the active state is up to date
-            return;
+            return false;
         }
 
         // Update enabled / disabled state
@@ -340,6 +342,8 @@ impl Mempool {
             // cancelling its download tasks.
             self.active_state = ActiveState::Disabled
         }
+
+        true
     }
 
     /// Return whether the mempool is enabled or not.
@@ -369,16 +373,21 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.update_state();
+        let is_state_changed = self.update_state();
 
         // When the mempool is disabled we still return that the service is ready.
-        // Otherwise, callers could block waiting for the mempool to be enabled,
-        // which may not be the desired behavior.
+        // Otherwise, callers could block waiting for the mempool to be enabled.
         if !self.is_enabled() {
             return Poll::Ready(Ok(()));
         }
 
         let tip_action = self.chain_tip_change.last_tip_change();
+
+        // If the mempool was just freshly enabled,
+        // skip resetting and removing mined transactions for this tip.
+        if is_state_changed {
+            return Poll::Ready(Ok(()));
+        }
 
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
         if matches!(tip_action, Some(TipAction::Reset { .. })) {
