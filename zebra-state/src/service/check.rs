@@ -18,6 +18,7 @@ use super::check;
 
 use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
+pub(crate) mod anchors;
 pub(crate) mod difficulty;
 pub(crate) mod nullifier;
 pub(crate) mod utxo;
