@@ -26,24 +26,36 @@ pub enum Response {
     Nil,
 
     /// A list of peers, used to respond to `GetPeers`.
+    ///
+    /// The list contains `0..=MAX_META_ADDR` peers.
     Peers(Vec<MetaAddr>),
 
     /// A list of blocks.
+    ///
+    /// The list contains zero or more blocks.
     Blocks(Vec<Arc<Block>>),
 
     /// A list of block hashes.
+    ///
+    /// The list contains zero or more block hashes.
     BlockHashes(Vec<block::Hash>),
 
     /// A list of block headers.
+    ///
+    /// The list contains zero or more block headers.
     BlockHeaders(Vec<block::CountedHeader>),
 
     /// A list of unmined transactions.
+    ///
+    /// The list contains zero or more unmined transactions.
     Transactions(Vec<UnminedTx>),
 
     /// A list of unmined transaction IDs.
     ///
     /// v4 transactions use a legacy transaction ID, and
     /// v5 transactions use a witnessed transaction ID.
+    ///
+    /// The list contains zero or more transaction IDs.
     TransactionIds(Vec<UnminedTxId>),
 }
 

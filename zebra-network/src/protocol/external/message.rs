@@ -145,6 +145,9 @@ pub enum Message {
     /// - parses received `addrv2` messages, ignoring some address types,
     /// - but does not send `addrv2` messages.
     ///
+    ///
+    /// The list contains `0..=MAX_META_ADDR` addresses.
+    ///
     /// Because some address types are ignored, the deserialized vector can be empty,
     /// even if the peer sent addresses. This is not an error.
     ///
@@ -163,6 +166,8 @@ pub enum Message {
     /// If supplied, the `stop` parameter specifies the last header to request.
     /// Otherwise, an inv packet with the maximum number (500) are sent.
     ///
+    /// The known blocks list contains zero or more block hashes.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getheaders)
     GetBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
@@ -176,6 +181,8 @@ pub enum Message {
     /// Allows a node to advertise its knowledge of one or more
     /// objects. It can be received unsolicited, or in reply to
     /// `getblocks`.
+    ///
+    /// The list contains zero or more inventory hashes.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#inv)
     /// [ZIP-239](https://zips.z.cash/zip-0239)
@@ -192,6 +199,8 @@ pub enum Message {
     /// If supplied, the `stop` parameter specifies the last header to request.
     /// Otherwise, the maximum number of block headers (160) are sent.
     ///
+    /// The known blocks list contains zero or more block hashes.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getheaders)
     GetHeaders {
         /// Hashes of known blocks, ordered from highest height to lowest height.
@@ -206,6 +215,8 @@ pub enum Message {
     ///
     /// Each block header is accompanied by a transaction count.
     ///
+    /// The list contains zero or more headers.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#headers)
     Headers(Vec<block::CountedHeader>),
 
@@ -219,6 +230,8 @@ pub enum Message {
     /// Missing blocks are silently skipped. Missing transaction hashes are
     /// included in a single `NotFound` message following the transactions.
     /// Other item or non-item messages can come before or after the batch.
+    ///
+    /// The list contains zero or more inventory hashes.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getdata)
     /// [ZIP-239](https://zips.z.cash/zip-0239)
@@ -247,6 +260,8 @@ pub enum Message {
     /// But when a peer requests blocks or headers, any missing items are
     /// silently skipped, without any `NotFound` messages.
     ///
+    /// The list contains zero or more inventory hashes.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#notfound)
     /// [ZIP-239](https://zips.z.cash/zip-0239)
     /// [zcashd code](https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5632)
@@ -264,6 +279,8 @@ pub enum Message {
     /// A `filterload` message.
     ///
     /// This was defined in [BIP37], which is included in Zcash.
+    ///
+    /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
@@ -288,6 +305,8 @@ pub enum Message {
     ///
     /// This was defined in [BIP37], which is included in Zcash.
     ///
+    /// Zebra currently ignores this message.
+    ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterAdd {
@@ -303,6 +322,8 @@ pub enum Message {
     /// A `filterclear` message.
     ///
     /// This was defined in [BIP37], which is included in Zcash.
+    ///
+    /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
