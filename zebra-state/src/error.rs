@@ -214,6 +214,9 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
+    #[error("error in Sprout note commitment tree")]
+    SproutNoteCommitmentTreeError(#[from] zebra_chain::sprout::tree::NoteCommitmentTreeError),
+
     #[error("error in Sapling note commitment tree")]
     SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
 
