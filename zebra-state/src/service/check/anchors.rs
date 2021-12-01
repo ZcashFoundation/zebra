@@ -46,6 +46,8 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // of a previous block.
         if transaction.has_sprout_joinsplit_data() {
             for (n, joinsplit) in transaction.sprout_groth16_joinsplits().enumerate() {
+                tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
+
                 if !parent_chain.sprout_anchors.contains(&joinsplit.anchor)
                     && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
                 {
@@ -59,6 +61,8 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                         });
                     }
                 }
+
+                tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
             }
         }
 
