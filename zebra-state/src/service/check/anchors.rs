@@ -1,6 +1,10 @@
 //! Checks for whether cited anchors are previously-computed note commitment
 //! tree roots.
 
+use std::collections::HashSet;
+
+use zebra_chain::sprout;
+
 use crate::{
     service::{finalized_state::FinalizedState, non_finalized_state::Chain},
     PreparedBlock, ValidateContextError,
@@ -45,21 +49,33 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // The FIRST JOINSPLIT in a transaction MUST refer to the output treestate
         // of a previous block.
         if transaction.has_sprout_joinsplit_data() {
+            // > The anchor of each JoinSplit description in a transaction MUST refer to
+            // > either some earlier block’s final Sprout treestate, or to the interstitial
+            // > output treestate of any prior JoinSplit description in the same transaction.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#joinsplit
+            let mut interstitial_roots: HashSet<sprout::tree::Root> = HashSet::new();
+
+            let mut interstitial_note_commitment_tree = parent_chain.sprout_note_commitment_tree();
+
             for (n, joinsplit) in transaction.sprout_groth16_joinsplits().enumerate() {
+                for cm in joinsplit.commitments {
+                    interstitial_note_commitment_tree
+                        .append(cm)
+                        .expect("note commitment should be appendable to the tree");
+                }
+
+                interstitial_roots.insert(interstitial_note_commitment_tree.root());
+
                 tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
 
                 if !parent_chain.sprout_anchors.contains(&joinsplit.anchor)
                     && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
+                    && ((n == 0) || (!(n == 0) && !interstitial_roots.contains(&joinsplit.anchor)))
                 {
-                    if !(n == 0) {
-                        // TODO: check interstitial treestates of the earlier JoinSplits
-                        // in this transaction against this anchor
-                        unimplemented!()
-                    } else {
-                        return Err(ValidateContextError::UnknownSproutAnchor {
-                            anchor: joinsplit.anchor,
-                        });
-                    }
+                    return Err(ValidateContextError::UnknownSproutAnchor {
+                        anchor: joinsplit.anchor,
+                    });
                 }
 
                 tracing::debug!(?joinsplit.anchor, "validated sprout anchor");

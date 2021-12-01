@@ -394,6 +394,14 @@ impl Chain {
             chain_value_pools: self.chain_value_pools,
         }
     }
+
+    /// Returns a clone of the Sprout note commitment tree for this chain.
+    ///
+    /// Useful when calculating interstitial note commitment trees for each JoinSplit in a Sprout
+    /// shielded transaction.
+    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
+        self.sprout_note_commitment_tree.clone()
+    }
 }
 
 /// The revert position being performed on a chain.
