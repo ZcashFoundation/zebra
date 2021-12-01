@@ -150,7 +150,7 @@ pub(crate) fn parse_coinbase_height(
 ///
 /// This check is required, because the genesis block does not include an encoded
 /// coinbase height,
-fn write_coinbase_height<W: io::Write>(
+pub(crate) fn write_coinbase_height<W: io::Write>(
     height: block::Height,
     coinbase_data: &CoinbaseData,
     mut w: W,
