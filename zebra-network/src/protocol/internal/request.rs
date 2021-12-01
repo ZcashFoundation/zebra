@@ -63,6 +63,8 @@ pub enum Request {
     /// block. This routing is only used for request sets of size 1.
     /// Otherwise, it is routed using the normal load-balancing strategy.
     ///
+    /// The list contains zero or more block hashes.
+    ///
     /// # Returns
     ///
     /// Returns [`Response::Blocks`](super::Response::Blocks).
@@ -80,6 +82,8 @@ pub enum Request {
     /// the transaction. This routing is only used for request sets of size 1.
     /// Otherwise, it is routed using the normal load-balancing strategy.
     ///
+    /// The list contains zero or more unmined transaction IDs.
+    ///
     /// # Returns
     ///
     /// Returns [`Response::Transactions`](super::Response::Transactions).
@@ -87,6 +91,8 @@ pub enum Request {
 
     /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
+    ///
+    /// The known blocks list contains zero or more block hashes.
     ///
     /// # Returns
     ///
@@ -106,6 +112,8 @@ pub enum Request {
     /// `inv` messages will always have exactly one block hash.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
+        //
+        // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
         known_blocks: Vec<block::Hash>,
         /// Optionally, the last block hash to request.
         stop: Option<block::Hash>,
@@ -114,12 +122,16 @@ pub enum Request {
     /// Request headers of subsequent blocks in the chain, given hashes of
     /// known blocks.
     ///
+    /// The known blocks list contains zero or more block hashes.
+    ///
     /// # Returns
     ///
     /// Returns
     /// [`Response::BlockHeaders`](super::Response::BlockHeaders).
     FindHeaders {
         /// Hashes of known blocks, ordered from highest height to lowest height.
+        //
+        // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
         known_blocks: Vec<block::Hash>,
         /// Optionally, the last header to request.
         stop: Option<block::Hash>,
@@ -150,8 +162,10 @@ pub enum Request {
     /// v4 transactions use a legacy transaction ID, and
     /// v5 transactions use a witnessed transaction ID.
     ///
-    /// The peer set routes this request specially, sending it to *every*
-    /// available peer.
+    /// The list contains zero or more transaction IDs.
+    ///
+    /// The peer set routes this request specially, sending it to *half of*
+    /// the available peers.
     ///
     /// # Returns
     ///
@@ -166,8 +180,8 @@ pub enum Request {
     /// [`Request::BlocksByHash`] against the "inbound" service passed to
     /// [`zebra_network::init`].
     ///
-    /// The peer set routes this request specially, sending it to *every*
-    /// available peer.
+    /// The peer set routes this request specially, sending it to *half of*
+    /// the available peers.
     ///
     /// # Returns
     ///

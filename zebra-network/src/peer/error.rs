@@ -5,6 +5,8 @@ use thiserror::Error;
 use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
+use crate::protocol::external::InventoryHash;
+
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
 #[error(transparent)]
@@ -44,6 +46,13 @@ pub enum PeerError {
     /// to shed load.
     #[error("Internal services over capacity")]
     Overloaded,
+
+    // TODO: stop closing connections on these errors (#2107)
+    //       log info or debug logs instead
+    //
+    /// We requested data that the peer couldn't find.
+    #[error("Remote peer could not find items: {0:?}")]
+    NotFound(Vec<InventoryHash>),
 }
 
 /// A shared error slot for peer errors.
