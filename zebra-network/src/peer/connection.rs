@@ -539,7 +539,7 @@ where
                                 pending @ State::AwaitingResponse { .. } => {
                                     // Drop the un-consumed request message,
                                     // because we can't process multiple messages at the same time.
-                                    info!(
+                                    debug!(
                                         new_request = %request_msg
                                             .as_ref()
                                             .map(|m| m.to_string())
