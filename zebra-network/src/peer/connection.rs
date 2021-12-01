@@ -543,7 +543,7 @@ where
                                         new_request = %request_msg
                                             .as_ref()
                                             .map(|m| m.to_string())
-                                            .unwrap_or("None".into()),
+                                            .unwrap_or_else(|| "None".into()),
                                         awaiting_response = %pending,
                                         "ignoring new request while awaiting a response"
                                     );
