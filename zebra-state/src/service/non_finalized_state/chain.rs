@@ -1,3 +1,5 @@
+//! Chain that is a part of the non-finalized state.
+
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
@@ -25,6 +27,7 @@ use crate::{service::check, ContextuallyValidBlock, ValidateContextError};
 
 #[derive(Debug, Clone)]
 pub struct Chain {
+    // The function `eq_internal_state` must be updated every time a field is added to `Chain`.
     network: Network,
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
@@ -43,6 +46,9 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
+    /// The Sprout note commitment tree of the tip of this `Chain`,
+    /// including all finalized notes, and the non-finalized notes in this chain.
+    pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
     /// The Sapling note commitment tree of the tip of this `Chain`,
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
@@ -53,14 +59,18 @@ pub struct Chain {
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: HistoryTree,
 
+    /// The Sprout anchors created by `blocks`.
+    pub(super) sprout_anchors: HashMultiSet<sprout::tree::Root>,
+    /// The Sprout anchors created by each block in `blocks`.
+    pub(super) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
     /// The Sapling anchors created by `blocks`.
-    pub(super) sapling_anchors: HashMultiSet<sapling::tree::Root>,
+    pub(crate) sapling_anchors: HashMultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
-    pub(super) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
+    pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// The Orchard anchors created by `blocks`.
-    pub(super) orchard_anchors: HashMultiSet<orchard::tree::Root>,
+    pub(crate) orchard_anchors: HashMultiSet<orchard::tree::Root>,
     /// The Orchard anchors created by each block in `blocks`.
-    pub(super) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
+    pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The Sprout nullifiers revealed by `blocks`.
     pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
@@ -89,6 +99,7 @@ impl Chain {
     /// Create a new Chain with the given trees and network.
     pub(crate) fn new(
         network: Network,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -100,9 +111,12 @@ impl Chain {
             height_by_hash: Default::default(),
             tx_by_hash: Default::default(),
             created_utxos: Default::default(),
+            sprout_note_commitment_tree,
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             spent_utxos: Default::default(),
+            sprout_anchors: HashMultiSet::new(),
+            sprout_anchors_by_height: Default::default(),
             sapling_anchors: HashMultiSet::new(),
             sapling_anchors_by_height: Default::default(),
             orchard_anchors: HashMultiSet::new(),
@@ -130,8 +144,6 @@ impl Chain {
     pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
         use zebra_chain::history_tree::NonEmptyHistoryTree;
 
-        // this method must be updated every time a field is added to Chain
-
         // blocks, heights, hashes
         self.blocks == other.blocks &&
             self.height_by_hash == other.height_by_hash &&
@@ -142,6 +154,7 @@ impl Chain {
             self.spent_utxos == other.spent_utxos &&
 
             // note commitment trees
+            self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
 
@@ -149,6 +162,8 @@ impl Chain {
             self.history_tree.as_ref().map(NonEmptyHistoryTree::hash) == other.history_tree.as_ref().map(NonEmptyHistoryTree::hash) &&
 
             // anchors
+            self.sprout_anchors == other.sprout_anchors &&
+            self.sprout_anchors_by_height == other.sprout_anchors_by_height &&
             self.sapling_anchors == other.sapling_anchors &&
             self.sapling_anchors_by_height == other.sapling_anchors_by_height &&
             self.orchard_anchors == other.orchard_anchors &&
@@ -216,6 +231,7 @@ impl Chain {
     pub fn fork(
         &self,
         fork_tip: block::Hash,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -225,6 +241,7 @@ impl Chain {
         }
 
         let mut forked = self.with_trees(
+            sprout_note_commitment_tree,
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             history_tree,
@@ -240,12 +257,20 @@ impl Chain {
         // See https://github.com/ZcashFoundation/zebra/issues/2378
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
+                for sprout_note_commitment in transaction.sprout_note_commitments() {
+                    forked
+                        .sprout_note_commitment_tree
+                        .append(*sprout_note_commitment)
+                        .expect("must work since it was already appended before the fork");
+                }
+
                 for sapling_note_commitment in transaction.sapling_note_commitments() {
                     forked
                         .sapling_note_commitment_tree
                         .append(*sapling_note_commitment)
                         .expect("must work since it was already appended before the fork");
                 }
+
                 for orchard_note_commitment in transaction.orchard_note_commitments() {
                     forked
                         .orchard_note_commitment_tree
@@ -256,15 +281,16 @@ impl Chain {
 
             // Note that anchors don't need to be recreated since they are already
             // handled in revert_chain_state_with.
-
             let sapling_root = forked
                 .sapling_anchors_by_height
                 .get(&block.height)
                 .expect("Sapling anchors must exist for pre-fork blocks");
+
             let orchard_root = forked
                 .orchard_anchors_by_height
                 .get(&block.height)
                 .expect("Orchard anchors must exist for pre-fork blocks");
+
             forked.history_tree.push(
                 self.network,
                 block.block.clone(),
@@ -339,6 +365,7 @@ impl Chain {
     /// Useful when forking, where the trees are rebuilt anyway.
     fn with_trees(
         &self,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -350,10 +377,13 @@ impl Chain {
             tx_by_hash: self.tx_by_hash.clone(),
             created_utxos: self.created_utxos.clone(),
             spent_utxos: self.spent_utxos.clone(),
+            sprout_note_commitment_tree,
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
+            sprout_anchors: self.sprout_anchors.clone(),
             sapling_anchors: self.sapling_anchors.clone(),
             orchard_anchors: self.orchard_anchors.clone(),
+            sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
             sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
             orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
             sprout_nullifiers: self.sprout_nullifiers.clone(),
@@ -487,9 +517,13 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the treestates of this block.
+        let sprout_root = self.sprout_note_commitment_tree.root();
+        self.sprout_anchors.insert(sprout_root);
+        self.sprout_anchors_by_height.insert(height, sprout_root);
         let sapling_root = self.sapling_note_commitment_tree.root();
         self.sapling_anchors.insert(sapling_root);
         self.sapling_anchors_by_height.insert(height, sapling_root);
+
         let orchard_root = self.orchard_note_commitment_tree.root();
         self.orchard_anchors.insert(orchard_root);
         self.orchard_anchors_by_height.insert(height, orchard_root);
@@ -594,6 +628,15 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         }
 
         let anchor = self
+            .sprout_anchors_by_height
+            .remove(&height)
+            .expect("Sprout anchor must be present if block was added to chain");
+        assert!(
+            self.sprout_anchors.remove(&anchor),
+            "Sprout anchor must be present if block was added to chain"
+        );
+
+        let anchor = self
             .sapling_anchors_by_height
             .remove(&height)
             .expect("Sapling anchor must be present if block was added to chain");
@@ -601,6 +644,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.sapling_anchors.remove(&anchor),
             "Sapling anchor must be present if block was added to chain"
         );
+
         let anchor = self
             .orchard_anchors_by_height
             .remove(&height)
@@ -673,6 +717,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
+            for cm in joinsplit_data.note_commitments() {
+                self.sprout_note_commitment_tree.append(*cm)?;
+            }
+
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
@@ -711,6 +759,9 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            // The `_u` here indicates that the Sapling note commitment is
+            // specified only by the `u`-coordinate of the Jubjub curve
+            // point `(u, v)`.
             for cm_u in sapling_shielded_data.note_commitments() {
                 self.sapling_note_commitment_tree.append(*cm_u)?;
             }

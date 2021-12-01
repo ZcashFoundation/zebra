@@ -38,7 +38,7 @@ fn main() {
     *config.cargo_mut().features_mut() = false;
 
     // Disable git if we're building with an invalid `zebra/.git`
-    match vergen(config) {
+    match vergen(config.clone()) {
         Ok(_) => {}
         Err(e) => {
             eprintln!(

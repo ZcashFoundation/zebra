@@ -66,7 +66,7 @@ use crate::components::{
 mod tests;
 
 /// The number of peers to request transactions from per crawl event.
-const FANOUT: usize = 4;
+const FANOUT: usize = 3;
 
 /// The delay between crawl events.
 const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);

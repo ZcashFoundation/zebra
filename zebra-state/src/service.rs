@@ -225,6 +225,7 @@ impl StateService {
 
     /// Run contextual validation on the prepared block and add it to the
     /// non-finalized state if it is contextually valid.
+    #[tracing::instrument(level = "debug", skip(self, prepared))]
     fn validate_and_commit(&mut self, prepared: PreparedBlock) -> Result<(), CommitBlockError> {
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
@@ -245,6 +246,7 @@ impl StateService {
 
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
+    #[tracing::instrument(level = "debug", skip(self, new_parent))]
     fn process_queued(&mut self, new_parent: block::Hash) {
         let mut new_parents: Vec<(block::Hash, Result<(), CloneError>)> =
             vec![(new_parent, Ok(()))];
