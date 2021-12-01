@@ -65,7 +65,7 @@ impl ZcashDeserialize for OutPoint {
 ///
 /// The height may consume `0..=5` bytes at the stat of the coinbase data.
 /// The genesis block does not include an encoded coinbase height.
-fn parse_coinbase_height(
+pub(crate) fn parse_coinbase_height(
     mut data: Vec<u8>,
 ) -> Result<(block::Height, CoinbaseData), SerializationError> {
     use block::Height;
@@ -78,20 +78,33 @@ fn parse_coinbase_height(
         // Blocks 17 through 128 exclusive encode block height with the `0x01` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
         (Some(0x01), len) if len >= 2 && data[1] < 0x80 => {
-            Ok((Height(data[1] as u32), CoinbaseData(data.split_off(2))))
+            let h = data[1] as u32;
+            if h < 128 {
+                Ok((Height(h), CoinbaseData(data.split_off(2))))
+            } else {
+                Err(SerializationError::Parse("Invalid block height"))
+            }
         }
         // Blocks 128 through 32768 exclusive encode block height with the `0x02` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
-        (Some(0x02), len) if len >= 3 && data[2] < 0x80 => Ok((
-            Height(data[1] as u32 + ((data[2] as u32) << 8)),
-            CoinbaseData(data.split_off(3)),
-        )),
-        // Blocks 65536 through 2**23 exclusive encode block height with the `0x03` opcode.
+        (Some(0x02), len) if len >= 3 && data[2] < 0x80 => {
+            let h = data[1] as u32 + ((data[2] as u32) << 8);
+            if (128..32_768).contains(&h) {
+                Ok((Height(h), CoinbaseData(data.split_off(3))))
+            } else {
+                Err(SerializationError::Parse("Invalid block height"))
+            }
+        }
+        // Blocks 32768 through 2**23 exclusive encode block height with the `0x03` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
-        (Some(0x03), len) if len >= 4 && data[3] < 0x80 => Ok((
-            Height(data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16)),
-            CoinbaseData(data.split_off(4)),
-        )),
+        (Some(0x03), len) if len >= 4 && data[3] < 0x80 => {
+            let h = data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16);
+            if (32_768..8_388_608).contains(&h) {
+                Ok((Height(h), CoinbaseData(data.split_off(4))))
+            } else {
+                Err(SerializationError::Parse("Invalid block height"))
+            }
+        }
         // The genesis block does not encode the block height by mistake; special case it.
         // The first five bytes are [4, 255, 255, 7, 31], the little-endian encoding of
         // 520_617_983.
@@ -112,7 +125,7 @@ fn parse_coinbase_height(
                 + ((data[2] as u32) << 8)
                 + ((data[3] as u32) << 16)
                 + ((data[4] as u32) << 24);
-            if h <= Height::MAX.0 {
+            if (8_388_608..=Height::MAX.0).contains(&h) {
                 Ok((Height(h), CoinbaseData(data.split_off(5))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
@@ -164,10 +177,10 @@ fn write_coinbase_height<W: io::Write>(
     } else if let h @ 17..=127 = height.0 {
         w.write_u8(0x01)?;
         w.write_u8(h as u8)?;
-    } else if let h @ 128..=32767 = height.0 {
+    } else if let h @ 128..=32_767 = height.0 {
         w.write_u8(0x02)?;
         w.write_u16::<LittleEndian>(h as u16)?;
-    } else if let h @ 32768..=8_388_607 = height.0 {
+    } else if let h @ 32_768..=8_388_607 = height.0 {
         w.write_u8(0x03)?;
         w.write_u8(h as u8)?;
         w.write_u8((h >> 8) as u8)?;
