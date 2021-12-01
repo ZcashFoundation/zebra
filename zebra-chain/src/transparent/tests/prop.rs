@@ -1,12 +1,10 @@
 //! Property tests for transparent inputs and outputs.
-//!
-//! TODO: Move this module into a `tests` submodule.
 
 use zebra_test::prelude::*;
 
 use crate::{block, fmt::SummaryDebug, transaction::arbitrary::MAX_ARBITRARY_ITEMS, LedgerState};
 
-use super::Input;
+use super::super::Input;
 
 #[test]
 fn coinbase_has_height() -> Result<()> {
