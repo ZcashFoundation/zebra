@@ -28,26 +28,37 @@ pub enum Response {
     /// A list of peers, used to respond to `GetPeers`.
     ///
     /// The list contains `0..=MAX_META_ADDR` peers.
+    //
+    // TODO: make this into a HashMap<SocketAddr, MetaAddr> - a unique list of peer addresses (#2244)
     Peers(Vec<MetaAddr>),
 
     /// A list of blocks.
     ///
     /// The list contains zero or more blocks.
+    //
+    // TODO: split this into found and not found (#2726)
     Blocks(Vec<Arc<Block>>),
 
     /// A list of block hashes.
     ///
     /// The list contains zero or more block hashes.
+    //
+    // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
     BlockHashes(Vec<block::Hash>),
 
     /// A list of block headers.
     ///
     /// The list contains zero or more block headers.
+    //
+    // TODO: make this into a HashMap<block::Hash, CountedHeader> - a unique list of headers (#2244)
+    //       split this into found and not found (#2726)
     BlockHeaders(Vec<block::CountedHeader>),
 
     /// A list of unmined transactions.
     ///
     /// The list contains zero or more unmined transactions.
+    //
+    // TODO: split this into found and not found (#2726)
     Transactions(Vec<UnminedTx>),
 
     /// A list of unmined transaction IDs.
@@ -56,6 +67,8 @@ pub enum Response {
     /// v5 transactions use a witnessed transaction ID.
     ///
     /// The list contains zero or more transaction IDs.
+    //
+    // TODO: make this into a HashSet - a unique list of transaction IDs (#2244)
     TransactionIds(Vec<UnminedTxId>),
 }
 

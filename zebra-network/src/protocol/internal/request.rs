@@ -112,6 +112,8 @@ pub enum Request {
     /// `inv` messages will always have exactly one block hash.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
+        //
+        // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
         known_blocks: Vec<block::Hash>,
         /// Optionally, the last block hash to request.
         stop: Option<block::Hash>,
@@ -128,6 +130,8 @@ pub enum Request {
     /// [`Response::BlockHeaders`](super::Response::BlockHeaders).
     FindHeaders {
         /// Hashes of known blocks, ordered from highest height to lowest height.
+        //
+        // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
         known_blocks: Vec<block::Hash>,
         /// Optionally, the last header to request.
         stop: Option<block::Hash>,
