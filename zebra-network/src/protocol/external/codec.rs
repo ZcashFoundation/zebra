@@ -428,7 +428,19 @@ impl Decoder for Codec {
                     b"filterload\0\0" => self.read_filterload(&mut body_reader, body_len),
                     b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader, body_len),
                     b"filterclear\0" => self.read_filterclear(&mut body_reader),
-                    _ => return Err(Parse("unknown command")),
+                    _ => {
+                        let command_string = String::from_utf8_lossy(&command);
+
+                        // # Security
+                        //
+                        // Zcash connections are not authenticated, so malicious nodes can
+                        // send fake messages, with connected peers' IP addresses in the IP header.
+                        //
+                        // Since we can't verify their source, Zebra needs to ignore unexpected messages,
+                        // because closing the connection could cause a denial of service or eclipse attack.
+                        debug!(?command, %command_string, "unknown message command from peer");
+                        return Ok(None);
+                    }
                 }
                 // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.

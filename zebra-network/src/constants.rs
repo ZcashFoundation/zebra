@@ -105,7 +105,13 @@ pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 ///
 /// Zebra resists distributed denial of service attacks by making sure that requests for more
 /// peer addresses are sent at least `MIN_PEER_GET_ADDR_INTERVAL` apart.
-pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(10);
+pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The combined timeout for all the requests in [`CandidateSet::update()`][Self::update].
+///
+/// `zcashd` doesn't respond to most `getaddr` requests,
+/// so this timeout needs to be short.
+pub const PEER_GET_ADDR_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The number of GetAddr requests sent when crawling for new peers.
 ///
@@ -116,9 +122,6 @@ pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(10);
 ///
 /// Zebra regularly crawls for new peers, initiating a new crawl every
 /// [`crawl_new_peer_interval`](crate::config::Config.crawl_new_peer_interval).
-///
-/// TODO: limit the number of addresses that Zebra uses from a single peer
-///       response (#1869)
 pub const GET_ADDR_FANOUT: usize = 3;
 
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
