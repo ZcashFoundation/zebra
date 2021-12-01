@@ -20,8 +20,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::IntervalStream;
 use tower::{
-    buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
-    util::BoxService, Service, ServiceExt,
+    buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -141,7 +140,7 @@ where
         // Discover interprets an error as stream termination,
         // so discard any errored connections...
         .filter(|result| future::ready(result.is_ok()))
-        .map_ok(|(address, client)| Change::Insert(address, client));
+        .map_ok(|(address, client)| Change::Insert(address, client.into()));
 
     // Create an mpsc channel for peerset demand signaling,
     // based on the maximum number of outbound peers.
@@ -154,12 +153,7 @@ where
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
         &config,
-        PeakEwmaDiscover::new(
-            discovered_peers,
-            constants::EWMA_DEFAULT_RTT,
-            constants::EWMA_DECAY_TIME,
-            tower::load::CompleteOnResponse::default(),
-        ),
+        discovered_peers,
         demand_tx.clone(),
         handle_rx,
         inv_receiver,
