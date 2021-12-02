@@ -24,7 +24,6 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     pub vpub_old: Amount<NonNegative>,
     /// A value that the JoinSplit transfer inserts into the transparent value
     /// pool.
-    ///
     pub vpub_new: Amount<NonNegative>,
     /// A root of the Sprout note commitment tree at some block height in the
     /// past, or the root produced by a previous JoinSplit transfer in this
