@@ -136,7 +136,7 @@ From "Keep a Changelog":
 - [ ] Mark the PR to update `CHANGELOG.md` as "Ready for Review"
 - [ ] Once the changelog PR has been approved and merged, update the draft release with the final changelog
 - [ ] Set the release title to `Zebra ` followed by the version tag, for example: `Zebra 1.0.0-alpha.0`
-- [ ] Set the tag name to the version tag, for example: `1.0.0-alpha.0`
+- [ ] Set the tag name to the version tag, for example: `v1.0.0-alpha.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
 
