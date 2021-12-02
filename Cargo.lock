@@ -4434,7 +4434,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "bincode",
  "chrono",
