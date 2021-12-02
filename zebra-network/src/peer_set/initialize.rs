@@ -714,8 +714,8 @@ where
             }
             HandshakeConnected { address, client } => {
                 debug!(candidate.addr = ?address, "successfully dialed new peer");
-                // successes are handled by an independent task, so they
-                // shouldn't hang
+                // successes are handled by an independent task, except for `candidates.update` in
+                // this task, which has a timeout, so they shouldn't hang
                 peerset_tx.send(Ok((address, client))).await?;
             }
             HandshakeFailed { failed_addr } => {
