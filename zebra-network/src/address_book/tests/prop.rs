@@ -1,3 +1,5 @@
+//! Randomised property tests for the address book.
+
 use std::{net::SocketAddr, time::Instant};
 
 use chrono::Utc;
