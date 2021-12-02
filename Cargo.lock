@@ -4491,7 +4491,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "color-eyre",
  "hex",
