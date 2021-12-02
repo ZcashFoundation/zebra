@@ -83,15 +83,11 @@ for all active consensus rules as of NU5 activation.
 
 Currently, Zebra does not validate the following Zcash consensus rules:
 
-#### NU5
-- Full validation of Orchard transactions from NU5 onwards
-
 #### NU1 - Sapling
 - Validation of Sprout JoinSplit-on-Groth16 proofs
 
 #### Sprout
 - Validation of Sprout anchors (root of the Sprout note commitment tree)
-- Validating updates of the Sprout note commitment tree
 
 #### Other
 - Undocumented rules derived from Bitcoin
