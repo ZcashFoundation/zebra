@@ -718,6 +718,7 @@ where
     /// from the block downloader and verifier stream.
     fn should_restart_sync(e: BlockDownloadVerifyError) -> bool {
         match e {
+            // Structural matches
             BlockDownloadVerifyError::Invalid(VerifyChainError::Checkpoint(
                 VerifyCheckpointError::AlreadyVerified { .. },
             )) => {
@@ -732,19 +733,29 @@ where
                 tracing::debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
-            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
-                VerifyBlockError::Commit(ref source),
-            )) if format!("{:?}", source).contains("block is already committed to the state") => {
-                // TODO: improve this by checking the type
-                // https://github.com/ZcashFoundation/zebra/issues/2908
-                tracing::debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
-                false
-            }
             BlockDownloadVerifyError::CancelledDuringDownload
             | BlockDownloadVerifyError::CancelledDuringVerification => {
                 tracing::debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
+
+            // String matches
+            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
+                VerifyBlockError::Commit(ref source),
+            )) if format!("{:?}", source).contains("block is already committed to the state") => {
+                // TODO: improve this by checking the type (#2908)
+                tracing::debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::DownloadFailed(ref source)
+                if format!("{:?}", source).contains("NotFound") =>
+            {
+                // TODO: improve this by checking the type (#2908)
+                //       restart after a certain number of NotFound errors?
+                tracing::debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+
             _ => {
                 // download_and_verify downcasts errors from the block verifier
                 // into VerifyChainError, and puts the result inside one of the
@@ -757,7 +768,9 @@ where
                 let err_str = format!("{:?}", e);
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
+                    || err_str.contains("Cancelled")
                     || err_str.contains("block is already committed to the state")
+                    || err_str.contains("NotFound")
                 {
                     tracing::error!(?e,
                         "a BlockDownloadVerifyError that should have been filtered out was detected, \
