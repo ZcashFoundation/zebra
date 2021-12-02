@@ -10,9 +10,9 @@ use crate::{
     PreparedBlock, ValidateContextError,
 };
 
-/// Check that all the Sprout, Sapling, and Orchard anchors specified by
+/// Check that the Sprout, Sapling, and Orchard anchors specified by
 /// transactions in this block have been computed previously within the context
-/// of its parent chain.
+/// of its parent chain. We do not check any anchors in `JoinSplit`s on BCTV14.
 ///
 /// Sprout anchors may refer to some earlier block's final treestate (like
 /// Sapling and Orchard do exclusively) _or_ to the interstisial output
