@@ -9,6 +9,8 @@ use super::super::{
     Input,
 };
 
+use proptest::collection::vec;
+
 #[test]
 fn coinbase_has_height() -> Result<()> {
     zebra_test::init();
@@ -48,7 +50,7 @@ fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
 }
 
 #[test]
-fn coinbase_height_round_trip() -> Result<()> {
+fn coinbase_height_round_trip_from_random_input() -> Result<()> {
     zebra_test::init();
 
     let strategy =
@@ -67,4 +69,20 @@ fn coinbase_height_round_trip() -> Result<()> {
     });
 
     Ok(())
+}
+
+proptest! {
+    #[test]
+    fn coinbase_height_round_trip_from_random_bytes(mut height_bytes in vec(any::<u8>(), 1..4)) {
+        let mut encoded1 = vec![height_bytes.len() as u8];
+        encoded1.append(&mut height_bytes);
+
+        let decoded = parse_coinbase_height(encoded1.clone()).ok();
+
+        if decoded.is_some() {
+            let mut encoded2 = Vec::new();
+            write_coinbase_height(decoded.as_ref().unwrap().0, &decoded.unwrap().1, &mut encoded2)?;
+            prop_assert_eq!(encoded2, encoded1);
+        }
+    }
 }
