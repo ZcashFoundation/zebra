@@ -79,7 +79,7 @@ pub(crate) fn parse_coinbase_height(
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
         (Some(0x01), len) if len >= 2 && data[1] < 0x80 => {
             let h = data[1] as u32;
-            if h < 128 {
+            if (17..128).contains(&h) {
                 Ok((Height(h), CoinbaseData(data.split_off(2))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
