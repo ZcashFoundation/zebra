@@ -1,9 +1,10 @@
 //! The `AddressBook` manages information about what peers exist, when they were
 //! seen, and what services they provide.
 
-use std::{collections::BTreeMap, iter::Extend, net::SocketAddr, time::Instant};
+use std::{cmp::Reverse, iter::Extend, net::SocketAddr, time::Instant};
 
 use chrono::Utc;
+use ordered_map::OrderedMap;
 use tracing::Span;
 
 use crate::{
@@ -53,7 +54,10 @@ pub struct AddressBook {
     /// in connection attempt order.
     ///
     /// Some peers in this list might have open outbound or inbound connections.
-    by_addr: BTreeMap<SocketAddr, MetaAddr>,
+    ///
+    /// We reverse the comparison order, because the standard library ([`BTreeMap`])
+    /// sorts in ascending order, but [`OrderedMap`] sorts in descending order.
+    by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -102,7 +106,7 @@ impl AddressBook {
         let chrono_now = Utc::now();
 
         let mut new_book = AddressBook {
-            by_addr: BTreeMap::default(),
+            by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
             local_listener: canonical_socket_addr(local_listener),
             span,
             last_address_log: None,
@@ -114,6 +118,10 @@ impl AddressBook {
 
     /// Construct an [`AddressBook`] with the given `local_listener`,
     /// [`tracing::Span`], and addresses.
+    ///
+    /// If there are multiple [`MetaAddr`]s with the same address,
+    /// an arbitrary address is inserted into the address book,
+    /// and the rest are dropped.
     ///
     /// This constructor can be used to break address book invariants,
     /// so it should only be used in tests.
@@ -139,7 +147,11 @@ impl AddressBook {
             })
             .filter(MetaAddr::address_is_valid_for_outbound)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
-        new_book.by_addr.extend(addrs);
+
+        for (socket_addr, meta_addr) in addrs {
+            // overwrite any duplicate addresses
+            new_book.by_addr.insert(socket_addr, meta_addr);
+        }
 
         new_book.update_metrics(instant_now, chrono_now);
         new_book
@@ -169,7 +181,7 @@ impl AddressBook {
 
         // Then sanitize and shuffle
         let mut peers = peers
-            .values()
+            .descending_values()
             .filter_map(MetaAddr::sanitize)
             // Security: remove peers that:
             //   - last responded more than three hours ago, or
@@ -182,6 +194,22 @@ impl AddressBook {
             .collect::<Vec<_>>();
         peers.shuffle(&mut rand::thread_rng());
         peers
+    }
+
+    /// Look up `addr` in the address book, and return its [`MetaAddr`].
+    ///
+    /// Converts `addr` to a canonical address before looking it up.
+    pub fn get(&mut self, addr: &SocketAddr) -> Option<MetaAddr> {
+        let addr = canonical_socket_addr(*addr);
+
+        // Unfortunately, `OrderedMap` doesn't implement `get`.
+        let meta_addr = self.by_addr.remove(&addr);
+
+        if let Some(meta_addr) = meta_addr {
+            self.by_addr.insert(addr, meta_addr);
+        }
+
+        meta_addr
     }
 
     /// Apply `change` to the address book, returning the updated `MetaAddr`,
@@ -204,12 +232,13 @@ impl AddressBook {
     /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
     /// peers.
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+        let previous = self.get(&change.addr());
+
         let _guard = self.span.enter();
 
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
-        let previous = self.by_addr.get(&change.addr()).cloned();
         let updated = change.apply_to_meta_addr(previous);
 
         trace!(
@@ -276,24 +305,13 @@ impl AddressBook {
         }
     }
 
-    /// Returns true if the given [`SocketAddr`] has recently sent us a message.
-    pub fn recently_live_addr(&self, addr: &SocketAddr, now: chrono::DateTime<Utc>) -> bool {
-        let _guard = self.span.enter();
-        match self.by_addr.get(addr) {
-            None => false,
-            // NeverAttempted, Failed, and AttemptPending peers should never be live
-            Some(peer) => {
-                peer.last_connection_state == PeerAddrState::Responded
-                    && peer.has_connection_recently_responded(now)
-            }
-        }
-    }
-
     /// Returns true if the given [`SocketAddr`] is pending a reconnection
     /// attempt.
-    pub fn pending_reconnection_addr(&self, addr: &SocketAddr) -> bool {
+    pub fn pending_reconnection_addr(&mut self, addr: &SocketAddr) -> bool {
+        let meta_addr = self.get(addr);
+
         let _guard = self.span.enter();
-        match self.by_addr.get(addr) {
+        match meta_addr {
             None => false,
             Some(peer) => peer.last_connection_state == PeerAddrState::AttemptPending,
         }
@@ -304,7 +322,7 @@ impl AddressBook {
     /// Returns peers in reconnection attempt order, including recently connected peers.
     pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
-        self.by_addr.values().cloned()
+        self.by_addr.descending_values().cloned()
     }
 
     /// Return an iterator over peers that are due for a reconnection attempt,
@@ -319,7 +337,7 @@ impl AddressBook {
         // Skip live peers, and peers pending a reconnect attempt.
         // The peers are already stored in sorted order.
         self.by_addr
-            .values()
+            .descending_values()
             .filter(move |peer| peer.is_ready_for_connection_attempt(instant_now, chrono_now))
             .cloned()
     }
@@ -330,7 +348,7 @@ impl AddressBook {
         let _guard = self.span.enter();
 
         self.by_addr
-            .values()
+            .descending_values()
             .filter(move |peer| peer.last_connection_state == state)
             .cloned()
     }
@@ -345,7 +363,7 @@ impl AddressBook {
         let _guard = self.span.enter();
 
         self.by_addr
-            .values()
+            .descending_values()
             .filter(move |peer| !peer.is_ready_for_connection_attempt(instant_now, chrono_now))
             .cloned()
     }
@@ -359,8 +377,8 @@ impl AddressBook {
         let _guard = self.span.enter();
 
         self.by_addr
-            .values()
-            .filter(move |peer| self.recently_live_addr(&peer.addr, now))
+            .descending_values()
+            .filter(move |peer| peer.was_recently_live(now))
             .cloned()
     }
 

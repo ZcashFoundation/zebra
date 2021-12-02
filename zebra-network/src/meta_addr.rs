@@ -477,6 +477,13 @@ impl MetaAddr {
         }
     }
 
+    /// Returns true if this peer has recently sent us a message.
+    pub fn was_recently_live(&self, now: chrono::DateTime<Utc>) -> bool {
+        // NeverAttempted, Failed, and AttemptPending peers should never be live
+        self.last_connection_state == PeerAddrState::Responded
+            && self.has_connection_recently_responded(now)
+    }
+
     /// Has this peer been seen recently?
     ///
     /// Returns `true` if this peer has responded recently or if the peer was gossiped with a
