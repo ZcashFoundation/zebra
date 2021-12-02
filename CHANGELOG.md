@@ -6,7 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.2) - 2021-12-03
 
-Zebra's latest beta finishes transaction header and amount validation, and continues implementing proof and note commitment tree validation.
+Zebra's latest beta continues implementing zero-knowledge proof and note commitment tree validation. In this release, we have finished implementing transaction header and amount validation.
+
 
 We also fix a number of security issues that could pose a local denial of service risk, or make it easier for an attacker to make a node follow a false chain.
 
