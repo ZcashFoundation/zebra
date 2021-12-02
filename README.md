@@ -78,29 +78,19 @@ Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashF
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 
-The goals of the beta release series are for Zebra to act as a fully validating Zcash node for
-all applicable consensus rules as of NU5 activation.
+The goals of the beta release series are for Zebra to act as a fully validating Zcash node,
+for all active consensus rules as of NU5 activation.
 
 Currently, Zebra does not validate the following Zcash consensus rules:
 
 #### NU5
-
 - Full validation of Orchard transactions from NU5 onwards
-   - Validation of Orchard anchors (root of the Orchard note commitment tree)
-
-#### NU4 - Canopy
-- Validation of coinbase miner subsidy and miner fees
 
 #### NU1 - Sapling
-- Validation of Sapling anchors (root of the Sapling note commitment tree)
 - Validation of Sprout JoinSplit-on-Groth16 proofs
-
-#### NU0 - Overwinter
-- ZIP-203: Transaction Expiry consensus rules
 
 #### Sprout
 - Validation of Sprout anchors (root of the Sprout note commitment tree)
-- Validation of transaction lock times
 - Validating updates of the Sprout note commitment tree
 
 #### Other
@@ -139,9 +129,13 @@ The recommended requirements for compiling and running `zebrad` are:
 - 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
-- Windows Server 2019
-- macOS Big Sur 11.0
-- Ubuntu 18.04 / the latest LTS
+
+The *latest* [GitHub Runners](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources) for:
+- Windows Server
+- macOS
+- Ubuntu
+
+Docker:
 - Debian Buster
 
 Zebra's tests can take over an hour, depending on your machine.
@@ -196,7 +190,6 @@ See our [roadmap](#future-work) for details.
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [When Zebra receives an unexpected network message from a peer, it disconnects from that peer #2107](https://github.com/ZcashFoundation/zebra/issues/2107)
 - [Zebra's address book can use all available memory #1873](https://github.com/ZcashFoundation/zebra/issues/1873)
 - [Zebra does not evict pre-upgrade peers from the peer set across a network upgrade #706](https://github.com/ZcashFoundation/zebra/issues/706)
 - [Zebra accepts non-minimal height encodings #2226](https://github.com/ZcashFoundation/zebra/issues/2226)
