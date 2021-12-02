@@ -47,9 +47,6 @@ pub enum PeerError {
     #[error("Internal services over capacity")]
     Overloaded,
 
-    // TODO: stop closing connections on these errors (#2107)
-    //       log info or debug logs instead
-    //
     /// We requested data that the peer couldn't find.
     #[error("Remote peer could not find items: {0:?}")]
     NotFound(Vec<InventoryHash>),
