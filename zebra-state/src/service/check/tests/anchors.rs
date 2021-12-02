@@ -23,7 +23,8 @@ fn check_sprout_anchors() {
 
     let (mut state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Bootstrap a block at height == 1 that has the first Sprout note commitments.
+    // Bootstrap a block at height == 1 that has the first Sprout note
+    // commitments on Groth16.
     let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
