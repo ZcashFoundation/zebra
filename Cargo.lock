@@ -4286,7 +4286,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "aes",
  "bech32",
@@ -4421,7 +4421,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "displaydoc",
  "hex",
