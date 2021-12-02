@@ -8,7 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Zebra's latest beta continues implementing zero-knowledge proof and note commitment tree validation. In this release, we have finished implementing transaction header and amount validation.
 
-
 We also fix a number of security issues that could pose a local denial of service risk, or make it easier for an attacker to make a node follow a false chain.
 
 As of this release, Zebra will automatically download and cache the Sprout and Sapling Groth16 circuit parameters. The cache uses around 1 GB of disk space. These cached parameters are shared across all Zebra and `zcashd` instances run by the same user.
@@ -50,7 +49,7 @@ As of this release, Zebra will automatically download and cache the Sprout and S
 ## Security
 
 - Stop closing connections on unexpected messages, Credit: Equilibrium (#3120)
-- Security: Stop routing inventory requests by peer address (#3090)
+- Stop routing inventory requests by peer address (#3090)
 
 ## [Zebra 1.0.0-beta.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.1) - 2021-11-19
 
