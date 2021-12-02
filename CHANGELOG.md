@@ -48,7 +48,7 @@ As of this release, Zebra will automatically download and cache the Sprout and S
 
 ## Security
 
-- Stop closing connections on unexpected messages, Credit: Equilibrium (#3120)
+- Stop closing connections on unexpected messages, Credit: Equilibrium (#3120, #3131)
 - Stop routing inventory requests by peer address (#3090)
 
 ## [Zebra 1.0.0-beta.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.1) - 2021-11-19
