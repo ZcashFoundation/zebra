@@ -334,7 +334,7 @@ async fn verify_sprout_groth16_vector() {
         random_seed: <[u8; 32]>::from_hex(
             "6A14E910A94EF500043A42417D8D2B4124AB35DC1E14DDF830EBCF972E850807",
         )
-        .unwrap(),
+        .unwrap().into(),
         vmacs: [
             <[u8; 32]>::from_hex(
                 "630D39F963960E9092E518CEF4C84853C13EF9FC759CBECDD2ED61D1070C82E6",

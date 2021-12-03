@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 use crate::groth16::h_sig;
 
 #[test]
@@ -46,7 +48,12 @@ fn h_sig_works() {
         nf2.reverse();
         let mut pubkey = hex::decode(t[3]).unwrap();
         pubkey.reverse();
-        let mut r = h_sig(&random_seed, &nf1, &nf2, &pubkey);
+        let mut r = h_sig(
+            &<[u8; 32]>::try_from(random_seed).unwrap().into(),
+            &<[u8; 32]>::try_from(nf1).unwrap().into(),
+            &<[u8; 32]>::try_from(nf2).unwrap().into(),
+            &<[u8; 32]>::try_from(pubkey).unwrap().into(),
+        );
         r.reverse();
 
         assert_eq!(hex::encode(r), t[4]);

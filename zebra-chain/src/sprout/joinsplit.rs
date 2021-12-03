@@ -14,6 +14,35 @@ use crate::{
 
 use super::{commitment, note, tree};
 
+/// A 256-bit seed that must be chosen independently at
+/// random for each JoinSplit description [1].
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
+pub struct RandomSeed([u8; 32]);
+
+impl From<[u8; 32]> for RandomSeed {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<RandomSeed> for [u8; 32] {
+    fn from(rt: RandomSeed) -> [u8; 32] {
+        rt.0
+    }
+}
+
+impl From<&RandomSeed> for [u8; 32] {
+    fn from(random_seed: &RandomSeed) -> Self {
+        random_seed.clone().into()
+    }
+}
+
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
@@ -38,7 +67,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     pub ephemeral_key: x25519::PublicKey,
     /// A 256-bit seed that must be chosen independently at random for each
     /// JoinSplit description.
-    pub random_seed: [u8; 32],
+    pub random_seed: RandomSeed,
     /// A message authentication tag.
     pub vmacs: [note::Mac; 2],
     /// A ZK JoinSplit proof, either a
@@ -60,7 +89,7 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
         writer.write_32_bytes(&self.commitments[0].into())?;
         writer.write_32_bytes(&self.commitments[1].into())?;
         writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
-        writer.write_all(&self.random_seed[..])?;
+        writer.write_32_bytes(&(&self.random_seed).into())?;
         self.vmacs[0].zcash_serialize(&mut writer)?;
         self.vmacs[1].zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
@@ -106,7 +135,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
                 commitment::NoteCommitment::from(reader.read_32_bytes()?),
             ],
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
-            random_seed: reader.read_32_bytes()?,
+            random_seed: RandomSeed::from(reader.read_32_bytes()?),
             vmacs: [
                 note::Mac::zcash_deserialize(&mut reader)?,
                 note::Mac::zcash_deserialize(&mut reader)?,

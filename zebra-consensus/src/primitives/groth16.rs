@@ -25,9 +25,12 @@ use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
 use zebra_chain::{
-    primitives::{ed25519, Groth16Proof},
+    primitives::{
+        ed25519::{self, VerificationKeyBytes},
+        Groth16Proof,
+    },
     sapling::{Output, PerSpendAnchor, Spend},
-    sprout::JoinSplit,
+    sprout::{JoinSplit, Nullifier, RandomSeed},
 };
 
 mod params;
@@ -216,19 +219,19 @@ impl Description for Output {
 ///
 /// [1]: https://zips.z.cash/protocol/protocol.pdf#hsigcrh
 pub(super) fn h_sig(
-    random_seed: &[u8],
-    nf1: &[u8],
-    nf2: &[u8],
-    joinsplit_pub_key: &[u8],
+    random_seed: &RandomSeed,
+    nf1: &Nullifier,
+    nf2: &Nullifier,
+    joinsplit_pub_key: &VerificationKeyBytes,
 ) -> [u8; 32] {
     let h_sig: [u8; 32] = blake2b_simd::Params::new()
         .hash_length(32)
         .personal(b"ZcashComputehSig")
         .to_state()
-        .update(random_seed)
-        .update(nf1)
-        .update(nf2)
-        .update(joinsplit_pub_key)
+        .update(&(<[u8; 32]>::from(random_seed))[..])
+        .update(&(<[u8; 32]>::from(nf1))[..])
+        .update(&(<[u8; 32]>::from(nf2))[..])
+        .update(joinsplit_pub_key.as_ref())
         .finalize()
         .as_bytes()
         .try_into()
@@ -261,10 +264,10 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
         let vpub_new = joinsplit.vpub_new.to_bytes();
 
         let h_sig = h_sig(
-            &joinsplit.random_seed[..],
-            &nf1[..],
-            &nf2[..],
-            joinsplit_pub_key.as_ref(),
+            &joinsplit.random_seed,
+            &joinsplit.nullifiers[0],
+            &joinsplit.nullifiers[1],
+            joinsplit_pub_key,
         );
 
         // Prepare the public input for the verifier
