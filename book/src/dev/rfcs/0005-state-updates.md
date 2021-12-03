@@ -685,6 +685,15 @@ So they should not be used for consensus-critical checks.
   family: instead, hash the block, and use the hash from `height_and_tx_count_by_hash`. (Since the
   rocksdb state only stores finalized state, they are actually a bijection).
 
+- Block headers and transactions are stored separately in the database,
+  so that individual transactions can be accessed efficiently.
+  Blocks can be re-created on request using the following process:
+  - Look up `height` and `tx_count` in `height_and_tx_count_by_hash`
+  - Get the block header for `height` from `block_header_by_height`
+  - Use [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
+    or [`multi_get`](https://github.com/facebook/rocksdb/wiki/MultiGet-Performance)
+    to get each transaction from `0..tx_count` from `tx_by_location`
+
 - Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
   that blocks with adjacent heights are adjacent in the database, and many
