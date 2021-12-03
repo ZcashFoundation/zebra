@@ -121,7 +121,7 @@ impl<P: ZkSnarkProof> JoinSplit<P> {
     }
 
     /// Encodes the primary inputs for the proof statement as Bls12_381 base
-    /// field elements, to match bellman::groth16::verify_proof.
+    /// field elements, to match [`bellman::groth16::verify_proof()`].
     ///
     /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
     ///

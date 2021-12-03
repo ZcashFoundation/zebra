@@ -204,12 +204,12 @@ where
             let pub_key = tx
                 .sprout_joinsplit_pub_key()
                 .expect("pub key must exist since there are joinsplits");
-            let spend_rsp = verifier
+            let joinsplit_rsp = verifier
                 .ready()
                 .await?
                 .call(groth16::ItemWrapper::from((&pub_key, joinsplit)).into());
 
-            async_checks.push(spend_rsp);
+            async_checks.push(joinsplit_rsp);
         }
 
         while let Some(result) = async_checks.next().await {
@@ -268,12 +268,12 @@ where
 
     tracing::trace!(?joinsplit);
 
-    let spend_rsp = verifier
+    let joinsplit_rsp = verifier
         .ready()
         .await?
         .call(groth16::ItemWrapper::from((pub_key, joinsplit)).into());
 
-    async_checks.push(spend_rsp);
+    async_checks.push(joinsplit_rsp);
 
     while let Some(result) = async_checks.next().await {
         tracing::trace!(?result);
@@ -388,12 +388,12 @@ where
             // Use an arbitrary public key which is not the correct one,
             // which will make the verification fail.
             let modified_pub_key = [0x42; 32].into();
-            let spend_rsp = verifier
+            let joinsplit_rsp = verifier
                 .ready()
                 .await?
                 .call(groth16::ItemWrapper::from((&modified_pub_key, joinsplit)).into());
 
-            async_checks.push(spend_rsp);
+            async_checks.push(joinsplit_rsp);
         }
 
         while let Some(result) = async_checks.next().await {
