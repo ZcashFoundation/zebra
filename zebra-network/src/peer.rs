@@ -15,7 +15,12 @@ mod load_tracked_client;
 /// Watches for chain tip height updates to determine the minimum support peer protocol version.
 mod minimum_peer_version;
 
-use client::{ClientRequest, ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
+#[cfg(not(test))]
+use client::ClientRequest;
+#[cfg(test)]
+pub(crate) use client::ClientRequest;
+
+use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 
 pub use client::Client;
 pub use connection::Connection;
