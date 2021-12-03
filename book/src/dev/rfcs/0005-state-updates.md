@@ -625,12 +625,13 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
 
 Block and Transaction Data:
-- `Height`: 32 bits, big-endian, unsigned
-- `TransactionIndex`: 32 bits, big-endian, unsigned
+- `Height`: 24 bits, big-endian, unsigned (allows for ~30 years worth of blocks)
+- `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
 - `TransactionLocation`: `Height \|\| TransactionIndex`
 - `AtLeastOne<TransactionLocation>`: `TransactionLocation \|\| ...`
-- `TransparentOutputIndex`: 32 bits, big-endian, unsigned
-- `OutPoint`: `transaction::Hash \|\| TransparentOutputIndex`
+- `TransparentOutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
+- transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
+- `OutPoint`: `transaction::Hash \|\| TransferIndex`
 - `IsFromCoinbase` : 8 bits, boolean, zero or one
 - `Utxo`: `Height \|\| IsFromCoinbase \|\| Output`
 
