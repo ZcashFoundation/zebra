@@ -73,7 +73,7 @@ fn coinbase_height_round_trip_from_random_input() -> Result<()> {
 
 proptest! {
     #[test]
-    fn coinbase_height_round_trip_from_random_bytes(mut height_bytes in vec(any::<u8>(), 1..4)) {
+    fn coinbase_height_round_trip_from_random_bytes(mut height_bytes in vec(any::<u8>(), 1..5)) {
         let mut encoded1 = vec![height_bytes.len() as u8];
         encoded1.append(&mut height_bytes);
 
