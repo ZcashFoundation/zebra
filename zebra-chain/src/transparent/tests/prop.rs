@@ -85,4 +85,16 @@ proptest! {
             prop_assert_eq!(encoded2, encoded1);
         }
     }
+
+    #[test]
+    fn coinbase_height_round_trip_from_random_byte(height_byte in vec(any::<u8>(), 1..2)) {
+        let encoded1 = height_byte;
+        let decoded = parse_coinbase_height(encoded1.clone()).ok();
+
+        if decoded.is_some() {
+            let mut encoded2 = Vec::new();
+            write_coinbase_height(decoded.as_ref().unwrap().0, &decoded.unwrap().1, &mut encoded2)?;
+            prop_assert_eq!(encoded2, encoded1);
+        }
+    }
 }
