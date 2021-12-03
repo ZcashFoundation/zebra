@@ -603,9 +603,11 @@ We use the following rocksdb column families:
 | Column Family                  | Keys                   | Values                               | Updates |
 |--------------------------------|------------------------|--------------------------------------|---------|
 | `hash_by_height`               | `block::Height`        | `block::Hash`                        | Never   |
-| `height_by_hash`               | `block::Hash`          | `block::Height`                      | Never   |
-| `block_by_height`              | `block::Height`        | `Block`                              | Never   |
+| `height_and_tx_count_by_hash`  | `block::Hash`          | `TransactionLocation{.. , tx_count}` | Never   |
+| `block_header_by_height`       | `block::Height`        | `block::Header`                      | Never   |
+| `tx_by_location`               | `TransactionLocation`  | `Transaction`                        | Never   |
 | `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`                | Never   |
+| `tx_by_transparent_address`    | `transparent::Address` | `AtLeastOne<TransactionLocation>`    | Update  |
 | `utxo_by_outpoint`             | `OutPoint`             | `transparent::Utxo`                  | Delete  |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                 | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `()`                                 | Never   |
@@ -626,6 +628,7 @@ Block and Transaction Data:
 - `Height`: 32 bits, big-endian, unsigned
 - `TransactionIndex`: 32 bits, big-endian, unsigned
 - `TransactionLocation`: `Height \|\| TransactionIndex`
+- `AtLeastOne<TransactionLocation>`: `TransactionLocation \|\| ...`
 - `TransparentOutputIndex`: 32 bits, big-endian, unsigned
 - `OutPoint`: `transaction::Hash \|\| TransparentOutputIndex`
 - `IsFromCoinbase` : 8 bits, boolean, zero or one
@@ -673,22 +676,25 @@ So they should not be used for consensus-critical checks.
 
 ### Notes on rocksdb column families
 
-- The `hash_by_height` and `height_by_hash` column families provide a bijection between
+- The `hash_by_height` and `height_and_tx_count_by_hash` column families provide a bijection between
   block heights and block hashes.  (Since the rocksdb state only stores finalized
   state, they are actually a bijection).
 
-- The `block_by_height` column family provides a bijection between block
-  heights and block data. There is no corresponding `height_by_block` column
-  family: instead, hash the block, and use `height_by_hash`. (Since the
+- The `block_header_by_height` column family provides a bijection between block
+  heights and block header data. There is no corresponding `height_by_block` column
+  family: instead, hash the block, and use the hash from `height_and_tx_count_by_hash`. (Since the
   rocksdb state only stores finalized state, they are actually a bijection).
 
-- Blocks are stored by height, not by hash.  This has the downside that looking
+- Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
   that blocks with adjacent heights are adjacent in the database, and many
   common access patterns, such as helping a client sync the chain or doing
   analysis, access blocks in (potentially sparse) height order.  In addition,
   the fact that we commit blocks in order means we're writing only to the end
   of the rocksdb column family, which may help save space.
+
+- Similarly, transaction data is stored in chain order in `tx_by_location`,
+  and within each vector in `tx_by_transparent_address`.
 
 - `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
