@@ -1,6 +1,7 @@
 //! Async Groth16 batch verifier service
 
 use std::{
+    convert::TryInto,
     fmt,
     future::Future,
     mem,
@@ -9,6 +10,7 @@ use std::{
 };
 
 use bellman::{
+    gadgets::multipack,
     groth16::{batch, VerifyingKey},
     VerificationError,
 };
@@ -31,6 +33,8 @@ use zebra_chain::{
 mod params;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vectors;
 
 pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
 
@@ -132,31 +136,169 @@ pub type Item = batch::Item<Bls12>;
 /// A wrapper to workaround the missing `ServiceExt::map_err` method.
 pub struct ItemWrapper(Item);
 
-impl From<&Spend<PerSpendAnchor>> for ItemWrapper {
-    fn from(spend: &Spend<PerSpendAnchor>) -> Self {
-        Self(Item::from((
-            bellman::groth16::Proof::read(&spend.zkproof.0[..]).unwrap(),
-            spend.primary_inputs(),
-        )))
+/// A Groth16 Description (JoinSplit, Spend, or Output) with a Groth16 proof
+/// and its inputs encoded as scalars.
+pub trait Description {
+    /// The Groth16 proof of this description.
+    fn proof(&self) -> &Groth16Proof;
+    /// The primary inputs for this proof, encoded as [`jubjub::Fq`] scalars.
+    fn primary_inputs(&self) -> Vec<jubjub::Fq>;
+}
+
+impl Description for Spend<PerSpendAnchor> {
+    /// Encodes the primary inputs for the proof statement as 7 Bls12_381 base
+    /// field elements, to match bellman::groth16::verify_proof.
+    ///
+    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#cctsaplingspend
+    fn primary_inputs(&self) -> Vec<jubjub::Fq> {
+        let mut inputs = vec![];
+
+        let rk_affine = jubjub::AffinePoint::from_bytes(self.rk.into()).unwrap();
+        inputs.push(rk_affine.get_u());
+        inputs.push(rk_affine.get_v());
+
+        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.into()).unwrap();
+        inputs.push(cv_affine.get_u());
+        inputs.push(cv_affine.get_v());
+
+        // TODO: V4 only
+        inputs.push(jubjub::Fq::from_bytes(&self.per_spend_anchor.into()).unwrap());
+
+        let nullifier_limbs: [jubjub::Fq; 2] = self.nullifier.into();
+
+        inputs.push(nullifier_limbs[0]);
+        inputs.push(nullifier_limbs[1]);
+
+        inputs
+    }
+
+    fn proof(&self) -> &Groth16Proof {
+        &self.zkproof
     }
 }
 
-impl From<&Output> for ItemWrapper {
-    fn from(output: &Output) -> Self {
-        Self(Item::from((
-            bellman::groth16::Proof::read(&output.zkproof.0[..]).unwrap(),
-            output.primary_inputs(),
-        )))
+impl Description for Output {
+    /// Encodes the primary inputs for the proof statement as 5 Bls12_381 base
+    /// field elements, to match bellman::groth16::verify_proof.
+    ///
+    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#cctsaplingoutput
+    fn primary_inputs(&self) -> Vec<jubjub::Fq> {
+        let mut inputs = vec![];
+
+        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.into()).unwrap();
+        inputs.push(cv_affine.get_u());
+        inputs.push(cv_affine.get_v());
+
+        let epk_affine = jubjub::AffinePoint::from_bytes(self.ephemeral_key.into()).unwrap();
+        inputs.push(epk_affine.get_u());
+        inputs.push(epk_affine.get_v());
+
+        inputs.push(self.cm_u);
+
+        inputs
+    }
+
+    fn proof(&self) -> &Groth16Proof {
+        &self.zkproof
     }
 }
 
-impl From<(&ed25519::VerificationKeyBytes, &JoinSplit<Groth16Proof>)> for ItemWrapper {
-    fn from(
-        (pub_key, joinsplit): (&ed25519::VerificationKeyBytes, &JoinSplit<Groth16Proof>),
-    ) -> Self {
+/// Compute the [h_{Sig} hash function][1] which is used in JoinSplit descriptions.
+///
+/// `random_seed`: the random seed from the JoinSplit description.
+/// `nf1`: the first nullifier from the JoinSplit description.
+/// `nf2`: the second nullifier from the JoinSplit description.
+/// `joinsplit_pub_key`: the JoinSplit public validation key from the transaction.
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#hsigcrh
+pub(super) fn h_sig(
+    random_seed: &[u8],
+    nf1: &[u8],
+    nf2: &[u8],
+    joinsplit_pub_key: &[u8],
+) -> [u8; 32] {
+    let h_sig: [u8; 32] = blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"ZcashComputehSig")
+        .to_state()
+        .update(random_seed)
+        .update(nf1)
+        .update(nf2)
+        .update(joinsplit_pub_key)
+        .finalize()
+        .as_bytes()
+        .try_into()
+        .expect("32 byte array");
+    h_sig
+}
+
+impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) {
+    /// Encodes the primary inputs for the proof statement as Bls12_381 base
+    /// field elements, to match [`bellman::groth16::verify_proof()`].
+    ///
+    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
+    ///
+    /// `joinsplit_pub_key`: the JoinSplit public validation key for this JoinSplit, from
+    /// the transaction. (All JoinSplits in a transaction share the same validation key.)
+    ///
+    /// This is not yet officially documented; see the reference implementation:
+    /// https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166
+    fn primary_inputs(&self) -> Vec<jubjub::Fq> {
+        let (joinsplit, joinsplit_pub_key) = self;
+
+        let rt: [u8; 32] = joinsplit.anchor.into();
+        let mac1: [u8; 32] = (&joinsplit.vmacs[0]).into();
+        let mac2: [u8; 32] = (&joinsplit.vmacs[1]).into();
+        let nf1: [u8; 32] = (&joinsplit.nullifiers[0]).into();
+        let nf2: [u8; 32] = (&joinsplit.nullifiers[1]).into();
+        let cm1: [u8; 32] = (&joinsplit.commitments[0]).into();
+        let cm2: [u8; 32] = (&joinsplit.commitments[1]).into();
+        let vpub_old = joinsplit.vpub_old.to_bytes();
+        let vpub_new = joinsplit.vpub_new.to_bytes();
+
+        let h_sig = h_sig(
+            &joinsplit.random_seed[..],
+            &nf1[..],
+            &nf2[..],
+            joinsplit_pub_key.as_ref(),
+        );
+
+        // Prepare the public input for the verifier
+        let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
+        public_input.extend(rt);
+        public_input.extend(h_sig);
+        public_input.extend(nf1);
+        public_input.extend(mac1);
+        public_input.extend(nf2);
+        public_input.extend(mac2);
+        public_input.extend(cm1);
+        public_input.extend(cm2);
+        public_input.extend(vpub_old);
+        public_input.extend(vpub_new);
+
+        let public_input = multipack::bytes_to_bits(&public_input);
+
+        multipack::compute_multipacking(&public_input)
+    }
+
+    fn proof(&self) -> &Groth16Proof {
+        &self.0.zkproof
+    }
+}
+
+impl<T> From<&T> for ItemWrapper
+where
+    T: Description,
+{
+    /// Convert a [`Description`] into an [`ItemWrapper`].
+    fn from(input: &T) -> Self {
         Self(Item::from((
-            bellman::groth16::Proof::read(&joinsplit.zkproof.0[..]).unwrap(),
-            joinsplit.primary_inputs(pub_key),
+            bellman::groth16::Proof::read(&input.proof().0[..]).unwrap(),
+            input.primary_inputs(),
         )))
     }
 }

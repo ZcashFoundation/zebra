@@ -15,7 +15,6 @@ bench = ["zebra-test"]
 [dependencies]
 aes = "0.7.5"
 bech32 = "0.8.1"
-bellman = "0.11.1"
 bigint = "4.4.3"
 bitflags = "1.2.1"
 bitvec = "0.22"

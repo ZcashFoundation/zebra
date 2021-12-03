@@ -207,7 +207,7 @@ where
             let joinsplit_rsp = verifier
                 .ready()
                 .await?
-                .call(groth16::ItemWrapper::from((&pub_key, joinsplit)).into());
+                .call(groth16::ItemWrapper::from(&(joinsplit, &pub_key)).into());
 
             async_checks.push(joinsplit_rsp);
         }
@@ -271,7 +271,7 @@ where
     let joinsplit_rsp = verifier
         .ready()
         .await?
-        .call(groth16::ItemWrapper::from((pub_key, joinsplit)).into());
+        .call(groth16::ItemWrapper::from(&(joinsplit, pub_key)).into());
 
     async_checks.push(joinsplit_rsp);
 
@@ -391,7 +391,7 @@ where
             let joinsplit_rsp = verifier
                 .ready()
                 .await?
-                .call(groth16::ItemWrapper::from((&modified_pub_key, joinsplit)).into());
+                .call(groth16::ItemWrapper::from(&(joinsplit, &modified_pub_key)).into());
 
             async_checks.push(joinsplit_rsp);
         }

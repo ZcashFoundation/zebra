@@ -1,4 +1,4 @@
-use crate::sprout::joinsplit::h_sig;
+use crate::groth16::h_sig;
 
 #[test]
 fn h_sig_works() {
