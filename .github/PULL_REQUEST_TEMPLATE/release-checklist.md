@@ -92,7 +92,7 @@ Also check for crates that depend on crates that have changed. They should get a
 
 - [ ] After any changes, test that the `cargo install` command in works. Use
       e.g. `cargo install --locked --path zebrad`.
-      
+
 ## README
 
 As we resolve various outstanding known issues and implement new functionality with each release, we should double check the README for any necessary updates.
@@ -100,9 +100,9 @@ As we resolve various outstanding known issues and implement new functionality w
 We should check and update if necessary:
 
 - [ ] The "Beta Release" section
-- [ ] The "Known Issues" section 
+- [ ] The "Known Issues" section
 
-to ensure that any items that are resolved in the latest release are no longer listed in the README. 
+to ensure that any items that are resolved in the latest release are no longer listed in the README.
 
 ## Change Log
 
@@ -135,8 +135,8 @@ From "Keep a Changelog":
 - [ ] Check for any PRs that have been merged since you created the draft PR to update `CHANGELOG.md` and push any updates if necessary
 - [ ] Mark the PR to update `CHANGELOG.md` as "Ready for Review"
 - [ ] Once the changelog PR has been approved and merged, update the draft release with the final changelog
-- [ ] Set the release title to `Zebra ` followed by the version tag, for example: `Zebra 1.0.0-alpha.0` 
-- [ ] Set the tag name to the version tag, for example: `1.0.0-alpha.0`
+- [ ] Set the release title to `Zebra ` followed by the version tag, for example: `Zebra 1.0.0-alpha.0`
+- [ ] Set the tag name to the version tag, for example: `v1.0.0-alpha.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
 
