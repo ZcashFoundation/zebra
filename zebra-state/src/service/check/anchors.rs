@@ -12,7 +12,8 @@ use crate::{
 
 /// Check that the Sprout, Sapling, and Orchard anchors specified by
 /// transactions in this block have been computed previously within the context
-/// of its parent chain. We do not check any anchors in `JoinSplit`s on BCTV14.
+/// of its parent chain. We do not check any anchors in checkpointed blocks, which avoids 
+/// JoinSplits<BCTV14Proof>
 ///
 /// Sprout anchors may refer to some earlier block's final treestate (like
 /// Sapling and Orchard do exclusively) _or_ to the interstisial output
