@@ -12,6 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use chrono::Utc;
 use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
@@ -305,8 +306,11 @@ impl Service<zn::Request> for Inbound {
                 // the lock.
                 let peers = address_book.lock().unwrap().clone();
 
+                // Correctness: get the current time after acquiring the address book lock.
+                let now = Utc::now();
+
                 // Send a sanitized response
-                let mut peers = peers.sanitized();
+                let mut peers = peers.sanitized(now);
 
                 // Truncate the list
                 let truncate_at = MAX_ADDRS_IN_MESSAGE

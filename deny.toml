@@ -46,6 +46,10 @@ skip-tree = [
     # ticket #3063: redjubjub dependencies
     { name = "redjubjub", version = "=0.4.0" },
 
+    # ordered-map dependencies that should be dev-dependencies
+    # https://github.com/qwfy/ordered-map/pull/1
+    { name = "env_logger", version = "=0.7.1" },
+
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
 
