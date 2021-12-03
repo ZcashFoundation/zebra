@@ -837,14 +837,20 @@ impl fmt::Debug for TransmissionKey {
 
 impl Eq for TransmissionKey {}
 
-impl From<[u8; 32]> for TransmissionKey {
-    /// Attempts to interpret a byte representation of an
-    /// affine point, failing if the element is not on
-    /// the curve or non-canonical.
+impl TryFrom<[u8; 32]> for TransmissionKey {
+    type Error = &'static str;
+
+    /// Attempts to interpret a byte representation of an affine Jubjub point, failing if the
+    /// element is not on the curve, non-prime, the identity, or non-canonical.
     ///
     /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let affine_point = jubjub::AffinePoint::from_bytes(bytes).unwrap();
+        if affine_point.is_prime_order().into() {
+            Ok(Self(affine_point))
+        } else {
+            Err("derived an invalid Sapling transmission key")
+        }
     }
 }
 
@@ -854,16 +860,22 @@ impl From<TransmissionKey> for [u8; 32] {
     }
 }
 
-impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
+impl TryFrom<(IncomingViewingKey, Diversifier)> for TransmissionKey {
+    type Error = &'static str;
+
     /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
     /// scalar mult _\[ivk\]G_d_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
-    fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
-        Self(jubjub::AffinePoint::from(
-            diversify_hash(d.0).unwrap() * ivk.scalar,
-        ))
+    fn try_from((ivk, d): (IncomingViewingKey, Diversifier)) -> Result<Self, Self::Error> {
+        let affine_point = jubjub::AffinePoint::from(diversify_hash(d.0).unwrap() * ivk.scalar);
+
+        if affine_point.is_prime_order().into() {
+            Ok(Self(affine_point))
+        } else {
+            Err("derived an invalid Sapling transmission key")
+        }
     }
 }
 
