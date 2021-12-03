@@ -1,13 +1,13 @@
 //! DateTime types with specific serialization invariants.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chrono::{TimeZone, Utc};
-
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
     num::TryFromIntError,
 };
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{TimeZone, Utc};
 
 use super::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
@@ -50,7 +50,7 @@ impl DateTime32 {
     ///
     /// If the number of seconds since the UNIX epoch is greater than `u32::MAX`.
     pub fn now() -> DateTime32 {
-        Utc::now()
+        chrono::Utc::now()
             .try_into()
             .expect("unexpected out of range chrono::DateTime")
     }
@@ -71,14 +71,18 @@ impl DateTime32 {
 
     /// Returns the duration elapsed since this time,
     /// or if this time is in the future, returns `None`.
-    pub fn checked_elapsed(&self) -> Option<Duration32> {
-        DateTime32::now().checked_duration_since(*self)
+    pub fn checked_elapsed(&self, now: chrono::DateTime<Utc>) -> Option<Duration32> {
+        DateTime32::try_from(now)
+            .expect("unexpected out of range chrono::DateTime")
+            .checked_duration_since(*self)
     }
 
     /// Returns the duration elapsed since this time,
     /// or if this time is in the future, returns zero.
-    pub fn saturating_elapsed(&self) -> Duration32 {
-        DateTime32::now().saturating_duration_since(*self)
+    pub fn saturating_elapsed(&self, now: chrono::DateTime<Utc>) -> Duration32 {
+        DateTime32::try_from(now)
+            .expect("unexpected out of range chrono::DateTime")
+            .saturating_duration_since(*self)
     }
 
     /// Returns the time that is `duration` after this time.
