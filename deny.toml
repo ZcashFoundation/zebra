@@ -82,6 +82,8 @@ skip-tree = [
     # wait for lots of crates in the tokio ecosystem to upgrade
     { name = "redox_syscall", version = "=0.1.57" },
     { name = "socket2", version = "=0.3.16" },
+
+    { name = "zcash_encoding" }
 ]
 
 # This section is considered when running `cargo deny check sources`.

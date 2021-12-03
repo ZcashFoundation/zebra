@@ -36,6 +36,21 @@ pub struct Address {
     transmission_key: keys::TransmissionKey,
 }
 
+impl Address {
+    /// Creates a new [`sapling::Address`] from components.
+    pub fn new(
+        network: Network,
+        diversifier: keys::Diversifier,
+        transmission_key: keys::TransmissionKey,
+    ) -> Self {
+        Address {
+            network,
+            diversifier,
+            transmission_key,
+        }
+    }
+}
+
 impl fmt::Debug for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("SaplingAddress")
@@ -59,6 +74,22 @@ impl fmt::Display for Address {
         };
 
         bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
+    }
+}
+
+impl From<Address> for [u8; 43] {
+    /// Corresponds to the _raw encoding_ of an *Sapling* _shielded payment address_.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding>
+    fn from(addr: Address) -> [u8; 43] {
+        use std::convert::TryInto;
+
+        let mut bytes = io::Cursor::new(Vec::new());
+
+        let _ = bytes.write_all(&<[u8; 11]>::from(addr.diversifier));
+        let _ = bytes.write_all(&<[u8; 32]>::from(addr.transmission_key));
+
+        bytes.into_inner().try_into().expect("43 bytes")
     }
 }
 

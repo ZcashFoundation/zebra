@@ -2,6 +2,7 @@
 members = [
         "zebrad",
         "zebra-chain",
+        "zebra-cli",
         "zebra-network",
         "zebra-state",
         "zebra-script",

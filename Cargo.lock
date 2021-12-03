@@ -561,6 +561,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "checked_int_cast"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17cc5e6b5ab06331c33589842070416baa137e8b0eb912b008cfd4a78ada7919"
+
+[[package]]
 name = "chrono"
 version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -656,6 +662,12 @@ dependencies = [
  "tracing-core",
  "tracing-error",
 ]
+
+[[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "constant_time_eq"
@@ -1110,6 +1122,14 @@ checksum = "5f29abf4740a4778632fe27a4f681ef5b7a6f659aeba3330ac66f48e20cfa3b7"
 dependencies = [
  "indenter",
  "once_cell",
+]
+
+[[package]]
+name = "f4jumble"
+version = "0.0.0"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=53d0a51d33a421cb76d3e3124d1e4c1c9036068e#53d0a51d33a421cb76d3e3124d1e4c1c9036068e"
+dependencies = [
+ "blake2b_simd",
 ]
 
 [[package]]
@@ -1616,6 +1636,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "image"
+version = "0.23.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24ffcb7e7244a9bf19d35bf2883b9c080c4ced3c07a9895572178cdb8f13f6a1"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "color_quant",
+ "num-iter",
+ "num-rational",
+ "num-traits",
+]
+
+[[package]]
 name = "incrementalmerkletree"
 version = "0.1.0"
 source = "git+https://github.com/zcash/incrementalmerkletree.git?rev=b7bd6246122a6e9ace8edb51553fbf5228906cbb#b7bd6246122a6e9ace8edb51553fbf5228906cbb"
@@ -2114,6 +2148,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-iter"
+version = "0.1.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2021c8337a54d21aca0d59a92577a029af9431cb59b909b03252b9c164fad59"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12ac428b1cb17fce6f731001d307d351ec70a6d202fc2e60f7d4c5e42d8f4f07"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2485,6 +2541,16 @@ dependencies = [
  "proc-macro2 0.4.30",
  "quote 0.6.13",
  "syn 0.15.44",
+]
+
+[[package]]
+name = "qrcode"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16d2f1455f3630c6e5107b4f2b94e74d76dea80736de0981fd27644216cff57f"
+dependencies = [
+ "checked_int_cast",
+ "image",
 ]
 
 [[package]]
@@ -4222,6 +4288,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_address"
+version = "0.0.0"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=53d0a51d33a421cb76d3e3124d1e4c1c9036068e#53d0a51d33a421cb76d3e3124d1e4c1c9036068e"
+dependencies = [
+ "bech32",
+ "blake2b_simd",
+ "bs58",
+ "f4jumble",
+ "zcash_encoding 0.0.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=53d0a51d33a421cb76d3e3124d1e4c1c9036068e)",
+]
+
+[[package]]
+name = "zcash_encoding"
+version = "0.0.0"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=53d0a51d33a421cb76d3e3124d1e4c1c9036068e#53d0a51d33a421cb76d3e3124d1e4c1c9036068e"
+dependencies = [
+ "byteorder",
+ "nonempty",
+]
+
+[[package]]
 name = "zcash_encoding"
 version = "0.0.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
@@ -4285,7 +4372,7 @@ dependencies = [
  "rand_core 0.6.3",
  "sha2",
  "subtle",
- "zcash_encoding",
+ "zcash_encoding 0.0.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61)",
  "zcash_note_encryption",
 ]
 
@@ -4378,6 +4465,22 @@ dependencies = [
  "zcash_history",
  "zcash_note_encryption",
  "zcash_primitives",
+ "zebra-test",
+]
+
+[[package]]
+name = "zebra-cli"
+version = "1.0.0-alpha.0"
+dependencies = [
+ "abscissa_core",
+ "gumdrop",
+ "once_cell",
+ "qrcode",
+ "rand 0.8.4",
+ "serde",
+ "thiserror",
+ "zcash_address",
+ "zebra-chain",
  "zebra-test",
 ]
 

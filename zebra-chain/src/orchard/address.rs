@@ -1,6 +1,9 @@
 //! Orchard shielded payment addresses.
 
-use std::fmt;
+use std::{
+    fmt,
+    io::{self, Write},
+};
 
 use super::keys;
 
@@ -16,12 +19,38 @@ pub struct Address {
     pub(crate) transmission_key: keys::TransmissionKey,
 }
 
+impl Address {
+    /// Creates a new [`Address`] from components.
+    pub fn new(diversifier: keys::Diversifier, transmission_key: keys::TransmissionKey) -> Self {
+        Address {
+            diversifier,
+            transmission_key,
+        }
+    }
+}
+
 impl fmt::Debug for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("OrchardAddress")
             .field("diversifier", &self.diversifier)
             .field("transmission_key", &self.transmission_key)
             .finish()
+    }
+}
+
+impl From<Address> for [u8; 43] {
+    /// Corresponds to the _raw encoding_ of an *Orchard* _shielded payment address_.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding>
+    fn from(addr: Address) -> [u8; 43] {
+        use std::convert::TryInto;
+
+        let mut bytes = io::Cursor::new(Vec::new());
+
+        let _ = bytes.write_all(&<[u8; 11]>::from(addr.diversifier));
+        let _ = bytes.write_all(&<[u8; 32]>::from(addr.transmission_key));
+
+        bytes.into_inner().try_into().expect("43 bytes")
     }
 }
 
