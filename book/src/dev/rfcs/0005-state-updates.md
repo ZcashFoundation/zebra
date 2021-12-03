@@ -600,29 +600,46 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Column Family         | Keys                  | Values                               | Updates |
-|-----------------------|-----------------------|--------------------------------------|---------|
-| `hash_by_height`      | `BE32(height)`        | `block::Hash`                        | Never   |
-| `height_by_hash`      | `block::Hash`         | `BE32(height)`                       | Never   |
-| `block_by_height`     | `BE32(height)`        | `Block`                              | Never   |
-| `tx_by_hash`          | `transaction::Hash`   | `(BE32(height) \|\| BE32(tx_index))` | Never   |
-| `utxo_by_outpoint`    | `OutPoint`            | `transparent::Output`                | Delete  |
-| `sprout_nullifiers`   | `sprout::Nullifier`   | `()`                                 | Never   |
-| `sapling_nullifiers`  | `sapling::Nullifier`  | `()`                                 | Never   |
-| `orchard_nullifiers`  | `orchard::Nullifier`  | `()`                                 | Never   |
-| `sprout_anchors`      | `sprout::tree::Root`  | `()`                                 | Never   |
-| `sprout_incremental`  | `BE32(height)` *?*    | `sprout::tree::NoteCommitmentTree`   | Delete  |
-| `sapling_anchors`     | `sapling::tree::Root` | `()`                                 | Never   |
-| `sapling_incremental` | `BE32(height)` *?*    | `sapling::tree::NoteCommitmentTree`  | Delete  |
-| `orchard_anchors`     | `orchard::tree::Root` | `()`                                 | Never   |
-| `orchard_incremental` | `BE32(height)` *?*    | `orchard::tree::NoteCommitmentTree`  | Delete  |
-| `history_incremental` | `BE32(height)`        | `zcash_history::Entry`         | Delete  |
-| `tip_chain_value_pool`| `BE32(height)`        | `ValueBalance<NonNegative>`          | Delete  |
+| Column Family                 | Keys                   | Values                               | Updates |
+|-------------------------------|------------------------|--------------------------------------|---------|
+| `hash_by_height`              | `block::Height`        | `block::Hash`                        | Never   |
+| `height_by_hash`              | `block::Hash`          | `block::Height`                      | Never   |
+| `block_by_height`             | `block::Height`        | `Block`                              | Never   |
+| `tx_by_hash`                  | `transaction::Hash`    | `TransactionLocation`                | Never   |
+| `utxo_by_outpoint`            | `OutPoint`             | `transparent::Utxo`                  | Delete  |
+| `sprout_nullifiers`           | `sprout::Nullifier`    | `()`                                 | Never   |
+| `sprout_anchors`              | `sprout::tree::Root`   | `()`                                 | Never   |
+| `sprout_note_commitment_tree` | `block::Height`        | `sprout::tree::NoteCommitmentTree`   | Delete  |
+| `sapling_nullifiers`          | `sapling::Nullifier`   | `()`                                 | Never   |
+| `sapling_anchors`             | `sapling::tree::Root`  | `()`                                 | Never   |
+| `sapling_note_commitment_tree`| `block::Height`        | `sapling::tree::NoteCommitmentTree`  | Delete  |
+| `orchard_nullifiers`          | `orchard::Nullifier`   | `()`                                 | Never   |
+| `orchard_anchors`             | `orchard::tree::Root`  | `()`                                 | Never   |
+| `orchard_note_commitment_tree`| `block::Height`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
+| `history_tree`                | `block::Height`        | `zcash_history::Entry`               | Delete  |
+| `tip_chain_value_pool`        | `()`                   | `ValueBalance<NonNegative>`          | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
 
-**Note:** We do not store the cumulative work for the finalized chain, because the finalized work is equal for all non-finalized chains. So the additional non-finalized work can be used to calculate the relative chain order, and choose the best chain.
+Block and Transaction Data:
+- `Height`: 32 bits, big-endian, unsigned
+- `TransactionIndex`: 32 bits, big-endian, unsigned
+- `TransactionLocation`: `Height \|\| TransactionIndex`
+- `TransferIndex`: 32 bits, big-endian, unsigned
+- `OutPoint`: `transaction::Hash \|\| TransferIndex`
+- `IsFromCoinbase` : 8 bits, boolean, zero or one
+- `Utxo`: `Height \|\| IsFromCoinbase \|\| Output`
+
+We use big-endian encoding for keys, to allow database index prefix searches.
+
+Amounts:
+- `Amount`: 64 bits, little-endian, signed
+- `ValueBalance<NonNegative>`: `[Amount; 4]`
+
+Derived Formats:
+- `*::NoteCommitmentTree`: `bincode` using `serde`
+- `zcash_history::Entry`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
 
 ### Implementing consensus rules using rocksdb
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
@@ -673,7 +690,7 @@ So they should not be used for consensus-critical checks.
   the fact that we commit blocks in order means we're writing only to the end
   of the rocksdb column family, which may help save space.
 
-- Transaction references are stored as a `(height, index)` pair referencing the
+- `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
   block.  This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
@@ -689,7 +706,11 @@ So they should not be used for consensus-critical checks.
   But we map those peak indexes to heights, to make testing and debugging easier.
 
 - The value pools are only stored for the finalized tip.
-  We index it by height to make testing and debugging easier.
+
+- We do not store the cumulative work for the finalized chain,
+  because the finalized work is equal for all non-finalized chains.
+  So the additional non-finalized work can be used to calculate the relative chain order,
+  and choose the best chain.
 
 ## Committing finalized blocks
 
@@ -714,40 +735,17 @@ zebra-state service's responsibility) to commit finalized blocks in order.
 The genesis block does not have a parent block. For genesis blocks,
 check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
-2. Insert:
-    - `(hash, height)` into `height_by_hash`;
-    - `(height, hash)` into `hash_by_height`;
-    - `(height, block)` into `block_by_height`.
+2. Insert the block and transaction data into the relevant column families.
 
 3. If the block is a genesis block, skip any transaction updates.
 
     (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
     genesis block anchors and transactions are ignored during validation.)
 
-4.  Update the `sprout_anchors` and `sapling_anchors` trees with the Sprout and
-    Sapling anchors.
+4.  Update the block anchors, history tree, and chain value pools.
 
-5. Iterate over the enumerated transactions in the block. For each transaction:
-
-   1. Insert `(transaction_hash, BE32(block_height) || BE32(tx_index))` to
-   `tx_by_hash`;
-
-   2. For each `TransparentInput::PrevOut { outpoint, .. }` in the
-   transaction's `inputs()`, remove `outpoint` from `utxo_by_output`.
-
-   3. For each `output` in the transaction's `outputs()`, construct the
-   `outpoint` that identifies it, and insert `(outpoint, output)` into
-   `utxo_by_output`.
-
-   4. For each [`JoinSplit`] description in the transaction,
-   insert `(nullifiers[0],())` and `(nullifiers[1],())` into
-   `sprout_nullifiers`.
-
-   5. For each [`Spend`] description in the transaction, insert
-   `(nullifier,())` into `sapling_nullifiers`.
-
-   6. For each [`Action`] description in the transaction, insert
-   `(nullifier,())` into `orchard_nullifiers`.
+5. Iterate over the enumerated transactions in the block. For each transaction,
+   update the relevant column families.
 
 **Note**: The Sprout and Sapling anchors are the roots of the Sprout and
 Sapling note commitment trees that have already been calculated for the last
