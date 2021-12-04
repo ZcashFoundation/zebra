@@ -314,6 +314,10 @@ where
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
             }
 
+            // Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+            check::joinsplit_has_vpub_zero(&tx)?;
+
             // [Canopy onward]: `vpub_old` MUST be zero.
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::disabled_add_to_sprout_pool(&tx, req.height(), network)?;
@@ -636,12 +640,25 @@ where
         let mut checks = AsyncChecks::new();
 
         if let Some(joinsplit_data) = joinsplit_data {
-            // XXX create a method on JoinSplitData
-            // that prepares groth16::Items with the correct proofs
-            // and proof inputs, handling interstitial treestates
-            // correctly.
-
-            // Then, pass those items to self.joinsplit to verify them.
+            for joinsplit in joinsplit_data.joinsplits() {
+                // Consensus rule: The proof π_ZKSpend MUST be valid given a
+                // primary input formed from the relevant other fields and h_{Sig}
+                //
+                // Queue the verification of the Groth16 spend proof
+                // for each JoinSplit description while adding the
+                // resulting future to our collection of async
+                // checks that (at a minimum) must pass for the
+                // transaction to verify.
+                checks.push(
+                    primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
+                        primitives::groth16::ItemWrapper::from(&(
+                            joinsplit,
+                            &joinsplit_data.pub_key,
+                        ))
+                        .into(),
+                    ),
+                );
+            }
 
             // Consensus rule: The joinSplitSig MUST represent a
             // valid signature, under joinSplitPubKey, of the

@@ -22,7 +22,7 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 
 use tower_batch::{Batch, BatchControl};
-use tower_fallback::Fallback;
+use tower_fallback::{BoxedError, Fallback};
 
 use zebra_chain::{
     primitives::{
@@ -115,7 +115,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
-pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>> =
+pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), BoxedError>>>> =
     Lazy::new(|| {
         // We need a Service to use. The obvious way to do this would
         // be to write a closure that returns an async block. But because we
@@ -127,7 +127,8 @@ pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), Verif
         tower::service_fn(
             (|item: Item| {
                 ready(
-                    item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key),
+                    item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
+                        .map_err(tower_fallback::BoxedError::from),
                 )
             }) as fn(_) -> _,
         )

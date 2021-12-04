@@ -153,6 +153,9 @@ pub enum TransactionError {
     #[error("Downcast from BoxError to redjubjub::Error failed")]
     InternalDowncastError(String),
 
+    #[error("either vpub_old or vpub_new must be zero")]
+    BothVPubsNonZero,
+
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,
 
