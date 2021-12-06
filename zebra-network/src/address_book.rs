@@ -59,6 +59,12 @@ pub struct AddressBook {
     /// sorts in ascending order, but [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
+    /// The maximum number of addresses in the address book.
+    ///
+    /// Always set to [`MAX_ADDRS_IN_ADDRESS_BOOK`](constants::MAX_ADDRS_IN_ADDRESS_BOOK),
+    /// in release builds. Lower values are used during testing.
+    addr_limit: usize,
+
     /// The local listener address.
     local_listener: SocketAddr,
 
@@ -107,6 +113,7 @@ impl AddressBook {
 
         let mut new_book = AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
+            addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             local_listener: canonical_socket_addr(local_listener),
             span,
             last_address_log: None,
@@ -117,7 +124,9 @@ impl AddressBook {
     }
 
     /// Construct an [`AddressBook`] with the given `local_listener`,
-    /// [`tracing::Span`], and addresses.
+    /// `addr_limit`, [`tracing::Span`], and addresses.
+    ///
+    /// `addr_limit` is only enforced after the first [`AddressBook::update`] call.
     ///
     /// If there are multiple [`MetaAddr`]s with the same address,
     /// an arbitrary address is inserted into the address book,
@@ -128,6 +137,7 @@ impl AddressBook {
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn new_with_addrs(
         local_listener: SocketAddr,
+        addr_limit: usize,
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
     ) -> AddressBook {
@@ -138,6 +148,7 @@ impl AddressBook {
         let chrono_now = Utc::now();
 
         let mut new_book = AddressBook::new(local_listener, span);
+        new_book.addr_limit = addr_limit;
 
         let addrs = addrs
             .into_iter()
@@ -278,7 +289,7 @@ impl AddressBook {
             // then other peers could re-insert them into the address book.
             // And we would start connecting to those outdated peers again,
             // ignoring the age limit in [`MetaAddr::is_probably_reachable`].
-            while self.by_addr.len() > constants::MAX_ADDRS_IN_ADDRESS_BOOK {
+            while self.by_addr.len() > self.addr_limit {
                 let surplus_peer = self
                     .peers()
                     .next_back()

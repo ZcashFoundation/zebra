@@ -9,7 +9,7 @@ use tracing::Span;
 use zebra_chain::serialization::Duration32;
 
 use crate::{
-    constants::MAX_PEER_ACTIVE_FOR_GOSSIP,
+    constants::{MAX_ADDRS_IN_ADDRESS_BOOK, MAX_PEER_ACTIVE_FOR_GOSSIP},
     meta_addr::{arbitrary::MAX_META_ADDR, MetaAddr},
     AddressBook,
 };
@@ -25,7 +25,12 @@ proptest! {
         zebra_test::init();
         let chrono_now = Utc::now();
 
-        let address_book = AddressBook::new_with_addrs(local_listener, Span::none(), addresses);
+        let address_book = AddressBook::new_with_addrs(
+            local_listener,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            addresses
+        );
 
         for gossiped_address in address_book.sanitized(chrono_now) {
             let duration_since_last_seen = gossiped_address
@@ -48,7 +53,12 @@ proptest! {
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
-        let address_book = AddressBook::new_with_addrs(local_listener, Span::none(), addresses);
+        let address_book = AddressBook::new_with_addrs(
+            local_listener,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            addresses
+        );
 
         for peer in address_book.reconnection_peers(instant_now, chrono_now) {
             prop_assert!(peer.is_probably_reachable(chrono_now), "peer: {:?}", peer);

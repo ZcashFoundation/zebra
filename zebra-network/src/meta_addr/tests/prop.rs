@@ -19,7 +19,7 @@ use tracing::Span;
 use zebra_chain::serialization::DateTime32;
 
 use crate::{
-    constants::{MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
+    constants::{MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -154,8 +154,12 @@ proptest! {
 
         let chrono_now = Utc::now();
 
-        let address_book =
-            AddressBook::new_with_addrs(local_listener, Span::none(), address_book_addrs);
+        let address_book = AddressBook::new_with_addrs(
+            local_listener,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            address_book_addrs
+        );
         let sanitized_addrs = address_book.sanitized(chrono_now);
 
         let expected_local_listener = address_book.local_listener_meta_addr();
@@ -226,6 +230,7 @@ proptest! {
 
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addrs,
         )));
