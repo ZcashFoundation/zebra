@@ -138,6 +138,18 @@ pub const GET_ADDR_FANOUT: usize = 3;
 /// https://zips.z.cash/zip-0155#specification
 pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 
+/// The fraction of addresses Zebra sends in response to a `Peers` request.
+///
+/// Each response contains approximately:
+/// `address_book.len() / ADDR_RESPONSE_LIMIT_DENOMINATOR`
+/// addresses, selected at random from the address book.
+///
+/// # Security
+///
+/// This limit makes sure that Zebra does not reveal its entire address book
+/// in a single `Peers` response.
+pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 3;
+
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// ## SECURITY
