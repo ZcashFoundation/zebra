@@ -26,7 +26,7 @@ use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 #[cfg(test)]
-mod prop;
+mod tests;
 
 use crate::{
     amount::{Amount, NonNegative},
