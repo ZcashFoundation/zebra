@@ -600,24 +600,24 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Column Family                 | Keys                   | Values                               | Updates |
-|-------------------------------|------------------------|--------------------------------------|---------|
-| `hash_by_height`              | `block::Height`        | `block::Hash`                        | Never   |
-| `height_by_hash`              | `block::Hash`          | `block::Height`                      | Never   |
-| `block_by_height`             | `block::Height`        | `Block`                              | Never   |
-| `tx_by_hash`                  | `transaction::Hash`    | `TransactionLocation`                | Never   |
-| `utxo_by_outpoint`            | `OutPoint`             | `transparent::Utxo`                  | Delete  |
-| `sprout_nullifiers`           | `sprout::Nullifier`    | `()`                                 | Never   |
-| `sprout_anchors`              | `sprout::tree::Root`   | `()`                                 | Never   |
-| `sprout_note_commitment_tree` | `block::Height`        | `sprout::tree::NoteCommitmentTree`   | Delete  |
-| `sapling_nullifiers`          | `sapling::Nullifier`   | `()`                                 | Never   |
-| `sapling_anchors`             | `sapling::tree::Root`  | `()`                                 | Never   |
-| `sapling_note_commitment_tree`| `block::Height`        | `sapling::tree::NoteCommitmentTree`  | Delete  |
-| `orchard_nullifiers`          | `orchard::Nullifier`   | `()`                                 | Never   |
-| `orchard_anchors`             | `orchard::tree::Root`  | `()`                                 | Never   |
-| `orchard_note_commitment_tree`| `block::Height`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
-| `history_tree`                | `block::Height`        | `zcash_history::Entry`               | Delete  |
-| `tip_chain_value_pool`        | `()`                   | `ValueBalance<NonNegative>`          | Update  |
+| Column Family                  | Keys                   | Values                               | Updates |
+|--------------------------------|------------------------|--------------------------------------|---------|
+| `hash_by_height`               | `block::Height`        | `block::Hash`                        | Never   |
+| `height_by_hash`               | `block::Hash`          | `block::Height`                      | Never   |
+| `block_by_height`              | `block::Height`        | `Block`                              | Never   |
+| `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`                | Never   |
+| `utxo_by_outpoint`             | `OutPoint`             | `transparent::Utxo`                  | Delete  |
+| `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                 | Never   |
+| `sprout_anchors`               | `sprout::tree::Root`   | `()`                                 | Never   |
+| `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`   | Delete  |
+| `sapling_nullifiers`           | `sapling::Nullifier`   | `()`                                 | Never   |
+| `sapling_anchors`              | `sapling::tree::Root`  | `()`                                 | Never   |
+| `sapling_note_commitment_tree` | `block::Height`        | `sapling::tree::NoteCommitmentTree`  | Delete  |
+| `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                 | Never   |
+| `orchard_anchors`              | `orchard::tree::Root`  | `()`                                 | Never   |
+| `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
+| `history_tree`                 | `block::Height`        | `zcash_history::Entry`               | Delete  |
+| `tip_chain_value_pool`         | `()`                   | `ValueBalance<NonNegative>`          | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
@@ -626,8 +626,8 @@ Block and Transaction Data:
 - `Height`: 32 bits, big-endian, unsigned
 - `TransactionIndex`: 32 bits, big-endian, unsigned
 - `TransactionLocation`: `Height \|\| TransactionIndex`
-- `TransferIndex`: 32 bits, big-endian, unsigned
-- `OutPoint`: `transaction::Hash \|\| TransferIndex`
+- `TransparentOutputIndex`: 32 bits, big-endian, unsigned
+- `OutPoint`: `transaction::Hash \|\| TransparentOutputIndex`
 - `IsFromCoinbase` : 8 bits, boolean, zero or one
 - `Utxo`: `Height \|\| IsFromCoinbase \|\| Output`
 
