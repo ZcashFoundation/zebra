@@ -126,7 +126,7 @@ impl AddressBook {
     /// Construct an [`AddressBook`] with the given `local_listener`,
     /// `addr_limit`, [`tracing::Span`], and addresses.
     ///
-    /// `addr_limit` is only enforced after the first [`AddressBook::update`] call.
+    /// `addr_limit` is enforced by this method, and by [`AddressBook::update`].
     ///
     /// If there are multiple [`MetaAddr`]s with the same address,
     /// an arbitrary address is inserted into the address book,
@@ -157,6 +157,7 @@ impl AddressBook {
                 meta_addr
             })
             .filter(MetaAddr::address_is_valid_for_outbound)
+            .take(addr_limit)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
 
         for (socket_addr, meta_addr) in addrs {
@@ -297,6 +298,8 @@ impl AddressBook {
 
                 self.by_addr.remove(&surplus_peer.addr);
             }
+
+            assert!(self.len() <= self.addr_limit);
 
             std::mem::drop(_guard);
             self.update_metrics(instant_now, chrono_now);
