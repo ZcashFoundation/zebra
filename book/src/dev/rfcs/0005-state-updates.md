@@ -635,7 +635,7 @@ We use big-endian encoding for keys, to allow database index prefix searches.
 
 Amounts:
 - `Amount`: 64 bits, little-endian, signed
-- `ValueBalance<NonNegative>`: `[Amount; 4]`
+- `ValueBalance`: `[Amount; 4]`
 
 Derived Formats:
 - `*::NoteCommitmentTree`: `bincode` using `serde`
