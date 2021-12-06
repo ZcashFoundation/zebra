@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use zebra_chain::{block, chain_tip::ChainTip, transaction};
+use zebra_chain::{block, chain_tip::ChainTip, parameters::Network, transaction};
+
+use super::MinimumPeerVersion;
 
 #[cfg(test)]
 mod prop;
@@ -42,5 +44,14 @@ impl ChainTip for MockChainTip {
 
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         unreachable!("Method not used in `MinimumPeerVersion` tests");
+    }
+}
+
+impl MinimumPeerVersion<MockChainTip> {
+    pub fn with_mock_chain_tip(network: Network) -> (Self, watch::Sender<Option<block::Height>>) {
+        let (chain_tip, best_tip_height) = MockChainTip::new();
+        let minimum_peer_version = MinimumPeerVersion::new(chain_tip, network);
+
+        (minimum_peer_version, best_tip_height)
     }
 }
