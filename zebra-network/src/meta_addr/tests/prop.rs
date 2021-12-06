@@ -248,9 +248,13 @@ proptest! {
                     attempt_count += 1;
                     prop_assert!(
                         attempt_count <= 1,
-                        "candidate: {:?}, change: {}, now: {:?}, earliest next attempt: {:?}, \
-                         attempts: {}, live peer interval limit: {}, test time limit: {:?}, \
-                         peer change interval: {:?}, original addr was in address book: {}",
+                        "candidate: {:?},\n \
+                         change: {},\n \
+                         now: {:?},\n \
+                         earliest next attempt: {:?},\n \
+                         attempts: {}, live peer interval limit: {},\n \
+                         test time limit: {:?}, peer change interval: {:?},\n \
+                         original addr was in address book: {}\n",
                         candidate_addr,
                         i,
                         Instant::now(),
