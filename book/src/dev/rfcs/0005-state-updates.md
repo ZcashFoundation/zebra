@@ -617,7 +617,7 @@ We use the following rocksdb column families:
 | `orchard_anchors`              | `orchard::tree::Root`  | `()`                                 | Never   |
 | `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
 | `history_tree`                 | `block::Height`        | `zcash_history::Entry`               | Delete  |
-| `tip_chain_value_pool`         | `()`                   | `ValueBalance<NonNegative>`          | Update  |
+| `tip_chain_value_pool`         | `()`                   | `ValueBalance`                       | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
