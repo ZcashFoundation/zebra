@@ -26,7 +26,7 @@ use zebra_state as zs;
 use zebra_chain::block::{self, Block};
 use zebra_consensus::chain::VerifyChainError;
 use zebra_network::{
-    constants::{MAX_ADDRS_IN_MESSAGE, ADDR_RESPONSE_LIMIT_DENOMINATOR},
+    constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     AddressBook,
 };
 
