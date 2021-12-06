@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
 use tokio::{runtime, time::Instant};
 use tower::service_fn;
@@ -18,7 +19,7 @@ use tracing::Span;
 use zebra_chain::serialization::DateTime32;
 
 use crate::{
-    constants::{MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
+    constants::{MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -112,10 +113,13 @@ proptest! {
     ) {
         zebra_test::init();
 
+        let instant_now = std::time::Instant::now();
+        let chrono_now = Utc::now();
+
         let mut attempt_count: usize = 0;
 
         for change in changes {
-            while addr.is_ready_for_connection_attempt() {
+            while addr.is_ready_for_connection_attempt(instant_now, chrono_now) {
                 attempt_count += 1;
                 // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
                 prop_assert!(attempt_count <= 1);
@@ -148,9 +152,15 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let address_book =
-            AddressBook::new_with_addrs(local_listener, Span::none(), address_book_addrs);
-        let sanitized_addrs = address_book.sanitized();
+        let chrono_now = Utc::now();
+
+        let address_book = AddressBook::new_with_addrs(
+            local_listener,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            address_book_addrs
+        );
+        let sanitized_addrs = address_book.sanitized(chrono_now);
 
         let expected_local_listener = address_book.local_listener_meta_addr();
         let canonical_local_listener = canonical_socket_addr(local_listener);
@@ -220,6 +230,7 @@ proptest! {
 
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addrs,
         )));
@@ -242,9 +253,13 @@ proptest! {
                     attempt_count += 1;
                     prop_assert!(
                         attempt_count <= 1,
-                        "candidate: {:?}, change: {}, now: {:?}, earliest next attempt: {:?}, \
-                         attempts: {}, live peer interval limit: {}, test time limit: {:?}, \
-                         peer change interval: {:?}, original addr was in address book: {}",
+                        "candidate: {:?},\n \
+                         change: {},\n \
+                         now: {:?},\n \
+                         earliest next attempt: {:?},\n \
+                         attempts: {}, live peer interval limit: {},\n \
+                         test time limit: {:?}, peer change interval: {:?},\n \
+                         original addr was in address book: {}\n",
                         candidate_addr,
                         i,
                         Instant::now(),
@@ -289,6 +304,9 @@ proptest! {
     ) {
         zebra_test::init();
 
+        let instant_now = std::time::Instant::now();
+        let chrono_now = Utc::now();
+
         // Run the test for this many simulated live peer durations
         const LIVE_PEER_INTERVALS: u32 = 3;
         // Run the test for this much simulated time
@@ -322,7 +340,7 @@ proptest! {
                     let addr = addrs.entry(addr.addr).or_insert(*addr);
                     let change = changes.get(change_index);
 
-                    while addr.is_ready_for_connection_attempt() {
+                    while addr.is_ready_for_connection_attempt(instant_now, chrono_now) {
                         *attempt_counts.entry(addr.addr).or_default() += 1;
                         prop_assert!(
                             *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
@@ -362,16 +380,18 @@ proptest! {
     /// Make sure check if a peer was recently seen is correct.
     #[test]
     fn last_seen_is_recent_is_correct(peer in any::<MetaAddr>()) {
+        let chrono_now = Utc::now();
+
         let time_since_last_seen = peer
             .last_seen()
-            .map(|last_seen| last_seen.saturating_elapsed());
+            .map(|last_seen| last_seen.saturating_elapsed(chrono_now));
 
         let recently_seen = time_since_last_seen
             .map(|elapsed| elapsed <= MAX_RECENT_PEER_AGE)
             .unwrap_or(false);
 
         prop_assert_eq!(
-            peer.last_seen_is_recent(),
+            peer.last_seen_is_recent(chrono_now),
             recently_seen,
             "last seen: {:?}, now: {:?}",
             peer.last_seen(),
@@ -382,13 +402,16 @@ proptest! {
     /// Make sure a peer is correctly determined to be probably reachable.
     #[test]
     fn probably_rechable_is_determined_correctly(peer in any::<MetaAddr>()) {
+
+        let chrono_now = Utc::now();
+
         let last_attempt_failed = peer.last_connection_state == Failed;
-        let not_recently_seen = !peer.last_seen_is_recent();
+        let not_recently_seen = !peer.last_seen_is_recent(chrono_now);
 
         let probably_unreachable = last_attempt_failed && not_recently_seen;
 
         prop_assert_eq!(
-            peer.is_probably_reachable(),
+            peer.is_probably_reachable(chrono_now),
             !probably_unreachable,
             "last_connection_state: {:?}, last_seen: {:?}",
             peer.last_connection_state,

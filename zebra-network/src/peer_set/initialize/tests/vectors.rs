@@ -20,6 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     FutureExt, StreamExt,
@@ -184,7 +185,7 @@ async fn peer_limit_zero_mainnet() {
         address_book.lock().unwrap().peers().count(),
         0,
         "expected no peers in Mainnet address book, but got: {:?}",
-        address_book.lock().unwrap().address_metrics()
+        address_book.lock().unwrap().address_metrics(Utc::now())
     );
 }
 
@@ -205,7 +206,7 @@ async fn peer_limit_zero_testnet() {
         address_book.lock().unwrap().peers().count(),
         0,
         "expected no peers in Testnet address book, but got: {:?}",
-        address_book.lock().unwrap().address_metrics()
+        address_book.lock().unwrap().address_metrics(Utc::now())
     );
 }
 
@@ -1405,7 +1406,7 @@ where
         over_limit_peers,
         "expected {} peers in Mainnet address book, but got: {:?}",
         over_limit_peers,
-        address_book.lock().unwrap().address_metrics()
+        address_book.lock().unwrap().address_metrics(Utc::now())
     );
 
     (config, peerset_rx)
