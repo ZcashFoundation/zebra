@@ -1,5 +1,6 @@
 use std::{cmp::min, sync::Arc};
 
+use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
@@ -317,9 +318,14 @@ where
         // be kept to a minimum.
         let reconnect = {
             let mut guard = self.address_book.lock().unwrap();
+
+            // Now we have the lock, get the current time
+            let instant_now = std::time::Instant::now();
+            let chrono_now = Utc::now();
+
             // It's okay to return without sleeping here, because we're returning
             // `None`. We only need to sleep before yielding an address.
-            let reconnect = guard.reconnection_peers().next()?;
+            let reconnect = guard.reconnection_peers(instant_now, chrono_now).next()?;
 
             let reconnect = MetaAddr::new_reconnect(&reconnect.addr);
             guard.update(reconnect)?

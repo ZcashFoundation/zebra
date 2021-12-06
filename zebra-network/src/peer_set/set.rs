@@ -55,6 +55,7 @@ use std::{
     time::Instant,
 };
 
+use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     future::{FutureExt, TryFutureExt},
@@ -675,9 +676,15 @@ where
         //
         // Only log address metrics in exceptional circumstances, to avoid lock contention.
         //
+        // Get the current time after acquiring the address book lock.
+        //
         // TODO: replace with a watch channel that is updated in `AddressBook::update_metrics()`,
         //       or turn the address book into a service (#1976)
-        let address_metrics = self.address_book.lock().unwrap().address_metrics();
+        let address_metrics = self
+            .address_book
+            .lock()
+            .unwrap()
+            .address_metrics(Utc::now());
         if unready_services_len == 0 {
             warn!(
                 ?address_metrics,
@@ -704,7 +711,12 @@ where
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {
-            let address_metrics = self.address_book.lock().unwrap().address_metrics();
+            // Correctness: Get the current time after acquiring the address book lock.
+            let address_metrics = self
+                .address_book
+                .lock()
+                .unwrap()
+                .address_metrics(Utc::now());
             panic!(
                 "unexpectedly exceeded configured peer set connection limit: \n\
                  peers: {:?}, ready: {:?}, unready: {:?}, \n\
