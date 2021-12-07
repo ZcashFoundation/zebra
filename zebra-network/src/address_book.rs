@@ -8,8 +8,8 @@ use ordered_map::OrderedMap;
 use tracing::Span;
 
 use crate::{
-    meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr, types::MetaAddr,
-    PeerAddrState,
+    constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
+    types::MetaAddr, PeerAddrState,
 };
 
 #[cfg(test)]
@@ -59,6 +59,12 @@ pub struct AddressBook {
     /// sorts in ascending order, but [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
+    /// The maximum number of addresses in the address book.
+    ///
+    /// Always set to [`MAX_ADDRS_IN_ADDRESS_BOOK`](constants::MAX_ADDRS_IN_ADDRESS_BOOK),
+    /// in release builds. Lower values are used during testing.
+    addr_limit: usize,
+
     /// The local listener address.
     local_listener: SocketAddr,
 
@@ -107,6 +113,7 @@ impl AddressBook {
 
         let mut new_book = AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
+            addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             local_listener: canonical_socket_addr(local_listener),
             span,
             last_address_log: None,
@@ -117,7 +124,9 @@ impl AddressBook {
     }
 
     /// Construct an [`AddressBook`] with the given `local_listener`,
-    /// [`tracing::Span`], and addresses.
+    /// `addr_limit`, [`tracing::Span`], and addresses.
+    ///
+    /// `addr_limit` is enforced by this method, and by [`AddressBook::update`].
     ///
     /// If there are multiple [`MetaAddr`]s with the same address,
     /// an arbitrary address is inserted into the address book,
@@ -128,6 +137,7 @@ impl AddressBook {
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn new_with_addrs(
         local_listener: SocketAddr,
+        addr_limit: usize,
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
     ) -> AddressBook {
@@ -138,6 +148,7 @@ impl AddressBook {
         let chrono_now = Utc::now();
 
         let mut new_book = AddressBook::new(local_listener, span);
+        new_book.addr_limit = addr_limit;
 
         let addrs = addrs
             .into_iter()
@@ -146,6 +157,7 @@ impl AddressBook {
                 meta_addr
             })
             .filter(MetaAddr::address_is_valid_for_outbound)
+            .take(addr_limit)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
 
         for (socket_addr, meta_addr) in addrs {
@@ -270,6 +282,25 @@ impl AddressBook {
             }
 
             self.by_addr.insert(updated.addr, updated);
+
+            // Security: Limit the number of peers in the address book.
+            //
+            // We only delete outdated peers when we have too many peers.
+            // If we deleted them as soon as they became too old,
+            // then other peers could re-insert them into the address book.
+            // And we would start connecting to those outdated peers again,
+            // ignoring the age limit in [`MetaAddr::is_probably_reachable`].
+            while self.by_addr.len() > self.addr_limit {
+                let surplus_peer = self
+                    .peers()
+                    .next_back()
+                    .expect("just checked there is at least one peer");
+
+                self.by_addr.remove(&surplus_peer.addr);
+            }
+
+            assert!(self.len() <= self.addr_limit);
+
             std::mem::drop(_guard);
             self.update_metrics(instant_now, chrono_now);
         }
@@ -320,7 +351,7 @@ impl AddressBook {
     /// Return an iterator over all peers.
     ///
     /// Returns peers in reconnection attempt order, including recently connected peers.
-    pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + '_ {
+    pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
         let _guard = self.span.enter();
         self.by_addr.descending_values().cloned()
     }
@@ -331,7 +362,7 @@ impl AddressBook {
         &'_ self,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
-    ) -> impl Iterator<Item = MetaAddr> + '_ {
+    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
         let _guard = self.span.enter();
 
         // Skip live peers, and peers pending a reconnect attempt.
@@ -344,7 +375,10 @@ impl AddressBook {
 
     /// Return an iterator over all the peers in `state`,
     /// in reconnection attempt order, including recently connected peers.
-    pub fn state_peers(&'_ self, state: PeerAddrState) -> impl Iterator<Item = MetaAddr> + '_ {
+    pub fn state_peers(
+        &'_ self,
+        state: PeerAddrState,
+    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
@@ -359,7 +393,7 @@ impl AddressBook {
         &'_ self,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
-    ) -> impl Iterator<Item = MetaAddr> + '_ {
+    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
@@ -373,7 +407,7 @@ impl AddressBook {
     pub fn recently_live_peers(
         &'_ self,
         now: chrono::DateTime<Utc>,
-    ) -> impl Iterator<Item = MetaAddr> + '_ {
+    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
