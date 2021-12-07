@@ -27,8 +27,8 @@ use zebra_state as zs;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// We allow an extra checkpoint's worth of blocks in the verifier and state queues.
-const EXTRA_DOWNLOADS_LOOKAHEAD: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+/// We allow an extra two checkpoints' worth of blocks in the verifier and state queues.
+const EXTRA_DOWNLOADS_LOOKAHEAD: usize = 2 * zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
