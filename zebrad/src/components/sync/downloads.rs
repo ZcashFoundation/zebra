@@ -180,6 +180,7 @@ where
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Report> {
         if self.cancel_handles.contains_key(&hash) {
+            metrics::counter!("sync.already.queued.dropped.block.hash.count", 1);
             return Err(eyre!("duplicate hash queued for download: {:?}", hash));
         }
 
