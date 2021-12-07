@@ -3,9 +3,12 @@
 use std::{convert::TryInto, ops::Deref, sync::Arc};
 
 use zebra_chain::{
+    amount::Amount,
     block::{Block, Height},
+    primitives::Groth16Proof,
     serialization::ZcashDeserializeInto,
-    transaction::{LockTime, Transaction},
+    sprout::JoinSplit,
+    transaction::{JoinSplitData, LockTime, Transaction},
 };
 
 use crate::{
@@ -32,32 +35,48 @@ fn check_sprout_anchors() {
     // Convert the coinbase transaction to a version that the non-finalized state will accept.
     block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
 
-    // Prime finalized state with the Sapling start + 1, which has the first
-    // JoinSplits on Groth16.
-    let block_419201 = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+    let block_396 = zebra_test::vectors::BLOCK_MAINNET_396_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
 
-    block_419201
+    block_396
         .transactions
         .into_iter()
         .filter(|tx| tx.has_sprout_joinsplit_data())
         .for_each(|tx| {
             let joinsplit_data = match tx.deref() {
-                Transaction::V4 { joinsplit_data, .. } => joinsplit_data.clone(),
-                _ => unreachable!("These are known v4 transactions"),
+                Transaction::V2 { joinsplit_data, .. } => joinsplit_data.clone(),
+                _ => unreachable!("These are known v2 transactions"),
             };
 
-            // Set value balance to 0 to pass the chain value pool checks.
-            let joinsplit_data = joinsplit_data.map(|mut s| {
-                for joinsplit in s.joinsplits_mut() {
-                    let zero_amount = 0.try_into().expect("unexpected invalid zero amount");
+            let joinsplit_data = joinsplit_data.map(|s| {
+                let mut new_joinsplits: Vec<JoinSplit<Groth16Proof>> = Vec::new();
 
-                    joinsplit.vpub_old = zero_amount;
-                    joinsplit.vpub_new = zero_amount;
+                for old_joinsplit in s.joinsplits() {
+                    new_joinsplits.push(JoinSplit {
+                        vpub_old: Amount::zero(),
+                        vpub_new: Amount::zero(),
+                        anchor: old_joinsplit.anchor,
+                        nullifiers: old_joinsplit.nullifiers,
+                        commitments: old_joinsplit.commitments,
+                        ephemeral_key: old_joinsplit.ephemeral_key,
+                        random_seed: old_joinsplit.random_seed,
+                        vmacs: old_joinsplit.vmacs.clone(),
+                        zkproof: Groth16Proof::from([0; 192]),
+                        enc_ciphertexts: old_joinsplit.enc_ciphertexts,
+                    })
                 }
 
-                s
+                match new_joinsplits.split_first() {
+                    None => unreachable!("the new joinsplits are never empty"),
+
+                    Some((first, rest)) => JoinSplitData {
+                        first: first.clone(),
+                        rest: rest.to_vec(),
+                        pub_key: s.pub_key,
+                        sig: s.sig,
+                    },
+                }
             });
 
             block1.transactions.push(Arc::new(Transaction::V4 {
