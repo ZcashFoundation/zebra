@@ -1,0 +1,363 @@
+//! Fixed test vectors for the syncer.
+
+use std::{collections::HashMap, iter, sync::Arc, time::Duration};
+
+use color_eyre::Report;
+use futures::{Future, FutureExt};
+
+use zebra_chain::{
+    block::{self, Block},
+    chain_tip::mock::{MockChainTip, MockChainTipSender},
+    serialization::ZcashDeserializeInto,
+};
+use zebra_consensus::Config as ConsensusConfig;
+use zebra_state::Config as StateConfig;
+use zebra_test::mock_service::{MockService, PanicAssertion};
+
+use zebra_network as zn;
+use zebra_state as zs;
+
+use crate::{
+    components::{
+        sync::{self, SyncStatus},
+        ChainSync,
+    },
+    config::ZebradConfig,
+};
+
+/// Maximum time to wait for a network service request.
+///
+/// The default [`MockService`] value can be too short for some of these tests that take a little
+/// longer than expected to actually send the network request.
+///
+/// Increasing this value causes the tests to take longer to complete, so it can't be too large.
+const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
+
+/// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
+///
+/// This test also makes sure that the syncer downloads blocks in order.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
+    // Get services
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut chain_verifier,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    // Get blocks
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let block2_hash = block2.hash();
+
+    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?;
+    let block3_hash = block3.hash();
+
+    let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
+    let block4_hash = block4.hash();
+
+    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
+    let block5_hash = block5.hash();
+
+    // Start the syncer
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    // ChainSync::request_genesis
+
+    // State is checked for genesis
+    state_service
+        .expect_request(zs::Request::Depth(block0_hash))
+        .await
+        .respond(zs::Response::Depth(None));
+
+    // Block 0 is fetched and committed to the state
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![block0.clone()]));
+
+    chain_verifier
+        .expect_request(block0)
+        .await
+        .respond(block0_hash);
+
+    // Check that nothing unexpected happened.
+    // We expect more requests to the state service, because the syncer keeps on running.
+    peer_set.expect_no_requests().await;
+    chain_verifier.expect_no_requests().await;
+
+    // State is checked for genesis again
+    state_service
+        .expect_request(zs::Request::Depth(block0_hash))
+        .await
+        .respond(zs::Response::Depth(Some(0)));
+
+    // ChainSync::obtain_tips
+
+    // State is asked for a block locator.
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    // Network is sent the block locator
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![
+            block1_hash, // tip
+            block2_hash, // expected_next
+            block3_hash, // (discarded - last hash, possibly incorrect)
+        ]));
+
+    // State is checked for the first unknown block (block 1)
+    state_service
+        .expect_request(zs::Request::Depth(block1_hash))
+        .await
+        .respond(zs::Response::Depth(None));
+
+    // Clear remaining block locator requests
+    for _ in 0..(sync::FANOUT - 1) {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block0_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test obtain tips error")));
+    }
+
+    // Check that nothing unexpected happened.
+    peer_set.expect_no_requests().await;
+    chain_verifier.expect_no_requests().await;
+
+    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    state_service
+        .expect_request(zs::Request::Depth(block1_hash))
+        .await
+        .respond(zs::Response::Depth(None));
+    state_service
+        .expect_request(zs::Request::Depth(block2_hash))
+        .await
+        .respond(zs::Response::Depth(None));
+
+    // Blocks 1 & 2 are fetched in order, then verified concurrently
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![block1.clone()]));
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![block2.clone()]));
+
+    // We can't guarantee the verification request order
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
+        [(block1_hash, block1), (block2_hash, block2)]
+            .iter()
+            .cloned()
+            .collect();
+
+    for _ in 1..=2 {
+        chain_verifier
+            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .await
+            .respond_with(|req| req.hash());
+    }
+    assert_eq!(
+        remaining_blocks,
+        HashMap::new(),
+        "expected all non-tip blocks to be verified by obtain tips"
+    );
+
+    // Check that nothing unexpected happened.
+    chain_verifier.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    // ChainSync::extend_tips
+
+    // Network is sent a block locator based on the tip
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block1_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![
+            block2_hash, // tip (discarded - already fetched)
+            block3_hash, // expected_next
+            block4_hash,
+            block5_hash, // (discarded - last hash, possibly incorrect)
+        ]));
+
+    // Clear remaining block locator requests
+    for _ in 0..(sync::FANOUT - 1) {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block1_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
+    }
+
+    // Check that nothing unexpected happened.
+    chain_verifier.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    // Blocks 3 & 4 are fetched in order, then verified concurrently
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![block3.clone()]));
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![block4.clone()]));
+
+    // We can't guarantee the verification request order
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
+        [(block3_hash, block3), (block4_hash, block4)]
+            .iter()
+            .cloned()
+            .collect();
+
+    for _ in 3..=4 {
+        chain_verifier
+            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .await
+            .respond_with(|req| req.hash());
+    }
+    assert_eq!(
+        remaining_blocks,
+        HashMap::new(),
+        "expected all non-tip blocks to be verified by extend tips"
+    );
+
+    // Check that nothing unexpected happened.
+    chain_verifier.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        matches!(chain_sync_result, None),
+        "unexpected error or panic in chain sync task: {:?}",
+        chain_sync_result,
+    );
+
+    Ok(())
+}
+
+/// Test that zebra-network rejects blocks with the wrong hash.
+#[tokio::test]
+async fn sync_block_wrong_hash() -> Result<(), crate::BoxError> {
+    // Get services
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut chain_verifier,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    // Get blocks
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    // Get a block that is a long way away from genesis
+    let block982k: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+
+    // Start the syncer
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    // State is checked for genesis
+    state_service
+        .expect_request(zs::Request::Depth(block0_hash))
+        .await
+        .respond(zs::Response::Depth(None));
+
+    // Block 0 is fetched, but the peer returns a much higher block
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![block982k.clone()]));
+
+    // Block is dropped because it has the wrong hash.
+    // We expect more requests to the state service, because the syncer keeps on running.
+    peer_set.expect_no_requests().await;
+    chain_verifier.expect_no_requests().await;
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        matches!(chain_sync_result, None),
+        "unexpected error or panic in chain sync task: {:?}",
+        chain_sync_result,
+    );
+
+    Ok(())
+}
+
+fn setup() -> (
+    // ChainSync
+    impl Future<Output = Result<(), Report>> + Send,
+    SyncStatus,
+    // ChainVerifier
+    MockService<Arc<Block>, block::Hash, PanicAssertion>,
+    // PeerSet
+    MockService<zebra_network::Request, zebra_network::Response, PanicAssertion>,
+    // StateService
+    MockService<zebra_state::Request, zebra_state::Response, PanicAssertion>,
+    MockChainTipSender,
+) {
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+    let config = ZebradConfig {
+        consensus: consensus_config,
+        state: state_config,
+        ..Default::default()
+    };
+
+    let peer_set = MockService::build()
+        .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+        .for_unit_tests();
+
+    let chain_verifier = MockService::build().for_unit_tests();
+
+    let state_service = MockService::build().for_unit_tests();
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+
+    let (chain_sync, sync_status) = ChainSync::new(
+        &config,
+        peer_set.clone(),
+        chain_verifier.clone(),
+        state_service.clone(),
+        mock_chain_tip,
+    );
+
+    let chain_sync_future = chain_sync.sync();
+
+    (
+        chain_sync_future,
+        sync_status,
+        chain_verifier,
+        peer_set,
+        state_service,
+        mock_chain_tip_sender,
+    )
+}
