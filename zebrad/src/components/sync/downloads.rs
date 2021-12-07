@@ -27,6 +27,9 @@ use zebra_state as zs;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// We allow an extra checkpoint's worth of blocks in the verifier and state queues.
+const EXTRA_DOWNLOADS_LOOKAHEAD: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
 
@@ -240,7 +243,8 @@ where
                 let tip_height = latest_chain_tip.best_tip_height();
 
                 let max_lookahead_height = if let Some(tip_height) = tip_height {
-                    let lookahead = i32::try_from(lookahead_limit).expect("fits in i32");
+                    let lookahead = i32::try_from(lookahead_limit + EXTRA_DOWNLOADS_LOOKAHEAD)
+                        .expect("fits in i32");
                     (tip_height + lookahead).expect("tip is much lower than Height::MAX")
                 } else {
                     let genesis_lookahead =
