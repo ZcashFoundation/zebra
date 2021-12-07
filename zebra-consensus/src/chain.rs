@@ -76,9 +76,18 @@ where
         + 'static,
     V::Future: Send + 'static,
 {
-    block: BlockVerifier<S, V>,
+    /// The checkpointing block verifier.
+    ///
+    /// Always used for blocks before `Canopy`, optionally used for the entire checkpoint list.
     checkpoint: CheckpointVerifier<S>,
+
+    /// The highest permitted checkpoint block.
+    ///
+    /// This height must be in the `checkpoint` verifier's checkpoint list.
     max_checkpoint_height: block::Height,
+
+    /// The full block verifier, used for blocks after `max_checkpoint_height`.
+    block: BlockVerifier<S, V>,
 }
 
 /// An error while semantically verifying a block.
@@ -248,9 +257,9 @@ where
     let block = BlockVerifier::new(network, state_service.clone(), transaction.clone());
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let chain = ChainVerifier {
-        block,
         checkpoint,
         max_checkpoint_height,
+        block,
     };
 
     let chain = Buffer::new(BoxService::new(chain), VERIFIER_BUFFER_BOUND);
