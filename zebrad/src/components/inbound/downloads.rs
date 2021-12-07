@@ -227,6 +227,12 @@ where
                 .oneshot(zn::Request::BlocksByHash(std::iter::once(hash).collect()))
                 .await?
             {
+                assert_eq!(
+                    blocks.len(),
+                    1,
+                    "wrong number of blocks in response to a single hash"
+                );
+
                 blocks
                     .into_iter()
                     .next()

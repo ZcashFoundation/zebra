@@ -191,6 +191,12 @@ where
                 };
 
                 let block = if let zn::Response::Blocks(blocks) = rsp {
+                    assert_eq!(
+                        blocks.len(),
+                        1,
+                        "wrong number of blocks in response to a single hash"
+                    );
+
                     blocks
                         .into_iter()
                         .next()
