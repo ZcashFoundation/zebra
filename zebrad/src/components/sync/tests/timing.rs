@@ -1,9 +1,12 @@
-use futures::future;
 use std::sync::{
     atomic::{AtomicU8, Ordering},
     Arc,
 };
+
+use futures::future;
 use tokio::time::{timeout, Duration};
+
+use zebra_chain::parameters::Network;
 
 use super::super::*;
 use crate::config::ZebradConfig;
@@ -107,6 +110,9 @@ fn request_genesis_is_rate_limited() {
         }
     });
 
+    // create an empty latest chain tip
+    let (_sender, latest_chain_tip, _change) = zs::ChainTipSender::new(None, Network::Mainnet);
+
     // create a verifier service that will always panic as it will never be called
     let verifier_service =
         tower::service_fn(
@@ -117,8 +123,9 @@ fn request_genesis_is_rate_limited() {
     let (mut chain_sync, _) = ChainSync::new(
         &ZebradConfig::default(),
         peer_service,
-        state_service,
         verifier_service,
+        state_service,
+        latest_chain_tip,
     );
 
     // run `request_genesis()` with a timeout of 13 seconds

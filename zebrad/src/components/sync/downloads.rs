@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -17,8 +18,12 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    chain_tip::ChainTip,
+};
 use zebra_network as zn;
+use zebra_state as zs;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -47,6 +52,12 @@ pub enum BlockDownloadVerifyError {
     #[error("block did not pass consensus validation")]
     Invalid(#[from] zebra_consensus::chain::VerifyChainError),
 
+    #[error("downloaded block was too far ahead of the chain tip")]
+    AboveLookaheadHeightLimit,
+
+    #[error("downloaded block had an invalid height")]
+    InvalidHeight,
+
     #[error("block download / verification was cancelled during download")]
     CancelledDuringDownload,
 
@@ -71,6 +82,13 @@ where
 
     /// A service that verifies downloaded blocks.
     verifier: ZV,
+
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: zs::LatestChainTip,
+
+    // Configuration
+    /// The configured lookahead limit, after applying the minimum limit.
+    lookahead_limit: usize,
 
     // Internal downloads state
     /// A list of pending block download and verify tasks.
@@ -132,15 +150,23 @@ where
     ZV::Future: Send,
 {
     /// Initialize a new download stream with the provided `network` and
-    /// `verifier` services.
+    /// `verifier` services. Uses the `latest_chain_tip` and `lookahead_limit`
+    /// to drop blocks that are too far ahead of the current state tip.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV) -> Self {
+    pub fn new(
+        network: ZN,
+        verifier: ZV,
+        latest_chain_tip: zs::LatestChainTip,
+        lookahead_limit: usize,
+    ) -> Self {
         Self {
             network,
             verifier,
+            latest_chain_tip,
+            lookahead_limit,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
         }
@@ -177,6 +203,9 @@ where
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
         let mut verifier = self.verifier.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
+        let lookahead_limit = self.lookahead_limit;
+
         let task = tokio::spawn(
             async move {
                 // Prefer the cancel handle if both are ready.
@@ -205,6 +234,42 @@ where
                     unreachable!("wrong response to block request");
                 };
                 metrics::counter!("sync.downloaded.block.count", 1);
+
+                // Security & Performance: reject blocks that are too far ahead of our tip
+                let tip_height = latest_chain_tip.best_tip_height();
+
+                let max_lookahead_height = if let Some(tip_height) = tip_height {
+                    let lookahead = i32::try_from(lookahead_limit).expect("fits in i32");
+                    (tip_height + lookahead).expect("tip is much lower than Height::MAX")
+                } else {
+                    let genesis_lookahead =
+                        u32::try_from(lookahead_limit - 1).expect("fits in u32");
+                    block::Height(genesis_lookahead)
+                };
+
+                if let Some(block_height) = block.coinbase_height() {
+                    if block_height > max_lookahead_height {
+                        tracing::info!(
+                            ?hash,
+                            ?block_height,
+                            ?tip_height,
+                            ?max_lookahead_height,
+                            lookahead_limit = ?lookahead_limit,
+                            "synced block height too far ahead of the tip: dropped downloaded block"
+                        );
+                        metrics::counter!("sync.height.limit.dropped.block.count", 1);
+
+                        Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit)?;
+                    }
+                } else {
+                    tracing::info!(
+                        ?hash,
+                        "synced block with no height: dropped downloaded block"
+                    );
+                    metrics::counter!("sync.no.height.dropped.block.count", 1);
+
+                    Err(BlockDownloadVerifyError::InvalidHeight)?;
+                }
 
                 let rsp = verifier
                     .ready()
