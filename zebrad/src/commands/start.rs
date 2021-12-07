@@ -125,7 +125,7 @@ impl StartCmd {
             state.clone(),
             tx_verifier,
             sync_status.clone(),
-            latest_chain_tip,
+            latest_chain_tip.clone(),
             chain_tip_change.clone(),
         );
         let mempool = BoxService::new(mempool);
@@ -137,6 +137,7 @@ impl StartCmd {
             block_verifier: chain_verifier,
             mempool: mempool.clone(),
             state,
+            latest_chain_tip,
         };
         setup_tx
             .send(setup_data)

@@ -647,7 +647,7 @@ async fn setup(
         state_service.clone(),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
-        latest_chain_tip,
+        latest_chain_tip.clone(),
         chain_tip_change.clone(),
     );
 
@@ -677,6 +677,7 @@ async fn setup(
         block_verifier,
         mempool: mempool_service.clone(),
         state: state_service.clone(),
+        latest_chain_tip,
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
