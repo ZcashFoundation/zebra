@@ -183,7 +183,9 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "block hash already queued for inbound download: ignored block"
             );
+
             metrics::gauge!("gossip.queued.block.count", self.pending.len() as _);
+            metrics::counter!("gossip.already.queued.dropped.block.hash.count", 1);
 
             return DownloadAction::AlreadyQueued;
         }
@@ -195,7 +197,9 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many blocks queued for inbound download: ignored block"
             );
+
             metrics::gauge!("gossip.queued.block.count", self.pending.len() as _);
+            metrics::counter!("gossip.full.queue.dropped.block.hash.count", 1);
 
             return DownloadAction::FullQueue;
         }
