@@ -110,9 +110,21 @@ async fn verify_sapling_groth16() {
         .unwrap()
 }
 
+#[derive(Clone, Copy)]
+enum Groth16OutputModification {
+    ZeroCMU,
+    ZeroProof,
+}
+
+static GROTH16_OUTPUT_MODIFICATIONS: [Groth16OutputModification; 2] = [
+    Groth16OutputModification::ZeroCMU,
+    Groth16OutputModification::ZeroProof,
+];
+
 async fn verify_invalid_groth16_output_description<V>(
     output_verifier: &mut V,
     transactions: Vec<std::sync::Arc<Transaction>>,
+    modification: Groth16OutputModification,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -132,7 +144,10 @@ where
             // This changes the primary inputs to the proof
             // verification, causing it to fail for this proof.
             let mut modified_output = output.clone();
-            modified_output.cm_u = jubjub::Fq::zero();
+            match modification {
+                Groth16OutputModification::ZeroCMU => modified_output.cm_u = jubjub::Fq::zero(),
+                Groth16OutputModification::ZeroProof => modified_output.zkproof.0 = [0; 192],
+            }
 
             tracing::trace!(?modified_output);
 
@@ -174,9 +189,15 @@ async fn correctly_err_on_invalid_output_proof() {
         .zcash_deserialize_into::<Block>()
         .expect("a valid block");
 
-    verify_invalid_groth16_output_description(&mut output_verifier, block.transactions)
+    for modification in GROTH16_OUTPUT_MODIFICATIONS {
+        verify_invalid_groth16_output_description(
+            &mut output_verifier,
+            block.transactions.clone(),
+            modification,
+        )
         .await
         .expect_err("unexpected success checking invalid groth16 inputs");
+    }
 }
 
 async fn verify_groth16_joinsplits<V>(
