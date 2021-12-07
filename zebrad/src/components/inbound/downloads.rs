@@ -47,7 +47,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-const MAX_INBOUND_CONCURRENCY: usize = 10;
+const MAX_INBOUND_CONCURRENCY: usize = 20;
 
 /// The action taken in response to a peer's gossiped block hash.
 pub enum DownloadAction {
