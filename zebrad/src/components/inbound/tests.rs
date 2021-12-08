@@ -566,6 +566,9 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+/// Test that the inbound downloader rejects blocks above the lookahead limit.
+///
+/// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
 #[tokio::test]
 async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     // Get services

@@ -242,9 +242,13 @@ where
             };
             metrics::counter!("gossip.downloaded.block.count", 1);
 
-            // Security & Performance: reject blocks that are too far ahead of our tip.
-            // Avoids denial of service attacks, and reduces wasted work on high blocks
-            // that will timeout before being verified.
+            // # Security & Performance
+            //
+            // Reject blocks that are too far ahead of our tip,
+            // and blocks that are behind the finalized tip.
+            //
+            // Avoids denial of service attacks. Also reduces wasted work on high blocks
+            // that will timeout before being verified, and low blocks that can never be finalized.
             let tip_height = latest_chain_tip.best_tip_height();
 
             let max_lookahead_height = if let Some(tip_height) = tip_height {
@@ -256,6 +260,21 @@ where
                 block::Height(genesis_lookahead)
             };
 
+            // Get the finalized tip height, assuming we're using the non-finalized state.
+            //
+            // It doesn't matter if we're a few blocks off here, because blocks this low
+            // are part of a fork with much less work. So they would be rejected anyway.
+            //
+            // And if we're still checkpointing, the checkpointer will reject blocks behind
+            // the finalized tip anyway.
+            //
+            // TODO: get the actual finalized tip height
+            let min_accepted_height = tip_height
+                .map(|tip_height| {
+                    block::Height(tip_height.0.saturating_sub(zs::MAX_BLOCK_REORG_HEIGHT))
+                })
+                .unwrap_or(block::Height(0));
+
             if let Some(block_height) = block.coinbase_height() {
                 if block_height > max_lookahead_height {
                     tracing::info!(
@@ -266,9 +285,21 @@ where
                         lookahead_limit = ?MAX_INBOUND_CONCURRENCY,
                         "gossiped block height too far ahead of the tip: dropped downloaded block"
                     );
-                    metrics::counter!("gossip.height.limit.dropped.block.count", 1);
+                    metrics::counter!("gossip.max.height.limit.dropped.block.count", 1);
 
                     Err("gossiped block height too far ahead")?;
+                } else if block_height < min_accepted_height {
+                    tracing::info!(
+                        ?hash,
+                        ?block_height,
+                        ?tip_height,
+                        ?min_accepted_height,
+                        behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
+                        "gossiped block height behind the finalized tip: dropped downloaded block"
+                    );
+                    metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
+
+                    Err("gossiped block height behind the finalized tip")?;
                 }
             } else {
                 tracing::info!(

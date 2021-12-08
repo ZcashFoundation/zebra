@@ -76,6 +76,9 @@ pub enum BlockDownloadVerifyError {
     #[error("downloaded block was too far ahead of the chain tip")]
     AboveLookaheadHeightLimit,
 
+    #[error("downloaded block was too far behind the chain tip")]
+    BehindTipHeightLimit,
+
     #[error("downloaded block had an invalid height")]
     InvalidHeight,
 
@@ -276,6 +279,21 @@ where
                     block::Height(genesis_lookahead)
                 };
 
+                // Get the finalized tip height, assuming we're using the non-finalized state.
+                //
+                // It doesn't matter if we're a few blocks off here, because blocks this low
+                // are part of a fork with much less work. So they would be rejected anyway.
+                //
+                // And if we're still checkpointing, the checkpointer will reject blocks behind
+                // the finalized tip anyway.
+                //
+                // TODO: get the actual finalized tip height
+                let min_accepted_height = tip_height
+                    .map(|tip_height| {
+                        block::Height(tip_height.0.saturating_sub(zs::MAX_BLOCK_REORG_HEIGHT))
+                    })
+                    .unwrap_or(block::Height(0));
+
                 if let Some(block_height) = block.coinbase_height() {
                     if block_height > max_lookahead_height {
                         tracing::info!(
@@ -286,7 +304,7 @@ where
                             lookahead_limit = ?lookahead_limit,
                             "synced block height too far ahead of the tip: dropped downloaded block"
                         );
-                        metrics::counter!("sync.height.limit.dropped.block.count", 1);
+                        metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 
                         // This error should be very rare during normal operation.
                         //
@@ -298,6 +316,18 @@ where
                         // it will continue downloading blocks from a bad chain,
                         // (or blocks far ahead of the current state tip).
                         Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit)?;
+                    } else if block_height < min_accepted_height {
+                        tracing::info!(
+                            ?hash,
+                            ?block_height,
+                            ?tip_height,
+                            ?min_accepted_height,
+                            behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
+                            "synced block height behind the finalized tip: dropped downloaded block"
+                        );
+                        metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
+
+                        Err(BlockDownloadVerifyError::BehindTipHeightLimit)?;
                     }
                 } else {
                     tracing::info!(
