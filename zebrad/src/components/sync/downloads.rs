@@ -25,10 +25,28 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
+use super::{DEFAULT_LOOKAHEAD_LIMIT, MAX_TIPS_RESPONSE_HASH_COUNT};
+
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// We allow an extra two checkpoints' worth of blocks in the verifier and state queues.
-const EXTRA_DOWNLOADS_LOOKAHEAD: usize = 2 * zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+/// A divisor used to calculate the extra number of blocks we allow in the
+/// verifier and state pipelines, on top of the lookahead limit.
+///
+/// The extra number of blocks is calculated using
+/// `lookahead_limit / VERIFICATION_PIPELINE_SCALING_DIVISOR`.
+///
+/// For the default lookahead limit, the extra number of blocks is
+/// `2 * MAX_TIPS_RESPONSE_HASH_COUNT`.
+///
+/// This allows the verifier and state queues to hold an extra two tips responses worth of blocks,
+/// even if the syncer queue is full. Any unused capacity is shared between both queues.
+///
+/// Since the syncer queue is limited to the `lookahead_limit`,
+/// the rest of the capacity is reserved for the other queues.
+/// There is no reserved capacity for the syncer queue:
+/// if the other queues stay full, the syncer will eventually time out and reset.
+const VERIFICATION_PIPELINE_SCALING_DIVISOR: usize =
+    DEFAULT_LOOKAHEAD_LIMIT / (2 * MAX_TIPS_RESPONSE_HASH_COUNT);
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -239,12 +257,18 @@ where
                 };
                 metrics::counter!("sync.downloaded.block.count", 1);
 
-                // Security & Performance: reject blocks that are too far ahead of our tip
+                // Security & Performance: reject blocks that are too far ahead of our tip.
+                // Avoids denial of service attacks, and reduces wasted work on high blocks
+                // that will timeout before being verified.
                 let tip_height = latest_chain_tip.best_tip_height();
 
                 let max_lookahead_height = if let Some(tip_height) = tip_height {
-                    let lookahead = i32::try_from(lookahead_limit + EXTRA_DOWNLOADS_LOOKAHEAD)
-                        .expect("fits in i32");
+                    // Scale the height limit with the lookahead limit,
+                    // so users with low capacity or under DoS can reduce them both.
+                    let lookahead = i32::try_from(
+                        lookahead_limit + lookahead_limit / VERIFICATION_PIPELINE_SCALING_DIVISOR,
+                    )
+                    .expect("fits in i32");
                     (tip_height + lookahead).expect("tip is much lower than Height::MAX")
                 } else {
                     let genesis_lookahead =
@@ -264,6 +288,15 @@ where
                         );
                         metrics::counter!("sync.height.limit.dropped.block.count", 1);
 
+                        // This error should be very rare during normal operation.
+                        //
+                        // We need to reset the syncer on this error,
+                        // to allow the verifier and state to catch up,
+                        // or prevent it following a bad chain.
+                        //
+                        // If we don't reset the syncer on this error,
+                        // it will continue downloading blocks from a bad chain,
+                        // (or blocks far ahead of the current state tip).
                         Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit)?;
                     }
                 } else {

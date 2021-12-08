@@ -81,6 +81,15 @@ pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GA
 /// See [`MIN_LOOKAHEAD_LIMIT`] for details.
 pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 5;
 
+/// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
+///
+/// This is used to allow block heights that are slightly beyond the lookahead limit,
+/// but still limit the number of blocks in the pipeline between the downloader and
+/// the state.
+///
+/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
+
 /// Controls how long we wait for a tips response to return.
 ///
 /// ## Correctness
@@ -749,10 +758,6 @@ where
             BlockDownloadVerifyError::CancelledDuringDownload
             | BlockDownloadVerifyError::CancelledDuringVerification => {
                 tracing::debug!(error = ?e, "block verification was cancelled, continuing");
-                false
-            }
-            BlockDownloadVerifyError::AboveLookaheadHeightLimit => {
-                tracing::debug!(error = ?e, "block height was above lookahead limit, continuing");
                 false
             }
 

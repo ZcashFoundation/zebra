@@ -242,7 +242,9 @@ where
             };
             metrics::counter!("gossip.downloaded.block.count", 1);
 
-            // Security & Performance: reject blocks that are too far ahead of our tip
+            // Security & Performance: reject blocks that are too far ahead of our tip.
+            // Avoids denial of service attacks, and reduces wasted work on high blocks
+            // that will timeout before being verified.
             let tip_height = latest_chain_tip.best_tip_height();
 
             let max_lookahead_height = if let Some(tip_height) = tip_height {
