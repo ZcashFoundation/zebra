@@ -23,6 +23,9 @@ use crate::{
     AddressBook, Config,
 };
 
+#[cfg(test)]
+mod prop;
+
 /// The maximum number of arbitrary peers to generate in [`PeerVersions`].
 ///
 /// This affects the maximum number of peer connections added to the [`PeerSet`] during the tests.
