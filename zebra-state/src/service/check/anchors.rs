@@ -45,7 +45,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
     for transaction in prepared.block.transactions.iter() {
-        // Sprout JoinSplits, with interstitial treestates to check as well
+        // Sprout JoinSplits, with interstitial treestates to check as well.
         //
         // The FIRST JOINSPLIT in a transaction MUST refer to the output treestate
         // of a previous block.
@@ -59,7 +59,27 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
 
             let mut interstitial_note_commitment_tree = parent_chain.sprout_note_commitment_tree();
 
-            for (n, joinsplit) in transaction.sprout_groth16_joinsplits().enumerate() {
+            for joinsplit in transaction.sprout_groth16_joinsplits() {
+                // Check all anchor sets, including the one for interstitial anchors.
+                //
+                // Note that [`interstitial_roots`] is always empty in the first
+                // iteration of the loop. This is because:
+                //
+                // > "The anchor of each JoinSplit description in a transaction
+                // > MUST refer to [...] to the interstitial output treestate of
+                // > any **prior** JoinSplit description in the same transaction."
+                if !parent_chain.sprout_anchors.contains(&joinsplit.anchor)
+                    && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
+                    && (!interstitial_roots.contains(&joinsplit.anchor))
+                {
+                    return Err(ValidateContextError::UnknownSproutAnchor {
+                        anchor: joinsplit.anchor,
+                    });
+                }
+
+                tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
+
+                // Add new anchors to the interstitial note commitment tree.
                 for cm in joinsplit.commitments {
                     interstitial_note_commitment_tree
                         .append(cm)
@@ -69,17 +89,6 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 interstitial_roots.insert(interstitial_note_commitment_tree.root());
 
                 tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
-
-                if !parent_chain.sprout_anchors.contains(&joinsplit.anchor)
-                    && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
-                    && ((n == 0) || (!(n == 0) && !interstitial_roots.contains(&joinsplit.anchor)))
-                {
-                    return Err(ValidateContextError::UnknownSproutAnchor {
-                        anchor: joinsplit.anchor,
-                    });
-                }
-
-                tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
             }
         }
 

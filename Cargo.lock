@@ -308,7 +308,7 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "clap",
- "env_logger",
+ "env_logger 0.8.3",
  "lazy_static",
  "lazycell",
  "log",
@@ -1068,6 +1068,16 @@ dependencies = [
  "proc-macro2 1.0.24",
  "quote 1.0.7",
  "syn 1.0.60",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44533bbbb3bb3c1fa17d9f2e4e38bbbaf8396ba82193c4cb1b6445d711445d36"
+dependencies = [
+ "log",
+ "regex",
 ]
 
 [[package]]
@@ -2182,6 +2192,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordered-map"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ac8f4a4a06c811aa24b151dbb3fe19f687cb52e0d5cca0493671ed88f973970"
+dependencies = [
+ "quickcheck",
+ "quickcheck_macros",
+]
+
+[[package]]
 name = "owning_ref"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2496,6 +2516,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8533f14c8382aaad0d592c812ac3b826162128b65662331e1127b45c3d18536b"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "quickcheck"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a44883e74aa97ad63db83c4bf8ca490f02b2fc02f92575e720c8551e843c945f"
+dependencies = [
+ "env_logger 0.7.1",
+ "log",
+ "rand 0.7.3",
+ "rand_core 0.5.1",
+]
+
+[[package]]
+name = "quickcheck_macros"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "608c156fd8e97febc07dc9c2e2c80bf74cfc6ef26893eae3daf8bc2bc94a4b7f"
+dependencies = [
+ "proc-macro2 1.0.24",
+ "quote 1.0.7",
+ "syn 1.0.60",
 ]
 
 [[package]]
@@ -3618,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.17"
+version = "0.2.18"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -3936,9 +3979,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "5.1.18"
+version = "5.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d48696c0fbbdafd9553e14c4584b4b9583931e9474a3ae506f1872b890d0b47"
+checksum = "b4a21b1fc04977357c3a6187a56ebd91ab60b98328956c1dda501f4e04c7afcb"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -4286,7 +4329,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "aes",
  "bech32",
@@ -4344,7 +4387,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4386,7 +4429,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4396,6 +4439,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "metrics",
+ "ordered-map",
  "pin-project 1.0.7",
  "proptest",
  "proptest-derive",
@@ -4421,7 +4465,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "displaydoc",
  "hex",
@@ -4434,7 +4478,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "bincode",
  "chrono",
@@ -4468,7 +4512,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "color-eyre",
  "futures",
@@ -4491,7 +4535,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "color-eyre",
  "hex",
@@ -4506,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "abscissa_core",
  "atty",
