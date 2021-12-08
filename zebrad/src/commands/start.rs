@@ -1,8 +1,8 @@
 //! `start` subcommand - entry point for starting a zebra node
 //!
-//!  ## Application Structure
+//! ## Application Structure
 //!
-//!  A zebra node consists of the following services and tasks:
+//! A zebra node consists of the following services and tasks:
 //!
 //! Peers:
 //!  * Network Service

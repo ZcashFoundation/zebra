@@ -1,0 +1,294 @@
+//! `copy-state` subcommand - copies state from one directory to another (debug only)
+//!
+//! Copying state helps Zebra developers modify and debug cached state formats.
+//!
+//! In order to test a new state format, blocks must be identical when they are:
+//! - written to the new format, and then
+//! - read from the new format.
+//!
+//! The "old" and "new" states can also use the same format.
+//! This tests the low-level state API's performance.
+//!
+//! ## Command Structure
+//!
+//! Copying cached state uses the following services and tasks:
+//!
+//! Tasks:
+//!  * Old to New Copy Task
+//!    * queries the source state for blocks,
+//!      and copies those blocks to the target state
+//!  * New to Old Copy Task
+//!    * queries the source state for blocks,
+//!      and copies those blocks to the target state
+//!
+//! Services:
+//!  * Source Old State Service
+//!    * fetches blocks from the best finalized chain from permanent storage,
+//!      in the old format
+//!  * Source/Target New State Service
+//!    * writes best finalized chain blocks to permanent storage,
+//!      in the new format
+//!    * only performs essential contextual verification of blocks,
+//!      to make sure that block data hasn't been corrupted by
+//!      receiving blocks in the new format
+//!    * fetches blocks from the best finalized chain from permanent storage,
+//!      in the new format
+//!  * Target Old State Service
+//!    * writes best finalized chain blocks to permanent storage,
+//!      in the old format
+//!    * only performs essential contextual verification of blocks
+//!      to make sure that block data hasn't been corrupted by
+//!      writing, reading, and sending blocks in the new format
+
+use std::path::PathBuf;
+
+use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+use color_eyre::eyre::{eyre, Report};
+
+use tokio::time::Instant;
+use tower::{Service, ServiceExt};
+use zebra_chain::{block::Height, parameters::Network};
+use zebra_state as old_zs;
+use zebra_state as new_zs;
+
+use crate::{
+    components::tokio::{RuntimeRun, TokioComponent},
+    config::ZebradConfig,
+    prelude::*,
+    BoxError,
+};
+
+/// How often we log info-level progress locks
+const PROGRESS_HEIGHT_INTERVAL: u32 = 10_000;
+
+/// `copy-state` subcommand
+#[derive(Command, Debug, Options)]
+pub struct CopyStateCmd {
+    /// Path to a Zebra config.toml for the target state.
+    /// Uses an ephemeral config by default.
+    ///
+    /// Zebra only uses the state options from this config.
+    /// All other options are ignored.
+    #[options(free)]
+    target_state_config_path: Option<PathBuf>,
+
+    /// Filter strings
+    #[options(free)]
+    filters: Vec<String>,
+}
+
+impl CopyStateCmd {
+    /// Configure and launch the copy command
+    async fn start(&self) -> Result<(), Report> {
+        let base_config = app_config().clone();
+        let source_config = base_config.state.clone();
+
+        // The default load_config impl doesn't actually modify the app config.
+        let target_config = self
+            .target_state_config_path
+            .as_ref()
+            .map(|path| app_writer().load_config(path))
+            .transpose()?
+            .map(|app_config| app_config.state)
+            .unwrap_or_else(new_zs::Config::ephemeral);
+
+        info!(?base_config, "state copy base config");
+
+        self.copy(base_config.network.network, source_config, target_config)
+            .await
+            .map_err(|e| eyre!(e))
+    }
+
+    /// Initialize the source and target states,
+    /// then copy from the source to the target state.
+    async fn copy(
+        &self,
+        network: Network,
+        source_config: old_zs::Config,
+        target_config: new_zs::Config,
+    ) -> Result<(), BoxError> {
+        info!(
+            ?source_config,
+            "initializing source state service (old format)"
+        );
+
+        let source_start_time = Instant::now();
+        let (mut source_state, _source_latest_chain_tip, _source_chain_tip_change) =
+            old_zs::init(source_config.clone(), network);
+
+        let elapsed = source_start_time.elapsed();
+        info!(?elapsed, "finished initializing source state service");
+
+        info!(
+            ?target_config, target_config_path = ?self.target_state_config_path,
+            "initializing target state service (new format)"
+        );
+
+        let target_start_time = Instant::now();
+        let (mut target_state, _target_latest_chain_tip, _target_chain_tip_change) =
+            new_zs::init(target_config.clone(), network);
+
+        let elapsed = target_start_time.elapsed();
+        info!(?elapsed, "finished initializing target state service");
+
+        info!("fetching source tip height");
+
+        let tip_start_time = Instant::now();
+        let source_tip = source_state
+            .ready()
+            .await?
+            .call(old_zs::Request::Tip)
+            .await?;
+        let source_tip = match source_tip {
+            old_zs::Response::Tip(Some(source_tip)) => {
+                info!(?source_tip, "got source tip");
+                source_tip.0 .0
+            }
+            old_zs::Response::Tip(None) => Err("empty source state: no blocks to copy")?,
+
+            response => Err(format!(
+                "unexpected response to Tip request: {:?}",
+                response,
+            ))?,
+        };
+
+        let elapsed = tip_start_time.elapsed();
+        info!(?elapsed, "finished fetching source tip height");
+
+        info!(?source_tip, "starting copy from source to target");
+
+        let copy_start_time = Instant::now();
+        for height in 0..=source_tip {
+            // Read block from source
+            let source_block = source_state
+                .ready()
+                .await?
+                .call(old_zs::Request::Block(Height(height).into()))
+                .await?;
+            let source_block = match source_block {
+                old_zs::Response::Block(Some(source_block)) => {
+                    trace!(?height, %source_block, "read source block");
+                    source_block
+                }
+                old_zs::Response::Block(None) => Err(format!(
+                    "unexpected missing source block, height: {}",
+                    height,
+                ))?,
+
+                response => Err(format!(
+                    "unexpected response to Block request, height: {}, \n \
+                     response: {:?}",
+                    height, response,
+                ))?,
+            };
+            let source_block_hash = source_block.hash();
+
+            // Write block to target
+            let target_block_commit_hash = target_state
+                .ready()
+                .await?
+                .call(new_zs::Request::CommitFinalizedBlock(
+                    source_block.clone().into(),
+                ))
+                .await?;
+            let target_block_commit_hash = match target_block_commit_hash {
+                new_zs::Response::Committed(target_block_commit_hash) => {
+                    trace!(?target_block_commit_hash, "wrote target block");
+                    target_block_commit_hash
+                }
+                response => Err(format!(
+                    "unexpected response to CommitFinalizedBlock request, height: {}\n \
+                     response: {:?}",
+                    height, response,
+                ))?,
+            };
+
+            // Check for data errors
+            if source_block_hash != target_block_commit_hash {
+                error!(
+                    ?source_block_hash,
+                    ?target_block_commit_hash,
+                    "source and target block hashes did not match, fetching target block"
+                );
+
+                let target_block = target_state
+                    .ready()
+                    .await?
+                    .call(new_zs::Request::Block(Height(height).into()))
+                    .await?;
+                let target_block = match target_block {
+                    new_zs::Response::Block(Some(target_block)) => {
+                        info!(?height, %target_block, "read target block");
+                        target_block
+                    }
+                    new_zs::Response::Block(None) => Err(format!(
+                        "unexpected missing target block, height: {}",
+                        height,
+                    ))?,
+
+                    response => Err(format!(
+                        "unexpected response to Block request, height: {},\n \
+                         response: {:?}",
+                        height, response,
+                    ))?,
+                };
+                let target_block_data_hash = target_block.hash();
+
+                Err(format!(
+                    "unexpected mismatch between source and target blocks,\n \
+                     source hash: {:?},\n \
+                     target commit hash: {:?},\n \
+                     target data hash: {:?},\n \
+                     source block: {:?},\n \
+                     target block: {:?}",
+                    source_block_hash,
+                    target_block_commit_hash,
+                    target_block_data_hash,
+                    source_block,
+                    target_block
+                ))?;
+            }
+
+            // Log progress
+            if height % PROGRESS_HEIGHT_INTERVAL == 0 {
+                let elapsed = copy_start_time.elapsed();
+                info!(?height, ?elapsed, "copied block from source to target");
+            }
+        }
+
+        let elapsed = copy_start_time.elapsed();
+        info!(?source_tip, ?elapsed, "finished copy task");
+
+        Ok(())
+    }
+}
+
+impl Runnable for CopyStateCmd {
+    /// Start the application.
+    fn run(&self) {
+        info!("starting cached chain state copy");
+        let rt = app_writer()
+            .state_mut()
+            .components
+            .get_downcast_mut::<TokioComponent>()
+            .expect("TokioComponent should be available")
+            .rt
+            .take();
+
+        rt.expect("runtime should not already be taken")
+            .run(self.start());
+    }
+}
+
+impl config::Override<ZebradConfig> for CopyStateCmd {
+    // Process the given command line options, overriding settings from
+    // a configuration file using explicit flags taken from command-line
+    // arguments.
+    fn override_config(&self, mut config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
+        if !self.filters.is_empty() {
+            config.tracing.filter = Some(self.filters.join(","));
+        }
+
+        Ok(config)
+    }
+}
