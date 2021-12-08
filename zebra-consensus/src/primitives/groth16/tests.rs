@@ -37,10 +37,11 @@ where
         for spend in spends {
             tracing::trace!(?spend);
 
-            let spend_rsp = spend_verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&spend).into());
+            let spend_rsp = spend_verifier.ready().await?.call(
+                groth16::ItemWrapper::try_from(&DescriptionWrapper(spend))
+                    .map_err(tower_fallback::BoxedError::from)?
+                    .into(),
+            );
 
             async_checks.push(spend_rsp);
         }
@@ -48,10 +49,11 @@ where
         for output in outputs {
             tracing::trace!(?output);
 
-            let output_rsp = output_verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(output).into());
+            let output_rsp = output_verifier.ready().await?.call(
+                groth16::ItemWrapper::try_from(&DescriptionWrapper(output.clone()))
+                    .map_err(tower_fallback::BoxedError::from)?
+                    .into(),
+            );
 
             async_checks.push(output_rsp);
         }
@@ -151,10 +153,11 @@ where
 
             tracing::trace!(?modified_output);
 
-            let output_rsp = output_verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&modified_output).into());
+            let output_rsp = output_verifier.ready().await?.call(
+                groth16::ItemWrapper::try_from(&DescriptionWrapper(modified_output.clone()))
+                    .map_err(tower_fallback::BoxedError::from)?
+                    .into(),
+            );
 
             async_checks.push(output_rsp);
         }
@@ -225,10 +228,11 @@ where
             let pub_key = tx
                 .sprout_joinsplit_pub_key()
                 .expect("pub key must exist since there are joinsplits");
-            let joinsplit_rsp = verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&(joinsplit, &pub_key)).into());
+            let joinsplit_rsp = verifier.ready().await?.call(
+                groth16::ItemWrapper::try_from(&DescriptionWrapper((joinsplit, &pub_key)))
+                    .map_err(tower_fallback::BoxedError::from)?
+                    .into(),
+            );
 
             async_checks.push(joinsplit_rsp);
         }
@@ -289,10 +293,11 @@ where
 
     tracing::trace!(?joinsplit);
 
-    let joinsplit_rsp = verifier
-        .ready()
-        .await?
-        .call(groth16::ItemWrapper::from(&(joinsplit, pub_key)).into());
+    let joinsplit_rsp = verifier.ready().await?.call(
+        groth16::ItemWrapper::try_from(&DescriptionWrapper((joinsplit, pub_key)))
+            .map_err(tower_fallback::BoxedError::from)?
+            .into(),
+    );
 
     async_checks.push(joinsplit_rsp);
 
@@ -409,10 +414,11 @@ where
             // Use an arbitrary public key which is not the correct one,
             // which will make the verification fail.
             let modified_pub_key = [0x42; 32].into();
-            let joinsplit_rsp = verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&(joinsplit, &modified_pub_key)).into());
+            let joinsplit_rsp = verifier.ready().await?.call(
+                groth16::ItemWrapper::try_from(&DescriptionWrapper((joinsplit, &modified_pub_key)))
+                    .map_err(tower_fallback::BoxedError::from)?
+                    .into(),
+            );
 
             async_checks.push(joinsplit_rsp);
         }

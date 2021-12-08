@@ -1,7 +1,7 @@
 //! Async Groth16 batch verifier service
 
 use std::{
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     fmt,
     future::Future,
     mem,
@@ -40,6 +40,8 @@ mod tests;
 mod vectors;
 
 pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
+
+use crate::error::TransactionError;
 
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
@@ -133,12 +135,6 @@ pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), Boxed
             }) as fn(_) -> _,
         )
     });
-
-/// A Groth16 verification item, used as the request type of the service.
-pub type Item = batch::Item<Bls12>;
-
-/// A wrapper to workaround the missing `ServiceExt::map_err` method.
-pub struct ItemWrapper(Item);
 
 /// A Groth16 Description (JoinSplit, Spend, or Output) with a Groth16 proof
 /// and its inputs encoded as scalars.
@@ -297,16 +293,30 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     }
 }
 
-impl<T> From<&T> for ItemWrapper
+/// A Groth16 verification item, used as the request type of the service.
+pub type Item = batch::Item<Bls12>;
+
+/// A wrapper to workaround the missing `ServiceExt::map_err` method.
+pub struct ItemWrapper(Item);
+
+/// A wrapper to allow a TryFrom blanket implementation of the [`Description`]
+/// trait for the [`ItemWrapper`] struct.
+/// See https://github.com/rust-lang/rust/issues/50133 for more details.
+pub struct DescriptionWrapper<T>(pub T);
+
+impl<T> TryFrom<&DescriptionWrapper<T>> for ItemWrapper
 where
     T: Description,
 {
+    type Error = TransactionError;
+
     /// Convert a [`Description`] into an [`ItemWrapper`].
-    fn from(input: &T) -> Self {
-        Self(Item::from((
-            bellman::groth16::Proof::read(&input.proof().0[..]).unwrap(),
-            input.primary_inputs(),
-        )))
+    fn try_from(input: &DescriptionWrapper<T>) -> Result<Self, Self::Error> {
+        Ok(Self(Item::from((
+            bellman::groth16::Proof::read(&input.0.proof().0[..])
+                .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?,
+            input.0.primary_inputs(),
+        ))))
     }
 }
 

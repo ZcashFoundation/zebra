@@ -2,6 +2,7 @@
 //!
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     future::Future,
     iter::FromIterator,
     pin::Pin,
@@ -33,7 +34,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
 
-use crate::{error::TransactionError, primitives, script, BoxError};
+use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
@@ -465,7 +466,7 @@ where
         .and(Self::verify_sprout_shielded_data(
             joinsplit_data,
             &shielded_sighash,
-        ))
+        )?)
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
             &shielded_sighash,
@@ -636,7 +637,7 @@ where
     fn verify_sprout_shielded_data(
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         shielded_sighash: &SigHash,
-    ) -> AsyncChecks {
+    ) -> Result<AsyncChecks, TransactionError> {
         let mut checks = AsyncChecks::new();
 
         if let Some(joinsplit_data) = joinsplit_data {
@@ -651,10 +652,10 @@ where
                 // transaction to verify.
                 checks.push(
                     primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                        primitives::groth16::ItemWrapper::from(&(
+                        primitives::groth16::ItemWrapper::try_from(&DescriptionWrapper((
                             joinsplit,
                             &joinsplit_data.pub_key,
-                        ))
+                        )))?
                         .into(),
                     ),
                 );
@@ -678,7 +679,7 @@ where
             checks.push(ed25519_verifier.oneshot(ed25519_item));
         }
 
-        checks
+        Ok(checks)
     }
 
     /// Verifies a transaction's Sapling shielded data.
@@ -711,9 +712,12 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 async_checks.push(
-                    primitives::groth16::SPEND_VERIFIER
-                        .clone()
-                        .oneshot(primitives::groth16::ItemWrapper::from(&spend).into()),
+                    primitives::groth16::SPEND_VERIFIER.clone().oneshot(
+                        primitives::groth16::ItemWrapper::try_from(&DescriptionWrapper(
+                            spend.clone(),
+                        ))?
+                        .into(),
+                    ),
                 );
 
                 // Consensus rule: The spend authorization signature
@@ -750,9 +754,12 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 async_checks.push(
-                    primitives::groth16::OUTPUT_VERIFIER
-                        .clone()
-                        .oneshot(primitives::groth16::ItemWrapper::from(output).into()),
+                    primitives::groth16::OUTPUT_VERIFIER.clone().oneshot(
+                        primitives::groth16::ItemWrapper::try_from(&DescriptionWrapper(
+                            output.clone(),
+                        ))?
+                        .into(),
+                    ),
                 );
             }
 

@@ -135,6 +135,10 @@ pub enum TransactionError {
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
     Groth16,
 
+    // XXX: the underlying error is io::Error, but it does not implement Clone as required here
+    #[error("Groth16 proof is malformed")]
+    MalformedGroth16(String),
+
     #[error(
         "Sprout joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
     )]
