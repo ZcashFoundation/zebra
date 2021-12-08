@@ -2,7 +2,7 @@
 //!
 use std::{
     collections::HashMap,
-    convert::TryFrom,
+    convert::TryInto,
     future::Future,
     iter::FromIterator,
     pin::Pin,
@@ -650,15 +650,9 @@ where
                 // resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
-                checks.push(
-                    primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                        primitives::groth16::ItemWrapper::try_from(&DescriptionWrapper((
-                            joinsplit,
-                            &joinsplit_data.pub_key,
-                        )))?
-                        .into(),
-                    ),
-                );
+                checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
+                    DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
+                ));
             }
 
             // Consensus rule: The joinSplitSig MUST represent a
@@ -712,12 +706,9 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 async_checks.push(
-                    primitives::groth16::SPEND_VERIFIER.clone().oneshot(
-                        primitives::groth16::ItemWrapper::try_from(&DescriptionWrapper(
-                            spend.clone(),
-                        ))?
-                        .into(),
-                    ),
+                    primitives::groth16::SPEND_VERIFIER
+                        .clone()
+                        .oneshot(DescriptionWrapper(&spend).try_into()?),
                 );
 
                 // Consensus rule: The spend authorization signature
@@ -754,12 +745,9 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 async_checks.push(
-                    primitives::groth16::OUTPUT_VERIFIER.clone().oneshot(
-                        primitives::groth16::ItemWrapper::try_from(&DescriptionWrapper(
-                            output.clone(),
-                        ))?
-                        .into(),
-                    ),
+                    primitives::groth16::OUTPUT_VERIFIER
+                        .clone()
+                        .oneshot(DescriptionWrapper(output).try_into()?),
                 );
             }
 

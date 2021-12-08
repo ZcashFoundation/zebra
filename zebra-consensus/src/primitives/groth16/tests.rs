@@ -11,7 +11,7 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use crate::primitives::groth16::{self, *};
+use crate::primitives::groth16::*;
 
 async fn verify_groth16_spends_and_outputs<V>(
     spend_verifier: &mut V,
@@ -38,9 +38,9 @@ where
             tracing::trace!(?spend);
 
             let spend_rsp = spend_verifier.ready().await?.call(
-                groth16::ItemWrapper::try_from(&DescriptionWrapper(spend))
-                    .map_err(tower_fallback::BoxedError::from)?
-                    .into(),
+                DescriptionWrapper(&spend)
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
             );
 
             async_checks.push(spend_rsp);
@@ -50,9 +50,9 @@ where
             tracing::trace!(?output);
 
             let output_rsp = output_verifier.ready().await?.call(
-                groth16::ItemWrapper::try_from(&DescriptionWrapper(output.clone()))
-                    .map_err(tower_fallback::BoxedError::from)?
-                    .into(),
+                DescriptionWrapper(output)
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
             );
 
             async_checks.push(output_rsp);
@@ -154,9 +154,9 @@ where
             tracing::trace!(?modified_output);
 
             let output_rsp = output_verifier.ready().await?.call(
-                groth16::ItemWrapper::try_from(&DescriptionWrapper(modified_output.clone()))
-                    .map_err(tower_fallback::BoxedError::from)?
-                    .into(),
+                DescriptionWrapper(&modified_output)
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
             );
 
             async_checks.push(output_rsp);
@@ -229,9 +229,9 @@ where
                 .sprout_joinsplit_pub_key()
                 .expect("pub key must exist since there are joinsplits");
             let joinsplit_rsp = verifier.ready().await?.call(
-                groth16::ItemWrapper::try_from(&DescriptionWrapper((joinsplit, &pub_key)))
-                    .map_err(tower_fallback::BoxedError::from)?
-                    .into(),
+                DescriptionWrapper(&(joinsplit, &pub_key))
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
             );
 
             async_checks.push(joinsplit_rsp);
@@ -294,9 +294,9 @@ where
     tracing::trace!(?joinsplit);
 
     let joinsplit_rsp = verifier.ready().await?.call(
-        groth16::ItemWrapper::try_from(&DescriptionWrapper((joinsplit, pub_key)))
-            .map_err(tower_fallback::BoxedError::from)?
-            .into(),
+        DescriptionWrapper(&(joinsplit, pub_key))
+            .try_into()
+            .map_err(tower_fallback::BoxedError::from)?,
     );
 
     async_checks.push(joinsplit_rsp);
@@ -415,9 +415,9 @@ where
             // which will make the verification fail.
             let modified_pub_key = [0x42; 32].into();
             let joinsplit_rsp = verifier.ready().await?.call(
-                groth16::ItemWrapper::try_from(&DescriptionWrapper((joinsplit, &modified_pub_key)))
-                    .map_err(tower_fallback::BoxedError::from)?
-                    .into(),
+                DescriptionWrapper(&(joinsplit, &modified_pub_key))
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
             );
 
             async_checks.push(joinsplit_rsp);
