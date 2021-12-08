@@ -539,7 +539,6 @@ where
                                     tx,
                                     ..
                                 } => {
-
                                     if let Ok(response) = response.as_ref() {
                                         debug!(%response, "finished receiving peer response to Zebra request");
                                     } else {
@@ -899,7 +898,6 @@ where
     #[instrument(name = "msg_as_req", skip(self, msg), fields(%msg))]
     async fn handle_message_as_request(&mut self, msg: Message) {
         trace!(?msg);
-
         debug!(state = %self.state, %msg, "received peer request to Zebra");
 
         let req = match msg {
