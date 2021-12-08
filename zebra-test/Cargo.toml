@@ -20,7 +20,7 @@ tower = { version = "0.4.11", features = ["util"] }
 futures = "0.3.18"
 
 color-eyre = "0.5.11"
-owo-colors = "3.1.0"
+owo-colors = "3.1.1"
 spandoc = "0.2.0"
 thiserror = "1.0.30"
 tracing = "0.1.29"
