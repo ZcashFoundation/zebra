@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -6,11 +6,15 @@ use futures::{
 };
 use proptest::{collection::vec, prelude::any};
 use proptest_derive::Arbitrary;
+use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{discover::Change, BoxError};
+use tracing::Span;
 
+use super::MorePeers;
 use crate::{
     peer::{Client, ClientRequest, ErrorSlot, LoadTrackedClient},
-    protocol::external::types::Version,
+    protocol::external::{types::Version, InventoryHash},
+    AddressBook,
 };
 
 /// The maximum number of arbitrary peers to generate in [`PeerVersions`].
@@ -119,5 +123,91 @@ impl PeerVersions {
         let discovered_peers = stream::iter(discovered_peers_iterator).chain(stream::pending());
 
         (discovered_peers, handles)
+    }
+}
+
+/// A helper type to keep track of some dummy endpoints sent to a test [`PeerSet`] instance.
+#[derive(Default)]
+pub struct PeerSetGuard {
+    background_tasks_sender:
+        Option<tokio::sync::oneshot::Sender<Vec<JoinHandle<Result<(), BoxError>>>>>,
+    demand_receiver: Option<mpsc::Receiver<MorePeers>>,
+    inventory_sender: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
+}
+
+impl PeerSetGuard {
+    /// Create a new empty [`PeerSetGuard`] instance.
+    pub fn new() -> Self {
+        PeerSetGuard::default()
+    }
+
+    /// Create a dummy channel for the background tasks sent to the [`PeerSet`].
+    ///
+    /// The sender is stored inside the [`PeerSetGuard`], while the receiver is returned to be
+    /// passed to the [`PeerSet`] constructor.
+    pub fn create_background_tasks_receiver(
+        &mut self,
+    ) -> tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+
+        self.background_tasks_sender = Some(sender);
+
+        receiver
+    }
+
+    /// Create a dummy channel for the [`PeerSet`] to send demand signals for more peers.
+    ///
+    /// The receiver is stored inside the [`PeerSetGuard`], while the sender is returned to be
+    /// passed to the [`PeerSet`] constructor.
+    pub fn create_demand_sender(&mut self) -> mpsc::Sender<MorePeers> {
+        let (sender, receiver) = mpsc::channel(1);
+
+        self.demand_receiver = Some(receiver);
+
+        sender
+    }
+
+    /// Create a dummy channel for the inventory hashes sent to the [`PeerSet`].
+    ///
+    /// The sender is stored inside the [`PeerSetGuard`], while the receiver is returned to be
+    /// passed to the [`PeerSet`] constructor.
+    pub fn create_inventory_receiver(
+        &mut self,
+    ) -> broadcast::Receiver<(InventoryHash, SocketAddr)> {
+        let (sender, receiver) = broadcast::channel(1);
+
+        self.inventory_sender = Some(sender);
+
+        receiver
+    }
+
+    /// Prepare an [`AddressBook`] instance to send to the [`PeerSet`].
+    ///
+    /// If the `maybe_address_book` parameter contains an [`AddressBook`] instance, it is stored
+    /// inside the [`PeerSetGuard`] to keep track of it. Otherwise, a new instance is created with
+    /// the [`Self::fallback_address_book`] method.
+    ///
+    /// A reference to the [`AddressBook`] instance tracked by the [`PeerSetGuard`] is returned to
+    /// be passed to the [`PeerSet`] constructor.
+    pub fn prepare_address_book(
+        &mut self,
+        maybe_address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
+    ) -> Arc<std::sync::Mutex<AddressBook>> {
+        let address_book = maybe_address_book.unwrap_or_else(Self::fallback_address_book);
+
+        self.address_book = Some(address_book.clone());
+
+        address_book
+    }
+
+    /// Create an empty [`AddressBook`] instance using a dummy local listener address.
+    fn fallback_address_book() -> Arc<std::sync::Mutex<AddressBook>> {
+        let local_listener = "127.0.0.1:1000"
+            .parse()
+            .expect("Invalid local listener address");
+        let address_book = AddressBook::new(local_listener, Span::none());
+
+        Arc::new(std::sync::Mutex::new(address_book))
     }
 }
