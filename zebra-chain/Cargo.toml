@@ -31,7 +31,7 @@ group = "0.11.0"
 halo2 = "=0.1.0-beta.1"
 hex = "0.4"
 incrementalmerkletree = "0.1.0"
-itertools = "0.10.1"
+itertools = "0.10.3"
 jubjub = "0.8.0"
 lazy_static = "1.4.0"
 rand_core = "0.6"
@@ -71,7 +71,7 @@ zebra-test = { path = "../zebra-test/", optional = true }
 [dev-dependencies]
 color-eyre = "0.5.11"
 criterion = { version = "0.3", features = ["html_reports"] }
-itertools = "0.10.1"
+itertools = "0.10.3"
 spandoc = "0.2"
 tracing = "0.1.29"
 
