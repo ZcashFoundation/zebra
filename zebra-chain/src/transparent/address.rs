@@ -4,6 +4,7 @@ use std::{fmt, io};
 
 use ripemd160::{Digest, Ripemd160};
 use secp256k1::PublicKey;
+use sha2::Digest as Sha2Digest;
 use sha2::Sha256;
 
 #[cfg(test)]
