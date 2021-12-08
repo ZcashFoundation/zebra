@@ -4,7 +4,7 @@ use futures::{
     channel::{mpsc, oneshot},
     stream, Stream, StreamExt,
 };
-use proptest::{collection::vec, prelude::any};
+use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{
@@ -13,7 +13,11 @@ use tower::{
 };
 use tracing::Span;
 
-use zebra_chain::chain_tip::ChainTip;
+use zebra_chain::{
+    block,
+    chain_tip::ChainTip,
+    parameters::{Network, NetworkUpgrade},
+};
 
 use super::MorePeers;
 use crate::{
@@ -317,4 +321,62 @@ impl PeerSetGuard {
 
         Arc::new(std::sync::Mutex::new(address_book))
     }
+}
+
+/// A pair of block height values, where one is before and the other is at or after an arbitrary
+/// network upgrade's activation height.
+#[derive(Clone, Copy, Debug)]
+pub struct BlockHeightPairAcrossNetworkUpgrades {
+    /// The network for which the block height values represent heights before and after an
+    /// upgrade.
+    pub network: Network,
+
+    /// The block height before the network upgrade activation.
+    pub before_upgrade: block::Height,
+
+    /// The block height at or after the network upgrade activation.
+    pub after_upgrade: block::Height,
+}
+
+impl Arbitrary for BlockHeightPairAcrossNetworkUpgrades {
+    type Parameters = ();
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        any::<(Network, NetworkUpgrade)>()
+            // Filter out genesis upgrade because there is no block height before genesis.
+            .prop_filter("no block height before genesis", |(_, upgrade)| {
+                !matches!(upgrade, NetworkUpgrade::Genesis)
+            })
+            // Filter out network upgrades without activation heights.
+            .prop_filter_map(
+                "missing activation height for network upgrade",
+                |(network, upgrade)| {
+                    upgrade
+                        .activation_height(network)
+                        .map(|height| (network, height))
+                },
+            )
+            // Obtain random heights before and after (or at) the network upgrade activation.
+            .prop_flat_map(|(network, activation_height)| {
+                let before_upgrade_strategy = 0..activation_height.0;
+                let after_upgrade_strategy = activation_height.0..;
+
+                (
+                    Just(network),
+                    before_upgrade_strategy,
+                    after_upgrade_strategy,
+                )
+            })
+            // Collect the arbitrary values to build the final type.
+            .prop_map(|(network, before_upgrade_height, after_upgrade_height)| {
+                BlockHeightPairAcrossNetworkUpgrades {
+                    network,
+                    before_upgrade: dbg!(block::Height(before_upgrade_height)),
+                    after_upgrade: dbg!(block::Height(after_upgrade_height)),
+                }
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
