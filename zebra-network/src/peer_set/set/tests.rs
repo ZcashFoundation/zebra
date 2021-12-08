@@ -7,14 +7,20 @@ use futures::{
 use proptest::{collection::vec, prelude::any};
 use proptest_derive::Arbitrary;
 use tokio::{sync::broadcast, task::JoinHandle};
-use tower::{discover::Change, BoxError};
+use tower::{
+    discover::{Change, Discover},
+    BoxError,
+};
 use tracing::Span;
+
+use zebra_chain::chain_tip::ChainTip;
 
 use super::MorePeers;
 use crate::{
-    peer::{Client, ClientRequest, ErrorSlot, LoadTrackedClient},
+    peer::{Client, ClientRequest, ErrorSlot, LoadTrackedClient, MinimumPeerVersion},
+    peer_set::PeerSet,
     protocol::external::{types::Version, InventoryHash},
-    AddressBook,
+    AddressBook, Config,
 };
 
 /// The maximum number of arbitrary peers to generate in [`PeerVersions`].
@@ -123,6 +129,104 @@ impl PeerVersions {
         let discovered_peers = stream::iter(discovered_peers_iterator).chain(stream::pending());
 
         (discovered_peers, handles)
+    }
+}
+
+/// A helper builder type for creating test [`PeerSet`] instances.
+///
+/// This helps to reduce repeated boilerplate code. Fields that are not set are configured to use
+/// dummy fallbacks.
+#[derive(Default)]
+struct PeerSetBuilder<D, C> {
+    config: Option<Config>,
+    discover: Option<D>,
+    demand_signal: Option<mpsc::Sender<MorePeers>>,
+    handle_rx: Option<tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>>,
+    inv_stream: Option<broadcast::Receiver<(InventoryHash, SocketAddr)>>,
+    address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
+    minimum_peer_version: Option<MinimumPeerVersion<C>>,
+}
+
+impl PeerSetBuilder<(), ()> {
+    /// Create a new [`PeerSetBuilder`] instance.
+    pub fn new() -> Self {
+        PeerSetBuilder::default()
+    }
+}
+
+impl<D, C> PeerSetBuilder<D, C> {
+    /// Use the provided `discover` parameter when constructing the [`PeerSet`] instance.
+    pub fn with_discover<NewD>(self, discover: NewD) -> PeerSetBuilder<NewD, C> {
+        PeerSetBuilder {
+            discover: Some(discover),
+            config: self.config,
+            demand_signal: self.demand_signal,
+            handle_rx: self.handle_rx,
+            inv_stream: self.inv_stream,
+            address_book: self.address_book,
+            minimum_peer_version: self.minimum_peer_version,
+        }
+    }
+
+    /// Use the provided [`MinimumPeerVersion`] instance when constructing the [`PeerSet`] instance.
+    pub fn with_minimum_peer_version<NewC>(
+        self,
+        minimum_peer_version: MinimumPeerVersion<NewC>,
+    ) -> PeerSetBuilder<D, NewC> {
+        PeerSetBuilder {
+            minimum_peer_version: Some(minimum_peer_version),
+            config: self.config,
+            discover: self.discover,
+            demand_signal: self.demand_signal,
+            handle_rx: self.handle_rx,
+            inv_stream: self.inv_stream,
+            address_book: self.address_book,
+        }
+    }
+}
+
+impl<D, C> PeerSetBuilder<D, C>
+where
+    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D::Error: Into<BoxError>,
+    C: ChainTip,
+{
+    /// Finish building the [`PeerSet`] instance.
+    ///
+    /// Returns a tuple with the [`PeerSet`] instance and a [`PeerSetGuard`] to keep track of some
+    /// endpoints of channels created for the [`PeerSet`].
+    pub fn build(self) -> (PeerSet<D, C>, PeerSetGuard) {
+        let mut guard = PeerSetGuard::new();
+
+        let config = self.config.unwrap_or_default();
+        let discover = self.discover.expect("`discover` must be set");
+        let minimum_peer_version = self
+            .minimum_peer_version
+            .expect("`minimum_peer_version` must be set");
+
+        let demand_signal = self
+            .demand_signal
+            .unwrap_or_else(|| guard.create_demand_sender());
+        let handle_rx = self
+            .handle_rx
+            .unwrap_or_else(|| guard.create_background_tasks_receiver());
+        let inv_stream = self
+            .inv_stream
+            .unwrap_or_else(|| guard.create_inventory_receiver());
+
+        let address_book = guard.prepare_address_book(self.address_book);
+
+        let peer_set = PeerSet::new(
+            &config,
+            discover,
+            demand_signal,
+            handle_rx,
+            inv_stream,
+            address_book,
+            minimum_peer_version,
+        );
+
+        (peer_set, guard)
     }
 }
 
