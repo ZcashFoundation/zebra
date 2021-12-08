@@ -84,6 +84,11 @@ pub enum Message {
 
         /// Whether the remote peer should announce relayed
         /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)
+        ///
+        /// Zebra does not implement the bloom filters in BIP 0037.
+        /// Instead, it only relays:
+        /// - newly verified best chain block hashes and mempool transaction IDs,
+        /// - after it reaches the chain tip.
         relay: bool,
     },
 
@@ -127,9 +132,6 @@ pub enum Message {
         // Currently, all errors which provide this field fill it with
         // the TXID or block header hash of the object being rejected,
         // so the field is 32 bytes.
-        //
-        // Q: can we tell Rust that this field is optional? Or just
-        // default its value to an empty array, I guess.
         data: Option<[u8; 32]>,
     },
 
@@ -371,26 +373,56 @@ pub enum RejectReason {
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match self {
-            Message::Version { .. } => "version",
-            Message::Verack => "verack",
-            Message::Ping(_) => "ping",
-            Message::Pong(_) => "pong",
-            Message::Reject { .. } => "reject",
-            Message::GetAddr => "getaddr",
-            Message::Addr(_) => "addr",
-            Message::GetBlocks { .. } => "getblocks",
-            Message::Inv(_) => "inv",
-            Message::GetHeaders { .. } => "getheaders",
-            Message::Headers(_) => "headers",
-            Message::GetData(_) => "getdata",
-            Message::Block(_) => "block",
-            Message::Tx(_) => "tx",
-            Message::NotFound(_) => "notfound",
-            Message::Mempool => "mempool",
-            Message::FilterLoad { .. } => "filterload",
-            Message::FilterAdd { .. } => "filteradd",
-            Message::FilterClear => "filterclear",
+        f.write_str(&match self {
+            Message::Version {
+                version,
+                address_recv,
+                address_from,
+                user_agent,
+                ..
+            } => format!(
+                "version {{ network: {}, recv: {},_from: {}, user_agent: {:?} }}",
+                version,
+                address_recv.addr(),
+                address_from.addr(),
+                user_agent,
+            ),
+            Message::Verack => "verack".to_string(),
+            Message::Ping(_) => "ping".to_string(),
+            Message::Pong(_) => "pong".to_string(),
+            Message::Reject {
+                message,
+                reason,
+                data,
+                ..
+            } => format!(
+                "reject {{ message: {:?}, reason: {:?}, data: {} }}",
+                message,
+                reason,
+                if data.is_some() { "Some" } else { "None" },
+            ),
+            Message::GetAddr => "getaddr".to_string(),
+            Message::Addr(addrs) => format!("addr {{ addrs: {} }}", addrs.len()),
+            Message::GetBlocks { known_blocks, stop } => format!(
+                "getblocks {{ known_blocks: {}, stop: {} }}",
+                known_blocks.len(),
+                if stop.is_some() { "Some" } else { "None" },
+            ),
+            Message::Inv(invs) => format!("inv {{ invs: {} }}", invs.len()),
+            Message::GetHeaders { known_blocks, stop } => format!(
+                "getheaders {{ known_blocks: {}, stop: {} }}",
+                known_blocks.len(),
+                if stop.is_some() { "Some" } else { "None" },
+            ),
+            Message::Headers(headers) => format!("headers {{ headers: {} }}", headers.len()),
+            Message::GetData(invs) => format!("getdata {{ invs: {} }}", invs.len()),
+            Message::Block(_) => "block".to_string(),
+            Message::Tx(_) => "tx".to_string(),
+            Message::NotFound(invs) => format!("notfound {{ invs: {} }}", invs.len()),
+            Message::Mempool => "mempool".to_string(),
+            Message::FilterLoad { .. } => "filterload".to_string(),
+            Message::FilterAdd { .. } => "filteradd".to_string(),
+            Message::FilterClear => "filterclear".to_string(),
         })
     }
 }
