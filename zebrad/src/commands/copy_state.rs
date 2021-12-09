@@ -129,7 +129,7 @@ impl CopyStateCmd {
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");
 
-        info!("fetching source tip height");
+        info!("fetching source and target tip heights");
 
         let source_tip = source_state
             .ready()
@@ -147,17 +147,52 @@ impl CopyStateCmd {
         };
         let source_tip_height = source_tip.0 .0;
 
-        let max_copy_height =
-            min(self.max_source_height, Some(source_tip_height)).unwrap_or(source_tip_height);
+        let initial_target_tip = target_state
+            .ready()
+            .await?
+            .call(new_zs::Request::Tip)
+            .await?;
+        let initial_target_tip = match initial_target_tip {
+            new_zs::Response::Tip(target_tip) => target_tip,
+
+            response => Err(format!(
+                "unexpected response to Tip request: {:?}",
+                response,
+            ))?,
+        };
+        let min_target_height = initial_target_tip
+            .map(|target_tip| target_tip.0 .0 + 1)
+            .unwrap_or(0);
+
+        let max_copy_height = self
+            .max_source_height
+            .map(|max_source_height| min(source_tip_height, max_source_height))
+            .unwrap_or(source_tip_height);
+
+        if min_target_height >= max_copy_height {
+            info!(
+                ?min_target_height,
+                ?max_copy_height,
+                max_source_height = ?self.max_source_height,
+                ?source_tip,
+                ?initial_target_tip,
+                "target is already at or after max copy height"
+            );
+
+            return Ok(());
+        }
 
         info!(
+            ?min_target_height,
             ?max_copy_height,
+            max_source_height = ?self.max_source_height,
             ?source_tip,
+            ?initial_target_tip,
             "starting copy from source to target"
         );
 
         let copy_start_time = Instant::now();
-        for height in 0..=max_copy_height {
+        for height in min_target_height..=max_copy_height {
             // Read block from source
             let source_block = source_state
                 .ready()
@@ -274,12 +309,12 @@ impl CopyStateCmd {
 
         info!(?max_copy_height, "fetching final target tip");
 
-        let target_tip = target_state
+        let final_target_tip = target_state
             .ready()
             .await?
             .call(new_zs::Request::Tip)
             .await?;
-        let target_tip = match target_tip {
+        let final_target_tip = match final_target_tip {
             new_zs::Response::Tip(Some(target_tip)) => target_tip,
             new_zs::Response::Tip(None) => Err("empty target state: expected written blocks")?,
 
@@ -288,13 +323,13 @@ impl CopyStateCmd {
                 response,
             ))?,
         };
-        let target_tip_height = target_tip.0 .0;
-        let target_tip_hash = target_tip.1;
+        let final_target_tip_height = final_target_tip.0 .0;
+        let final_target_tip_hash = final_target_tip.1;
 
         let target_tip_source_depth = source_state
             .ready()
             .await?
-            .call(old_zs::Request::Depth(target_tip_hash))
+            .call(old_zs::Request::Depth(final_target_tip_hash))
             .await?;
         let target_tip_source_depth = match target_tip_source_depth {
             old_zs::Response::Depth(source_depth) => source_depth,
@@ -311,7 +346,7 @@ impl CopyStateCmd {
         // (See details above.)
         if max_copy_height == source_tip_height {
             let expected_target_depth = Some(0);
-            if source_tip != target_tip || target_tip_source_depth != expected_target_depth {
+            if source_tip != final_target_tip || target_tip_source_depth != expected_target_depth {
                 Err(format!(
                     "unexpected mismatch between source and target tips,\n \
                      max copy height: {:?},\n \
@@ -321,7 +356,7 @@ impl CopyStateCmd {
                      expect target tip depth in source: {:?}",
                     max_copy_height,
                     source_tip,
-                    target_tip,
+                    final_target_tip,
                     target_tip_source_depth,
                     expected_target_depth,
                 ))?;
@@ -329,13 +364,13 @@ impl CopyStateCmd {
                 info!(
                     ?max_copy_height,
                     ?source_tip,
-                    ?target_tip,
+                    ?final_target_tip,
                     ?target_tip_source_depth,
                     "source and target states contain the same blocks"
                 );
             }
         } else {
-            let expected_target_depth = source_tip_height.checked_sub(target_tip_height);
+            let expected_target_depth = source_tip_height.checked_sub(final_target_tip_height);
             if target_tip_source_depth != expected_target_depth {
                 Err(format!(
                     "unexpected mismatch between source and target tips,\n \
@@ -346,7 +381,7 @@ impl CopyStateCmd {
                      expect target tip depth in source: {:?}",
                     max_copy_height,
                     source_tip,
-                    target_tip,
+                    final_target_tip,
                     target_tip_source_depth,
                     expected_target_depth,
                 ))?;
@@ -354,7 +389,7 @@ impl CopyStateCmd {
                 info!(
                     ?max_copy_height,
                     ?source_tip,
-                    ?target_tip,
+                    ?final_target_tip,
                     ?target_tip_source_depth,
                     "target state reached the max copy height"
                 );
@@ -369,8 +404,8 @@ impl Runnable for CopyStateCmd {
     /// Start the application.
     fn run(&self) {
         info!(
-            ?self.max_source_height,
-            ?self.target_config_path,
+            max_source_height = ?self.max_source_height,
+            target_config_path = ?self.target_config_path,
             "starting cached chain state copy"
         );
         let rt = app_writer()
