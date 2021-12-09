@@ -371,8 +371,8 @@ impl Arbitrary for BlockHeightPairAcrossNetworkUpgrades {
             .prop_map(|(network, before_upgrade_height, after_upgrade_height)| {
                 BlockHeightPairAcrossNetworkUpgrades {
                     network,
-                    before_upgrade: dbg!(block::Height(before_upgrade_height)),
-                    after_upgrade: dbg!(block::Height(after_upgrade_height)),
+                    before_upgrade: block::Height(before_upgrade_height),
+                    after_upgrade: block::Height(after_upgrade_height),
                 }
             })
             .boxed()

@@ -64,7 +64,7 @@ proptest! {
             MinimumPeerVersion::with_mock_chain_tip(block_heights.network);
 
         best_tip_height
-            .send(Some(dbg!(block_heights.before_upgrade)))
+            .send(Some(block_heights.before_upgrade))
             .expect("receiving endpoint lives as long as `minimum_peer_version`");
 
         runtime.block_on(async move {
@@ -76,16 +76,17 @@ proptest! {
             check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,
                 &mut handles,
-                dbg!(minimum_peer_version.current()),
+                minimum_peer_version.current(),
             )?;
 
-            best_tip_height.send(Some(dbg!(block_heights.after_upgrade)))
-            .expect("receiving endpoint lives as long as `minimum_peer_version`");
+            best_tip_height
+                .send(Some(block_heights.after_upgrade))
+                .expect("receiving endpoint lives as long as `minimum_peer_version`");
 
             check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,
                 &mut handles,
-                dbg!(minimum_peer_version.current()),
+                minimum_peer_version.current(),
             )?;
 
             Ok::<_, TestCaseError>(())
