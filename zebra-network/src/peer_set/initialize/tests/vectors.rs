@@ -26,7 +26,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 use tokio::{net::TcpStream, task::JoinHandle};
-use tower::{discover::Change, service_fn, Service};
+use tower::{service_fn, Service};
 use tracing::Span;
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
@@ -40,12 +40,12 @@ use crate::{
     peer_set::{
         initialize::{
             accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
-            PeerChange,
+            DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, CandidateSet,
     },
-    protocol::types::PeerServices,
+    protocol::{external::types::Version, types::PeerServices},
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -359,6 +359,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Fake the connection closing.
@@ -367,7 +368,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
             // Give the crawler time to get the message.
             tokio::task::yield_now().await;
 
-            Ok(Change::Insert(addr, fake_client))
+            Ok((addr, fake_client))
         });
 
     let (config, mut peerset_rx) =
@@ -380,7 +381,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_result,
@@ -431,6 +432,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -438,7 +440,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
                 .unbounded_send(connection_tracker)
                 .expect("unexpected error sending to unbounded channel");
 
-            Ok(Change::Insert(addr, fake_client))
+            Ok((addr, fake_client))
         }
     });
 
@@ -452,7 +454,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
             // A peer handshake succeeded.
             Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_change_result,
@@ -550,6 +552,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Fake the connection closing.
@@ -558,7 +561,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
             // Give the crawler time to get the message.
             tokio::task::yield_now().await;
 
-            Ok(Change::Insert(addr, fake_client))
+            Ok((addr, fake_client))
         });
 
     // TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit
@@ -573,7 +576,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_result,
@@ -624,6 +627,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -631,7 +635,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 .unbounded_send(connection_tracker)
                 .expect("unexpected error sending to unbounded channel");
 
-            Ok(Change::Insert(addr, fake_client))
+            Ok((addr, fake_client))
         }
     });
 
@@ -646,7 +650,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
             // A peer handshake succeeded.
             Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_change_result,
@@ -775,6 +779,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             shutdown_tx: Some(shutdown_tx),
             server_tx,
             error_slot,
+            version: Version(1),
         };
 
         // Actually close the connection.
@@ -797,7 +802,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_result,
@@ -851,6 +856,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -872,7 +878,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
             // A peer handshake succeeded.
             Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_change_result,
@@ -979,6 +985,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             shutdown_tx: Some(shutdown_tx),
             server_tx,
             error_slot,
+            version: Version(1),
         };
 
         // Actually close the connection.
@@ -1001,7 +1008,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             // A peer handshake succeeded.
             Ok(Some(peer_result)) => {
                 assert!(
-                    matches!(peer_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_result,
@@ -1055,6 +1062,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 error_slot,
+                version: Version(1),
             };
 
             // Make the connection staying open.
@@ -1076,7 +1084,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
             // A peer handshake succeeded.
             Ok(Some(peer_change_result)) => {
                 assert!(
-                    matches!(peer_change_result, Ok(Change::Insert(_, _))),
+                    matches!(peer_change_result, Ok((_, _))),
                     "unexpected connection error: {:?}\n\
                      {} previous peers succeeded",
                     peer_change_result,
@@ -1308,13 +1316,10 @@ where
 async fn spawn_crawler_with_peer_limit<C>(
     peerset_initial_target_size: impl Into<Option<usize>>,
     outbound_connector: C,
-) -> (Config, mpsc::Receiver<PeerChange>)
+) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
-    C: Service<
-            OutboundConnectorRequest,
-            Response = Change<SocketAddr, peer::Client>,
-            Error = BoxError,
-        > + Clone
+    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+        + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -1358,7 +1363,7 @@ where
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
     // Make the channels large enough to hold all the peers.
-    let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(over_limit_peers);
+    let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_peers);
     let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(over_limit_peers);
 
     let candidates = CandidateSet::new(address_book.clone(), nil_peer_set);
@@ -1421,7 +1426,7 @@ where
 async fn spawn_inbound_listener_with_peer_limit<S>(
     peerset_initial_target_size: impl Into<Option<usize>>,
     listen_handshaker: S,
-) -> (Config, mpsc::Receiver<PeerChange>)
+) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
     S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError>
         + Clone
@@ -1446,7 +1451,7 @@ where
     // Make enough inbound connections to go over the limit, even if the limit is zero.
     // Make the channels large enough to hold all the connections.
     let over_limit_connections = config.peerset_inbound_connection_limit() * 2 + 1;
-    let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(over_limit_connections);
+    let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_connections);
 
     // Start listening for connections.
     let listen_fut = accept_inbound_connections(
@@ -1522,15 +1527,12 @@ async fn spawn_add_initial_peers<C>(
     outbound_connector: C,
 ) -> (
     JoinHandle<Result<ActiveConnectionCounter, BoxError>>,
-    mpsc::Receiver<PeerChange>,
+    mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 )
 where
-    C: Service<
-            OutboundConnectorRequest,
-            Response = Change<SocketAddr, peer::Client>,
-            Error = BoxError,
-        > + Clone
+    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+        + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -1556,7 +1558,7 @@ where
         ..Config::default()
     };
 
-    let (peerset_tx, peerset_rx) = mpsc::channel::<PeerChange>(peer_count + 1);
+    let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(peer_count + 1);
 
     let (_address_book, address_book_updater, address_book_updater_guard) =
         AddressBookUpdater::spawn(&config, unused_v4);
