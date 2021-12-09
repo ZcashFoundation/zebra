@@ -33,7 +33,7 @@
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
 
-use std::path::PathBuf;
+use std::{cmp::min, path::PathBuf};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
@@ -57,16 +57,21 @@ const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 /// `copy-state` subcommand
 #[derive(Command, Debug, Options)]
 pub struct CopyStateCmd {
+    /// Source height that the copy finishes at.
+    #[options(help = "stop copying at this source height")]
+    max_source_height: Option<u32>,
+
     /// Path to a Zebra config.toml for the target state.
     /// Uses an ephemeral config by default.
     ///
     /// Zebra only uses the state options from this config.
     /// All other options are ignored.
-    #[options(free)]
-    target_state_config_path: Option<PathBuf>,
+    #[options(help = "config file path for the target state (default: ephemeral), \
+                      the source state uses the main zebrad config")]
+    target_config_path: Option<PathBuf>,
 
-    /// Filter strings
-    #[options(free)]
+    /// Filter strings which override the config file and defaults
+    #[options(free, help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
@@ -78,7 +83,7 @@ impl CopyStateCmd {
 
         // The default load_config impl doesn't actually modify the app config.
         let target_config = self
-            .target_state_config_path
+            .target_config_path
             .as_ref()
             .map(|path| app_writer().load_config(path))
             .transpose()?
@@ -113,7 +118,7 @@ impl CopyStateCmd {
         info!(?elapsed, "finished initializing source state service");
 
         info!(
-            ?target_config, target_config_path = ?self.target_state_config_path,
+            ?target_config, target_config_path = ?self.target_config_path,
             "initializing target state service (new format)"
         );
 
@@ -142,10 +147,17 @@ impl CopyStateCmd {
         };
         let source_tip_height = source_tip.0 .0;
 
-        info!(?source_tip, "starting copy from source to target");
+        let max_copy_height =
+            min(self.max_source_height, Some(source_tip_height)).unwrap_or(source_tip_height);
+
+        info!(
+            ?max_copy_height,
+            ?source_tip,
+            "starting copy from source to target"
+        );
 
         let copy_start_time = Instant::now();
-        for height in 0..=source_tip_height {
+        for height in 0..=max_copy_height {
             // Read block from source
             let source_block = source_state
                 .ready()
@@ -230,30 +242,37 @@ impl CopyStateCmd {
             {
                 Err(format!(
                     "unexpected mismatch between source and target blocks,\n \
+                     max copy height: {:?},\n \
                      source hash: {:?},\n \
                      target commit hash: {:?},\n \
                      target data hash: {:?},\n \
                      source block: {:?},\n \
                      target block: {:?}",
+                    max_copy_height,
                     source_block_hash,
                     target_block_commit_hash,
                     target_block_data_hash,
                     source_block,
-                    target_block
+                    target_block,
                 ))?;
             }
 
             // Log progress
             if height % PROGRESS_HEIGHT_INTERVAL == 0 {
                 let elapsed = copy_start_time.elapsed();
-                info!(?height, ?elapsed, "copied block from source to target");
+                info!(
+                    ?height,
+                    ?max_copy_height,
+                    ?elapsed,
+                    "copied block from source to target"
+                );
             }
         }
 
         let elapsed = copy_start_time.elapsed();
-        info!(?source_tip, ?elapsed, "finished copying blocks");
+        info!(?max_copy_height, ?elapsed, "finished copying blocks");
 
-        info!("fetching final target tip height");
+        info!(?max_copy_height, "fetching final target tip");
 
         let target_tip = target_state
             .ready()
@@ -269,24 +288,77 @@ impl CopyStateCmd {
                 response,
             ))?,
         };
+        let target_tip_height = target_tip.0 .0;
+        let target_tip_hash = target_tip.1;
+
+        let target_tip_source_depth = source_state
+            .ready()
+            .await?
+            .call(old_zs::Request::Depth(target_tip_hash))
+            .await?;
+        let target_tip_source_depth = match target_tip_source_depth {
+            old_zs::Response::Depth(source_depth) => source_depth,
+
+            response => Err(format!(
+                "unexpected response to Depth request: {:?}",
+                response,
+            ))?,
+        };
 
         // Check the tips match
         //
         // This check works because Zebra doesn't cache tip structs.
         // (See details above.)
-        if source_tip != target_tip {
-            Err(format!(
-                "unexpected mismatch between source and target tips,\n \
+        if max_copy_height == source_tip_height {
+            let expected_target_depth = Some(0);
+            if source_tip != target_tip || target_tip_source_depth != expected_target_depth {
+                Err(format!(
+                    "unexpected mismatch between source and target tips,\n \
+                     max copy height: {:?},\n \
                      source tip: {:?},\n \
-                     final target tip: {:?}",
-                source_tip, target_tip,
-            ))?;
+                     target tip: {:?},\n \
+                     actual target tip depth in source: {:?},\n \
+                     expect target tip depth in source: {:?}",
+                    max_copy_height,
+                    source_tip,
+                    target_tip,
+                    target_tip_source_depth,
+                    expected_target_depth,
+                ))?;
+            } else {
+                info!(
+                    ?max_copy_height,
+                    ?source_tip,
+                    ?target_tip,
+                    ?target_tip_source_depth,
+                    "source and target states contain the same blocks"
+                );
+            }
         } else {
-            info!(
-                ?source_tip,
-                ?target_tip,
-                "source and target states contain the same blocks"
-            );
+            let expected_target_depth = source_tip_height.checked_sub(target_tip_height);
+            if target_tip_source_depth != expected_target_depth {
+                Err(format!(
+                    "unexpected mismatch between source and target tips,\n \
+                     max copy height: {:?},\n \
+                     source tip: {:?},\n \
+                     target tip: {:?},\n \
+                     actual target tip depth in source: {:?},\n \
+                     expect target tip depth in source: {:?}",
+                    max_copy_height,
+                    source_tip,
+                    target_tip,
+                    target_tip_source_depth,
+                    expected_target_depth,
+                ))?;
+            } else {
+                info!(
+                    ?max_copy_height,
+                    ?source_tip,
+                    ?target_tip,
+                    ?target_tip_source_depth,
+                    "target state reached the max copy height"
+                );
+            }
         }
 
         Ok(())
@@ -296,7 +368,11 @@ impl CopyStateCmd {
 impl Runnable for CopyStateCmd {
     /// Start the application.
     fn run(&self) {
-        info!("starting cached chain state copy");
+        info!(
+            ?self.max_source_height,
+            ?self.target_config_path,
+            "starting cached chain state copy"
+        );
         let rt = app_writer()
             .state_mut()
             .components
