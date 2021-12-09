@@ -1,4 +1,4 @@
-// From https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs#L512
+// From https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs#L585
 pub const HEX_EMPTY_ROOTS: [&str; 33] = [
     "0100000000000000000000000000000000000000000000000000000000000000",
     "817de36ab2d57feb077634bca77819c8e0bd298c04f6fed0e6a83cc1356ca155",
