@@ -92,14 +92,13 @@ impl NonAdjacentForm for pallas::Scalar {
             // Construct a buffer of bits of the scalar, starting at bit `pos`
             let u64_idx = pos / 64;
             let bit_idx = pos % 64;
-            let bit_buf: u64;
-            if bit_idx < 64 - w {
+            let bit_buf: u64 = if bit_idx < 64 - w {
                 // This window's bits are contained in a single u64
-                bit_buf = x_u64[u64_idx] >> bit_idx;
+                x_u64[u64_idx] >> bit_idx
             } else {
                 // Combine the current u64's bits with the bits from the next u64
-                bit_buf = (x_u64[u64_idx] >> bit_idx) | (x_u64[1 + u64_idx] << (64 - bit_idx));
-            }
+                (x_u64[u64_idx] >> bit_idx) | (x_u64[1 + u64_idx] << (64 - bit_idx))
+            };
 
             // Add the carry into the current window
             let window = carry + (bit_buf & window_mask);
