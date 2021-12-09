@@ -616,7 +616,7 @@ We use the following rocksdb column families:
 | `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                 | Never   |
 | `orchard_anchors`              | `orchard::tree::Root`  | `()`                                 | Never   |
 | `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
-| `history_tree`                 | `block::Height`        | `zcash_history::Entry`               | Delete  |
+| `history_tree`                 | `block::Height`        | `NonEmptyHistoryTree`               | Delete  |
 | `tip_chain_value_pool`         | `()`                   | `ValueBalance`                       | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
@@ -639,7 +639,7 @@ Amounts:
 
 Derived Formats:
 - `*::NoteCommitmentTree`: `bincode` using `serde`
-- `zcash_history::Entry`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
+- `NonEmptyHistoryTree`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
 
 ### Implementing consensus rules using rocksdb
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
