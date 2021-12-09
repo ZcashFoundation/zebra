@@ -304,7 +304,9 @@ where
         })
         .collect();
 
-    while let Some(Ok(handshake_result)) = handshakes.next().await {
+    while let Some(handshake_result) = handshakes.next().await {
+        let handshake_result =
+            handshake_result.expect("unexpected panic in initial peer handshake");
         match handshake_result {
             Ok(ref change) => {
                 handshake_success_total += 1;
