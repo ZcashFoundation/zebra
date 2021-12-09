@@ -324,6 +324,7 @@ proptest! {
 
         // Allows anchor checks to pass
         state.disk.populate_with_anchors(&block1);
+        state.disk.populate_with_anchors(&block2);
 
         let mut previous_mem = state.mem.clone();
 

@@ -329,6 +329,10 @@ lazy_static! {
     pub static ref BLOCK_MAINNET_202_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-000-202.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    // zcash-cli getblock 395 0 > block-main-0-000-395.txt
+    pub static ref BLOCK_MAINNET_395_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-0-000-395.txt").trim())
+        .expect("Block bytes are in valid hex representation");
     // zcash-cli getblock 396 0 > block-main-0-000-396.txt
     pub static ref BLOCK_MAINNET_396_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-0-000-396.txt").trim())
