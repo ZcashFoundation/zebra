@@ -113,7 +113,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 ///
 /// Zebra resists distributed denial of service attacks by making sure that new peer connections
 /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
-pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
+pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(25);
 
 /// The minimum time between successive calls to [`CandidateSet::update()`][Self::update].
 ///
@@ -273,6 +273,8 @@ pub mod magics {
 #[cfg(test)]
 mod tests {
 
+    use std::convert::TryFrom;
+
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
@@ -305,6 +307,22 @@ mod tests {
 
         assert!(EWMA_DECAY_TIME_NANOS > request_timeout_nanos,
                 "The EWMA decay time should be higher than the request timeout, so timed out peers are penalised by the EWMA.");
+
+        assert!(
+            u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
+                * MIN_PEER_CONNECTION_INTERVAL
+                < MIN_PEER_RECONNECTION_DELAY,
+            "each peer should get at least one connection attempt in each connection interval",
+        );
+
+        assert!(
+            MIN_PEER_RECONNECTION_DELAY.as_secs()
+                / (u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
+                    * MIN_PEER_CONNECTION_INTERVAL)
+                    .as_secs()
+                <= 2,
+            "each peer should only have a few connection attempts in each connection interval",
+        );
     }
 
     /// Make sure that peer age limits are consistent with each other.
