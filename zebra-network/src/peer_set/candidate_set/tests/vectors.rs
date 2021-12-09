@@ -7,10 +7,7 @@ use std::{
 };
 
 use chrono::{DateTime, Duration, Utc};
-use tokio::{
-    runtime,
-    time::{self, Instant},
-};
+use tokio::time::{self, Instant};
 use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
@@ -136,12 +133,7 @@ fn candidate_set_updates_are_rate_limited() {
     // How many times should `update` be called in each rate limit interval
     const POLL_FREQUENCY_FACTOR: u32 = 3;
 
-    zebra_test::init();
-
-    let runtime = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime");
+    let runtime = zebra_test::init_async();
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
@@ -182,10 +174,7 @@ fn candidate_set_updates_are_rate_limited() {
 /// rate limited.
 #[test]
 fn candidate_set_update_after_update_initial_is_rate_limited() {
-    let runtime = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime");
+    let runtime = zebra_test::init_async();
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());

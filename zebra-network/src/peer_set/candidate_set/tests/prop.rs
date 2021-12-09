@@ -8,10 +8,7 @@ use std::{
 
 use futures::FutureExt;
 use proptest::{collection::vec, prelude::*};
-use tokio::{
-    runtime::Runtime,
-    time::{sleep, timeout},
-};
+use tokio::time::{sleep, timeout};
 use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
@@ -60,9 +57,7 @@ proptest! {
     ///       using a "not ready for attempt" peer generation strategy
     #[test]
     fn skipping_outbound_peer_connection_skips_rate_limit(next_peer_attempts in 0..TEST_ADDRESSES) {
-        zebra_test::init();
-
-        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let runtime = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let peer_service = tower::service_fn(|_| async {
@@ -97,9 +92,7 @@ proptest! {
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {
-        zebra_test::init();
-
-        let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+        let runtime = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let peer_service = tower::service_fn(|_| async {
