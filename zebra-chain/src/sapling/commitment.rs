@@ -116,12 +116,12 @@ impl NoteCommitment {
         //
         // The `TryFrom<Diversifier>` impls for the `jubjub::*Point`s handles
         // calling `DiversifyHash` implicitly.
-        let g_d_bytes: [u8; 32];
-        if let Ok(g_d) = jubjub::AffinePoint::try_from(diversifier) {
-            g_d_bytes = g_d.to_bytes();
+
+        let g_d_bytes: [u8; 32] = if let Ok(g_d) = jubjub::AffinePoint::try_from(diversifier) {
+            g_d.to_bytes()
         } else {
             return None;
-        }
+        };
 
         let pk_d_bytes = <[u8; 32]>::from(transmission_key);
         let v_bytes = value.to_bytes();
