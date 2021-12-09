@@ -542,8 +542,7 @@ impl FinalizedState {
         let (finalized, rsp_tx) = queued_block;
         let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
 
-        let block_result;
-        if result.is_ok() {
+        let block_result = if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
@@ -556,7 +555,7 @@ impl FinalizedState {
             metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
             metrics::counter!("zcash.chain.verified.block.total", 1);
 
-            block_result = Ok(finalized);
+            Ok(finalized)
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
@@ -564,8 +563,8 @@ impl FinalizedState {
                 finalized.height.0 as _
             );
 
-            block_result = Err(());
-        }
+            Err(())
+        };
 
         let _ = rsp_tx.send(result.map_err(Into::into));
 

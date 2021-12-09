@@ -72,7 +72,10 @@ use tower::{
     Service,
 };
 
+use zebra_chain::chain_tip::ChainTip;
+
 use crate::{
+    peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
         InventoryRegistry,
@@ -83,6 +86,9 @@ use crate::{
     },
     AddressBook, BoxError, Config,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
 ///
@@ -106,14 +112,11 @@ pub struct CancelClientWork;
 /// connections have an ephemeral local or proxy port.)
 ///
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
-pub struct PeerSet<D>
+pub struct PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
-    D::Service: Service<Request, Response = Response> + Load,
+    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
-    <D::Service as Service<Request>>::Future: Send + 'static,
-    <D::Service as Load>::Metric: Debug,
+    C: ChainTip,
 {
     /// Provides new and deleted peer [`Change`]s to the peer set,
     /// via the [`Discover`] trait implementation.
@@ -130,7 +133,8 @@ where
     /// If this is `Some(addr)`, `addr` must be a key for a peer in `ready_services`.
     /// If that peer is removed from `ready_services`, we must set the preselected peer to `None`.
     ///
-    /// This is handled by [`PeerSet::take_ready_service`].
+    /// This is handled by [`PeerSet::take_ready_service`] and
+    /// [`PeerSet::disconnect_from_outdated_peers`].
     preselected_p2c_peer: Option<D::Key>,
 
     /// Stores gossiped inventory hashes from connected peers.
@@ -172,30 +176,30 @@ where
     /// The peer set panics if this size is exceeded.
     /// If that happens, our connection limit code has a bug.
     peerset_total_connection_limit: usize,
+
+    /// An endpoint to see the minimum peer protocol version in real time.
+    ///
+    /// The minimum version depends on the block height, and [`MinimumPeerVersion`] listens for
+    /// height changes and determines the correct minimum version.
+    minimum_peer_version: MinimumPeerVersion<C>,
 }
 
-impl<D> Drop for PeerSet<D>
+impl<D, C> Drop for PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
-    D::Service: Service<Request, Response = Response> + Load,
+    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
-    <D::Service as Service<Request>>::Future: Send + 'static,
-    <D::Service as Load>::Metric: Debug,
+    C: ChainTip,
 {
     fn drop(&mut self) {
         self.shut_down_tasks_and_channels()
     }
 }
 
-impl<D> PeerSet<D>
+impl<D, C> PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
-    D::Service: Service<Request, Response = Response> + Load,
+    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
-    <D::Service as Service<Request>>::Future: Send + 'static,
-    <D::Service as Load>::Metric: Debug,
+    C: ChainTip,
 {
     /// Construct a peerset which uses `discover` to manage peer connections.
     ///
@@ -216,6 +220,7 @@ where
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
         address_book: Arc<std::sync::Mutex<AddressBook>>,
+        minimum_peer_version: MinimumPeerVersion<C>,
     ) -> Self {
         Self {
             // Ready peers
@@ -237,6 +242,9 @@ where
             last_peer_log: None,
             address_book,
             peerset_total_connection_limit: config.peerset_total_connection_limit(),
+
+            // Real-time parameters
+            minimum_peer_version,
         }
     }
 
@@ -348,7 +356,8 @@ where
 
     /// Check busy peer services for request completion or errors.
     ///
-    /// Move newly ready services to the ready list, and drop failed services.
+    /// Move newly ready services to the ready list if they are for peers with supported protocol
+    /// versions, otherwise they are dropped. Also drop failed services.
     fn poll_unready(&mut self, cx: &mut Context<'_>) {
         loop {
             match Pin::new(&mut self.unready_services).poll_next(cx) {
@@ -360,7 +369,10 @@ where
                     trace!(?key, "service became ready");
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
-                    self.ready_services.insert(key, svc);
+
+                    if svc.version() >= self.minimum_peer_version.current() {
+                        self.ready_services.insert(key, svc);
+                    }
                 }
 
                 // Unready -> Canceled
@@ -376,8 +388,7 @@ where
                 }
 
                 // Unready -> Errored
-                Poll::Ready(Some(Err((key, UnreadyError::Inner(e))))) => {
-                    let error = e.into();
+                Poll::Ready(Some(Err((key, UnreadyError::Inner(error))))) => {
                     debug!(%error, "service failed while unready, dropping service");
 
                     let cancel = self.cancel_handles.remove(&key);
@@ -408,6 +419,26 @@ where
                     self.push_unready(key, svc);
                 }
             }
+        }
+    }
+
+    /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
+    fn disconnect_from_outdated_peers(&mut self) {
+        if let Some(minimum_version) = self.minimum_peer_version.changed() {
+            // TODO: Remove when the code base migrates to Rust 2021 edition (#2709).
+            let preselected_p2c_peer = &mut self.preselected_p2c_peer;
+
+            self.ready_services.retain(|address, peer| {
+                if peer.version() >= minimum_version {
+                    true
+                } else {
+                    if *preselected_p2c_peer == Some(*address) {
+                        *preselected_p2c_peer = None;
+                    }
+
+                    false
+                }
+            });
         }
     }
 
@@ -445,17 +476,29 @@ where
         }
     }
 
-    /// Adds a busy service to the unready list,
+    /// Adds a busy service to the unready list if it's for a peer with a supported version,
     /// and adds a cancel handle for the service's current request.
+    ///
+    /// If the service is for a connection to an outdated peer, the request is cancelled and the
+    /// service is dropped.
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
+        let peer_version = svc.version();
         let (tx, rx) = oneshot::channel();
-        self.cancel_handles.insert(key, tx);
+
         self.unready_services.push(UnreadyService {
             key: Some(key),
             service: Some(svc),
             cancel: rx,
             _req: PhantomData,
         });
+
+        if peer_version >= self.minimum_peer_version.current() {
+            self.cancel_handles.insert(key, tx);
+        } else {
+            // Cancel any request made to the service because it is using an outdated protocol
+            // version.
+            let _ = tx.send(CancelClientWork);
+        }
     }
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
@@ -727,14 +770,11 @@ where
     }
 }
 
-impl<D> Service<Request> for PeerSet<D>
+impl<D, C> Service<Request> for PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr> + Unpin,
-    D::Service: Service<Request, Response = Response> + Load,
+    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
-    <D::Service as Service<Request>>::Error: Into<BoxError> + 'static,
-    <D::Service as Service<Request>>::Future: Send + 'static,
-    <D::Service as Load>::Metric: Debug,
+    C: ChainTip,
 {
     type Response = Response;
     type Error = BoxError;
@@ -746,6 +786,7 @@ where
 
         // Update peer statuses
         let _ = self.poll_discover(cx)?;
+        self.disconnect_from_outdated_peers();
         self.inventory_registry.poll_inventory(cx)?;
         self.poll_unready(cx);
 
@@ -772,8 +813,7 @@ where
                         trace!("preselected service is no longer ready, moving to unready list");
                         self.push_unready(key, service);
                     }
-                    Poll::Ready(Err(e)) => {
-                        let error = e.into();
+                    Poll::Ready(Err(error)) => {
                         trace!(%error, "preselected service failed, dropping it");
                         std::mem::drop(service);
                     }
