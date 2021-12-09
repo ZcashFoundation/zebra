@@ -156,12 +156,14 @@ pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 /// This delay is particularly important on instances with slow or unreliable
 /// networks, and on testnet, which has a small number of slow peers.
 ///
+/// Using a prime number makes sure that syncer fanouts don't synchronise with other crawls.
+///
 /// ## Correctness
 ///
 /// If this delay is removed (or set too low), the syncer will
 /// sometimes get stuck in a failure loop, due to leftover downloads from
 /// previous sync runs.
-const SYNC_RESTART_DELAY: Duration = Duration::from_secs(61);
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 
 /// Controls how long we wait to retry a failed attempt to download
 /// and verify the genesis block.

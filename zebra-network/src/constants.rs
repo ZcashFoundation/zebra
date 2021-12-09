@@ -64,7 +64,21 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// This avoids explicit synchronization, but relies on the peer
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
-pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 20 + 20);
+pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 20 + 20);
+
+/// The default peer address crawler interval.
+///
+/// This should be at least [`HANDSHAKE_TIMEOUT`](constants::HANDSHAKE_TIMEOUT)
+/// lower than all other crawler intervals.
+///
+/// This makes the following sequence of events more likely:
+/// 1. a peer address crawl,
+/// 2. new peer connections,
+/// 3. peer requests from other crawlers.
+///
+/// Using a prime number makes sure that peer address crawls
+/// don't synchronise with other crawls.
+pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
 
 /// The maximum duration since a peer was last seen to consider it reachable.
 ///
@@ -89,7 +103,9 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+///
+/// Using a prime number makes sure that heartbeats don't synchronise with crawls.
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
 /// The minimum time between successive calls to [`CandidateSet::next()`][Self::next].
 ///
@@ -101,11 +117,13 @@ pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The minimum time between successive calls to [`CandidateSet::update()`][Self::update].
 ///
+/// Using a prime number makes sure that peer address crawls don't synchronise with other crawls.
+///
 /// ## Security
 ///
 /// Zebra resists distributed denial of service attacks by making sure that requests for more
 /// peer addresses are sent at least `MIN_PEER_GET_ADDR_INTERVAL` apart.
-pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(30);
+pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(31);
 
 /// The combined timeout for all the requests in [`CandidateSet::update()`][Self::update].
 ///

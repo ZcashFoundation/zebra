@@ -69,7 +69,13 @@ mod tests;
 const FANOUT: usize = 3;
 
 /// The delay between crawl events.
-const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
+///
+/// This should be less than the target block interval,
+/// so that we crawl peer mempools at least once per block.
+///
+/// Using a prime number makes sure that mempool crawler fanouts
+/// don't synchronise with other crawls.
+const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
 
 /// The time to wait for a peer response.
 ///
