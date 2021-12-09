@@ -34,15 +34,13 @@ impl<'a> TryFrom<&'a [u8]> for Memo {
 
 impl fmt::Debug for Memo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let output: String;
-
         // This saves work but if the 'valid utf8 string' is just a
         // bunch of numbers, it prints them out like
         // 'Memo("\u{0}\u{0}..")', so. ¯\_(ツ)_/¯
-        match std::str::from_utf8(&self.0[..]) {
-            Ok(memo) => output = String::from(memo),
-            _ => output = hex::encode(&self.0[..]),
-        }
+        let output: String = match std::str::from_utf8(&self.0[..]) {
+            Ok(memo) => String::from(memo),
+            _ => hex::encode(&self.0[..]),
+        };
 
         f.debug_tuple("Memo").field(&output).finish()
     }

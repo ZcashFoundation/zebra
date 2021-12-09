@@ -60,9 +60,9 @@ pub struct Chain {
     pub(crate) history_tree: HistoryTree,
 
     /// The Sprout anchors created by `blocks`.
-    pub(super) sprout_anchors: HashMultiSet<sprout::tree::Root>,
+    pub(crate) sprout_anchors: HashMultiSet<sprout::tree::Root>,
     /// The Sprout anchors created by each block in `blocks`.
-    pub(super) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
+    pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
     /// The Sapling anchors created by `blocks`.
     pub(crate) sapling_anchors: HashMultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
@@ -393,6 +393,14 @@ impl Chain {
             history_tree,
             chain_value_pools: self.chain_value_pools,
         }
+    }
+
+    /// Returns a clone of the Sprout note commitment tree for this chain.
+    ///
+    /// Useful when calculating interstitial note commitment trees for each JoinSplit in a Sprout
+    /// shielded transaction.
+    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
+        self.sprout_note_commitment_tree.clone()
     }
 }
 

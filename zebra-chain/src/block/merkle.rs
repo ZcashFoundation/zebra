@@ -184,7 +184,7 @@ where
             .map(|tx| {
                 tx.as_ref()
                     .auth_digest()
-                    .unwrap_or_else(|| transaction::AuthDigest([0xFF; 32]))
+                    .unwrap_or(transaction::AuthDigest([0xFF; 32]))
             })
             .collect()
     }
