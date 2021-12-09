@@ -37,11 +37,7 @@ proptest! {
         transaction in any::<VerifiedUnminedTx>(),
         chain_tip in any::<ChainTipBlock>(),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
-        let _guard = runtime.enter();
+        let runtime = zebra_test::init_async();
 
         runtime.block_on(async move {
             let (
@@ -92,11 +88,7 @@ proptest! {
         mut transactions in vec(any::<VerifiedUnminedTx>(), 0..CHAIN_LENGTH),
         fake_chain_tips in vec(any::<FakeChainTip>(), 0..CHAIN_LENGTH),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
-        let _guard = runtime.enter();
+        let runtime = zebra_test::init_async();
 
         runtime.block_on(async move {
             let (
@@ -178,11 +170,7 @@ proptest! {
         network in any::<Network>(),
         transaction in any::<VerifiedUnminedTx>(),
     ) {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
-        let _guard = runtime.enter();
+        let runtime = zebra_test::init_async();
 
         runtime.block_on(async move {
             let (

@@ -110,6 +110,8 @@ impl Handler {
         // XXX can this be avoided?
         let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
 
+        debug!(handler = %tmp_state, %msg, "received peer response to Zebra request");
+
         *self = match (tmp_state, msg) {
             (Handler::Ping(req_nonce), Message::Pong(rsp_nonce)) => {
                 if req_nonce == rsp_nonce {
@@ -311,6 +313,10 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFound(items)))
                 }
             }
+
+            // TODO:
+            // - add NotFound cases for blocks, transactions, and headers (#2726)
+            // - use `any(inv)` rather than `all(inv)`?
             (Handler::FindBlocks, Message::Inv(items))
                 if items
                     .iter()
@@ -533,6 +539,12 @@ where
                                     tx,
                                     ..
                                 } => {
+                                    if let Ok(response) = response.as_ref() {
+                                        debug!(%response, "finished receiving peer response to Zebra request");
+                                    } else {
+                                        debug!(error = ?response, "error in peer response to Zebra request");
+                                    }
+
                                     let _ = tx.send(response.map_err(Into::into));
                                     State::AwaitingRequest
                                 }
@@ -693,9 +705,11 @@ where
 
         if tx.is_canceled() {
             metrics::counter!("peer.canceled", 1);
-            tracing::debug!("ignoring canceled request");
+            debug!(state = %self.state, %request, "ignoring canceled request");
             return;
         }
+
+        debug!(state = %self.state, %request, "sending request from Zebra to peer");
 
         // These matches return a Result with (new_state, Option<Sender>) or an (error, Sender)
         let new_state_result = match (&self.state, request) {
@@ -884,6 +898,8 @@ where
     #[instrument(name = "msg_as_req", skip(self, msg), fields(%msg))]
     async fn handle_message_as_request(&mut self, msg: Message) {
         trace!(?msg);
+        debug!(state = %self.state, %msg, "received peer request to Zebra");
+
         let req = match msg {
             Message::Ping(nonce) => {
                 trace!(?nonce, "responding to heartbeat");
@@ -1031,7 +1047,7 @@ where
             return;
         }
 
-        let rsp = match self.svc.call(req).await {
+        let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
                     tracing::warn!("inbound service is overloaded, closing connection");
@@ -1052,7 +1068,7 @@ where
             Ok(rsp) => rsp,
         };
 
-        match rsp {
+        match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
@@ -1101,6 +1117,8 @@ where
                 }
             }
         }
+
+        debug!(state = %self.state, %req, %rsp, "sent Zebra response to peer");
     }
 }
 
