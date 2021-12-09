@@ -296,7 +296,8 @@ where
             // ... instead, spawn a new task to handle this connector
             tokio::spawn(async move {
                 let task = outbound_connector_future.await;
-                // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`.
+                // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
+                // sleeping for an interval according to its index in the list.
                 sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
                 task
             })
