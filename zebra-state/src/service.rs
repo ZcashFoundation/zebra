@@ -473,7 +473,7 @@ impl StateService {
             (max_height - 1).expect("max_len is at least 1")
         };
 
-        let stop_height = stop.map(|hash| self.best_height_by_hash(hash)).flatten();
+        let stop_height = stop.and_then(|hash| self.best_height_by_hash(hash));
 
         // Compute the final height, making sure it is:
         //   * at or below our chain tip, and

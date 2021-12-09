@@ -132,24 +132,21 @@ impl Block {
     pub fn sprout_nullifiers(&self) -> impl Iterator<Item = &sprout::Nullifier> {
         self.transactions
             .iter()
-            .map(|transaction| transaction.sprout_nullifiers())
-            .flatten()
+            .flat_map(|transaction| transaction.sprout_nullifiers())
     }
 
     /// Access the [`sapling::Nullifier`]s from all transactions in this block.
     pub fn sapling_nullifiers(&self) -> impl Iterator<Item = &sapling::Nullifier> {
         self.transactions
             .iter()
-            .map(|transaction| transaction.sapling_nullifiers())
-            .flatten()
+            .flat_map(|transaction| transaction.sapling_nullifiers())
     }
 
     /// Access the [`orchard::Nullifier`]s from all transactions in this block.
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
         self.transactions
             .iter()
-            .map(|transaction| transaction.orchard_nullifiers())
-            .flatten()
+            .flat_map(|transaction| transaction.orchard_nullifiers())
     }
 
     /// Count how many Sapling transactions exist in a block,

@@ -7,7 +7,7 @@ fn parse_coinbase_height_mins() {
     // examples with height 1:
 
     let case1 = vec![0x51];
-    assert!(!parse_coinbase_height(case1.clone()).is_err());
+    assert!(parse_coinbase_height(case1.clone()).is_ok());
     assert_eq!(parse_coinbase_height(case1).unwrap().0 .0, 1);
 
     let case2 = vec![0x01, 0x01];
@@ -25,7 +25,7 @@ fn parse_coinbase_height_mins() {
     // examples with height 17:
 
     let case1 = vec![0x01, 0x11];
-    assert!(!parse_coinbase_height(case1.clone()).is_err());
+    assert!(parse_coinbase_height(case1.clone()).is_ok());
     assert_eq!(parse_coinbase_height(case1).unwrap().0 .0, 17);
 
     let case2 = vec![0x02, 0x11, 0x00];
