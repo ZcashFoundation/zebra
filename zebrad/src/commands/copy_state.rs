@@ -307,6 +307,8 @@ impl Runnable for CopyStateCmd {
 
         rt.expect("runtime should not already be taken")
             .run(self.start());
+
+        info!("finished cached chain state copy");
     }
 }
 

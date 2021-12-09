@@ -268,6 +268,8 @@ impl Runnable for StartCmd {
 
         rt.expect("runtime should not already be taken")
             .run(self.start());
+
+        info!("stopping zebrad");
     }
 }
 
