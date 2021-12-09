@@ -3,7 +3,8 @@
 //! Copying state helps Zebra developers modify and debug cached state formats.
 //!
 //! In order to test a new state format, blocks must be identical when they are:
-//! - written to the new format, and then
+//! - read from the old format,
+//! - written to the new format, and
 //! - read from the new format.
 //!
 //! The "old" and "new" states can also use the same format.
@@ -16,16 +17,14 @@
 //! Tasks:
 //!  * Old to New Copy Task
 //!    * queries the source state for blocks,
-//!      and copies those blocks to the target state
-//!  * New to Old Copy Task
-//!    * queries the source state for blocks,
-//!      and copies those blocks to the target state
+//!      copies those blocks to the target state, then
+//!      reads the copied blocks from the target state.
 //!
 //! Services:
 //!  * Source Old State Service
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the old format
-//!  * Source/Target New State Service
+//!  * Target New State Service
 //!    * writes best finalized chain blocks to permanent storage,
 //!      in the new format
 //!    * only performs essential contextual verification of blocks,
@@ -33,12 +32,6 @@
 //!      receiving blocks in the new format
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
-//!  * Target Old State Service
-//!    * writes best finalized chain blocks to permanent storage,
-//!      in the old format
-//!    * only performs essential contextual verification of blocks
-//!      to make sure that block data hasn't been corrupted by
-//!      writing, reading, and sending blocks in the new format
 
 use std::path::PathBuf;
 
@@ -59,7 +52,7 @@ use crate::{
 };
 
 /// How often we log info-level progress locks
-const PROGRESS_HEIGHT_INTERVAL: u32 = 10_000;
+const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 
 /// `copy-state` subcommand
 #[derive(Command, Debug, Options)]
@@ -133,17 +126,13 @@ impl CopyStateCmd {
 
         info!("fetching source tip height");
 
-        let tip_start_time = Instant::now();
         let source_tip = source_state
             .ready()
             .await?
             .call(old_zs::Request::Tip)
             .await?;
         let source_tip = match source_tip {
-            old_zs::Response::Tip(Some(source_tip)) => {
-                info!(?source_tip, "got source tip");
-                source_tip.0 .0
-            }
+            old_zs::Response::Tip(Some(source_tip)) => source_tip,
             old_zs::Response::Tip(None) => Err("empty source state: no blocks to copy")?,
 
             response => Err(format!(
@@ -151,14 +140,12 @@ impl CopyStateCmd {
                 response,
             ))?,
         };
-
-        let elapsed = tip_start_time.elapsed();
-        info!(?elapsed, "finished fetching source tip height");
+        let source_tip_height = source_tip.0 .0;
 
         info!(?source_tip, "starting copy from source to target");
 
         let copy_start_time = Instant::now();
-        for height in 0..=source_tip {
+        for height in 0..=source_tip_height {
             // Read block from source
             let source_block = source_state
                 .ready()
@@ -203,37 +190,44 @@ impl CopyStateCmd {
                 ))?,
             };
 
+            // Read written block from target
+            let target_block = target_state
+                .ready()
+                .await?
+                .call(new_zs::Request::Block(Height(height).into()))
+                .await?;
+            let target_block = match target_block {
+                new_zs::Response::Block(Some(target_block)) => {
+                    trace!(?height, %target_block, "read target block");
+                    target_block
+                }
+                new_zs::Response::Block(None) => Err(format!(
+                    "unexpected missing target block, height: {}",
+                    height,
+                ))?,
+
+                response => Err(format!(
+                    "unexpected response to Block request, height: {},\n \
+                     response: {:?}",
+                    height, response,
+                ))?,
+            };
+            let target_block_data_hash = target_block.hash();
+
             // Check for data errors
-            if source_block_hash != target_block_commit_hash {
-                error!(
-                    ?source_block_hash,
-                    ?target_block_commit_hash,
-                    "source and target block hashes did not match, fetching target block"
-                );
-
-                let target_block = target_state
-                    .ready()
-                    .await?
-                    .call(new_zs::Request::Block(Height(height).into()))
-                    .await?;
-                let target_block = match target_block {
-                    new_zs::Response::Block(Some(target_block)) => {
-                        info!(?height, %target_block, "read target block");
-                        target_block
-                    }
-                    new_zs::Response::Block(None) => Err(format!(
-                        "unexpected missing target block, height: {}",
-                        height,
-                    ))?,
-
-                    response => Err(format!(
-                        "unexpected response to Block request, height: {},\n \
-                         response: {:?}",
-                        height, response,
-                    ))?,
-                };
-                let target_block_data_hash = target_block.hash();
-
+            //
+            // These checks make sure that Zebra doesn't corrupt the block data
+            // when serializing it in the new format.
+            // Zebra currently serializes `Block` structs into bytes while writing,
+            // then deserializes bytes into new `Block` structs when reading.
+            // So these checks are sufficient to detect block data corruption.
+            //
+            // If Zebra starts re-using cached `Block` structs after writing them,
+            // we'll also need to check `Block` structs created from the actual database bytes.
+            if source_block_hash != target_block_commit_hash
+                || source_block_hash != target_block_data_hash
+                || source_block != target_block
+            {
                 Err(format!(
                     "unexpected mismatch between source and target blocks,\n \
                      source hash: {:?},\n \
@@ -257,7 +251,43 @@ impl CopyStateCmd {
         }
 
         let elapsed = copy_start_time.elapsed();
-        info!(?source_tip, ?elapsed, "finished copy task");
+        info!(?source_tip, ?elapsed, "finished copying blocks");
+
+        info!("fetching final target tip height");
+
+        let target_tip = target_state
+            .ready()
+            .await?
+            .call(new_zs::Request::Tip)
+            .await?;
+        let target_tip = match target_tip {
+            new_zs::Response::Tip(Some(target_tip)) => target_tip,
+            new_zs::Response::Tip(None) => Err("empty target state: expected written blocks")?,
+
+            response => Err(format!(
+                "unexpected response to Tip request: {:?}",
+                response,
+            ))?,
+        };
+
+        // Check the tips match
+        //
+        // This check works because Zebra doesn't cache tip structs.
+        // (See details above.)
+        if source_tip != target_tip {
+            Err(format!(
+                "unexpected mismatch between source and target tips,\n \
+                     source tip: {:?},\n \
+                     final target tip: {:?}",
+                source_tip, target_tip,
+            ))?;
+        } else {
+            info!(
+                ?source_tip,
+                ?target_tip,
+                "source and target states contain the same blocks"
+            );
+        }
 
         Ok(())
     }
