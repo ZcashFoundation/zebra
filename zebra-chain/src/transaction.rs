@@ -887,8 +887,7 @@ impl Transaction {
     pub fn orchard_actions(&self) -> impl Iterator<Item = &orchard::Action> {
         self.orchard_shielded_data()
             .into_iter()
-            .map(orchard::ShieldedData::actions)
-            .flatten()
+            .flat_map(orchard::ShieldedData::actions)
     }
 
     /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
@@ -896,8 +895,7 @@ impl Transaction {
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
         self.orchard_shielded_data()
             .into_iter()
-            .map(orchard::ShieldedData::nullifiers)
-            .flatten()
+            .flat_map(orchard::ShieldedData::nullifiers)
     }
 
     /// Access the note commitments in this transaction, if there are any,
@@ -905,8 +903,7 @@ impl Transaction {
     pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
         self.orchard_shielded_data()
             .into_iter()
-            .map(orchard::ShieldedData::note_commitments)
-            .flatten()
+            .flat_map(orchard::ShieldedData::note_commitments)
     }
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,

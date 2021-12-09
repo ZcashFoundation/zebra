@@ -344,9 +344,7 @@ proptest! {
 
                     // If `change` is invalid for the current MetaAddr state, skip it.
                     // If we've run out of changes for this addr, do nothing.
-                    if let Some(changed_addr) = change
-                        .map(|change| change.apply_to_meta_addr(*addr))
-                        .flatten()
+                    if let Some(changed_addr) = change.and_then(|change| change.apply_to_meta_addr(*addr))
                     {
                         prop_assert_eq!(changed_addr.addr, addr.addr);
                         *addr = changed_addr;
