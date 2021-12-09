@@ -30,7 +30,9 @@ use zebra_chain::{
 use crate::{
     constants,
     meta_addr::MetaAddrChange,
-    peer::{Client, ClientRequest, Connection, ErrorSlot, HandshakeError, PeerError},
+    peer::{
+        Client, ClientRequest, Connection, ErrorSlot, HandshakeError, MinimumPeerVersion, PeerError,
+    },
     peer_set::ConnectionTracker,
     protocol::{
         external::{types::*, AddrInVersion, Codec, InventoryHash, Message},
@@ -59,7 +61,7 @@ pub struct Handshake<S, C = NoChainTip> {
     our_services: PeerServices,
     relay: bool,
     parent_span: Span,
-    latest_chain_tip: C,
+    minimum_peer_version: MinimumPeerVersion<C>,
 }
 
 /// The peer address that we are handshaking with.
@@ -420,6 +422,8 @@ where
         let user_agent = self.user_agent.unwrap_or_else(|| "".to_string());
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
+        let network = config.network;
+        let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, network);
 
         Ok(Handshake {
             config,
@@ -431,7 +435,7 @@ where
             our_services,
             relay,
             parent_span: Span::current(),
-            latest_chain_tip: self.latest_chain_tip,
+            minimum_peer_version,
         })
     }
 }
@@ -473,7 +477,7 @@ pub async fn negotiate_version(
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-    latest_chain_tip: impl ChainTip,
+    mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -589,8 +593,7 @@ pub async fn negotiate_version(
 
     // SECURITY: Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
-    let height = latest_chain_tip.best_tip_height();
-    let min_version = Version::min_remote_for_height(config.network, height);
+    let min_version = minimum_peer_version.current();
     if remote_version < min_version {
         debug!(
             remote_ip = ?their_addr,
@@ -716,7 +719,7 @@ where
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
-        let latest_chain_tip = self.latest_chain_tip.clone();
+        let minimum_peer_version = self.minimum_peer_version.clone();
 
         let fut = async move {
             debug!(
@@ -747,7 +750,7 @@ where
                     user_agent,
                     our_services,
                     relay,
-                    latest_chain_tip,
+                    minimum_peer_version,
                 ),
             )
             .await??;
@@ -792,6 +795,7 @@ where
                 shutdown_tx: Some(shutdown_tx),
                 server_tx: server_tx.clone(),
                 error_slot: slot.clone(),
+                version: remote_version,
             };
 
             let (peer_tx, peer_rx) = peer_conn.split();

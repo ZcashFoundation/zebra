@@ -200,7 +200,10 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(REQUEST_TIMEOUT.as_se
 ///
 /// This should be much larger than the `SYNC_RESTART_TIMEOUT`, so we choose
 /// better peers when we restart the sync.
-pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
+pub const EWMA_DECAY_TIME_NANOS: f64 = 200.0 * NANOS_PER_SECOND;
+
+/// The number of nanoseconds in one second.
+const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
@@ -279,7 +282,10 @@ mod tests {
         assert!(EWMA_DEFAULT_RTT > REQUEST_TIMEOUT,
                 "The default EWMA RTT should be higher than the request timeout, so new peers are required to prove they are fast, before we prefer them to other peers.");
 
-        assert!(EWMA_DECAY_TIME > REQUEST_TIMEOUT,
+        let request_timeout_nanos = REQUEST_TIMEOUT.as_secs_f64()
+            + f64::from(REQUEST_TIMEOUT.subsec_nanos()) * NANOS_PER_SECOND;
+
+        assert!(EWMA_DECAY_TIME_NANOS > request_timeout_nanos,
                 "The EWMA decay time should be higher than the request timeout, so timed out peers are penalised by the EWMA.");
     }
 
