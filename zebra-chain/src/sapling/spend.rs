@@ -110,36 +110,6 @@ impl From<(Spend<PerSpendAnchor>, FieldNotPresent)> for Spend<PerSpendAnchor> {
     }
 }
 
-impl Spend<PerSpendAnchor> {
-    /// Encodes the primary inputs for the proof statement as 7 Bls12_381 base
-    /// field elements, to match bellman::groth16::verify_proof.
-    ///
-    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#cctsaplingspend
-    pub fn primary_inputs(&self) -> Vec<jubjub::Fq> {
-        let mut inputs = vec![];
-
-        let rk_affine = jubjub::AffinePoint::from_bytes(self.rk.into()).unwrap();
-        inputs.push(rk_affine.get_u());
-        inputs.push(rk_affine.get_v());
-
-        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.into()).unwrap();
-        inputs.push(cv_affine.get_u());
-        inputs.push(cv_affine.get_v());
-
-        // TODO: V4 only
-        inputs.push(jubjub::Fq::from_bytes(&self.per_spend_anchor.into()).unwrap());
-
-        let nullifier_limbs: [jubjub::Fq; 2] = self.nullifier.into();
-
-        inputs.push(nullifier_limbs[0]);
-        inputs.push(nullifier_limbs[1]);
-
-        inputs
-    }
-}
-
 impl Spend<SharedAnchor> {
     /// Combine the prefix and non-prefix fields from V5 transaction
     /// deserialization.

@@ -12,6 +12,24 @@ use std::io::{self, Read};
 )]
 pub struct Mac([u8; 32]);
 
+impl From<[u8; 32]> for Mac {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<Mac> for [u8; 32] {
+    fn from(rt: Mac) -> [u8; 32] {
+        rt.0
+    }
+}
+
+impl From<&Mac> for [u8; 32] {
+    fn from(mac: &Mac) -> Self {
+        mac.clone().into()
+    }
+}
+
 impl ZcashDeserialize for Mac {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         let bytes = reader.read_32_bytes()?;
