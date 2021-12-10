@@ -57,3 +57,9 @@ impl From<NoteCommitment> for [u8; 32] {
         cm.0
     }
 }
+
+impl From<&NoteCommitment> for [u8; 32] {
+    fn from(cm: &NoteCommitment) -> [u8; 32] {
+        cm.0
+    }
+}

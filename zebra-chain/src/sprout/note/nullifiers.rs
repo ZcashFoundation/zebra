@@ -86,3 +86,9 @@ impl From<Nullifier> for [u8; 32] {
         n.0
     }
 }
+
+impl From<&Nullifier> for [u8; 32] {
+    fn from(n: &Nullifier) -> Self {
+        n.0
+    }
+}

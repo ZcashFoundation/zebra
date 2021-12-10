@@ -1441,7 +1441,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
         x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand07::thread_rng()));
-    let random_seed = [0u8; 32];
+    let random_seed = sprout::RandomSeed::from([0u8; 32]);
     let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
         .expect("Failure to deserialize dummy MAC");
     let zkproof = Groth16Proof([0u8; 192]);

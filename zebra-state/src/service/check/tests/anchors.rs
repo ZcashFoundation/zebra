@@ -92,7 +92,7 @@ fn prepare_sprout_block(mut block_to_prepare: Block, reference_block: Block) -> 
                         nullifiers: old_joinsplit.nullifiers,
                         commitments: old_joinsplit.commitments,
                         ephemeral_key: old_joinsplit.ephemeral_key,
-                        random_seed: old_joinsplit.random_seed,
+                        random_seed: old_joinsplit.random_seed.clone(),
                         vmacs: old_joinsplit.vmacs.clone(),
                         zkproof: Groth16Proof::from([0; 192]),
                         enc_ciphertexts: old_joinsplit.enc_ciphertexts,
