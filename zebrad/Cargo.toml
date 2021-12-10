@@ -50,7 +50,7 @@ sentry-tracing = "0.23.0"
 rand = "0.8.4"
 
 [build-dependencies]
-vergen = { version = "5.2.0", default-features = false, features = ["cargo", "git"] }
+vergen = { version = "6.0.0", default-features = false, features = ["cargo", "git"] }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
