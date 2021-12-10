@@ -299,7 +299,9 @@ impl Application for ZebradApp {
                     }
 
                     let error_str = error.to_string();
-                    !error_str.contains("timed out") && !error_str.contains("duplicate hash")
+                    !error_str.contains("timed out")
+                        && !error_str.contains("duplicate hash")
+                        && !error_str.contains("No space left on device")
                 }
             });
 

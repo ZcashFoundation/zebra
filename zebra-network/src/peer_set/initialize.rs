@@ -706,9 +706,22 @@ where
                 //
                 // TODO: refactor candidates into a buffered service, so we can
                 //       spawn independent tasks to avoid deadlocks
-                candidates.update().await?;
-                // Try to connect to a new peer.
-                let _ = demand_tx.try_send(MorePeers);
+                let more_peers = candidates.update().await?;
+
+                // If we got more peers, try to connect to a new peer.
+                //
+                // # Security
+                //
+                // Update attempts are rate-limited by the candidate set.
+                //
+                // We only try peers if there was actually an update.
+                // So if all peers have had a recent attempt,
+                // and there was recent update with no peers,
+                // the channel will drain.
+                // This prevents useless update attempt loops.
+                if let Some(more_peers) = more_peers {
+                    let _ = demand_tx.try_send(more_peers);
+                }
             }
             TimerCrawl { tick } => {
                 debug!(
@@ -734,6 +747,8 @@ where
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
+                //
+                // Security: handshake failures are rate-limited by peer attempt timeouts.
                 let _ = demand_tx.try_send(MorePeers);
             }
         }
