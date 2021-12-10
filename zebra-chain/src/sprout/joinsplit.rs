@@ -15,9 +15,9 @@ use crate::{
 use super::{commitment, note, tree};
 
 /// A 256-bit seed that must be chosen independently at
-/// random for each JoinSplit description [1].
+/// random for each [JoinSplit description].
 ///
-/// [1]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
+/// [JoinSplit description]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),

@@ -149,12 +149,13 @@ pub trait Description {
 }
 
 impl Description for Spend<PerSpendAnchor> {
-    /// Encodes the primary inputs for the proof statement as 7 Bls12_381 base
-    /// field elements, to match bellman::groth16::verify_proof.
+    /// Encodes the primary input for the Sapling Spend proof statement as 7 Bls12_381 base
+    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element 
+    /// `1` is filled in by [`bellman`].
     ///
     /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#cctsaplingspend
+    /// <https://zips.z.cash/protocol/protocol.pdf#cctsaplingspend>
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let mut inputs = vec![];
 
@@ -183,12 +184,13 @@ impl Description for Spend<PerSpendAnchor> {
 }
 
 impl Description for Output {
-    /// Encodes the primary inputs for the proof statement as 5 Bls12_381 base
-    /// field elements, to match bellman::groth16::verify_proof.
+    /// Encodes the primary input for the Sapling Output proof statement as 5 Bls12_381 base
+    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element 
+    /// `1` is filled in by [`bellman`].
     ///
-    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
+    /// NB: [`jubjub::Fq`] is a type alias for [`bls12_381::Scalar`].
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#cctsaplingoutput
+    /// <https://zips.z.cash/protocol/protocol.pdf#cctsaplingoutput>
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let mut inputs = vec![];
 
@@ -240,16 +242,17 @@ pub(super) fn h_sig(
 }
 
 impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) {
-    /// Encodes the primary inputs for the proof statement as Bls12_381 base
+    /// Encodes the primary input for the JoinSplit proof statement as Bls12_381 base
     /// field elements, to match [`bellman::groth16::verify_proof()`].
     ///
-    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
+    /// NB: [`jubjub::Fq`] is a type alias for [`bls12_381::Scalar`].
     ///
     /// `joinsplit_pub_key`: the JoinSplit public validation key for this JoinSplit, from
     /// the transaction. (All JoinSplits in a transaction share the same validation key.)
     ///
     /// This is not yet officially documented; see the reference implementation:
     /// https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166
+    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let (joinsplit, joinsplit_pub_key) = self;
 
