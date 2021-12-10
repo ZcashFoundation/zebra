@@ -150,7 +150,7 @@ pub trait Description {
 
 impl Description for Spend<PerSpendAnchor> {
     /// Encodes the primary input for the Sapling Spend proof statement as 7 Bls12_381 base
-    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element 
+    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element
     /// `1` is filled in by [`bellman`].
     ///
     /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
@@ -185,7 +185,7 @@ impl Description for Spend<PerSpendAnchor> {
 
 impl Description for Output {
     /// Encodes the primary input for the Sapling Output proof statement as 5 Bls12_381 base
-    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element 
+    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element
     /// `1` is filled in by [`bellman`].
     ///
     /// NB: [`jubjub::Fq`] is a type alias for [`bls12_381::Scalar`].

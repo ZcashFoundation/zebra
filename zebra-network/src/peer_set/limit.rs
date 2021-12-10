@@ -39,7 +39,7 @@ impl fmt::Debug for ActiveConnectionCounter {
 impl ActiveConnectionCounter {
     /// Create and return a new active connection counter.
     pub fn new_counter() -> Self {
-        // TODO: This channel will be bounded by the connection limit (#1850, #1851, #2902).
+        // The number of items in this channel is bounded by the connection limit.
         let (close_notification_tx, close_notification_rx) = mpsc::unbounded_channel();
 
         Self {
@@ -73,7 +73,7 @@ impl ActiveConnectionCounter {
             );
         }
 
-        debug!(
+        trace!(
             open_connections = ?self.count,
             ?previous_connections,
             "updated active connection count"

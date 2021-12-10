@@ -246,7 +246,9 @@ async fn add_initial_peers<S>(
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
-        + Clone,
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     let initial_peers = limit_initial_peers(&config, address_book_updater).await;
@@ -285,20 +287,26 @@ where
                 connection_tracker,
             };
 
-            let outbound_connector = outbound_connector.clone();
-            async move {
-                // Rate-limit the connection, sleeping for an interval according
-                // to its index in the list.
+            // Construct a connector future but do not drive it yet ...
+            let outbound_connector_future = outbound_connector
+                .clone()
+                .oneshot(req)
+                .map_err(move |e| (addr, e));
+
+            // ... instead, spawn a new task to handle this connector
+            tokio::spawn(async move {
+                let task = outbound_connector_future.await;
+                // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
+                // sleeping for an interval according to its index in the list.
                 sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
-                outbound_connector
-                    .oneshot(req)
-                    .map_err(move |e| (addr, e))
-                    .await
-            }
+                task
+            })
         })
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
+        let handshake_result =
+            handshake_result.expect("unexpected panic in initial peer handshake");
         match handshake_result {
             Ok(ref change) => {
                 handshake_success_total += 1;
@@ -698,9 +706,22 @@ where
                 //
                 // TODO: refactor candidates into a buffered service, so we can
                 //       spawn independent tasks to avoid deadlocks
-                candidates.update().await?;
-                // Try to connect to a new peer.
-                let _ = demand_tx.try_send(MorePeers);
+                let more_peers = candidates.update().await?;
+
+                // If we got more peers, try to connect to a new peer.
+                //
+                // # Security
+                //
+                // Update attempts are rate-limited by the candidate set.
+                //
+                // We only try peers if there was actually an update.
+                // So if all peers have had a recent attempt,
+                // and there was recent update with no peers,
+                // the channel will drain.
+                // This prevents useless update attempt loops.
+                if let Some(more_peers) = more_peers {
+                    let _ = demand_tx.try_send(more_peers);
+                }
             }
             TimerCrawl { tick } => {
                 debug!(
@@ -726,6 +747,8 @@ where
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
+                //
+                // Security: handshake failures are rate-limited by peer attempt timeouts.
                 let _ = demand_tx.try_send(MorePeers);
             }
         }

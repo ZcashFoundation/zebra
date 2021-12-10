@@ -72,8 +72,8 @@ use crate::{
 /// `start` subcommand
 #[derive(Command, Debug, Options)]
 pub struct StartCmd {
-    /// Filter strings
-    #[options(free)]
+    /// Filter strings which override the config file and defaults
+    #[options(free, help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
