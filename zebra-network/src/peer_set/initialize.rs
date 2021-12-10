@@ -246,7 +246,9 @@ async fn add_initial_peers<S>(
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
-        + Clone,
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     let initial_peers = limit_initial_peers(&config, address_book_updater).await;
@@ -285,20 +287,26 @@ where
                 connection_tracker,
             };
 
-            let outbound_connector = outbound_connector.clone();
-            async move {
-                // Rate-limit the connection, sleeping for an interval according
-                // to its index in the list.
+            // Construct a connector future but do not drive it yet ...
+            let outbound_connector_future = outbound_connector
+                .clone()
+                .oneshot(req)
+                .map_err(move |e| (addr, e));
+
+            // ... instead, spawn a new task to handle this connector
+            tokio::spawn(async move {
+                let task = outbound_connector_future.await;
+                // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
+                // sleeping for an interval according to its index in the list.
                 sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
-                outbound_connector
-                    .oneshot(req)
-                    .map_err(move |e| (addr, e))
-                    .await
-            }
+                task
+            })
         })
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
+        let handshake_result =
+            handshake_result.expect("unexpected panic in initial peer handshake");
         match handshake_result {
             Ok(ref change) => {
                 handshake_success_total += 1;
