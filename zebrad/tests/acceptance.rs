@@ -83,11 +83,17 @@ fn default_test_config() -> Result<ZebradConfig> {
         ..mempool::Config::default()
     };
 
+    let consensus = zebra_consensus::Config {
+        debug_skip_parameter_preload: true,
+        ..zebra_consensus::Config::default()
+    };
+
     let config = ZebradConfig {
         network,
         state: zebra_state::Config::ephemeral(),
         sync,
         mempool,
+        consensus,
         ..ZebradConfig::default()
     };
 

@@ -106,6 +106,7 @@ impl StartCmd {
                 config.consensus.clone(),
                 config.network.network,
                 state.clone(),
+                config.consensus.debug_skip_parameter_preload,
             )
             .await;
 

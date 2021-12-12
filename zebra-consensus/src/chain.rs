@@ -150,7 +150,8 @@ where
 }
 
 /// Initialize block and transaction verification services,
-/// and pre-download Groth16 parameters if needed.
+/// and pre-download Groth16 parameters if requested by the `debug_skip_parameter_preload`
+/// config parameter and if the download is not already started.
 ///
 /// Returns a block verifier, transaction verifier,
 /// and the Groth16 parameter download task [`JoinHandle`].
@@ -185,6 +186,7 @@ pub async fn init<S>(
     config: Config,
     network: Network,
     mut state_service: S,
+    debug_skip_parameter_preload: bool,
 ) -> (
     Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>,
     Buffer<
@@ -204,10 +206,12 @@ where
 
     // The parameter download thread must be launched before initializing any verifiers.
     // Otherwise, the download might happen on the startup thread.
-    let groth16_download_handle = spawn_blocking(|| {
-        // The lazy static initializer does the download, if needed,
-        // and the file hash checks.
-        lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
+    let groth16_download_handle = spawn_blocking(move || {
+        if !debug_skip_parameter_preload {
+            // The lazy static initializer does the download, if needed,
+            // and the file hash checks.
+            lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
+        }
     });
 
     // transaction verification
