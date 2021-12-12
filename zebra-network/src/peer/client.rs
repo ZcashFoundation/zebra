@@ -68,8 +68,6 @@ pub(super) struct ClientRequestReceiver {
 
 /// A message from the `peer::Client` to the `peer::Server`,
 /// after it has been received by the `peer::Server`.
-///
-///
 #[derive(Debug)]
 #[must_use = "tx.send() must be called before drop"]
 pub(super) struct InProgressClientRequest {
@@ -234,7 +232,7 @@ impl Service<Request> for Client {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // CORRECTNESS
+        // # Correctness
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
@@ -242,11 +240,26 @@ impl Service<Request> for Client {
         //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
         // schedules this task for wakeup.
         //
-        // Since `shutdown_tx` is used for oneshot communication to the heartbeat
-        // task, it will never be `Pending`.
-        //
-        // TODO: should the Client exit if the heartbeat task exits and drops
-        // `shutdown_tx`?
+        // `shutdown_tx` is used for oneshot communication to the heartbeat task.
+        // If the heartbeat task exits, we want to drop the associated connection.
+        // So we use `poll_canceled` to schedule the client task for wakeup,
+        // if the heartbeat task exits and drops the cancel handle.
+        if let Poll::Ready(()) = self
+            .shutdown_tx
+            .as_mut()
+            .expect("only taken on drop")
+            .poll_canceled(cx)
+        {
+            let original_error = self
+                .error_slot
+                .try_update_error(PeerError::HeartbeatTaskExited.into());
+            info!(
+                ?original_error,
+                latest_error = ?PeerError::HeartbeatTaskExited,
+                "client heartbeat task exited"
+            );
+        }
+
         if ready!(self.server_tx.poll_ready(cx)).is_err() {
             Poll::Ready(Err(self
                 .error_slot
