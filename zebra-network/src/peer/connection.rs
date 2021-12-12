@@ -541,6 +541,15 @@ where
                                 } => {
                                     if let Ok(response) = response.as_ref() {
                                         debug!(%response, "finished receiving peer response to Zebra request");
+                                        // Add a metric for inbound responses to outbound requests.
+                                        metrics::counter!(
+                                            "zebra.net.in.responses",
+                                            1,
+                                            "command" => response.command(),
+
+                                            // TODO: add the address to the metrics
+                                            //"addr" => connected_addr.get_transient_addr_label(),
+                                        );
                                     } else {
                                         debug!(error = ?response, "error in peer response to Zebra request");
                                     }
@@ -710,6 +719,16 @@ where
         }
 
         debug!(state = %self.state, %request, "sending request from Zebra to peer");
+
+        // Add a metric for outbound requests.
+        metrics::counter!(
+            "zebra.net.out.requests",
+            1,
+            "command" => request.command(),
+
+            // TODO: add the address to the metrics
+            //"addr" => connected_addr.get_transient_addr_label(),
+        );
 
         // These matches return a Result with (new_state, Option<Sender>) or an (error, Sender)
         let new_state_result = match (&self.state, request) {
@@ -1040,6 +1059,16 @@ where
         trace!(?req);
         use tower::{load_shed::error::Overloaded, ServiceExt};
 
+        // Add a metric for inbound requests
+        metrics::counter!(
+            "zebra.net.in.requests",
+            1,
+            "command" => req.command(),
+
+            // TODO: add the address to the metrics
+            //"addr" => connected_addr.get_transient_addr_label(),
+        );
+
         if self.svc.ready().await.is_err() {
             // Treat all service readiness errors as Overloaded
             // TODO: treat `TryRecvError::Closed` in `Inbound::poll_ready` as a fatal error (#1655)
@@ -1067,6 +1096,16 @@ where
             }
             Ok(rsp) => rsp,
         };
+
+        // Add a metric for outbound responses to inbound requests
+        metrics::counter!(
+            "zebra.net.out.responses",
+            1,
+            "command" => rsp.command(),
+
+            // TODO: add the address to the metrics
+            //"addr" => connected_addr.get_transient_addr_label(),
+        );
 
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
