@@ -179,9 +179,9 @@ where
         let mut verifier = self.verifier.clone();
         let task = tokio::spawn(
             async move {
-                // TODO: if the verifier and cancel are both ready, which should
-                //       we prefer? (Currently, select! chooses one at random.)
+                // Prefer the cancel handle if both are ready.
                 let rsp = tokio::select! {
+                    biased;
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
@@ -205,9 +205,9 @@ where
                     .await
                     .map_err(BlockDownloadVerifyError::VerifierError)?
                     .call(block);
-                // TODO: if the verifier and cancel are both ready, which should
-                //       we prefer? (Currently, select! chooses one at random.)
+                // Prefer the cancel handle if both are ready.
                 let verification = tokio::select! {
+                    biased;
                     _ = &mut cancel_rx => {
                         tracing::trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
