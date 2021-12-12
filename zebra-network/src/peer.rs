@@ -18,7 +18,7 @@ mod minimum_peer_version;
 #[cfg(not(test))]
 use client::ClientRequest;
 #[cfg(test)]
-pub(crate) use client::ClientRequest;
+pub(crate) use client::{CancelHeartbeatTask, ClientRequest};
 
 use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 
