@@ -809,7 +809,7 @@ where
                 metrics::counter!(
                     "zcash.net.out.messages",
                     1,
-                    "command" => msg.to_string(),
+                    "command" => msg.command(),
                     "addr" => connected_addr.get_transient_addr_label(),
                 );
                 // We need to use future::ready rather than an async block here,
@@ -840,7 +840,7 @@ where
                                 metrics::counter!(
                                     "zcash.net.in.messages",
                                     1,
-                                    "command" => msg.to_string(),
+                                    "command" => msg.command(),
                                     "addr" => connected_addr.get_transient_addr_label(),
                                 );
 
