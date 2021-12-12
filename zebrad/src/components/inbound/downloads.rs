@@ -289,7 +289,7 @@ where
 
                     Err("gossiped block height too far ahead")?;
                 } else if block_height < min_accepted_height {
-                    tracing::info!(
+                    tracing::debug!(
                         ?hash,
                         ?block_height,
                         ?tip_height,
