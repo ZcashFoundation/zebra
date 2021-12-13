@@ -7,7 +7,10 @@ use tracing::Span;
 
 use zebra_chain::serialization::{DateTime32, Duration32};
 
-use crate::{meta_addr::MetaAddr, protocol::external::types::PeerServices, AddressBook};
+use crate::{
+    constants::MAX_ADDRS_IN_ADDRESS_BOOK, meta_addr::MetaAddr,
+    protocol::external::types::PeerServices, AddressBook,
+};
 
 /// Make sure an empty address book is actually empty.
 #[test]
@@ -39,8 +42,12 @@ fn address_book_peer_order() {
 
     // Regardless of the order of insertion, the most recent address should be chosen first
     let addrs = vec![meta_addr1, meta_addr2];
-    let address_book =
-        AddressBook::new_with_addrs("0.0.0.0:0".parse().unwrap(), Span::current(), addrs);
+    let address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        addrs,
+    );
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
@@ -50,8 +57,12 @@ fn address_book_peer_order() {
 
     // Reverse the order, check that we get the same result
     let addrs = vec![meta_addr2, meta_addr1];
-    let address_book =
-        AddressBook::new_with_addrs("0.0.0.0:0".parse().unwrap(), Span::current(), addrs);
+    let address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        addrs,
+    );
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
@@ -64,8 +75,12 @@ fn address_book_peer_order() {
     meta_addr2.addr = addr1;
 
     let addrs = vec![meta_addr1, meta_addr2];
-    let address_book =
-        AddressBook::new_with_addrs("0.0.0.0:0".parse().unwrap(), Span::current(), addrs);
+    let address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        addrs,
+    );
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
@@ -75,8 +90,12 @@ fn address_book_peer_order() {
 
     // Reverse the order, check that we get the same result
     let addrs = vec![meta_addr2, meta_addr1];
-    let address_book =
-        AddressBook::new_with_addrs("0.0.0.0:0".parse().unwrap(), Span::current(), addrs);
+    let address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        addrs,
+    );
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())

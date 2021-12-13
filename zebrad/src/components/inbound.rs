@@ -25,7 +25,10 @@ use zebra_state as zs;
 
 use zebra_chain::block::{self, Block};
 use zebra_consensus::chain::VerifyChainError;
-use zebra_network::{constants::MAX_ADDRS_IN_MESSAGE, AddressBook};
+use zebra_network::{
+    constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
+    AddressBook,
+};
 
 // Re-use the syncer timeouts for consistency.
 use super::{
@@ -38,10 +41,6 @@ mod downloads;
 mod tests;
 
 use downloads::Downloads as BlockDownloads;
-
-/// A security parameter to return only 1/3 of available addresses as a
-/// response to a `Peers` request.
-const FRAC_OF_AVAILABLE_ADDRESS: f64 = 1. / 3.;
 
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -313,9 +312,13 @@ impl Service<zn::Request> for Inbound {
                 let mut peers = peers.sanitized(now);
 
                 // Truncate the list
-                let truncate_at = MAX_ADDRS_IN_MESSAGE
-                    .min((peers.len() as f64 * FRAC_OF_AVAILABLE_ADDRESS).ceil() as usize);
-                peers.truncate(truncate_at);
+                //
+                // TODO: replace with div_ceil once it stabilises
+                //       https://github.com/rust-lang/rust/issues/88581
+                let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
+                let address_limit = MAX_ADDRS_IN_MESSAGE
+                    .min(address_limit);
+                peers.truncate(address_limit);
 
                 if !peers.is_empty() {
                     async { Ok(zn::Response::Peers(peers)) }.boxed()

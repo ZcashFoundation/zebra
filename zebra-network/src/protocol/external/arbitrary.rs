@@ -9,7 +9,7 @@ use zebra_chain::{block, transaction};
 
 use super::{
     addr::{canonical_socket_addr, ipv6_mapped_socket_addr},
-    types::PeerServices,
+    types::{PeerServices, Version},
     InventoryHash, Message,
 };
 
@@ -110,6 +110,18 @@ impl Message {
             .prop_map(Message::GetData)
             .boxed()
     }
+}
+
+impl Arbitrary for Version {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        prop_oneof![170_002_u32..=170_015, 0_u32..]
+            .prop_map(Version)
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 /// Returns a random canonical Zebra `SocketAddr`.

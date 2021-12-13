@@ -130,10 +130,14 @@ pub enum TransactionError {
     #[error("spend description cv and rk MUST NOT be of small order")]
     SmallOrder,
 
-    // XXX change this when we align groth16 verifier errors with bellman
-    // and add a from annotation when the error type is more precise
+    // XXX: the underlying error is bellman::VerificationError, but it does not implement
+    // Arbitrary as required here.
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
-    Groth16,
+    Groth16(String),
+
+    // XXX: the underlying error is io::Error, but it does not implement Clone as required here.
+    #[error("Groth16 proof is malformed")]
+    MalformedGroth16(String),
 
     #[error(
         "Sprout joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
@@ -152,6 +156,9 @@ pub enum TransactionError {
     // temporary error type until #1186 is fixed
     #[error("Downcast from BoxError to redjubjub::Error failed")]
     InternalDowncastError(String),
+
+    #[error("either vpub_old or vpub_new must be zero")]
+    BothVPubsNonZero,
 
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,

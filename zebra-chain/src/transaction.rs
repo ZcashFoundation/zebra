@@ -31,7 +31,7 @@ use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
     parameters::NetworkUpgrade,
-    primitives::{Bctv14Proof, Groth16Proof},
+    primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling, sprout,
     transparent::{
         self, outputs_from_utxos,
@@ -46,9 +46,9 @@ use std::{collections::HashMap, fmt, iter};
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
 /// value between two public key addresses on the Zcash ecosystem. Everything is
-/// designed to ensure that transactions can created, propagated on the network,
-/// validated, and finally added to the global ledger of transactions (the
-/// blockchain).
+/// designed to ensure that transactions can be created, propagated on the
+/// network, validated, and finally added to the global ledger of transactions
+/// (the blockchain).
 ///
 /// Zcash has a number of different transaction formats. They are represented
 /// internally by different enum variants. Because we checkpoint on Canopy
@@ -612,6 +612,97 @@ impl Transaction {
         }
     }
 
+    /// Access the JoinSplit public validating key in this transaction,
+    /// regardless of version, if any.
+    pub fn sprout_joinsplit_pub_key(&self) -> Option<ed25519::VerificationKeyBytes> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => None,
+        }
+    }
+
+    /// Return if the transaction has any Sprout JoinSplit data.
+    pub fn has_sprout_joinsplit_data(&self) -> bool {
+        match self {
+            // No JoinSplits
+            Transaction::V1 { .. } | Transaction::V5 { .. } => false,
+
+            // JoinSplits-on-BCTV14
+            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
+                joinsplit_data.is_some()
+            }
+
+            // JoinSplits-on-Groth16
+            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
+        }
+    }
+
+    /// Returns the Sprout note commitments in this transaction.
+    pub fn sprout_note_commitments(
+        &self,
+    ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
+        match self {
+            // Return [`NoteCommitment`]s with [`Bctv14Proof`]s.
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+
+            // Return [`NoteCommitment`]s with [`Groth16Proof`]s.
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.note_commitments()),
+
+            // Return an empty iterator.
+            Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V1 { .. }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
     // sapling
 
     /// Access the deduplicated [`sapling::tree::Root`]s in this transaction,
@@ -741,45 +832,6 @@ impl Transaction {
         }
     }
 
-    /// Returns the Sprout note commitments in this transaction.
-    pub fn sprout_note_commitments(
-        &self,
-    ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
-        match self {
-            // Return [`NoteCommitment`]s with [`Bctv14Proof`]s.
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.note_commitments()),
-
-            // Return [`NoteCommitment`]s with [`Groth16Proof`]s.
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.note_commitments()),
-
-            // Return an empty iterator.
-            Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V1 { .. }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
     /// Returns the Sapling note commitments in this transaction, regardless of version.
     pub fn sapling_note_commitments(&self) -> Box<dyn Iterator<Item = &jubjub::Fq> + '_> {
         // This function returns a boxed iterator because the different
@@ -871,8 +923,7 @@ impl Transaction {
     pub fn orchard_actions(&self) -> impl Iterator<Item = &orchard::Action> {
         self.orchard_shielded_data()
             .into_iter()
-            .map(orchard::ShieldedData::actions)
-            .flatten()
+            .flat_map(orchard::ShieldedData::actions)
     }
 
     /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
@@ -880,8 +931,7 @@ impl Transaction {
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
         self.orchard_shielded_data()
             .into_iter()
-            .map(orchard::ShieldedData::nullifiers)
-            .flatten()
+            .flat_map(orchard::ShieldedData::nullifiers)
     }
 
     /// Access the note commitments in this transaction, if there are any,
@@ -889,8 +939,7 @@ impl Transaction {
     pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
         self.orchard_shielded_data()
             .into_iter()
-            .map(orchard::ShieldedData::note_commitments)
-            .flatten()
+            .flat_map(orchard::ShieldedData::note_commitments)
     }
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
@@ -971,7 +1020,7 @@ impl Transaction {
     }
 
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// These values are added to the sprout chain value pool,
     /// and removed from the value pool of this transaction.
@@ -1018,7 +1067,7 @@ impl Transaction {
     }
 
     /// Modify the `vpub_old` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// See `output_values_to_sprout` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
@@ -1039,7 +1088,7 @@ impl Transaction {
                     .joinsplits_mut()
                     .map(|joinsplit| &mut joinsplit.vpub_old),
             ),
-            // JoinSplits with Groth Proofs
+            // JoinSplits with Groth16 Proofs
             Transaction::V4 {
                 joinsplit_data: Some(joinsplit_data),
                 ..
@@ -1067,7 +1116,7 @@ impl Transaction {
     }
 
     /// Returns the `vpub_new` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// These values are removed from the value pool of this transaction.
     /// and added to the sprout chain value pool.
@@ -1114,7 +1163,7 @@ impl Transaction {
     }
 
     /// Modify the `vpub_new` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// See `input_values_from_sprout` for details.
     #[cfg(any(test, feature = "proptest-impl"))]

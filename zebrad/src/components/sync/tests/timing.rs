@@ -3,10 +3,7 @@ use std::sync::{
     atomic::{AtomicU8, Ordering},
     Arc,
 };
-use tokio::{
-    runtime::Runtime,
-    time::{timeout, Duration},
-};
+use tokio::time::{timeout, Duration};
 
 use super::super::*;
 use crate::config::ZebradConfig;
@@ -70,7 +67,8 @@ fn ensure_timeouts_consistent() {
 /// Test that calls to [`ChainSync::request_genesis`] are rate limited.
 #[test]
 fn request_genesis_is_rate_limited() {
-    zebra_test::init();
+    let runtime = zebra_test::init_async();
+    let _guard = runtime.enter();
 
     // The number of calls to `request_genesis()` we are going to be testing for
     const RETRIES_TO_RUN: u8 = 3;
@@ -80,9 +78,6 @@ fn request_genesis_is_rate_limited() {
     let peer_requests_counter_in_service = Arc::clone(&peer_requests_counter);
     let state_requests_counter = Arc::new(AtomicU8::new(0));
     let state_requests_counter_in_service = Arc::clone(&state_requests_counter);
-
-    let runtime = Runtime::new().expect("Failed to create Tokio runtime");
-    let _guard = runtime.enter();
 
     // create a fake peer service that respond with `Error` to `BlocksByHash` or
     // panic in any other type of request.

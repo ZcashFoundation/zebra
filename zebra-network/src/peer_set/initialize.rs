@@ -9,7 +9,7 @@ use futures::{
     channel::mpsc,
     future::{self, FutureExt},
     sink::SinkExt,
-    stream::{FuturesUnordered, StreamExt},
+    stream::{FuturesUnordered, StreamExt, TryStreamExt},
     TryFutureExt,
 };
 use rand::seq::SliceRandom;
@@ -20,8 +20,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::IntervalStream;
 use tower::{
-    buffer::Buffer, discover::Change, layer::Layer, load::peak_ewma::PeakEwmaDiscover,
-    util::BoxService, Service, ServiceExt,
+    buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -32,7 +31,7 @@ use crate::{
     address_book_updater::AddressBookUpdater,
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
-    peer::{self, HandshakeRequest, OutboundConnectorRequest},
+    peer::{self, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest},
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -43,7 +42,7 @@ mod tests;
 /// The result of an outbound peer connection attempt or inbound connection handshake.
 ///
 /// This result comes from the [`Handshaker`].
-type PeerChange = Result<Change<SocketAddr, peer::Client>, BoxError>;
+type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
 /// and `latest_chain_tip`.
@@ -122,7 +121,7 @@ where
             .with_address_book_updater(address_book_updater.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(crate::constants::USER_AGENT.to_string())
-            .with_latest_chain_tip(latest_chain_tip)
+            .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)
             .finish()
             .expect("configured all required parameters");
@@ -135,7 +134,14 @@ where
     // Create an mpsc channel for peer changes,
     // based on the maximum number of inbound and outbound peers.
     let (peerset_tx, peerset_rx) =
-        mpsc::channel::<PeerChange>(config.peerset_total_connection_limit());
+        mpsc::channel::<DiscoveredPeer>(config.peerset_total_connection_limit());
+
+    let discovered_peers = peerset_rx
+        // Discover interprets an error as stream termination,
+        // so discard any errored connections...
+        .filter(|result| future::ready(result.is_ok()))
+        .map_ok(|(address, client)| Change::Insert(address, client.into()));
+
     // Create an mpsc channel for peerset demand signaling,
     // based on the maximum number of outbound peers.
     let (mut demand_tx, demand_rx) =
@@ -147,18 +153,12 @@ where
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
         &config,
-        PeakEwmaDiscover::new(
-            // Discover interprets an error as stream termination,
-            // so discard any errored connections...
-            peerset_rx.filter(|result| future::ready(result.is_ok())),
-            constants::EWMA_DEFAULT_RTT,
-            constants::EWMA_DECAY_TIME,
-            tower::load::CompleteOnResponse::default(),
-        ),
+        discovered_peers,
         demand_tx.clone(),
         handle_rx,
         inv_receiver,
         address_book.clone(),
+        MinimumPeerVersion::new(latest_chain_tip, config.network),
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
@@ -241,15 +241,14 @@ where
 async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
-    mut peerset_tx: mpsc::Sender<PeerChange>,
+    mut peerset_tx: mpsc::Sender<DiscoveredPeer>,
     address_book_updater: mpsc::Sender<MetaAddrChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
-    S: Service<
-            OutboundConnectorRequest,
-            Response = Change<SocketAddr, peer::Client>,
-            Error = BoxError,
-        > + Clone,
+    S: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     let initial_peers = limit_initial_peers(&config, address_book_updater).await;
@@ -288,20 +287,26 @@ where
                 connection_tracker,
             };
 
-            let outbound_connector = outbound_connector.clone();
-            async move {
-                // Rate-limit the connection, sleeping for an interval according
-                // to its index in the list.
+            // Construct a connector future but do not drive it yet ...
+            let outbound_connector_future = outbound_connector
+                .clone()
+                .oneshot(req)
+                .map_err(move |e| (addr, e));
+
+            // ... instead, spawn a new task to handle this connector
+            tokio::spawn(async move {
+                let task = outbound_connector_future.await;
+                // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
+                // sleeping for an interval according to its index in the list.
                 sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
-                outbound_connector
-                    .oneshot(req)
-                    .map_err(move |e| (addr, e))
-                    .await
-            }
+                task
+            })
         })
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
+        let handshake_result =
+            handshake_result.expect("unexpected panic in initial peer handshake");
         match handshake_result {
             Ok(ref change) => {
                 handshake_success_total += 1;
@@ -470,7 +475,7 @@ async fn accept_inbound_connections<S>(
     config: Config,
     listener: TcpListener,
     mut handshaker: S,
-    peerset_tx: mpsc::Sender<PeerChange>,
+    peerset_tx: mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
@@ -478,8 +483,24 @@ where
 {
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
 
+    let mut handshakes = FuturesUnordered::new();
+    // Keeping an unresolved future in the pool means the stream never terminates.
+    handshakes.push(future::pending().boxed());
+
     loop {
-        let inbound_result = listener.accept().await;
+        // Check for panics in finished tasks, before accepting new connections
+        let inbound_result = tokio::select! {
+            biased;
+            next_handshake_res = handshakes.next() => match next_handshake_res {
+                // The task has already sent the peer change to the peer set.
+                Some(Ok(_)) => continue,
+                Some(Err(task_panic)) => panic!("panic in inbound handshake task: {:?}", task_panic),
+                None => unreachable!("handshakes never terminates, because it contains a future that never resolves"),
+            },
+
+            inbound_result = listener.accept() => inbound_result,
+        };
+
         if let Ok((tcp_stream, addr)) = inbound_result {
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()
@@ -516,14 +537,21 @@ where
             // ... instead, spawn a new task to handle this connection
             {
                 let mut peerset_tx = peerset_tx.clone();
-                tokio::spawn(
+
+                let handshake_task = tokio::spawn(
                     async move {
-                        if let Ok(client) = handshake.await {
-                            let _ = peerset_tx.send(Ok(Change::Insert(addr, client))).await;
+                        let handshake_result = handshake.await;
+
+                        if let Ok(client) = handshake_result {
+                            let _ = peerset_tx.send(Ok((addr, client))).await;
+                        } else {
+                            debug!(?handshake_result, "error handshaking with inbound peer");
                         }
                     }
                     .instrument(handshaker_span),
                 );
+
+                handshakes.push(Box::pin(handshake_task));
             }
 
             // Only spawn one inbound connection handshake per `MIN_PEER_CONNECTION_INTERVAL`.
@@ -560,7 +588,8 @@ enum CrawlerAction {
     TimerCrawl { tick: Instant },
     /// Handle a successfully connected handshake `peer_set_change`.
     HandshakeConnected {
-        peer_set_change: Change<SocketAddr, peer::Client>,
+        address: SocketAddr,
+        client: peer::Client,
     },
     /// Handle a handshake failure to `failed_addr`.
     HandshakeFailed { failed_addr: MetaAddr },
@@ -598,15 +627,12 @@ async fn crawl_and_dial<C, S>(
     mut demand_rx: mpsc::Receiver<MorePeers>,
     mut candidates: CandidateSet<S>,
     outbound_connector: C,
-    mut peerset_tx: mpsc::Sender<PeerChange>,
+    mut peerset_tx: mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
 ) -> Result<(), BoxError>
 where
-    C: Service<
-            OutboundConnectorRequest,
-            Response = Change<SocketAddr, peer::Client>,
-            Error = BoxError,
-        > + Clone
+    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+        + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -703,9 +729,22 @@ where
                 //
                 // TODO: refactor candidates into a buffered service, so we can
                 //       spawn independent tasks to avoid deadlocks
-                candidates.update().await?;
-                // Try to connect to a new peer.
-                let _ = demand_tx.try_send(MorePeers);
+                let more_peers = candidates.update().await?;
+
+                // If we got more peers, try to connect to a new peer.
+                //
+                // # Security
+                //
+                // Update attempts are rate-limited by the candidate set.
+                //
+                // We only try peers if there was actually an update.
+                // So if all peers have had a recent attempt,
+                // and there was recent update with no peers,
+                // the channel will drain.
+                // This prevents useless update attempt loops.
+                if let Some(more_peers) = more_peers {
+                    let _ = demand_tx.try_send(more_peers);
+                }
             }
             TimerCrawl { tick } => {
                 debug!(
@@ -717,15 +756,11 @@ where
                 // Try to connect to a new peer.
                 let _ = demand_tx.try_send(MorePeers);
             }
-            HandshakeConnected { peer_set_change } => {
-                if let Change::Insert(ref addr, _) = peer_set_change {
-                    debug!(candidate.addr = ?addr, "successfully dialed new peer");
-                } else {
-                    unreachable!("unexpected handshake result: all changes should be Insert");
-                }
-                // successes are handled by an independent task, so they
-                // shouldn't hang
-                peerset_tx.send(Ok(peer_set_change)).await?;
+            HandshakeConnected { address, client } => {
+                debug!(candidate.addr = ?address, "successfully dialed new peer");
+                // successes are handled by an independent task, except for `candidates.update` in
+                // this task, which has a timeout, so they shouldn't hang
+                peerset_tx.send(Ok((address, client))).await?;
             }
             HandshakeFailed { failed_addr } => {
                 // The connection was never opened, or it failed the handshake and was dropped.
@@ -735,6 +770,8 @@ where
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
+                //
+                // Security: handshake failures are rate-limited by peer attempt timeouts.
                 let _ = demand_tx.try_send(MorePeers);
             }
         }
@@ -758,11 +795,8 @@ async fn dial<C>(
     outbound_connection_tracker: ConnectionTracker,
 ) -> CrawlerAction
 where
-    C: Service<
-            OutboundConnectorRequest,
-            Response = Change<SocketAddr, peer::Client>,
-            Error = BoxError,
-        > + Clone
+    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+        + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -794,11 +828,11 @@ where
         .await
 }
 
-impl From<Result<Change<SocketAddr, peer::Client>, (MetaAddr, BoxError)>> for CrawlerAction {
-    fn from(dial_result: Result<Change<SocketAddr, peer::Client>, (MetaAddr, BoxError)>) -> Self {
+impl From<Result<(SocketAddr, peer::Client), (MetaAddr, BoxError)>> for CrawlerAction {
+    fn from(dial_result: Result<(SocketAddr, peer::Client), (MetaAddr, BoxError)>) -> Self {
         use CrawlerAction::*;
         match dial_result {
-            Ok(peer_set_change) => HandshakeConnected { peer_set_change },
+            Ok((address, client)) => HandshakeConnected { address, client },
             Err((candidate, e)) => {
                 debug!(?candidate.addr, ?e, "failed to connect to candidate");
                 HandshakeFailed {

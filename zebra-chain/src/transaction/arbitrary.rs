@@ -847,8 +847,7 @@ pub fn transaction_to_fake_v5(
             expiry_height: height,
             sapling_shielded_data: sapling_shielded_data
                 .clone()
-                .map(sapling_shielded_v4_to_fake_v5)
-                .flatten(),
+                .and_then(sapling_shielded_v4_to_fake_v5),
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),

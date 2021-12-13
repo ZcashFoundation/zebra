@@ -542,8 +542,7 @@ impl FinalizedState {
         let (finalized, rsp_tx) = queued_block;
         let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
 
-        let block_result;
-        if result.is_ok() {
+        let block_result = if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
@@ -556,7 +555,7 @@ impl FinalizedState {
             metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
             metrics::counter!("zcash.chain.verified.block.total", 1);
 
-            block_result = Ok(finalized);
+            Ok(finalized)
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
@@ -564,8 +563,8 @@ impl FinalizedState {
                 finalized.height.0 as _
             );
 
-            block_result = Err(());
-        }
+            Err(())
+        };
 
         let _ = rsp_tx.send(result.map_err(Into::into));
 
@@ -632,11 +631,11 @@ impl FinalizedState {
         self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
     }
 
-    // /// Returns `true` if the finalized state contains `sprout_anchor`.
-    // pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
-    //     let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-    //     self.db.zs_contains(sprout_anchors, &sprout_anchor)
-    // }
+    /// Returns `true` if the finalized state contains `sprout_anchor`.
+    pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        self.db.zs_contains(sprout_anchors, &sprout_anchor)
+    }
 
     /// Returns `true` if the finalized state contains `sapling_anchor`.
     pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
@@ -791,15 +790,15 @@ impl FinalizedState {
     pub fn populate_with_anchors(&self, block: &Block) {
         let mut batch = rocksdb::WriteBatch::default();
 
-        // let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
 
         for transaction in block.transactions.iter() {
             // Sprout
-            // for joinsplit in transaction.sprout_groth16_joinsplits() {
-            //     batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
-            // }
+            for joinsplit in transaction.sprout_groth16_joinsplits() {
+                batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
+            }
 
             // Sapling
             for anchor in transaction.sapling_anchors() {

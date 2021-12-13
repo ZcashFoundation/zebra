@@ -48,7 +48,7 @@ pub struct SaplingParameters {
 ///
 /// New Sprout outputs were disabled by the Canopy network upgrade.
 pub struct SproutParameters {
-    pub spend_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
+    pub joinsplit_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 }
 
 impl Groth16Parameters {
@@ -110,7 +110,7 @@ impl Groth16Parameters {
         };
 
         let sprout = SproutParameters {
-            spend_prepared_verifying_key: parameters
+            joinsplit_prepared_verifying_key: parameters
                 .sprout_vk
                 .expect("unreachable code: sprout loader panics on failure"),
         };

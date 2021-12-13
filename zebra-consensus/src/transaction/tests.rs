@@ -904,14 +904,17 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
     zebra_test::init();
     zebra_test::RUNTIME.block_on(async {
         let network = Network::Mainnet;
-        let network_upgrade = NetworkUpgrade::Canopy;
 
-        let canopy_activation_height = network_upgrade
-            .activation_height(network)
-            .expect("Canopy activation height is not set");
+        let (height, transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.has_valid_coinbase_transaction_inputs()
+                    && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
+            .expect("No transaction found with Groth16 JoinSplits");
 
-        let transaction_block_height =
-            (canopy_activation_height + 10).expect("Canopy activation height is too large");
+        let expected_hash = transaction.unmined_id();
 
         // Initialize the verifier
         let state_service =
@@ -919,38 +922,13 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         let script_verifier = script::Verifier::new(state_service);
         let verifier = Verifier::new(network, script_verifier);
 
-        // Create a fake Sprout join split
-        let (joinsplit_data, signing_key) = mock_sprout_join_split_data();
-
-        let mut transaction = Transaction::V4 {
-            inputs: vec![],
-            outputs: vec![],
-            lock_time: LockTime::Height(block::Height(0)),
-            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
-            joinsplit_data: Some(joinsplit_data),
-            sapling_shielded_data: None,
-        };
-
-        // Sign the transaction
-        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
-
-        match &mut transaction {
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
-            _ => unreachable!("Mock transaction was created incorrectly"),
-        }
-
-        let expected_hash = transaction.unmined_id();
-
         // Test the transaction verifier
         let result = verifier
             .clone()
             .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
+                transaction,
                 known_utxos: Arc::new(HashMap::new()),
-                height: transaction_block_height,
+                height,
                 time: chrono::MAX_DATETIME,
             })
             .await;
@@ -962,65 +940,74 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
     });
 }
 
-/// Test if an unsigned V4 transaction with a dummy [`sprout::JoinSplit`] is rejected.
+/// Test if an V4 transaction with a modified [`sprout::JoinSplit`] is rejected.
 ///
 /// This test verifies if the transaction verifier correctly rejects the transaction because of the
-/// invalid signature.
+/// invalid JoinSplit.
 #[test]
-fn v4_with_unsigned_sprout_transfer_is_rejected() {
+fn v4_with_modified_joinsplit_is_rejected() {
     zebra_test::init();
     zebra_test::RUNTIME.block_on(async {
-        let network = Network::Mainnet;
-        let network_upgrade = NetworkUpgrade::Canopy;
-
-        let canopy_activation_height = network_upgrade
-            .activation_height(network)
-            .expect("Canopy activation height is not set");
-
-        let transaction_block_height =
-            (canopy_activation_height + 10).expect("Canopy activation height is too large");
-
-        // Initialize the verifier
-        let state_service =
-            service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
-
-        // Create a fake Sprout join split
-        let (joinsplit_data, _) = mock_sprout_join_split_data();
-
-        let transaction = Transaction::V4 {
-            inputs: vec![],
-            outputs: vec![],
-            lock_time: LockTime::Height(block::Height(0)),
-            expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
-            joinsplit_data: Some(joinsplit_data),
-            sapling_shielded_data: None,
-        };
-
-        // Test the transaction verifier
-        let result = verifier
-            .clone()
-            .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                height: transaction_block_height,
-                time: chrono::MAX_DATETIME,
-            })
-            .await;
-
-        assert_eq!(
-            result,
-            Err(
-                // TODO: Fix error downcast
-                // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
-                TransactionError::InternalDowncastError(
-                    "downcast to known transaction error type failed, original error: InvalidSignature"
-                        .to_string(),
-                )
-            )
-        );
+        v4_with_joinsplit_is_rejected_for_modification(
+            JoinSplitModification::CorruptSignature,
+            // TODO: Fix error downcast
+            // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
+            TransactionError::InternalDowncastError(
+                "downcast to known transaction error type failed, original error: InvalidSignature"
+                    .to_string(),
+            ),
+        )
+        .await;
+        v4_with_joinsplit_is_rejected_for_modification(
+            JoinSplitModification::CorruptProof,
+            TransactionError::Groth16("proof verification failed".to_string()),
+        )
+        .await;
+        v4_with_joinsplit_is_rejected_for_modification(
+            JoinSplitModification::ZeroProof,
+            TransactionError::MalformedGroth16("invalid G1".to_string()),
+        )
+        .await;
     });
+}
+
+async fn v4_with_joinsplit_is_rejected_for_modification(
+    modification: JoinSplitModification,
+    expected_error: TransactionError,
+) {
+    let network = Network::Mainnet;
+
+    let (height, mut transaction) = test_transactions(network)
+        .rev()
+        .filter(|(_, transaction)| {
+            !transaction.has_valid_coinbase_transaction_inputs() && transaction.inputs().is_empty()
+        })
+        .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
+        .expect("No transaction found with Groth16 JoinSplits");
+
+    modify_joinsplit(
+        Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
+        modification,
+    );
+
+    // Initialize the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    // Test the transaction verifier
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction,
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(result, Err(expected_error));
 }
 
 /// Test if a V4 transaction with Sapling spends is accepted by the verifier.
@@ -1441,7 +1428,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
         x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand07::thread_rng()));
-    let random_seed = [0u8; 32];
+    let random_seed = sprout::RandomSeed::from([0u8; 32]);
     let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
         .expect("Failure to deserialize dummy MAC");
     let zkproof = Groth16Proof([0u8; 192]);
@@ -1474,6 +1461,63 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     (joinsplit_data, signing_key)
+}
+
+/// A type of JoinSplit modification to test.
+#[derive(Clone, Copy)]
+enum JoinSplitModification {
+    // Corrupt a signature, making it invalid.
+    CorruptSignature,
+    // Corrupt a proof, making it invalid, but still well-formed.
+    CorruptProof,
+    // Make a proof all-zeroes, making it malformed.
+    ZeroProof,
+}
+
+/// Modify a JoinSplit in the transaction following the given modification type.
+fn modify_joinsplit(transaction: &mut Transaction, modification: JoinSplitModification) {
+    match transaction {
+        Transaction::V4 {
+            joinsplit_data: Some(ref mut joinsplit_data),
+            ..
+        } => modify_joinsplit_data(joinsplit_data, modification),
+        _ => unreachable!("Transaction has no JoinSplit shielded data"),
+    }
+}
+
+/// Modify a [`JoinSplitData`] following the given modification type.
+fn modify_joinsplit_data(
+    joinsplit_data: &mut JoinSplitData<Groth16Proof>,
+    modification: JoinSplitModification,
+) {
+    match modification {
+        JoinSplitModification::CorruptSignature => {
+            let mut sig_bytes: [u8; 64] = joinsplit_data.sig.into();
+            // Flip a bit from an arbitrary byte of the signature.
+            sig_bytes[10] ^= 0x01;
+            joinsplit_data.sig = sig_bytes.into();
+        }
+        JoinSplitModification::CorruptProof => {
+            let joinsplit = joinsplit_data
+                .joinsplits_mut()
+                .next()
+                .expect("must have a JoinSplit");
+            {
+                // A proof is composed of three field elements, the first and last having 48 bytes.
+                // (The middle one has 96 bytes.) To corrupt the proof without making it malformed,
+                // simply swap those first and last elements.
+                let (first, rest) = joinsplit.zkproof.0.split_at_mut(48);
+                first.swap_with_slice(&mut rest[96..144]);
+            }
+        }
+        JoinSplitModification::ZeroProof => {
+            let joinsplit = joinsplit_data
+                .joinsplits_mut()
+                .next()
+                .expect("must have a JoinSplit");
+            joinsplit.zkproof.0 = [0; 192];
+        }
+    }
 }
 
 /// Duplicate a Sapling spend inside a `transaction`.

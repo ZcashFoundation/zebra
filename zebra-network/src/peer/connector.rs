@@ -7,7 +7,7 @@ use std::{
 
 use futures::prelude::*;
 use tokio::net::TcpStream;
-use tower::{discover::Change, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
@@ -57,7 +57,7 @@ where
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
-    type Response = Change<SocketAddr, Client>;
+    type Response = (SocketAddr, Client);
     type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -86,7 +86,7 @@ where
                     connection_tracker,
                 })
                 .await?;
-            Ok(Change::Insert(addr, client))
+            Ok((addr, client))
         }
         .instrument(connector_span)
         .boxed()

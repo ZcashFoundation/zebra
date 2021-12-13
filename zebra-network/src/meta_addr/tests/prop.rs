@@ -12,14 +12,14 @@ use std::{
 
 use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
-use tokio::{runtime, time::Instant};
+use tokio::time::Instant;
 use tower::service_fn;
 use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
 
 use crate::{
-    constants::{MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
+    constants::{MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -154,8 +154,12 @@ proptest! {
 
         let chrono_now = Utc::now();
 
-        let address_book =
-            AddressBook::new_with_addrs(local_listener, Span::none(), address_book_addrs);
+        let address_book = AddressBook::new_with_addrs(
+            local_listener,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            address_book_addrs
+        );
         let sanitized_addrs = address_book.sanitized(chrono_now);
 
         let expected_local_listener = address_book.local_listener_meta_addr();
@@ -195,7 +199,8 @@ proptest! {
     fn individual_peer_retry_limit_candidate_set(
         (addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
     ) {
-        zebra_test::init();
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
 
         // Run the test for this many simulated live peer durations
         const LIVE_PEER_INTERVALS: u32 = 3;
@@ -210,12 +215,6 @@ proptest! {
             "there are enough changes for good test coverage",
         );
 
-        let runtime = runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
-        let _guard = runtime.enter();
-
         // Only put valid addresses in the address book.
         // This means some tests will start with an empty address book.
         let addrs = if addr.last_known_info_is_valid_for_outbound() {
@@ -226,6 +225,7 @@ proptest! {
 
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addrs,
         )));
@@ -248,9 +248,13 @@ proptest! {
                     attempt_count += 1;
                     prop_assert!(
                         attempt_count <= 1,
-                        "candidate: {:?}, change: {}, now: {:?}, earliest next attempt: {:?}, \
-                         attempts: {}, live peer interval limit: {}, test time limit: {:?}, \
-                         peer change interval: {:?}, original addr was in address book: {}",
+                        "candidate: {:?},\n \
+                         change: {},\n \
+                         now: {:?},\n \
+                         earliest next attempt: {:?},\n \
+                         attempts: {}, live peer interval limit: {},\n \
+                         test time limit: {:?}, peer change interval: {:?},\n \
+                         original addr was in address book: {}\n",
                         candidate_addr,
                         i,
                         Instant::now(),
@@ -293,7 +297,8 @@ proptest! {
             2..MAX_ADDR_CHANGE
         ),
     ) {
-        zebra_test::init();
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
 
         let instant_now = std::time::Instant::now();
         let chrono_now = Utc::now();
@@ -310,12 +315,6 @@ proptest! {
             u32::try_from(MAX_ADDR_CHANGE).unwrap() >= 3 * LIVE_PEER_INTERVALS,
             "there are enough changes for good test coverage",
         );
-
-        let runtime = runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
-        let _guard = runtime.enter();
 
         let attempt_counts = runtime.block_on(async move {
             tokio::time::pause();
@@ -345,9 +344,7 @@ proptest! {
 
                     // If `change` is invalid for the current MetaAddr state, skip it.
                     // If we've run out of changes for this addr, do nothing.
-                    if let Some(changed_addr) = change
-                        .map(|change| change.apply_to_meta_addr(*addr))
-                        .flatten()
+                    if let Some(changed_addr) = change.and_then(|change| change.apply_to_meta_addr(*addr))
                     {
                         prop_assert_eq!(changed_addr.addr, addr.addr);
                         *addr = changed_addr;

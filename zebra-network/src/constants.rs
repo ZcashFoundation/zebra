@@ -138,6 +138,27 @@ pub const GET_ADDR_FANOUT: usize = 3;
 /// https://zips.z.cash/zip-0155#specification
 pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 
+/// The fraction of addresses Zebra sends in response to a `Peers` request.
+///
+/// Each response contains approximately:
+/// `address_book.len() / ADDR_RESPONSE_LIMIT_DENOMINATOR`
+/// addresses, selected at random from the address book.
+///
+/// # Security
+///
+/// This limit makes sure that Zebra does not reveal its entire address book
+/// in a single `Peers` response.
+pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 3;
+
+/// The maximum number of addresses Zebra will keep in its address book.
+///
+/// This is a tradeoff between:
+/// - revealing the whole address book in a few requests,
+/// - sending the maximum number of peer addresses, and
+/// - making sure the limit code actually gets run.
+pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize =
+    MAX_ADDRS_IN_MESSAGE * (ADDR_RESPONSE_LIMIT_DENOMINATOR + 1);
+
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// ## SECURITY
@@ -179,7 +200,10 @@ pub const EWMA_DEFAULT_RTT: Duration = Duration::from_secs(REQUEST_TIMEOUT.as_se
 ///
 /// This should be much larger than the `SYNC_RESTART_TIMEOUT`, so we choose
 /// better peers when we restart the sync.
-pub const EWMA_DECAY_TIME: Duration = Duration::from_secs(200);
+pub const EWMA_DECAY_TIME_NANOS: f64 = 200.0 * NANOS_PER_SECOND;
+
+/// The number of nanoseconds in one second.
+const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
@@ -258,7 +282,46 @@ mod tests {
         assert!(EWMA_DEFAULT_RTT > REQUEST_TIMEOUT,
                 "The default EWMA RTT should be higher than the request timeout, so new peers are required to prove they are fast, before we prefer them to other peers.");
 
-        assert!(EWMA_DECAY_TIME > REQUEST_TIMEOUT,
+        let request_timeout_nanos = REQUEST_TIMEOUT.as_secs_f64()
+            + f64::from(REQUEST_TIMEOUT.subsec_nanos()) * NANOS_PER_SECOND;
+
+        assert!(EWMA_DECAY_TIME_NANOS > request_timeout_nanos,
                 "The EWMA decay time should be higher than the request timeout, so timed out peers are penalised by the EWMA.");
+    }
+
+    /// Make sure that peer age limits are consistent with each other.
+    #[test]
+    fn ensure_peer_age_limits_consistent() {
+        zebra_test::init();
+
+        assert!(
+            MAX_PEER_ACTIVE_FOR_GOSSIP <= MAX_RECENT_PEER_AGE,
+            "we should only gossip peers we are actually willing to try ourselves"
+        );
+    }
+
+    /// Make sure the address limits are consistent with each other.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn ensure_address_limits_consistent() {
+        // Zebra 1.0.0-beta.2 address book metrics in December 2021.
+        const TYPICAL_MAINNET_ADDRESS_BOOK_SIZE: usize = 4_500;
+
+        zebra_test::init();
+
+        assert!(
+            MAX_ADDRS_IN_ADDRESS_BOOK >= GET_ADDR_FANOUT * MAX_ADDRS_IN_MESSAGE,
+            "the address book should hold at least a fanout's worth of addresses"
+        );
+
+        assert!(
+            MAX_ADDRS_IN_ADDRESS_BOOK / ADDR_RESPONSE_LIMIT_DENOMINATOR > MAX_ADDRS_IN_MESSAGE,
+            "the address book should hold enough addresses for a full response"
+        );
+
+        assert!(
+            MAX_ADDRS_IN_ADDRESS_BOOK < TYPICAL_MAINNET_ADDRESS_BOOK_SIZE,
+            "the address book limit should actually be used"
+        );
     }
 }
