@@ -12,7 +12,7 @@ pub struct Config {
     /// Future versions of Zebra may change the mandatory checkpoint
     /// height.
     pub checkpoint_sync: bool,
-    /// Skip the download of Groth16 parameters if this option is true.
+    /// Skip the pre-download of Groth16 parameters if this option is true.
     pub debug_skip_parameter_preload: bool,
 }
 
