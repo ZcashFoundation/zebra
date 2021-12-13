@@ -2,6 +2,7 @@
 //!
 use std::{
     collections::HashMap,
+    convert::TryInto,
     future::Future,
     iter::FromIterator,
     pin::Pin,
@@ -33,7 +34,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
 
-use crate::{error::TransactionError, primitives, script, BoxError};
+use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
@@ -314,6 +315,13 @@ where
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
             }
 
+            // Consensus rule:
+            //
+            // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+            check::joinsplit_has_vpub_zero(&tx)?;
+
             // [Canopy onward]: `vpub_old` MUST be zero.
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::disabled_add_to_sprout_pool(&tx, req.height(), network)?;
@@ -461,7 +469,7 @@ where
         .and(Self::verify_sprout_shielded_data(
             joinsplit_data,
             &shielded_sighash,
-        ))
+        )?)
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
             &shielded_sighash,
@@ -632,16 +640,25 @@ where
     fn verify_sprout_shielded_data(
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         shielded_sighash: &SigHash,
-    ) -> AsyncChecks {
+    ) -> Result<AsyncChecks, TransactionError> {
         let mut checks = AsyncChecks::new();
 
         if let Some(joinsplit_data) = joinsplit_data {
-            // XXX create a method on JoinSplitData
-            // that prepares groth16::Items with the correct proofs
-            // and proof inputs, handling interstitial treestates
-            // correctly.
-
-            // Then, pass those items to self.joinsplit to verify them.
+            for joinsplit in joinsplit_data.joinsplits() {
+                // Consensus rule: The proof π_ZKSpend MUST be valid given a
+                // primary input formed from the relevant other fields and h_{Sig}
+                //
+                // Queue the verification of the Groth16 spend proof
+                // for each JoinSplit description while adding the
+                // resulting future to our collection of async
+                // checks that (at a minimum) must pass for the
+                // transaction to verify.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+                checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
+                    DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
+                ));
+            }
 
             // Consensus rule: The joinSplitSig MUST represent a
             // valid signature, under joinSplitPubKey, of the
@@ -661,7 +678,7 @@ where
             checks.push(ed25519_verifier.oneshot(ed25519_item));
         }
 
-        checks
+        Ok(checks)
     }
 
     /// Verifies a transaction's Sapling shielded data.
@@ -696,7 +713,7 @@ where
                 async_checks.push(
                     primitives::groth16::SPEND_VERIFIER
                         .clone()
-                        .oneshot(primitives::groth16::ItemWrapper::from(&spend).into()),
+                        .oneshot(DescriptionWrapper(&spend).try_into()?),
                 );
 
                 // Consensus rule: The spend authorization signature
@@ -735,7 +752,7 @@ where
                 async_checks.push(
                     primitives::groth16::OUTPUT_VERIFIER
                         .clone()
-                        .oneshot(primitives::groth16::ItemWrapper::from(output).into()),
+                        .oneshot(DescriptionWrapper(output).try_into()?),
                 );
             }
 

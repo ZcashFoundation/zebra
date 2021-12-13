@@ -164,6 +164,27 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
     }
 }
 
+/// Check if JoinSplits in the transaction have one of its v_{pub} values equal
+/// to zero.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError> {
+    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+
+    let vpub_pairs = tx
+        .output_values_to_sprout()
+        .zip(tx.input_values_from_sprout());
+    for (vpub_old, vpub_new) in vpub_pairs {
+        // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        if *vpub_old != zero && *vpub_new != zero {
+            return Err(TransactionError::BothVPubsNonZero);
+        }
+    }
+
+    Ok(())
+}
+
 /// Check if a transaction is adding to the sprout pool after Canopy
 /// network upgrade given a block height and a network.
 ///
