@@ -1010,6 +1010,7 @@ where
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
+    config.consensus.debug_skip_parameter_preload = false;
 
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
