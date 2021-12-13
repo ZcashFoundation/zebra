@@ -41,6 +41,53 @@
 //! [finagle]: https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded
 //! [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
 //! [tower-balance]: https://crates.io/crates/tower-balance
+//!
+//! # Behavior During Network Upgrades
+//!
+//! [ZIP-201] specifies peer behavior during network upgrades:
+//!
+//! > With scheduled network upgrades, at the activation height, nodes on each consensus branch
+//! > should disconnect from nodes on other consensus branches and only accept new incoming
+//! > connections from nodes on the same consensus branch.
+//!
+//! Zebra handles this with the help of [`MinimumPeerVersion`], which determines the minimum peer
+//! protocol version to accept based on the current best chain tip height. The minimum version is
+//! therefore automatically increased when the block height reaches a network upgrade's activation
+//! height. The helper type is then used to:
+//!
+//! - cancel handshakes to outdated peers, in
+//!   [`handshake::negotiate_version`][crate::peer::handshake::negotiate_version]
+//! - cancel requests to and disconnect from peers that have become outdated, in
+//!   [`PeerSet::push_unready`]
+//! - disconnect from peers that have just responded and became outdated, in
+//!   [`PeerSet::poll_unready`]
+//! - disconnect from idle peers that have become outdated, in
+//!   [`PeerSet::disconnect_from_outdated_peers`]
+//!
+//! ## Network Coalescence
+//!
+//! [ZIP-201] also specifies how Zcashd behaves [leading up to a activation
+//! height][network-coalescence]. Since Zcashd limits the number of connections to at most eight
+//! peers, it will gradually migrate its connections to up-to-date peers as it approaches the
+//! activation height.
+//!
+//! The motivation for this behavior is to avoid an abrupt partitioning the network, which can lead
+//! to isolated peers and increases the chance of an eclipse attack on some peers of the network.
+//!
+//! Zebra does not gradually migrate its peers as it approaches an activation height. This is
+//! because Zebra by default can connect to up to 75 peers, as can be seen in [`Config::default`].
+//! Since this is a lot larger than the 8 peers Zcashd connects to, an eclipse attack becomes a lot
+//! more costly to execute, and the probability of an abrupt network partition that isolates peers
+//! is lower.
+//!
+//! Even if a Zebra node is manually configured to connect to a smaller number of peers, the
+//! [`AddressBook`] is configured to hold a large number of peer addresses
+//! ([`MAX_ADDRS_IN_ADDRESS_BOOK`]). Since the address book prioritizes addresses it trusts (like
+//! those that it has successfully connected to before), the node should be able to recover and
+//! rejoin the network by itself, as long as the address book is populated with enough entries.
+//!
+//! [ZIP-201]: https://zips.z.cash/zip-0201
+//! [network-coalescence]: https://zips.z.cash/zip-0201#network-coalescence
 
 use std::{
     collections::{HashMap, HashSet},
