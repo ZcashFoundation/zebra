@@ -29,6 +29,10 @@ pub enum PeerError {
     #[error("Peer closed connection")]
     ConnectionClosed,
 
+    /// Zebra dropped the [`Connection`].
+    #[error("Internal connection dropped")]
+    ConnectionDropped,
+
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,

@@ -925,6 +925,7 @@ where
                 peer_tx,
                 connection_tracker,
                 metrics_label: connected_addr.get_transient_addr_label(),
+                last_metrics_state: None,
             };
 
             tokio::spawn(

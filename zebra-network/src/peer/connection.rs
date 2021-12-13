@@ -92,6 +92,25 @@ impl fmt::Display for Handler {
 }
 
 impl Handler {
+    /// Returns the Zebra internal handler type as a string.
+    pub fn command(&self) -> String {
+        match self {
+            Handler::Finished(Ok(response)) => format!("Finished({})", response.command()),
+            Handler::Finished(Err(error)) => format!("Finished({})", error),
+
+            Handler::Ping(_) => "Ping".to_string(),
+            Handler::Peers => "Peers".to_string(),
+
+            Handler::FindBlocks { .. } => "FindBlocks".to_string(),
+            Handler::FindHeaders { .. } => "FindHeaders".to_string(),
+
+            Handler::BlocksByHash { .. } => "BlocksByHash".to_string(),
+            Handler::TransactionsById { .. } => "TransactionsById".to_string(),
+
+            Handler::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+        }
+    }
+
     /// Try to handle `msg` as a response to a client request, possibly consuming
     /// it in the process.
     ///
@@ -375,6 +394,19 @@ impl fmt::Display for State {
     }
 }
 
+impl State {
+    /// Returns the Zebra internal state as a string.
+    pub fn command(&self) -> String {
+        match self {
+            State::AwaitingRequest => "AwaitingRequest".to_string(),
+            State::AwaitingResponse { handler, .. } => {
+                format!("AwaitingResponse({})", handler.command())
+            }
+            State::Failed => "Failed".to_string(),
+        }
+    }
+}
+
 /// The state associated with a peer connection.
 pub struct Connection<S, Tx> {
     /// The state of this connection's current request or response.
@@ -417,6 +449,9 @@ pub struct Connection<S, Tx> {
 
     /// The metrics label for this peer. Usually the remote IP and port.
     pub(super) metrics_label: String,
+
+    /// The state for this peer, when the metrics were last updated.
+    pub(super) last_metrics_state: Option<String>,
 }
 
 impl<S, Tx> Connection<S, Tx>
@@ -450,6 +485,8 @@ where
         // If there is a pending request, we wait only on an incoming peer message, and
         // check whether it can be interpreted as a response to the pending request.
         loop {
+            self.update_state_metrics(None);
+
             match self.state {
                 State::AwaitingRequest => {
                     trace!("awaiting client request or peer message");
@@ -501,6 +538,7 @@ where
                         .request_timer
                         .as_mut()
                         .expect("timeout must be set while awaiting response");
+
                     // CORRECTNESS
                     //
                     // Currently, select prefers the first future if multiple
@@ -516,6 +554,8 @@ where
                         Either::Right((None, _)) => self.fail_with(PeerError::ConnectionClosed),
                         Either::Right((Some(Err(e)), _)) => self.fail_with(e),
                         Either::Right((Some(Ok(peer_msg)), _cancel)) => {
+                            self.update_state_metrics(format!("Out::Rsp::{}", peer_msg.command()));
+
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
                             // keeping a live reference to handler across the
@@ -534,9 +574,14 @@ where
                                 ),
                             };
 
+                            self.update_state_metrics(None);
+
                             // Check whether the handler is finished
                             // processing messages and update the state.
-                            self.state = match self.state {
+                            //
+                            // Replace the state with a temporary value,
+                            // so we can take ownership of the response sender.
+                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
                                 State::AwaitingResponse {
                                     handler: Handler::Finished(response),
                                     tx,
@@ -578,6 +623,8 @@ where
                                 ),
                             };
 
+                            self.update_state_metrics(None);
+
                             // If the message was not consumed, check whether it
                             // should be handled as a request.
                             if let Some(msg) = request_msg {
@@ -589,7 +636,10 @@ where
                         Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
                             let e = PeerError::ClientRequestTimeout;
-                            self.state = match self.state {
+
+                            // Replace the state with a temporary value,
+                            // so we can take ownership of the response sender.
+                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
                                 // Special case: ping timeouts fail the connection.
                                 State::AwaitingResponse {
                                     handler: Handler::Ping(_),
@@ -689,6 +739,8 @@ where
         // we need to deal with it first if it exists.
         self.client_rx.close();
         let old_state = std::mem::replace(&mut self.state, State::Failed);
+        self.update_state_metrics(None);
+
         if let State::AwaitingResponse { tx, .. } = old_state {
             // # Correctness
             //
@@ -723,6 +775,7 @@ where
                 "command" => request.command(),
                 "addr" => self.metrics_label.clone(),
             );
+            self.update_state_metrics(format!("Out::Req::Canceled::{}", request.command()));
 
             return;
         }
@@ -736,6 +789,7 @@ where
             "command" => request.command(),
             "addr" => self.metrics_label.clone(),
         );
+        self.update_state_metrics(format!("Out::Req::{}", request.command()));
 
         // These matches return a Result with (new_state, Option<Sender>) or an (error, Sender)
         let new_state_result = match (&self.state, request) {
@@ -893,6 +947,7 @@ where
                 // send a response before dropping tx.
                 let _ = tx.send(Ok(Response::Nil));
                 self.state = AwaitingRequest;
+                // TODO: is this timer ever actually used?
                 self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
             }
             Ok((new_state @ AwaitingResponse { .. }, None)) => {
@@ -925,6 +980,8 @@ where
     async fn handle_message_as_request(&mut self, msg: Message) {
         trace!(?msg);
         debug!(state = %self.state, %msg, "received peer request to Zebra");
+
+        self.update_state_metrics(format!("In::Msg::{}", msg.command()));
 
         let req = match msg {
             Message::Ping(nonce) => {
@@ -1073,6 +1130,7 @@ where
             "command" => req.command(),
             "addr" => self.metrics_label.clone(),
         );
+        self.update_state_metrics(format!("In::Req::{}", req.command()));
 
         if self.svc.ready().await.is_err() {
             // Treat all service readiness errors as Overloaded
@@ -1109,6 +1167,7 @@ where
             "command" => rsp.command(),
             "addr" => self.metrics_label.clone(),
         );
+        self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
 
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
@@ -1161,6 +1220,62 @@ where
         }
 
         debug!(state = %self.state, %req, %rsp, "sent Zebra response to peer");
+    }
+}
+
+impl<S, Tx> Connection<S, Tx> {
+    /// Update the connection state metrics for this connection,
+    /// using `extra_state_info` as additional state information.
+    fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
+        let current_metrics_state = if let Some(extra_state_info) = extra_state_info.into() {
+            format!("{}::{}", self.state.command(), extra_state_info)
+        } else {
+            self.state.command()
+        };
+
+        if self.last_metrics_state.as_ref() == Some(&current_metrics_state) {
+            return;
+        }
+
+        self.erase_state_metrics();
+
+        // Set the new state
+        metrics::increment_gauge!(
+            "zebra.net.connection.state",
+            1.0,
+            "command" => current_metrics_state.clone(),
+            "addr" => self.metrics_label.clone(),
+        );
+
+        self.last_metrics_state = Some(current_metrics_state);
+    }
+
+    /// Erase the connection state metrics for this connection.
+    fn erase_state_metrics(&mut self) {
+        if self.last_metrics_state.is_some() {
+            metrics::gauge!(
+                "zebra.net.connection.state",
+                0.0,
+                "command" => self.last_metrics_state.take().expect("just checked for None"),
+                "addr" => self.metrics_label.clone(),
+            );
+        }
+    }
+}
+
+impl<S, Tx> Drop for Connection<S, Tx> {
+    fn drop(&mut self) {
+        if let State::AwaitingResponse { tx, .. } =
+            std::mem::replace(&mut self.state, State::Failed)
+        {
+            if let Some(error) = self.error_slot.try_get_error() {
+                let _ = tx.send(Err(error));
+            } else {
+                let _ = tx.send(Err(PeerError::ConnectionDropped.into()));
+            }
+        }
+
+        self.erase_state_metrics();
     }
 }
 
