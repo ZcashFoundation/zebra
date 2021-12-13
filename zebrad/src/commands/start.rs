@@ -218,7 +218,6 @@ impl StartCmd {
                             zebra_consensus::groth16::Groth16Parameters::failure_hint())
                         );
 
-                    info!("Groth16 pre-download and check task finished");
                     exit_when_task_finishes = false;
                     Ok(())
                 }
