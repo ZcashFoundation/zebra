@@ -414,6 +414,9 @@ pub struct Connection<S, Tx> {
     /// Eventually, Zebra could stop making connections entirely.
     #[allow(dead_code)]
     pub(super) connection_tracker: ConnectionTracker,
+
+    /// The metrics label for this peer. Usually the remote IP and port.
+    pub(super) metrics_label: String,
 }
 
 impl<S, Tx> Connection<S, Tx>
@@ -546,9 +549,7 @@ where
                                             "zebra.net.in.responses",
                                             1,
                                             "command" => response.command(),
-
-                                            // TODO: add the address to the metrics
-                                            //"addr" => connected_addr.get_transient_addr_label(),
+                                            "addr" => self.metrics_label.clone(),
                                         );
                                     } else {
                                         debug!(error = ?response, "error in peer response to Zebra request");
@@ -715,6 +716,14 @@ where
         if tx.is_canceled() {
             metrics::counter!("peer.canceled", 1);
             debug!(state = %self.state, %request, "ignoring canceled request");
+
+            metrics::counter!(
+                "zebra.net.out.requests.canceled",
+                1,
+                "command" => request.command(),
+                "addr" => self.metrics_label.clone(),
+            );
+
             return;
         }
 
@@ -725,9 +734,7 @@ where
             "zebra.net.out.requests",
             1,
             "command" => request.command(),
-
-            // TODO: add the address to the metrics
-            //"addr" => connected_addr.get_transient_addr_label(),
+            "addr" => self.metrics_label.clone(),
         );
 
         // These matches return a Result with (new_state, Option<Sender>) or an (error, Sender)
@@ -1064,9 +1071,7 @@ where
             "zebra.net.in.requests",
             1,
             "command" => req.command(),
-
-            // TODO: add the address to the metrics
-            //"addr" => connected_addr.get_transient_addr_label(),
+            "addr" => self.metrics_label.clone(),
         );
 
         if self.svc.ready().await.is_err() {
@@ -1102,9 +1107,7 @@ where
             "zebra.net.out.responses",
             1,
             "command" => rsp.command(),
-
-            // TODO: add the address to the metrics
-            //"addr" => connected_addr.get_transient_addr_label(),
+            "addr" => self.metrics_label.clone(),
         );
 
         match rsp.clone() {

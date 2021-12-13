@@ -924,6 +924,7 @@ where
                 error_slot: slot,
                 peer_tx,
                 connection_tracker,
+                metrics_label: connected_addr.get_transient_addr_label(),
             };
 
             tokio::spawn(
