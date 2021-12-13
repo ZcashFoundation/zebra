@@ -96,7 +96,7 @@ impl Handler {
     pub fn command(&self) -> String {
         match self {
             Handler::Finished(Ok(response)) => format!("Finished({})", response.command()),
-            Handler::Finished(Err(error)) => format!("Finished({})", error),
+            Handler::Finished(Err(error)) => format!("Finished({})", error.kind()),
 
             Handler::Ping(_) => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),

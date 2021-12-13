@@ -56,6 +56,22 @@ pub enum PeerError {
     NotFound(Vec<InventoryHash>),
 }
 
+impl PeerError {
+    /// Returns the Zebra internal handler type as a string.
+    pub fn kind(&self) -> String {
+        match self {
+            PeerError::ConnectionClosed => "ConnectionClosed".into(),
+            PeerError::ConnectionDropped => "ConnectionDropped".into(),
+            PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
+            // TODO: add error kinds or summaries to `SerializationError`
+            PeerError::Serialization(inner) => format!("Serialization({})", inner),
+            PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
+            PeerError::Overloaded => "Overloaded".into(),
+            PeerError::NotFound(_) => "NotFound".into(),
+        }
+    }
+}
+
 /// A shared error slot for peer errors.
 ///
 /// # Correctness
