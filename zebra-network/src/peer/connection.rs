@@ -643,8 +643,11 @@ where
                                 // Special case: ping timeouts fail the connection.
                                 State::AwaitingResponse {
                                     handler: Handler::Ping(_),
+                                    tx,
                                     ..
                                 } => {
+                                    let e = SharedPeerError::from(e);
+                                    let _ = tx.send(Err(e.clone()));
                                     self.fail_with(e);
                                     State::Failed
                                 }
