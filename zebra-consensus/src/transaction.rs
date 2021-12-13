@@ -315,7 +315,10 @@ where
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
             }
 
-            // Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+            // Consensus rule:
+            //
+            // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+            //
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::joinsplit_has_vpub_zero(&tx)?;
 
@@ -650,6 +653,8 @@ where
                 // resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
                     DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
                 ));

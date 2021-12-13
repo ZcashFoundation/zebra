@@ -167,7 +167,7 @@ pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionE
 /// Check if JoinSplits in the transaction have one of its v_{pub} values equal
 /// to zero.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+/// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError> {
     let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
 
