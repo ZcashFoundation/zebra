@@ -958,8 +958,9 @@ where
                 // send a response before dropping tx.
                 let _ = tx.send(Ok(Response::Nil));
                 self.state = AwaitingRequest;
-                // TODO: is this timer ever actually used?
-                self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+                // We only need a timer when we're waiting for a response.
+                // (And we don't want to accidentally re-use old timers.)
+                self.request_timer = None;
             }
             Ok((new_state @ AwaitingResponse { .. }, None)) => {
                 self.state = new_state;
