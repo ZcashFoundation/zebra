@@ -27,8 +27,8 @@ use zebra_chain::{
 use crate::{
     constants,
     peer::{
-        ClientRequestReceiver, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
-        SharedPeerError,
+        error::AlreadyErrored, ClientRequestReceiver, ErrorSlot, InProgressClientRequest,
+        MustUseOneshotSender, PeerError, SharedPeerError,
     },
     peer_set::ConnectionTracker,
     protocol::{
@@ -729,12 +729,20 @@ where
         //
         // See the original bug #1510 and PR #1531, and the later bug #1599
         // and PR #1600.
-        assert!(
-            self.error_slot.try_update_error(e).is_ok(),
-            "calling fail_with on already-failed connection state: failed connections must stop processing pending requests and responses, then close the connection. state: {:?} client receiver: {:?}",
-            self.state,
-            self.client_rx
-        );
+        let error_result = self.error_slot.try_update_error(e.clone());
+
+        if let Err(AlreadyErrored { original_error }) = error_result {
+            panic!(
+                "multiple failures for connection: \n\
+                 failed connections should stop processing pending requests and responses, \n\
+                 then close the connection. \n\
+                 state: {:?} \n\
+                 client receiver: {:?} \n\
+                 original error: {:?} \n\
+                 new error: {:?}",
+                self.state, self.client_rx, original_error, e,
+            );
+        }
 
         // We want to close the client channel and set State::Failed so
         // that we can flush any pending client requests. However, we may have

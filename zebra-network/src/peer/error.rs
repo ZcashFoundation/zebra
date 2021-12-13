@@ -105,8 +105,7 @@ impl ErrorSlot {
         let mut guard = self.0.lock().expect("error mutex should be unpoisoned");
 
         if let Some(original_error) = guard.clone() {
-            error!(?original_error, new_error = ?e, "peer connection already errored");
-            Err(AlreadyErrored)
+            Err(AlreadyErrored { original_error })
         } else {
             *guard = Some(e);
             Ok(())
@@ -114,8 +113,12 @@ impl ErrorSlot {
     }
 }
 
-/// The `ErrorSlot` already contains an error.
-pub struct AlreadyErrored;
+/// Error used when the `ErrorSlot` already contains an error.
+#[derive(Clone, Debug)]
+pub struct AlreadyErrored {
+    /// The original error in the error slot.
+    pub original_error: SharedPeerError,
+}
 
 /// An error during a handshake with a remote peer.
 #[derive(Error, Debug)]
