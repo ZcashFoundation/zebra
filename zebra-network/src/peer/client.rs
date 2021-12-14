@@ -280,6 +280,11 @@ impl Service<Request> for Client {
                 .error_slot
                 .try_get_error()
                 .expect("failed servers must set their error slot")))
+        } else if let Some(error) = self.error_slot.try_get_error() {
+            // Prevent any senders from sending more messages to this peer.
+            self.server_tx.close_channel();
+
+            Poll::Ready(Err(error))
         } else {
             Poll::Ready(Ok(()))
         }
