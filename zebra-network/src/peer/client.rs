@@ -325,6 +325,9 @@ impl Service<Request> for Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
+        // Prevent any senders from sending more messages to this peer.
+        self.server_tx.close_channel();
+
         let _ = self
             .shutdown_tx
             .take()
