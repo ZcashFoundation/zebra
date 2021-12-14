@@ -1,7 +1,8 @@
 //! Async Groth16 batch verifier service
 
 use std::{
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
+    error::Error,
     fmt,
     future::Future,
     mem,
@@ -22,7 +23,7 @@ use tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use tower::{util::ServiceFn, Service};
 
 use tower_batch::{Batch, BatchControl};
-use tower_fallback::Fallback;
+use tower_fallback::{BoxedError, Fallback};
 
 use zebra_chain::{
     primitives::{
@@ -40,6 +41,8 @@ mod tests;
 mod vectors;
 
 pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
+
+use crate::error::TransactionError;
 
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
@@ -115,7 +118,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
-pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>> =
+pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), BoxedError>>>> =
     Lazy::new(|| {
         // We need a Service to use. The obvious way to do this would
         // be to write a closure that returns an async block. But because we
@@ -126,18 +129,18 @@ pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), Verif
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
+                // Workaround bug in `bellman::VerificationError` fmt::Display
+                // implementation https://github.com/zkcrypto/bellman/pull/77
+                #[allow(deprecated)]
                 ready(
-                    item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key),
+                    item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
+                        // When that is fixed, change to `e.to_string()`
+                        .map_err(|e| TransactionError::Groth16(e.description().to_string()))
+                        .map_err(tower_fallback::BoxedError::from),
                 )
             }) as fn(_) -> _,
         )
     });
-
-/// A Groth16 verification item, used as the request type of the service.
-pub type Item = batch::Item<Bls12>;
-
-/// A wrapper to workaround the missing `ServiceExt::map_err` method.
-pub struct ItemWrapper(Item);
 
 /// A Groth16 Description (JoinSplit, Spend, or Output) with a Groth16 proof
 /// and its inputs encoded as scalars.
@@ -296,22 +299,26 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     }
 }
 
-impl<T> From<&T> for ItemWrapper
+/// A Groth16 verification item, used as the request type of the service.
+pub type Item = batch::Item<Bls12>;
+
+/// A wrapper to allow a TryFrom blanket implementation of the [`Description`]
+/// trait for the [`Item`] struct.
+/// See https://github.com/rust-lang/rust/issues/50133 for more details.
+pub struct DescriptionWrapper<T>(pub T);
+
+impl<T> TryFrom<DescriptionWrapper<&T>> for Item
 where
     T: Description,
 {
-    /// Convert a [`Description`] into an [`ItemWrapper`].
-    fn from(input: &T) -> Self {
-        Self(Item::from((
-            bellman::groth16::Proof::read(&input.proof().0[..]).unwrap(),
-            input.primary_inputs(),
-        )))
-    }
-}
+    type Error = TransactionError;
 
-impl From<ItemWrapper> for Item {
-    fn from(item_wrapper: ItemWrapper) -> Self {
-        item_wrapper.0
+    fn try_from(input: DescriptionWrapper<&T>) -> Result<Self, Self::Error> {
+        Ok(Item::from((
+            bellman::groth16::Proof::read(&input.0.proof().0[..])
+                .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?,
+            input.0.primary_inputs(),
+        )))
     }
 }
 

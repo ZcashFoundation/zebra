@@ -1020,7 +1020,7 @@ impl Transaction {
     }
 
     /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// These values are added to the sprout chain value pool,
     /// and removed from the value pool of this transaction.
@@ -1067,7 +1067,7 @@ impl Transaction {
     }
 
     /// Modify the `vpub_old` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// See `output_values_to_sprout` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
@@ -1116,7 +1116,7 @@ impl Transaction {
     }
 
     /// Returns the `vpub_new` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// These values are removed from the value pool of this transaction.
     /// and added to the sprout chain value pool.
@@ -1163,7 +1163,7 @@ impl Transaction {
     }
 
     /// Modify the `vpub_new` fields from `JoinSplit`s in this transaction,
-    /// regardless of version.
+    /// regardless of version, in the order they appear in the transaction.
     ///
     /// See `input_values_from_sprout` for details.
     #[cfg(any(test, feature = "proptest-impl"))]

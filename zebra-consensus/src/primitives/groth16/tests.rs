@@ -11,7 +11,7 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use crate::primitives::groth16::{self, *};
+use crate::primitives::groth16::*;
 
 async fn verify_groth16_spends_and_outputs<V>(
     spend_verifier: &mut V,
@@ -37,10 +37,11 @@ where
         for spend in spends {
             tracing::trace!(?spend);
 
-            let spend_rsp = spend_verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&spend).into());
+            let spend_rsp = spend_verifier.ready().await?.call(
+                DescriptionWrapper(&spend)
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
+            );
 
             async_checks.push(spend_rsp);
         }
@@ -48,10 +49,11 @@ where
         for output in outputs {
             tracing::trace!(?output);
 
-            let output_rsp = output_verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(output).into());
+            let output_rsp = output_verifier.ready().await?.call(
+                DescriptionWrapper(output)
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
+            );
 
             async_checks.push(output_rsp);
         }
@@ -110,9 +112,21 @@ async fn verify_sapling_groth16() {
         .unwrap()
 }
 
+#[derive(Clone, Copy)]
+enum Groth16OutputModification {
+    ZeroCMU,
+    ZeroProof,
+}
+
+static GROTH16_OUTPUT_MODIFICATIONS: [Groth16OutputModification; 2] = [
+    Groth16OutputModification::ZeroCMU,
+    Groth16OutputModification::ZeroProof,
+];
+
 async fn verify_invalid_groth16_output_description<V>(
     output_verifier: &mut V,
     transactions: Vec<std::sync::Arc<Transaction>>,
+    modification: Groth16OutputModification,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -132,14 +146,18 @@ where
             // This changes the primary inputs to the proof
             // verification, causing it to fail for this proof.
             let mut modified_output = output.clone();
-            modified_output.cm_u = jubjub::Fq::zero();
+            match modification {
+                Groth16OutputModification::ZeroCMU => modified_output.cm_u = jubjub::Fq::zero(),
+                Groth16OutputModification::ZeroProof => modified_output.zkproof.0 = [0; 192],
+            }
 
             tracing::trace!(?modified_output);
 
-            let output_rsp = output_verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&modified_output).into());
+            let output_rsp = output_verifier.ready().await?.call(
+                DescriptionWrapper(&modified_output)
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
+            );
 
             async_checks.push(output_rsp);
         }
@@ -174,9 +192,15 @@ async fn correctly_err_on_invalid_output_proof() {
         .zcash_deserialize_into::<Block>()
         .expect("a valid block");
 
-    verify_invalid_groth16_output_description(&mut output_verifier, block.transactions)
+    for modification in GROTH16_OUTPUT_MODIFICATIONS {
+        verify_invalid_groth16_output_description(
+            &mut output_verifier,
+            block.transactions.clone(),
+            modification,
+        )
         .await
         .expect_err("unexpected success checking invalid groth16 inputs");
+    }
 }
 
 async fn verify_groth16_joinsplits<V>(
@@ -204,10 +228,11 @@ where
             let pub_key = tx
                 .sprout_joinsplit_pub_key()
                 .expect("pub key must exist since there are joinsplits");
-            let joinsplit_rsp = verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&(joinsplit, &pub_key)).into());
+            let joinsplit_rsp = verifier.ready().await?.call(
+                DescriptionWrapper(&(joinsplit, &pub_key))
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
+            );
 
             async_checks.push(joinsplit_rsp);
         }
@@ -268,10 +293,11 @@ where
 
     tracing::trace!(?joinsplit);
 
-    let joinsplit_rsp = verifier
-        .ready()
-        .await?
-        .call(groth16::ItemWrapper::from(&(joinsplit, pub_key)).into());
+    let joinsplit_rsp = verifier.ready().await?.call(
+        DescriptionWrapper(&(joinsplit, pub_key))
+            .try_into()
+            .map_err(tower_fallback::BoxedError::from)?,
+    );
 
     async_checks.push(joinsplit_rsp);
 
@@ -388,10 +414,11 @@ where
             // Use an arbitrary public key which is not the correct one,
             // which will make the verification fail.
             let modified_pub_key = [0x42; 32].into();
-            let joinsplit_rsp = verifier
-                .ready()
-                .await?
-                .call(groth16::ItemWrapper::from(&(joinsplit, &modified_pub_key)).into());
+            let joinsplit_rsp = verifier.ready().await?.call(
+                DescriptionWrapper(&(joinsplit, &modified_pub_key))
+                    .try_into()
+                    .map_err(tower_fallback::BoxedError::from)?,
+            );
 
             async_checks.push(joinsplit_rsp);
         }

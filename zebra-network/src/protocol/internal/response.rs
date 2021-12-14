@@ -92,3 +92,22 @@ impl fmt::Display for Response {
         })
     }
 }
+
+impl Response {
+    /// Returns the Zebra internal response type as a string.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Response::Nil => "Nil",
+
+            Response::Peers(_) => "Peers",
+
+            Response::Blocks(_) => "Blocks",
+            Response::BlockHashes(_) => "BlockHashes",
+
+            Response::BlockHeaders { .. } => "BlockHeaders",
+
+            Response::Transactions(_) => "Transactions",
+            Response::TransactionIds(_) => "TransactionIds",
+        }
+    }
+}
