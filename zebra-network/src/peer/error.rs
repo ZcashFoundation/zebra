@@ -33,6 +33,10 @@ pub enum PeerError {
     #[error("Internal connection dropped")]
     ConnectionDropped,
 
+    /// Zebra dropped the [`Client`].
+    #[error("Internal client dropped")]
+    ClientDropped,
+
     /// Zebra's internal heartbeat task exited.
     #[error("Internal heartbeat task exited")]
     HeartbeatTaskExited,
@@ -66,6 +70,7 @@ impl PeerError {
         match self {
             PeerError::ConnectionClosed => "ConnectionClosed".into(),
             PeerError::ConnectionDropped => "ConnectionDropped".into(),
+            PeerError::ClientDropped => "ClientDropped".into(),
             PeerError::HeartbeatTaskExited => "HeartbeatTaskExited".into(),
             PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
             // TODO: add error kinds or summaries to `SerializationError`

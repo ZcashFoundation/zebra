@@ -240,8 +240,8 @@ impl Client {
             .expect("only taken on drop")
             .poll_canceled(cx)
         {
+            // Make sure there is an error in the slot
             let heartbeat_error: SharedPeerError = PeerError::HeartbeatTaskExited.into();
-
             let original_error = self.error_slot.try_update_error(heartbeat_error.clone());
             debug!(
                 ?original_error,
@@ -360,6 +360,15 @@ impl Service<Request> for Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
+        // Make sure there is an error in the slot
+        let drop_error: SharedPeerError = PeerError::ClientDropped.into();
+        let original_error = self.error_slot.try_update_error(drop_error.clone());
+        debug!(
+            ?original_error,
+            latest_error = ?drop_error,
+            "client struct dropped"
+        );
+
         self.shutdown();
     }
 }
