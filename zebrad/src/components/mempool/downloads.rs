@@ -263,6 +263,11 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "transaction id already queued for inbound download: ignored transaction"
             );
+            metrics::gauge!(
+                "mempool.currently.queued.transactions",
+                self.pending.len() as _
+            );
+
             return Err(MempoolError::AlreadyQueued);
         }
 
@@ -273,6 +278,11 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many transactions queued for inbound download: ignored transaction"
             );
+            metrics::gauge!(
+                "mempool.currently.queued.transactions",
+                self.pending.len() as _
+            );
+
             return Err(MempoolError::FullQueue);
         }
 
