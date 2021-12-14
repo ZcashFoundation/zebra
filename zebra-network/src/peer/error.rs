@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use thiserror::Error;
 
@@ -29,6 +29,10 @@ pub enum PeerError {
     #[error("Peer closed connection")]
     ConnectionClosed,
 
+    /// Zebra dropped the [`Connection`].
+    #[error("Internal connection dropped")]
+    ConnectionDropped,
+
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
@@ -50,6 +54,22 @@ pub enum PeerError {
     /// We requested data that the peer couldn't find.
     #[error("Remote peer could not find items: {0:?}")]
     NotFound(Vec<InventoryHash>),
+}
+
+impl PeerError {
+    /// Returns the Zebra internal handler type as a string.
+    pub fn kind(&self) -> Cow<'static, str> {
+        match self {
+            PeerError::ConnectionClosed => "ConnectionClosed".into(),
+            PeerError::ConnectionDropped => "ConnectionDropped".into(),
+            PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
+            // TODO: add error kinds or summaries to `SerializationError`
+            PeerError::Serialization(inner) => format!("Serialization({})", inner).into(),
+            PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
+            PeerError::Overloaded => "Overloaded".into(),
+            PeerError::NotFound(_) => "NotFound".into(),
+        }
+    }
 }
 
 /// A shared error slot for peer errors.
@@ -101,8 +121,7 @@ impl ErrorSlot {
         let mut guard = self.0.lock().expect("error mutex should be unpoisoned");
 
         if let Some(original_error) = guard.clone() {
-            error!(?original_error, new_error = ?e, "peer connection already errored");
-            Err(AlreadyErrored)
+            Err(AlreadyErrored { original_error })
         } else {
             *guard = Some(e);
             Ok(())
@@ -110,8 +129,12 @@ impl ErrorSlot {
     }
 }
 
-/// The `ErrorSlot` already contains an error.
-pub struct AlreadyErrored;
+/// Error used when the `ErrorSlot` already contains an error.
+#[derive(Clone, Debug)]
+pub struct AlreadyErrored {
+    /// The original error in the error slot.
+    pub original_error: SharedPeerError,
+}
 
 /// An error during a handshake with a remote peer.
 #[derive(Error, Debug)]

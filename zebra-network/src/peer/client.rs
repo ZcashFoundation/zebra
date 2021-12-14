@@ -22,7 +22,7 @@ use super::{ErrorSlot, PeerError, SharedPeerError};
 pub struct Client {
     /// Used to shut down the corresponding heartbeat.
     /// This is always Some except when we take it on drop.
-    pub(crate) shutdown_tx: Option<oneshot::Sender<()>>,
+    pub(crate) shutdown_tx: Option<oneshot::Sender<CancelHeartbeatTask>>,
 
     /// Used to send [`Request`]s to the remote peer.
     pub(crate) server_tx: mpsc::Sender<ClientRequest>,
@@ -35,6 +35,13 @@ pub struct Client {
     /// The peer connection's protocol version.
     pub(crate) version: Version,
 }
+
+/// A signal sent by the [`Client`] half of a peer connection,
+/// to cancel a [`Client`]'s heartbeat task.
+///
+/// When it receives this signal, the heartbeat task exits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CancelHeartbeatTask;
 
 /// A message from the `peer::Client` to the `peer::Server`.
 #[derive(Debug)]
@@ -294,6 +301,6 @@ impl Drop for Client {
             .shutdown_tx
             .take()
             .expect("must not drop twice")
-            .send(());
+            .send(CancelHeartbeatTask);
     }
 }
