@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use thiserror::Error;
 
@@ -58,13 +58,13 @@ pub enum PeerError {
 
 impl PeerError {
     /// Returns the Zebra internal handler type as a string.
-    pub fn kind(&self) -> String {
+    pub fn kind(&self) -> Cow<'static, str> {
         match self {
             PeerError::ConnectionClosed => "ConnectionClosed".into(),
             PeerError::ConnectionDropped => "ConnectionDropped".into(),
             PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
             // TODO: add error kinds or summaries to `SerializationError`
-            PeerError::Serialization(inner) => format!("Serialization({})", inner),
+            PeerError::Serialization(inner) => format!("Serialization({})", inner).into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
             PeerError::NotFound(_) => "NotFound".into(),
