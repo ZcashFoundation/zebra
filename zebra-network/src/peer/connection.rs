@@ -1264,11 +1264,11 @@ impl<S, Tx> Connection<S, Tx> {
 
     /// Erase the connection state metrics for this connection.
     fn erase_state_metrics(&mut self) {
-        if self.last_metrics_state.is_some() {
+        if let Some(last_metrics_state) = self.last_metrics_state.take() {
             metrics::gauge!(
                 "zebra.net.connection.state",
                 0.0,
-                "command" => self.last_metrics_state.take().expect("just checked for None"),
+                "command" => last_metrics_state,
                 "addr" => self.metrics_label.clone(),
             );
         }
