@@ -11,9 +11,12 @@ use futures::{
 };
 use tower::Service;
 
-use crate::protocol::{
-    external::types::Version,
-    internal::{Request, Response},
+use crate::{
+    peer::error::AlreadyErrored,
+    protocol::{
+        external::types::Version,
+        internal::{Request, Response},
+    },
 };
 
 use super::{ErrorSlot, PeerError, SharedPeerError};
@@ -237,30 +240,42 @@ impl Service<Request> for Client {
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
+        // `poll_canceled` schedules the client task for wakeup
+        // if the heartbeat task exits and drops the cancel handle.
+        //
         //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
         // schedules this task for wakeup.
-        //
-        // `shutdown_tx` is used for oneshot communication to the heartbeat task.
-        // If the heartbeat task exits, we want to drop the associated connection.
-        // So we use `poll_canceled` to schedule the client task for wakeup,
-        // if the heartbeat task exits and drops the cancel handle.
+
+        // Check if this connection's heartbeat task has exited.
         if let Poll::Ready(()) = self
             .shutdown_tx
             .as_mut()
             .expect("only taken on drop")
             .poll_canceled(cx)
         {
-            let original_error = self
-                .error_slot
-                .try_update_error(PeerError::HeartbeatTaskExited.into());
-            info!(
+            let heartbeat_error: SharedPeerError = PeerError::HeartbeatTaskExited.into();
+
+            let original_error = self.error_slot.try_update_error(heartbeat_error.clone());
+            debug!(
                 ?original_error,
-                latest_error = ?PeerError::HeartbeatTaskExited,
+                latest_error = ?heartbeat_error,
                 "client heartbeat task exited"
             );
+
+            // Prevent any senders from sending more messages to this peer.
+            self.server_tx.close_channel();
+
+            if let Err(AlreadyErrored { original_error }) = original_error {
+                return Poll::Ready(Err(original_error));
+            } else {
+                return Poll::Ready(Err(heartbeat_error));
+            }
         }
 
+        // Now check if there is space in the channel to send a request.
         if ready!(self.server_tx.poll_ready(cx)).is_err() {
+            // TODO: should we shut down the heartbeat task as soon as the connection fails?
+
             Poll::Ready(Err(self
                 .error_slot
                 .try_get_error()
