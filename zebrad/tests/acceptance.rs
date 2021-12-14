@@ -83,11 +83,17 @@ fn default_test_config() -> Result<ZebradConfig> {
         ..mempool::Config::default()
     };
 
+    let consensus = zebra_consensus::Config {
+        debug_skip_parameter_preload: true,
+        ..zebra_consensus::Config::default()
+    };
+
     let config = ZebradConfig {
         network,
         state: zebra_state::Config::ephemeral(),
         sync,
         mempool,
+        consensus,
         ..ZebradConfig::default()
     };
 
@@ -990,6 +996,7 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 fn create_cached_database_height<P>(
     network: Network,
     height: Height,
+    debug_skip_parameter_preload: bool,
     test_child_predicate: impl Into<Option<P>>,
 ) -> Result<()>
 where
@@ -1004,6 +1011,7 @@ where
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
+    config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
 
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
@@ -1031,11 +1039,16 @@ where
 
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
-    create_cached_database_height(network, height, |test_child: &mut TestChild<PathBuf>| {
-        // make sure pre-cached databases finish before the mandatory checkpoint
-        test_child.expect_stdout_line_matches("CommitFinalized request")?;
-        Ok(())
-    })
+    create_cached_database_height(
+        network,
+        height,
+        true,
+        |test_child: &mut TestChild<PathBuf>| {
+            // make sure pre-cached databases finish before the mandatory checkpoint
+            test_child.expect_stdout_line_matches("CommitFinalized request")?;
+            Ok(())
+        },
+    )
 }
 
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
@@ -1043,6 +1056,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
+        false,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure cached database tests finish after the mandatory checkpoint,
             // using the non-finalized state (the checkpoint_sync config must be false)
