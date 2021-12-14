@@ -21,6 +21,9 @@ use crate::{
 
 use super::{ErrorSlot, PeerError, SharedPeerError};
 
+#[cfg(test)]
+mod tests;
+
 /// The "client" duplex half of a peer connection.
 pub struct Client {
     /// Used to shut down the corresponding heartbeat.
