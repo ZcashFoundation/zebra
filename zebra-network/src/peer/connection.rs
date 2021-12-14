@@ -663,6 +663,7 @@ where
                             };
                         }
                         Either::Left((Either::Left(_), _peer_fut)) => {
+                            // The client receiver was dropped, so we don't need to send on `tx` here.
                             trace!(parent: &span, "client request was cancelled");
                             self.state = State::AwaitingRequest;
                         }
