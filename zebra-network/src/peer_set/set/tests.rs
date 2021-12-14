@@ -21,7 +21,10 @@ use zebra_chain::{
 
 use super::MorePeers;
 use crate::{
-    peer::{Client, ClientRequest, ErrorSlot, LoadTrackedClient, MinimumPeerVersion},
+    peer::{
+        CancelHeartbeatTask, Client, ClientRequest, ErrorSlot, LoadTrackedClient,
+        MinimumPeerVersion,
+    },
     peer_set::PeerSet,
     protocol::external::{types::Version, InventoryHash},
     AddressBook, Config,
@@ -38,7 +41,7 @@ const MAX_PEERS: usize = 20;
 /// A handle to a mocked [`Client`] instance.
 struct MockedClientHandle {
     _request_receiver: mpsc::Receiver<ClientRequest>,
-    shutdown_receiver: oneshot::Receiver<()>,
+    shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
     version: Version,
 }
 
@@ -74,7 +77,7 @@ impl MockedClientHandle {
     pub fn is_connected(&mut self) -> bool {
         match self.shutdown_receiver.try_recv() {
             Ok(None) => true,
-            Ok(Some(())) | Err(oneshot::Canceled) => false,
+            Ok(Some(CancelHeartbeatTask)) | Err(oneshot::Canceled) => false,
         }
     }
 }

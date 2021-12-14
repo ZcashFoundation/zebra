@@ -591,8 +591,13 @@ async fn setup(
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle) =
-        zebra_consensus::chain::init(consensus_config.clone(), network, state_service.clone())
-            .await;
+        zebra_consensus::chain::init(
+            consensus_config.clone(),
+            network,
+            state_service.clone(),
+            true,
+        )
+        .await;
 
     let mut peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
