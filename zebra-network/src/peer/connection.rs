@@ -184,7 +184,7 @@ impl Handler {
                     if !transactions.is_empty() {
                         // if our peers start sending mixed solicited and unsolicited transactions,
                         // we should update this code to handle those responses
-                        error!("unexpected transaction from peer: transaction responses should be sent in a continuous batch, followed by notfound. Using partial received transactions as the peer response");
+                        info!("unexpected transaction from peer: transaction responses should be sent in a continuous batch, followed by notfound. Using partial received transactions as the peer response");
                         // TODO: does the caller need a list of missing transactions? (#1515)
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
@@ -217,11 +217,11 @@ impl Handler {
                 if missing_transaction_ids != pending_ids {
                     trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
                     // if these errors are noisy, we should replace them with debugs
-                    error!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
+                    info!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
                 }
                 if missing_transaction_ids.len() != missing_invs.len() {
                     trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
-                    error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
+                    info!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
                 }
 
                 if !transactions.is_empty() {
@@ -316,11 +316,11 @@ impl Handler {
                 if missing_blocks != pending_hashes {
                     trace!(?items, ?missing_blocks, ?pending_hashes);
                     // if these errors are noisy, we should replace them with debugs
-                    error!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
+                    info!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
                 }
                 if missing_blocks.len() != items.len() {
                     trace!(?items, ?missing_blocks, ?pending_hashes);
-                    error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
+                    info!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
                 }
 
                 if !blocks.is_empty() {
@@ -1154,7 +1154,7 @@ where
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
-                    tracing::warn!("inbound service is overloaded, closing connection");
+                    tracing::info!("inbound service is overloaded, closing connection");
                     metrics::counter!("pool.closed.loadshed", 1);
                     self.fail_with(PeerError::Overloaded);
                 } else {
@@ -1162,10 +1162,10 @@ where
                     // them to disconnect, and we might be using them to sync blocks.
                     // For similar reasons, we don't want to fail_with() here - we
                     // only close the connection if the peer is doing something wrong.
-                    error!(%e,
-                           connection_state = ?self.state,
-                           client_receiver = ?self.client_rx,
-                           "error processing peer request");
+                    info!(%e,
+                          connection_state = ?self.state,
+                          client_receiver = ?self.client_rx,
+                          "error processing peer request");
                 }
                 return;
             }
