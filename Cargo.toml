@@ -17,6 +17,33 @@ members = [
 [profile.dev]
 panic = "abort"
 
+# Speed up tests by optimizing performance-critical crates
+
+[profile.dev.package.blake2b_simd]
+opt-level = 3
+
+[profile.dev.package.ff]
+opt-level = 3
+
+[profile.dev.package.group]
+opt-level = 3
+
+[profile.dev.package.pasta_curves]
+opt-level = 3
+
+[profile.dev.package.halo2]
+opt-level = 3
+
+[profile.dev.package.bls12_381]
+opt-level = 3
+
+[profile.dev.package.minreq]
+opt-level = 1
+
+[profile.dev.package.zcash_proofs]
+opt-level = 1
+
+
 [profile.release]
 panic = "abort"
 
