@@ -228,3 +228,25 @@ impl fmt::Display for Request {
         })
     }
 }
+
+impl Request {
+    /// Returns the Zebra internal request type as a string.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Request::Peers => "Peers",
+            Request::Ping(_) => "Ping",
+
+            Request::BlocksByHash(_) => "BlocksByHash",
+            Request::TransactionsById(_) => "TransactionsById",
+
+            Request::FindBlocks { .. } => "FindBlocks",
+            Request::FindHeaders { .. } => "FindHeaders",
+
+            Request::PushTransaction(_) => "PushTransaction",
+            Request::AdvertiseTransactionIds(_) => "AdvertiseTransactionIds",
+
+            Request::AdvertiseBlock(_) => "AdvertiseBlock",
+            Request::MempoolTransactionIds => "MempoolTransactionIds",
+        }
+    }
+}

@@ -426,3 +426,30 @@ impl fmt::Display for Message {
         })
     }
 }
+
+impl Message {
+    /// Returns the Zcash protocol message command as a string.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Message::Version { .. } => "version",
+            Message::Verack => "verack",
+            Message::Ping(_) => "ping",
+            Message::Pong(_) => "pong",
+            Message::Reject { .. } => "reject",
+            Message::GetAddr => "getaddr",
+            Message::Addr(_) => "addr",
+            Message::GetBlocks { .. } => "getblocks",
+            Message::Inv(_) => "inv",
+            Message::GetHeaders { .. } => "getheaders",
+            Message::Headers(_) => "headers",
+            Message::GetData(_) => "getdata",
+            Message::Block(_) => "block",
+            Message::Tx(_) => "tx",
+            Message::NotFound(_) => "notfound",
+            Message::Mempool => "mempool",
+            Message::FilterLoad { .. } => "filterload",
+            Message::FilterAdd { .. } => "filteradd",
+            Message::FilterClear => "filterclear",
+        }
+    }
+}
