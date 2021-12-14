@@ -678,6 +678,8 @@ where
                 // We've failed, but we need to flush all pending client
                 // requests before we can return and complete the future.
                 State::Failed => {
+                    self.client_rx.close();
+
                     match self.client_rx.next().await {
                         Some(InProgressClientRequest { tx, span, .. }) => {
                             trace!(
@@ -745,6 +747,8 @@ where
         // we need to deal with it first if it exists.
         self.client_rx.close();
         let old_state = std::mem::replace(&mut self.state, State::Failed);
+        self.request_timer = None;
+
         self.update_state_metrics(None);
 
         if let State::AwaitingResponse { tx, .. } = old_state {
