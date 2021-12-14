@@ -698,11 +698,7 @@ where
         }
     }
 
-    /// Marks the peer as having failed with error `e`.
-    ///
-    /// # Panics
-    ///
-    /// If `self` has already failed with a previous error.
+    /// Marks the peer as having failed with error `e`, and starts connection cleanup.
     fn fail_with<E>(&mut self, e: E)
     where
         E: Into<SharedPeerError>,
@@ -719,21 +715,13 @@ where
         //
         // Error slots use a threaded `std::sync::Mutex`, so accessing the slot
         // can block the async task's current thread. We only perform a single
-        // slot update per `Client`, and panic to enforce this constraint.
-        //
-        // This assertion typically fails due to these bugs:
-        // * we mark a connection as failed without using fail_with
-        // * we call fail_with without checking for a failed connection
-        //   state
-        // * we continue processing messages after calling fail_with
-        //
-        // See the original bug #1510 and PR #1531, and the later bug #1599
-        // and PR #1600.
+        // slot update per `Client`. We ignore subsequent error slot updates.
         let error_result = self.error_slot.try_update_error(e.clone());
 
         if let Err(AlreadyErrored { original_error }) = error_result {
-            panic!(
-                "multiple failures for connection: \n\
+            // TODO: downgrade log to debug?
+            info!(
+                "multiple errors on connection: \n\
                  failed connections should stop processing pending requests and responses, \n\
                  then close the connection. \n\
                  state: {:?} \n\
@@ -760,7 +748,7 @@ where
             //
             // Accessing the error slot locks a threaded std::sync::Mutex, which
             // can block the current async task thread. We briefly lock the mutex
-            // to get a reference to the error.
+            // to clone the error.
             let e = self.error_slot.try_get_error().unwrap();
             let _ = tx.send(Err(e));
         }
