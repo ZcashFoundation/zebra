@@ -420,9 +420,9 @@ pub struct Connection<S, Tx> {
     /// The `inbound` service, used to answer requests from this connection's peer.
     pub(super) svc: S,
 
-    /// A channel that receives network requests from the rest of Zebra.
+    /// A channel for requests that Zebra's internal services want to send to remote peers.
     ///
-    /// This channel produces `InProgressClientRequest`s.
+    /// This channel accepts [`Request`]s, and produces [`InProgressClientRequest`]s.
     pub(super) client_rx: ClientRequestReceiver,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
@@ -430,7 +430,11 @@ pub struct Connection<S, Tx> {
     /// `None` unless the connection or client have errored.
     pub(super) error_slot: ErrorSlot,
 
-    /// A channel for sending requests to the connected peer.
+    /// A channel for sending Zcash messages to the connected peer.
+    ///
+    /// This channel accepts [`Message`]s.
+    ///
+    /// The corresponding peer message receiver is passed to [`Connection::run`].
     pub(super) peer_tx: Tx,
 
     /// A connection tracker that reduces the open connection count when dropped.
@@ -442,8 +446,7 @@ pub struct Connection<S, Tx> {
     ///
     /// If this connection tracker or `Connection`s are leaked,
     /// the number of active connections will appear higher than it actually is.
-    ///
-    /// Eventually, Zebra could stop making connections entirely.
+    /// If enough connections leak, Zebra will stop making new connections.
     #[allow(dead_code)]
     pub(super) connection_tracker: ConnectionTracker,
 
@@ -461,6 +464,9 @@ where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
+    ///
+    /// `peer_rx` is a channel for receiving Zcash [`Message`]s from the connected peer.
+    /// The corresponding peer message receiver is [`Connection.peer_tx`].
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
