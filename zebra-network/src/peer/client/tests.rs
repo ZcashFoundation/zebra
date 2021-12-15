@@ -12,7 +12,7 @@ use crate::{
 
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
-    _request_receiver: mpsc::Receiver<ClientRequest>,
+    request_receiver: mpsc::Receiver<ClientRequest>,
     shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
     version: Version,
 }
@@ -21,7 +21,7 @@ impl ClientTestHarness {
     /// Create a new mocked [`Client`] instance, returning it together with a harness to track it.
     pub fn new(version: Version) -> (Self, Client) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let (request_sender, _request_receiver) = mpsc::channel(1);
+        let (request_sender, request_receiver) = mpsc::channel(1);
 
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
@@ -31,7 +31,7 @@ impl ClientTestHarness {
         };
 
         let harness = ClientTestHarness {
-            _request_receiver,
+            request_receiver,
             shutdown_receiver,
             version,
         };
@@ -56,6 +56,50 @@ impl ClientTestHarness {
         match receive_result {
             Ok(None) => true,
             Ok(Some(CancelHeartbeatTask)) | Err(oneshot::Canceled) => false,
+        }
+    }
+
+    /// Tries to receive a [`ClientRequest`] sent by the mocked [`Client`] instance.
+    pub(crate) fn try_to_receive_request(&mut self) -> ReceiveRequestAttempt {
+        match self.request_receiver.try_next() {
+            Ok(Some(request)) => ReceiveRequestAttempt::Request(request),
+            Ok(None) => ReceiveRequestAttempt::Closed,
+            Err(_) => ReceiveRequestAttempt::Empty,
+        }
+    }
+}
+
+/// A representation of the result of an attempt to receive a [`ClientRequest`] sent by the mocked
+/// [`Client`] instance.
+pub(crate) enum ReceiveRequestAttempt {
+    /// The mocked [`Client`] instance has closed the sender endpoint of the channel.
+    Closed,
+
+    /// There were no queued requests in the channel.
+    Empty,
+
+    /// One request was successfully received.
+    Request(ClientRequest),
+}
+
+impl ReceiveRequestAttempt {
+    /// Check if the attempt to receive resulted in discovering that the sender endpoint had been
+    /// closed.
+    pub fn is_closed(&self) -> bool {
+        matches!(self, ReceiveRequestAttempt::Closed)
+    }
+
+    /// Check if the attempt to receive resulted in no requests.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, ReceiveRequestAttempt::Empty)
+    }
+
+    /// Returns the received request, if there was one.
+    #[allow(dead_code)]
+    pub fn request(self) -> Option<ClientRequest> {
+        match self {
+            ReceiveRequestAttempt::Request(request) => Some(request),
+            ReceiveRequestAttempt::Closed | ReceiveRequestAttempt::Empty => None,
         }
     }
 }
