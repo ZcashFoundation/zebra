@@ -9,6 +9,7 @@ use futures::{
     future, ready,
     stream::{Stream, StreamExt},
 };
+use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::{
@@ -40,6 +41,12 @@ pub struct Client {
 
     /// The peer connection's protocol version.
     pub(crate) version: Version,
+
+    /// A handle to the task responsible for connecting to the peer.
+    pub(crate) connection_task: JoinHandle<()>,
+
+    /// A handle to the task responsible for sending periodic heartbeats.
+    pub(crate) heartbeat_task: JoinHandle<()>,
 }
 
 /// A signal sent by the [`Client`] half of a peer connection,
