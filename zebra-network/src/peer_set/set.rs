@@ -433,6 +433,14 @@ where
                         "service was canceled, dropping service"
                     );
                 }
+                Poll::Ready(Some(Err((key, UnreadyError::CancelHandleDropped(_))))) => {
+                    // Similarly, services with dropped cancel handes can have duplicates.
+                    trace!(
+                        ?key,
+                        duplicate_connection = self.cancel_handles.contains_key(&key),
+                        "cancel handle was dropped, dropping service"
+                    );
+                }
 
                 // Unready -> Errored
                 Poll::Ready(Some(Err((key, UnreadyError::Inner(error))))) => {

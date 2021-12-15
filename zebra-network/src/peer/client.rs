@@ -11,12 +11,18 @@ use futures::{
 };
 use tower::Service;
 
-use crate::protocol::{
-    external::types::Version,
-    internal::{Request, Response},
+use crate::{
+    peer::error::AlreadyErrored,
+    protocol::{
+        external::types::Version,
+        internal::{Request, Response},
+    },
 };
 
 use super::{ErrorSlot, PeerError, SharedPeerError};
+
+#[cfg(test)]
+mod tests;
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
@@ -68,8 +74,6 @@ pub(super) struct ClientRequestReceiver {
 
 /// A message from the `peer::Client` to the `peer::Server`,
 /// after it has been received by the `peer::Server`.
-///
-///
 #[derive(Debug)]
 #[must_use = "tx.send() must be called before drop"]
 pub(super) struct InProgressClientRequest {
@@ -129,9 +133,28 @@ impl From<ClientRequest> for InProgressClientRequest {
 }
 
 impl ClientRequestReceiver {
-    /// Forwards to `inner.close()`
+    /// Forwards to `inner.close()`.
     pub fn close(&mut self) {
         self.inner.close()
+    }
+
+    /// Closes `inner`, then gets the next pending [`Request`].
+    ///
+    /// Closing the channel ensures that:
+    /// - the request stream terminates, and
+    /// - task notifications are not required.
+    pub fn close_and_flush_next(&mut self) -> Option<InProgressClientRequest> {
+        self.inner.close();
+
+        // # Correctness
+        //
+        // The request stream terminates, because the sender is closed,
+        // and the channel has a limited capacity.
+        // Task notifications are not required, because the sender is closed.
+        self.inner
+            .try_next()
+            .expect("channel is closed")
+            .map(Into::into)
     }
 }
 
@@ -227,6 +250,62 @@ impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
     }
 }
 
+impl Client {
+    /// Check if this connection's heartbeat task has exited.
+    fn check_heartbeat(&mut self, cx: &mut Context<'_>) -> Result<(), SharedPeerError> {
+        if let Poll::Ready(()) = self
+            .shutdown_tx
+            .as_mut()
+            .expect("only taken on drop")
+            .poll_canceled(cx)
+        {
+            // Make sure there is an error in the slot
+            let heartbeat_error: SharedPeerError = PeerError::HeartbeatTaskExited.into();
+            let original_error = self.error_slot.try_update_error(heartbeat_error.clone());
+            debug!(
+                ?original_error,
+                latest_error = ?heartbeat_error,
+                "client heartbeat task exited"
+            );
+
+            if let Err(AlreadyErrored { original_error }) = original_error {
+                Err(original_error)
+            } else {
+                Err(heartbeat_error)
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Poll for space in the shared request sender channel.
+    fn poll_request(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
+        if ready!(self.server_tx.poll_ready(cx)).is_err() {
+            Poll::Ready(Err(self
+                .error_slot
+                .try_get_error()
+                .expect("failed servers must set their error slot")))
+        } else if let Some(error) = self.error_slot.try_get_error() {
+            Poll::Ready(Err(error))
+        } else {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// Shut down the resources held by the client half of this peer connection.
+    ///
+    /// Stops further requests to the remote peer, and stops the heartbeat task.
+    fn shutdown(&mut self) {
+        // Prevent any senders from sending more messages to this peer.
+        self.server_tx.close_channel();
+
+        // Stop the heartbeat task
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(CancelHeartbeatTask);
+        }
+    }
+}
+
 impl Service<Request> for Client {
     type Response = Response;
     type Error = SharedPeerError;
@@ -234,24 +313,27 @@ impl Service<Request> for Client {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // CORRECTNESS
+        // # Correctness
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
+        // `poll_canceled` schedules the client task for wakeup
+        // if the heartbeat task exits and drops the cancel handle.
+        //
         //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
         // schedules this task for wakeup.
-        //
-        // Since `shutdown_tx` is used for oneshot communication to the heartbeat
-        // task, it will never be `Pending`.
-        //
-        // TODO: should the Client exit if the heartbeat task exits and drops
-        // `shutdown_tx`?
-        if ready!(self.server_tx.poll_ready(cx)).is_err() {
-            Poll::Ready(Err(self
-                .error_slot
-                .try_get_error()
-                .expect("failed servers must set their error slot")))
+
+        let mut result = self.check_heartbeat(cx);
+
+        if result.is_ok() {
+            result = ready!(self.poll_request(cx));
+        }
+
+        if let Err(error) = result {
+            self.shutdown();
+
+            Poll::Ready(Err(error))
         } else {
             Poll::Ready(Ok(()))
         }
@@ -297,10 +379,15 @@ impl Service<Request> for Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        let _ = self
-            .shutdown_tx
-            .take()
-            .expect("must not drop twice")
-            .send(CancelHeartbeatTask);
+        // Make sure there is an error in the slot
+        let drop_error: SharedPeerError = PeerError::ClientDropped.into();
+        let original_error = self.error_slot.try_update_error(drop_error.clone());
+        debug!(
+            ?original_error,
+            latest_error = ?drop_error,
+            "client struct dropped"
+        );
+
+        self.shutdown();
     }
 }

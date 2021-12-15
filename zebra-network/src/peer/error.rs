@@ -33,6 +33,14 @@ pub enum PeerError {
     #[error("Internal connection dropped")]
     ConnectionDropped,
 
+    /// Zebra dropped the [`Client`].
+    #[error("Internal client dropped")]
+    ClientDropped,
+
+    /// Zebra's internal heartbeat task exited.
+    #[error("Internal heartbeat task exited")]
+    HeartbeatTaskExited,
+
     /// The remote peer did not respond to a [`peer::Client`] request in time.
     #[error("Client request timed out")]
     ClientRequestTimeout,
@@ -62,6 +70,8 @@ impl PeerError {
         match self {
             PeerError::ConnectionClosed => "ConnectionClosed".into(),
             PeerError::ConnectionDropped => "ConnectionDropped".into(),
+            PeerError::ClientDropped => "ClientDropped".into(),
+            PeerError::HeartbeatTaskExited => "HeartbeatTaskExited".into(),
             PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
             // TODO: add error kinds or summaries to `SerializationError`
             PeerError::Serialization(inner) => format!("Serialization({})", inner).into(),
@@ -129,7 +139,7 @@ impl ErrorSlot {
     }
 }
 
-/// Error used when the `ErrorSlot` already contains an error.
+/// Error returned when the `ErrorSlot` already contains an error.
 #[derive(Clone, Debug)]
 pub struct AlreadyErrored {
     /// The original error in the error slot.

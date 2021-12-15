@@ -38,6 +38,9 @@ use crate::{
     BoxError,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug)]
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
@@ -420,9 +423,9 @@ pub struct Connection<S, Tx> {
     /// The `inbound` service, used to answer requests from this connection's peer.
     pub(super) svc: S,
 
-    /// A channel that receives network requests from the rest of Zebra.
+    /// A channel for requests that Zebra's internal services want to send to remote peers.
     ///
-    /// This channel produces `InProgressClientRequest`s.
+    /// This channel accepts [`Request`]s, and produces [`InProgressClientRequest`]s.
     pub(super) client_rx: ClientRequestReceiver,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
@@ -430,7 +433,13 @@ pub struct Connection<S, Tx> {
     /// `None` unless the connection or client have errored.
     pub(super) error_slot: ErrorSlot,
 
-    /// A channel for sending requests to the connected peer.
+    /// A channel for sending Zcash messages to the connected peer.
+    ///
+    /// This channel accepts [`Message`]s.
+    ///
+    /// The corresponding peer message receiver is passed to [`Connection::run`].
+    ///
+    /// TODO: add a timeout when sending messages to the remote peer (#3234)
     pub(super) peer_tx: Tx,
 
     /// A connection tracker that reduces the open connection count when dropped.
@@ -442,8 +451,7 @@ pub struct Connection<S, Tx> {
     ///
     /// If this connection tracker or `Connection`s are leaked,
     /// the number of active connections will appear higher than it actually is.
-    ///
-    /// Eventually, Zebra could stop making connections entirely.
+    /// If enough connections leak, Zebra will stop making new connections.
     #[allow(dead_code)]
     pub(super) connection_tracker: ConnectionTracker,
 
@@ -461,6 +469,9 @@ where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
+    ///
+    /// `peer_rx` is a channel for receiving Zcash [`Message`]s from the connected peer.
+    /// The corresponding peer message receiver is [`Connection.peer_tx`].
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
@@ -484,6 +495,8 @@ where
         //
         // If there is a pending request, we wait only on an incoming peer message, and
         // check whether it can be interpreted as a response to the pending request.
+        //
+        // TODO: turn this comment into a module-level comment, after splitting the module.
         loop {
             self.update_state_metrics(None);
 
@@ -516,7 +529,11 @@ where
                         }
                         Either::Right((None, _)) => {
                             trace!("client_rx closed, ending connection");
-                            return;
+
+                            // There are no requests to be flushed,
+                            // but we need to set an error and update metrics.
+                            self.shutdown(PeerError::ClientDropped);
+                            break;
                         }
                         Either::Right((Some(req), _)) => {
                             let span = req.span.clone();
@@ -646,6 +663,8 @@ where
                                     tx,
                                     ..
                                 } => {
+                                    // We replaced the original state, which means `fail_with` won't see it.
+                                    // So we do the state request cleanup manually.
                                     let e = SharedPeerError::from(e);
                                     let _ = tx.send(Err(e.clone()));
                                     self.fail_with(e);
@@ -663,107 +682,35 @@ where
                             };
                         }
                         Either::Left((Either::Left(_), _peer_fut)) => {
+                            // The client receiver was dropped, so we don't need to send on `tx` here.
                             trace!(parent: &span, "client request was cancelled");
                             self.state = State::AwaitingRequest;
                         }
                     }
                 }
-                // We've failed, but we need to flush all pending client
-                // requests before we can return and complete the future.
-                State::Failed => {
-                    match self.client_rx.next().await {
-                        Some(InProgressClientRequest { tx, span, .. }) => {
-                            trace!(
-                                parent: &span,
-                                "sending an error response to a pending request on a failed connection"
-                            );
-                            // Correctness
-                            //
-                            // Error slots use a threaded `std::sync::Mutex`, so
-                            // accessing the slot can block the async task's
-                            // current thread. So we only hold the lock for long
-                            // enough to get a reference to the error.
-                            let e = self
-                                .error_slot
-                                .try_get_error()
-                                .expect("cannot enter failed state without setting error slot");
-                            let _ = tx.send(Err(e));
-                            // Continue until we've errored all queued reqs
-                            continue;
-                        }
-                        None => return,
-                    }
-                }
+                // This connection has failed: stop the event loop, and complete the future.
+                State::Failed => break,
             }
         }
+
+        assert!(
+            self.error_slot.try_get_error().is_some(),
+            "closing connections must call fail_with() or shutdown() to set the error slot"
+        );
     }
 
-    /// Marks the peer as having failed with error `e`.
+    /// Fail this connection.
     ///
-    /// # Panics
-    ///
-    /// If `self` has already failed with a previous error.
-    fn fail_with<E>(&mut self, e: E)
-    where
-        E: Into<SharedPeerError>,
-    {
-        let e = e.into();
-        debug!(%e,
-               connection_state = ?self.state,
+    /// If the connection has errored already, re-use the original error.
+    /// Otherwise, fail the connection with `error`.
+    fn fail_with(&mut self, error: impl Into<SharedPeerError>) {
+        let error = error.into();
+
+        debug!(%error,
                client_receiver = ?self.client_rx,
                "failing peer service with error");
 
-        // Update the shared error slot
-        //
-        // # Correctness
-        //
-        // Error slots use a threaded `std::sync::Mutex`, so accessing the slot
-        // can block the async task's current thread. We only perform a single
-        // slot update per `Client`, and panic to enforce this constraint.
-        //
-        // This assertion typically fails due to these bugs:
-        // * we mark a connection as failed without using fail_with
-        // * we call fail_with without checking for a failed connection
-        //   state
-        // * we continue processing messages after calling fail_with
-        //
-        // See the original bug #1510 and PR #1531, and the later bug #1599
-        // and PR #1600.
-        let error_result = self.error_slot.try_update_error(e.clone());
-
-        if let Err(AlreadyErrored { original_error }) = error_result {
-            panic!(
-                "multiple failures for connection: \n\
-                 failed connections should stop processing pending requests and responses, \n\
-                 then close the connection. \n\
-                 state: {:?} \n\
-                 client receiver: {:?} \n\
-                 original error: {:?} \n\
-                 new error: {:?}",
-                self.state, self.client_rx, original_error, e,
-            );
-        }
-
-        // We want to close the client channel and set State::Failed so
-        // that we can flush any pending client requests. However, we may have
-        // an outstanding client request in State::AwaitingResponse, so
-        // we need to deal with it first if it exists.
-        self.client_rx.close();
-        let old_state = std::mem::replace(&mut self.state, State::Failed);
-        self.update_state_metrics(None);
-
-        if let State::AwaitingResponse { tx, .. } = old_state {
-            // # Correctness
-            //
-            // We know the slot has Some(e) because we just set it above,
-            // and the error slot is never unset.
-            //
-            // Accessing the error slot locks a threaded std::sync::Mutex, which
-            // can block the current async task thread. We briefly lock the mutex
-            // to get a reference to the error.
-            let e = self.error_slot.try_get_error().unwrap();
-            let _ = tx.send(Err(e));
-        }
+        self.shutdown(error);
     }
 
     /// Handle an incoming client request, possibly generating outgoing messages to the
@@ -1273,19 +1220,89 @@ impl<S, Tx> Connection<S, Tx> {
             );
         }
     }
+
+    /// Marks the peer as having failed with `error`, and performs connection cleanup.
+    ///
+    /// If the connection has errored already, re-use the original error.
+    /// Otherwise, fail the connection with `error`.
+    fn shutdown(&mut self, error: impl Into<SharedPeerError>) {
+        let mut error = error.into();
+
+        // Close channels first, so other tasks can start shutting down.
+        //
+        // TODO: close peer_tx and peer_rx, after:
+        // - adapting them using a struct with a Stream impl, rather than closures
+        // - making the struct forward `close` to the inner channel
+        self.client_rx.close();
+
+        // Update the shared error slot
+        //
+        // # Correctness
+        //
+        // Error slots use a threaded `std::sync::Mutex`, so accessing the slot
+        // can block the async task's current thread. We only perform a single
+        // slot update per `Client`. We ignore subsequent error slot updates.
+        let slot_result = self.error_slot.try_update_error(error.clone());
+
+        if let Err(AlreadyErrored { original_error }) = slot_result {
+            debug!(
+                new_error = %error,
+                %original_error,
+                connection_state = ?self.state,
+                "multiple errors on connection: \
+                 failed connections should stop processing pending requests and responses, \
+                 then close the connection"
+            );
+
+            error = original_error;
+        } else {
+            debug!(%error,
+                   connection_state = ?self.state,
+                   "shutting down peer service with error");
+        }
+
+        // Prepare to flush any pending client requests.
+        //
+        // We've already closed the client channel, so setting State::Failed
+        // will make the main loop flush any pending requests.
+        //
+        // However, we may have an outstanding client request in State::AwaitingResponse,
+        // so we need to deal with it first.
+        if let State::AwaitingResponse { tx, .. } =
+            std::mem::replace(&mut self.state, State::Failed)
+        {
+            // # Correctness
+            //
+            // We know the slot has Some(error), because we just set it above,
+            // and the error slot is never unset.
+            //
+            // Accessing the error slot locks a threaded std::sync::Mutex, which
+            // can block the current async task thread. We briefly lock the mutex
+            // to clone the error.
+            let _ = tx.send(Err(error.clone()));
+        }
+
+        // Make the timer and metrics consistent with the Failed state.
+        self.request_timer = None;
+        self.update_state_metrics(None);
+
+        // Finally, flush pending client requests.
+        while let Some(InProgressClientRequest { tx, span, .. }) =
+            self.client_rx.close_and_flush_next()
+        {
+            trace!(
+                parent: &span,
+                %error,
+                "sending an error response to a pending request on a failed connection"
+            );
+            let _ = tx.send(Err(error.clone()));
+        }
+    }
 }
 
 impl<S, Tx> Drop for Connection<S, Tx> {
     fn drop(&mut self) {
-        if let State::AwaitingResponse { tx, .. } =
-            std::mem::replace(&mut self.state, State::Failed)
-        {
-            if let Some(error) = self.error_slot.try_get_error() {
-                let _ = tx.send(Err(error));
-            } else {
-                let _ = tx.send(Err(PeerError::ConnectionDropped.into()));
-            }
-        }
+        self.shutdown(PeerError::ConnectionDropped);
 
         self.erase_state_metrics();
     }
