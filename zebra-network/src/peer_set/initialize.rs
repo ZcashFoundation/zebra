@@ -696,7 +696,6 @@ where
                 // congested it can generate a lot of demand signal very
                 // rapidly.
                 trace!("too many open connections or in-flight handshakes, dropping demand signal");
-                continue;
             }
             DemandHandshake { candidate } => {
                 // Increment the connection count before we spawn the connection.
