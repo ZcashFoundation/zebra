@@ -72,12 +72,17 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                     && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
                     && (!interstitial_roots.contains(&joinsplit.anchor))
                 {
-                    // TODO: some block after ~1_200_000 is reaching here.
+                    // TODO: This check fails near:
+                    // - mainnet block 1_047_908
+                    //   with anchor 019c435cd1e8aca9a4165f7e126ac6e548952439d50213f4d15c546df9d49b61
+                    // - testnet block 1_057_737
+                    //   with anchor 3ad623811ffa4fe8498b23f3d6bb4e086dca32269afef6c8e572fd9ee6d0c0ea
+                    //
                     // Restore after finding the cause and fixing it.
                     // return Err(ValidateContextError::UnknownSproutAnchor {
                     //     anchor: joinsplit.anchor,
                     // });
-                    tracing::error!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor")
+                    tracing::warn!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor")
                 }
 
                 tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
