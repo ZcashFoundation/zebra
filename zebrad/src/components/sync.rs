@@ -435,7 +435,14 @@ where
         tracing::debug!(?block_locator, "got block locator");
 
         let mut requests = FuturesUnordered::new();
-        for _ in 0..FANOUT {
+        for attempt in 0..FANOUT {
+            if attempt > 0 {
+                // Let other tasks run, so we're more likely to choose a different peer.
+                //
+                // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                tokio::task::yield_now().await;
+            }
+
             requests.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
                 zn::Request::FindBlocks {
                     known_blocks: block_locator.clone(),
@@ -554,7 +561,14 @@ where
         for tip in tips {
             tracing::debug!(?tip, "asking peers to extend chain tip");
             let mut responses = FuturesUnordered::new();
-            for _ in 0..FANOUT {
+            for attempt in 0..FANOUT {
+                if attempt > 0 {
+                    // Let other tasks run, so we're more likely to choose a different peer.
+                    //
+                    // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                    tokio::task::yield_now().await;
+                }
+
                 responses.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
                     zn::Request::FindBlocks {
                         known_blocks: vec![tip.tip],

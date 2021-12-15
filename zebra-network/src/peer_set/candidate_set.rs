@@ -259,9 +259,14 @@ where
         let mut more_peers = None;
 
         // Launch requests
-        //
-        // TODO: launch each fanout in its own task (might require tokio 1.6)
-        for _ in 0..fanout_limit {
+        for attempt in 0..fanout_limit {
+            if attempt > 0 {
+                // Let other tasks run, so we're more likely to choose a different peer.
+                //
+                // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                tokio::task::yield_now().await;
+            }
+
             let peer_service = self.peer_service.ready().await?;
             responses.push(peer_service.call(Request::Peers));
         }
