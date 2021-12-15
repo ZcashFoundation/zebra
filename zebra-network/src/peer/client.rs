@@ -133,9 +133,28 @@ impl From<ClientRequest> for InProgressClientRequest {
 }
 
 impl ClientRequestReceiver {
-    /// Forwards to `inner.close()`
+    /// Forwards to `inner.close()`.
     pub fn close(&mut self) {
         self.inner.close()
+    }
+
+    /// Closes `inner`, then gets the next pending [`Request`].
+    ///
+    /// Closing the channel ensures that:
+    /// - the request stream terminates, and
+    /// - task notifications are not required.
+    pub fn close_and_flush_next(&mut self) -> Option<InProgressClientRequest> {
+        self.inner.close();
+
+        // # Correctness
+        //
+        // The request stream terminates, because the sender is closed,
+        // and the channel has a limited capacity.
+        // Task notifications are not required, because the sender is closed.
+        self.inner
+            .try_next()
+            .expect("channel is closed")
+            .map(Into::into)
     }
 }
 
