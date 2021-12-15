@@ -1273,7 +1273,7 @@ impl<S, Tx> Connection<S, Tx> {
         {
             // # Correctness
             //
-            // We know the slot has Some(errot), because we just set it above,
+            // We know the slot has Some(error), because we just set it above,
             // and the error slot is never unset.
             //
             // Accessing the error slot locks a threaded std::sync::Mutex, which
