@@ -6,7 +6,7 @@ mod vectors;
 use futures::channel::{mpsc, oneshot};
 
 use crate::{
-    peer::{CancelHeartbeatTask, Client, ClientRequest, ErrorSlot},
+    peer::{error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ErrorSlot},
     protocol::external::types::Version,
 };
 
@@ -14,6 +14,7 @@ use crate::{
 pub struct ClientTestHarness {
     request_receiver: mpsc::Receiver<ClientRequest>,
     shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
+    error_slot: ErrorSlot,
     version: Version,
 }
 
@@ -22,17 +23,19 @@ impl ClientTestHarness {
     pub fn new(version: Version) -> (Self, Client) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (request_sender, request_receiver) = mpsc::channel(1);
+        let error_slot = ErrorSlot::default();
 
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
             server_tx: request_sender,
-            error_slot: ErrorSlot::default(),
+            error_slot: error_slot.clone(),
             version,
         };
 
         let harness = ClientTestHarness {
             request_receiver,
             shutdown_receiver,
+            error_slot,
             version,
         };
 
@@ -66,6 +69,11 @@ impl ClientTestHarness {
             Ok(None) => ReceiveRequestAttempt::Closed,
             Err(_) => ReceiveRequestAttempt::Empty,
         }
+    }
+
+    /// Returns the current error in the [`ErrorSlot`], if there is one.
+    pub fn current_error(&self) -> Option<SharedPeerError> {
+        self.error_slot.try_get_error()
     }
 }
 
