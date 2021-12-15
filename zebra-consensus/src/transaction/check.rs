@@ -133,13 +133,11 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#spenddesc
 pub fn spend_cv_rk_not_small_order(spend: &Spend<PerSpendAnchor>) -> Result<(), TransactionError> {
-    if bool::from(spend.cv.0.is_small_order())
-        || bool::from(
-            jubjub::AffinePoint::from_bytes(spend.rk.into())
-                .unwrap()
-                .is_small_order(),
-        )
-    {
+    if bool::from(
+        jubjub::AffinePoint::from_bytes(spend.rk.into())
+            .unwrap()
+            .is_small_order(),
+    ) {
         Err(TransactionError::SmallOrder)
     } else {
         Ok(())
@@ -151,13 +149,11 @@ pub fn spend_cv_rk_not_small_order(spend: &Spend<PerSpendAnchor>) -> Result<(), 
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#outputdesc
 pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionError> {
-    if bool::from(output.cv.0.is_small_order())
-        || bool::from(
-            jubjub::AffinePoint::from_bytes(output.ephemeral_key.into())
-                .unwrap()
-                .is_small_order(),
-        )
-    {
+    if bool::from(
+        jubjub::AffinePoint::from_bytes(output.ephemeral_key.into())
+            .unwrap()
+            .is_small_order(),
+    ) {
         Err(TransactionError::SmallOrder)
     } else {
         Ok(())

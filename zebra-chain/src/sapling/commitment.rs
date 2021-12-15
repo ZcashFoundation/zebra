@@ -151,7 +151,7 @@ impl NoteCommitment {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
-pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint);
+pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
 
 impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
     type Output = Self;
@@ -185,9 +185,18 @@ impl fmt::Debug for ValueCommitment {
     }
 }
 
-impl From<jubjub::ExtendedPoint> for ValueCommitment {
-    fn from(extended_point: jubjub::ExtendedPoint) -> Self {
-        Self(jubjub::AffinePoint::from(extended_point))
+impl TryFrom<jubjub::ExtendedPoint> for ValueCommitment {
+    type Error = &'static str;
+
+    /// Convert a JubJub point into a ValueCommitment.
+    ///
+    /// Returns an error if the point is of small order.
+    fn try_from(extended_point: jubjub::ExtendedPoint) -> Result<Self, Self::Error> {
+        if extended_point.is_small_order().into() {
+            Err("small order point")
+        } else {
+            Ok(Self(jubjub::AffinePoint::from(extended_point)))
+        }
     }
 }
 
@@ -248,7 +257,12 @@ impl TryFrom<[u8; 32]> for ValueCommitment {
         let possible_point = jubjub::AffinePoint::from_bytes(bytes);
 
         if possible_point.is_some().into() {
-            Ok(Self(possible_point.unwrap()))
+            let point = possible_point.unwrap();
+            if point.is_small_order().into() {
+                Err("small order point")
+            } else {
+                Ok(Self(possible_point.unwrap()))
+            }
         } else {
             Err("Invalid jubjub::AffinePoint value")
         }
@@ -293,7 +307,10 @@ impl ValueCommitment {
         let V = find_group_hash(*b"Zcash_cv", b"v");
         let R = find_group_hash(*b"Zcash_cv", b"r");
 
-        Self::from(V * v + R * rcv)
+        // find_group_hash() returns points in the prime-order subgroup,
+        // so we know this result is also in the same subgroup and we don't
+        // need to check the error.
+        Self::try_from(V * v + R * rcv).expect("is in prime-order subgroup")
     }
 }
 

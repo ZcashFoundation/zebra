@@ -8,8 +8,9 @@ use rand_chacha::ChaChaRng;
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys, note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4,
-    PerSpendAnchor, SharedAnchor, Spend, ValueCommitment,
+    keys::{self, find_group_hash},
+    note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4, PerSpendAnchor,
+    SharedAnchor, Spend,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -25,7 +26,10 @@ impl Arbitrary for Spend<PerSpendAnchor> {
         )
             .prop_map(|(per_spend_anchor, nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor,
-                cv: ValueCommitment(AffinePoint::identity()),
+                // Use an arbitrary string to generate a dummy point
+                cv: find_group_hash(*b"arbitrar", b"a")
+                    .try_into()
+                    .expect("find_group_hash returns point in prime-order subgroup"),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -53,7 +57,10 @@ impl Arbitrary for Spend<SharedAnchor> {
         )
             .prop_map(|(nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor: FieldNotPresent,
-                cv: ValueCommitment(AffinePoint::identity()),
+                // Use an arbitrary string to generate a dummy point
+                cv: find_group_hash(*b"arbitrar", b"a")
+                    .try_into()
+                    .expect("find_group_hash returns point in prime-order subgroup"),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -79,7 +86,10 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(|(enc_ciphertext, out_ciphertext, zkproof)| Self {
-                cv: ValueCommitment(AffinePoint::identity()),
+                // Use an arbitrary string to generate a dummy point
+                cv: find_group_hash(*b"arbitrar", b"a")
+                    .try_into()
+                    .expect("find_group_hash returns point in prime-order subgroup"),
                 cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
                 ephemeral_key: keys::EphemeralPublicKey(AffinePoint::identity()),
                 enc_ciphertext,
