@@ -789,13 +789,6 @@ where
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
-            let client = Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx: server_tx.clone(),
-                error_slot: error_slot.clone(),
-                version: remote_version,
-            };
-
             let (peer_tx, peer_rx) = peer_conn.split();
 
             // Instrument the peer's rx and tx streams.
@@ -919,7 +912,7 @@ where
                 request_timer: None,
                 svc: inbound_service,
                 client_rx: server_rx.into(),
-                error_slot,
+                error_slot: error_slot.clone(),
                 peer_tx,
                 connection_tracker,
                 metrics_label: connected_addr.get_transient_addr_label(),
@@ -938,11 +931,18 @@ where
                     connected_addr,
                     remote_services,
                     shutdown_rx,
-                    server_tx,
+                    server_tx.clone(),
                     address_book_updater.clone(),
                 )
                 .instrument(tracing::debug_span!(parent: connection_span, "heartbeat")),
             );
+
+            let client = Client {
+                shutdown_tx: Some(shutdown_tx),
+                server_tx,
+                error_slot,
+                version: remote_version,
+            };
 
             Ok(client)
         };
