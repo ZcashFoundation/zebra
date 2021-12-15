@@ -472,9 +472,29 @@ pub struct AuthorizingKey(pub(crate) redjubjub::VerificationKey<SpendAuth>);
 
 impl Eq for AuthorizingKey {}
 
-impl From<[u8; 32]> for AuthorizingKey {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(redjubjub::VerificationKey::try_from(bytes).unwrap())
+impl TryFrom<[u8; 32]> for AuthorizingKey {
+    type Error = &'static str;
+
+    /// Decode an AuthorizingKey from a byte array.
+    ///
+    /// It must decode to a prime-order point:
+    ///
+    /// > When decoding this representation, the key MUST be considered invalid
+    /// > if abst_J returns ⊥ for either ak or nk, or if ak not in J^{(r)*}
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let affine_point = jubjub::AffinePoint::from_bytes(bytes);
+        if affine_point.is_none().into() {
+            return Err("derived an invalid Sapling transmission key");
+        }
+        if affine_point.unwrap().is_prime_order().into() {
+            Ok(Self(redjubjub::VerificationKey::try_from(bytes).map_err(
+                |_e| "derived an invalid Sapling transmission key",
+            )?))
+        } else {
+            Err("derived an invalid Sapling transmission key")
+        }
     }
 }
 
@@ -822,7 +842,13 @@ impl Diversifier {
 /// Derived by multiplying a JubJub point [derived][ps] from a
 /// _Diversifier_ by the _IncomingViewingKey_ scalar.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+/// The diversified TransmissionKey is denoted `pk_d` in the specification.
+/// Note that it can be the identity point, since its type is
+/// [`KA^{Sapling}.PublicPrimeSubgroup`][ka] which in turn is [`J^{(r)}`][jubjub].
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+/// [ka]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+/// [jubjub]: https://zips.z.cash/protocol/protocol.pdf#jubjub
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub(crate) jubjub::AffinePoint);
 
@@ -841,12 +867,13 @@ impl TryFrom<[u8; 32]> for TransmissionKey {
     type Error = &'static str;
 
     /// Attempts to interpret a byte representation of an affine Jubjub point, failing if the
-    /// element is not on the curve, non-prime, the identity, or non-canonical.
+    /// element is not on the curve, non-canonical, or not in the prime-order subgroup.
     ///
     /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
+    /// https://zips.z.cash/zip-0216
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let affine_point = jubjub::AffinePoint::from_bytes(bytes).unwrap();
-        if affine_point.is_prime_order().into() {
+        if (affine_point.is_identity() | affine_point.is_prime_order()).into() {
             Ok(Self(affine_point))
         } else {
             Err("derived an invalid Sapling transmission key")
@@ -869,13 +896,14 @@ impl TryFrom<(IncomingViewingKey, Diversifier)> for TransmissionKey {
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
     fn try_from((ivk, d): (IncomingViewingKey, Diversifier)) -> Result<Self, Self::Error> {
-        let affine_point = jubjub::AffinePoint::from(diversify_hash(d.0).unwrap() * ivk.scalar);
-
-        if affine_point.is_prime_order().into() {
-            Ok(Self(affine_point))
-        } else {
-            Err("derived an invalid Sapling transmission key")
-        }
+        let affine_point = jubjub::AffinePoint::from(
+            diversify_hash(d.0).ok_or("invalid diversifier")? * ivk.scalar,
+        );
+        // We need to ensure that the result point is in the prime-order subgroup.
+        // Since diversify_hash() returns a point in the prime-order subgroup,
+        // then the result point will also be in the prime-order subgroup
+        // and there is no need to check anything.
+        Ok(Self(affine_point))
     }
 }
 
@@ -958,7 +986,8 @@ impl FromStr for FullViewingKey {
                         fvk_hrp::MAINNET => Network::Mainnet,
                         _ => Network::Testnet,
                     },
-                    authorizing_key: AuthorizingKey::from(authorizing_key_bytes),
+                    authorizing_key: AuthorizingKey::try_from(authorizing_key_bytes)
+                        .map_err(SerializationError::Parse)?,
                     nullifier_deriving_key: NullifierDerivingKey::from(
                         nullifier_deriving_key_bytes,
                     ),
