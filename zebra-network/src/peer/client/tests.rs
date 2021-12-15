@@ -6,7 +6,7 @@ mod vectors;
 use futures::channel::{mpsc, oneshot};
 
 use crate::{
-    peer::{CancelHeartbeatTask, Client, ClientRequest, ErrorSlot, LoadTrackedClient},
+    peer::{CancelHeartbeatTask, Client, ClientRequest, ErrorSlot},
     protocol::external::types::Version,
 };
 
@@ -19,7 +19,7 @@ pub struct ClientTestHarness {
 
 impl ClientTestHarness {
     /// Create a new mocked [`Client`] instance, returning it together with a harness to track it.
-    pub fn new(version: Version) -> (Self, LoadTrackedClient) {
+    pub fn new(version: Version) -> (Self, Client) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (request_sender, _request_receiver) = mpsc::channel(1);
 
@@ -36,7 +36,7 @@ impl ClientTestHarness {
             version,
         };
 
-        (harness, client.into())
+        (harness, client)
     }
 
     /// Gets the peer protocol version associated to the [`Client`].

@@ -55,7 +55,7 @@ impl PeerVersions {
         for peer_version in &self.peer_versions {
             let (harness, client) = ClientTestHarness::new(*peer_version);
 
-            clients.push(client);
+            clients.push(client.into());
             harnesses.push(harness);
         }
 
