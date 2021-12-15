@@ -38,6 +38,9 @@ use crate::{
     BoxError,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug)]
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
@@ -435,6 +438,8 @@ pub struct Connection<S, Tx> {
     /// This channel accepts [`Message`]s.
     ///
     /// The corresponding peer message receiver is passed to [`Connection::run`].
+    ///
+    /// TODO: add a timeout when sending messages to the remote peer (#3234)
     pub(super) peer_tx: Tx,
 
     /// A connection tracker that reduces the open connection count when dropped.
