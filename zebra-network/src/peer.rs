@@ -15,6 +15,8 @@ mod load_tracked_client;
 /// Watches for chain tip height updates to determine the minimum support peer protocol version.
 mod minimum_peer_version;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use client::tests::MockedClientHandle;
 #[cfg(not(test))]
 use client::ClientRequest;
 #[cfg(test)]

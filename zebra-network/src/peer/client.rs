@@ -21,8 +21,8 @@ use crate::{
 
 use super::{ErrorSlot, PeerError, SharedPeerError};
 
-#[cfg(test)]
-mod tests;
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod tests;
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
