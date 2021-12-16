@@ -789,12 +789,12 @@ where
             // in this block, see constants.rs for more.
             let (server_tx, server_rx) = mpsc::channel(0);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
-            let slot = ErrorSlot::default();
+            let error_slot = ErrorSlot::default();
 
             let client = Client {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx: server_tx.clone(),
-                error_slot: slot.clone(),
+                error_slot: error_slot.clone(),
                 version: remote_version,
             };
 
@@ -809,7 +809,7 @@ where
                 metrics::counter!(
                     "zcash.net.out.messages",
                     1,
-                    "command" => msg.to_string(),
+                    "command" => msg.command(),
                     "addr" => connected_addr.get_transient_addr_label(),
                 );
                 // We need to use future::ready rather than an async block here,
@@ -840,7 +840,7 @@ where
                                 metrics::counter!(
                                     "zcash.net.in.messages",
                                     1,
-                                    "command" => msg.to_string(),
+                                    "command" => msg.command(),
                                     "addr" => connected_addr.get_transient_addr_label(),
                                 );
 
@@ -921,9 +921,11 @@ where
                 request_timer: None,
                 svc: inbound_service,
                 client_rx: server_rx.into(),
-                error_slot: slot,
+                error_slot,
                 peer_tx,
                 connection_tracker,
+                metrics_label: connected_addr.get_transient_addr_label(),
+                last_metrics_state: None,
             };
 
             tokio::spawn(
