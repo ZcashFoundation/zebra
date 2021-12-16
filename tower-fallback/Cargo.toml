@@ -13,4 +13,4 @@ tracing = "0.1"
 
 [dev-dependencies]
 zebra-test = { path = "../zebra-test/" }
-tokio = { version = "1.14.0", features = ["full"]}
+tokio = { version = "1.15.0", features = ["full"]}
