@@ -18,8 +18,8 @@ parsers:
 
 comment:
   layout: "diff"
-  # only post the comment if coverage changes
-  require_changes: true
+  # post a coverage comment, even if coverage hasn't changed
+  require_changes: false
 
 # This turns off the codecov PR comment.
 # The coverage percentage is still reported in the list of PR checks.
