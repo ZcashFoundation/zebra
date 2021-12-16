@@ -6,7 +6,6 @@
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 use futures::{
-    channel::mpsc,
     future::{self, FutureExt},
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt, TryStreamExt},
@@ -66,7 +65,9 @@ type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 ///
 /// In addition to returning a service for outbound requests, this method
 /// returns a shared [`AddressBook`] updated with last-seen timestamps for
-/// connected peers.
+/// connected peers. The shared address book should be accessed using a
+/// [blocking thread](https://docs.rs/tokio/1.15.0/tokio/task/index.html#blocking-and-yielding),
+/// to avoid async task deadlocks.
 ///
 /// # Panics
 ///
@@ -134,7 +135,7 @@ where
     // Create an mpsc channel for peer changes,
     // based on the maximum number of inbound and outbound peers.
     let (peerset_tx, peerset_rx) =
-        mpsc::channel::<DiscoveredPeer>(config.peerset_total_connection_limit());
+        futures::channel::mpsc::channel::<DiscoveredPeer>(config.peerset_total_connection_limit());
 
     let discovered_peers = peerset_rx
         // Discover interprets an error as stream termination,
@@ -145,7 +146,7 @@ where
     // Create an mpsc channel for peerset demand signaling,
     // based on the maximum number of outbound peers.
     let (mut demand_tx, demand_rx) =
-        mpsc::channel::<MorePeers>(config.peerset_outbound_connection_limit());
+        futures::channel::mpsc::channel::<MorePeers>(config.peerset_outbound_connection_limit());
 
     // Create a oneshot to send background task JoinHandles to the peer set
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
@@ -241,8 +242,8 @@ where
 async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
-    mut peerset_tx: mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: mpsc::Sender<MetaAddrChange>,
+    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
@@ -379,7 +380,7 @@ where
 /// Sends any unused entries to the `address_book_updater`.
 async fn limit_initial_peers(
     config: &Config,
-    mut address_book_updater: mpsc::Sender<MetaAddrChange>,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> HashSet<SocketAddr> {
     let all_peers = config.initial_peers().await;
     let peers_count = all_peers.len();
@@ -475,7 +476,7 @@ async fn accept_inbound_connections<S>(
     config: Config,
     listener: TcpListener,
     mut handshaker: S,
-    peerset_tx: mpsc::Sender<DiscoveredPeer>,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
@@ -623,11 +624,11 @@ enum CrawlerAction {
 ))]
 async fn crawl_and_dial<C, S>(
     config: Config,
-    mut demand_tx: mpsc::Sender<MorePeers>,
-    mut demand_rx: mpsc::Receiver<MorePeers>,
+    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+    mut demand_rx: futures::channel::mpsc::Receiver<MorePeers>,
     mut candidates: CandidateSet<S>,
     outbound_connector: C,
-    mut peerset_tx: mpsc::Sender<DiscoveredPeer>,
+    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
 ) -> Result<(), BoxError>
 where

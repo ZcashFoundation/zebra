@@ -2,9 +2,8 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use futures::{channel::mpsc, prelude::*};
 use thiserror::Error;
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{meta_addr::MetaAddrChange, AddressBook, BoxError, Config};
 
@@ -24,9 +23,11 @@ impl AddressBookUpdater {
     /// configured with Zebra's actual `local_listener` address.
     ///
     /// Returns handles for:
-    /// - the transmission channel for address book update events,
-    /// - the address book, and
+    /// - the address book,
+    /// - the transmission channel for address book update events, and
     /// - the address book updater task.
+    ///
+    /// The task exits with an error when the returned [`mpsc::Sender`] is closed.
     pub fn spawn(
         config: &Config,
         local_listener: SocketAddr,
@@ -47,8 +48,8 @@ impl AddressBookUpdater {
         )));
         let worker_address_book = address_book.clone();
 
-        let worker = async move {
-            while let Some(event) = worker_rx.next().await {
+        let worker = move || {
+            while let Some(event) = worker_rx.blocking_recv() {
                 // # Correctness
                 //
                 // Briefly hold the address book threaded mutex, to update the
@@ -62,7 +63,9 @@ impl AddressBookUpdater {
             Err(AllAddressBookUpdaterSendersClosed.into())
         };
 
-        let address_book_updater_task_handle = tokio::spawn(worker.boxed());
+        // Correctness: spawn address book accesses on a blocking thread,
+        //              to avoid deadlocks (see #1976)
+        let address_book_updater_task_handle = tokio::task::spawn_blocking(worker);
 
         (address_book, worker_tx, address_book_updater_task_handle)
     }
