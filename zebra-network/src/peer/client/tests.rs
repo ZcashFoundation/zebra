@@ -62,6 +62,11 @@ impl ClientTestHarness {
         }
     }
 
+    /// Closes the request receiver endpoint.
+    pub fn close_request_receiver(&mut self) {
+        self.request_receiver.close();
+    }
+
     /// Tries to receive a [`ClientRequest`] sent by the mocked [`Client`] instance.
     pub(crate) fn try_to_receive_request(&mut self) -> ReceiveRequestAttempt {
         match self.request_receiver.try_next() {
