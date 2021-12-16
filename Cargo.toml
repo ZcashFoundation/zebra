@@ -12,6 +12,7 @@ members = [
         "zebra-utils",
         "tower-batch",
         "tower-fallback",
+        "now-or-later",
 ]
 
 [profile.dev]

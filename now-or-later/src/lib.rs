@@ -25,7 +25,7 @@ use pin_project::pin_project;
 ///
 /// ```
 /// use futures::{FutureExt, future};
-/// # use zebrad::async_ext::NowOrLater;
+/// # use now_or_later::NowOrLater;
 ///
 /// let inner_future = future::ready(());
 ///
@@ -38,7 +38,7 @@ use pin_project::pin_project;
 ///
 /// ```
 /// use futures::{FutureExt, future};
-/// # use zebrad::async_ext::NowOrLater;
+/// # use now_or_later::NowOrLater;
 ///
 /// let inner_future = future::pending::<()>();
 ///

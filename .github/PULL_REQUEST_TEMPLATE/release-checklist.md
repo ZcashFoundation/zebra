@@ -76,6 +76,7 @@ fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.11' '1.0.0-alpha.12
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.10' '1.0.0-alpha.11'
 fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch
 fastmod --extensions rs,toml,md --fixed-strings '0.2.8' '0.2.9' tower-fallback
+fastmod --extensions rs,toml,md --fixed-strings '0.0.1' '0.0.1' now-or-later
 ```
 
 ### Reviewing Version Bump Pull Requests

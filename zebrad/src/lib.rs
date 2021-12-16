@@ -37,7 +37,6 @@ extern crate tracing;
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 pub mod application;
-pub mod async_ext;
 pub mod commands;
 pub mod components;
 pub mod config;

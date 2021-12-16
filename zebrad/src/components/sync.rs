@@ -12,6 +12,7 @@ use tower::{
     Service, ServiceExt,
 };
 
+use now_or_later::NowOrLater;
 use zebra_chain::{
     block::{self, Block},
     parameters::genesis_hash,
@@ -24,8 +25,7 @@ use zebra_state as zs;
 use zs::LatestChainTip;
 
 use crate::{
-    async_ext::NowOrLater, components::sync::downloads::BlockDownloadVerifyError,
-    config::ZebradConfig, BoxError,
+    components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
 };
 
 mod downloads;
