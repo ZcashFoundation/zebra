@@ -455,6 +455,7 @@ async fn handle_client_request(&mut self, req: InProgressClientRequest) {
 
 The reference section contains in-depth information about concurrency in Zebra:
 - [After an await, the rest of the Future might not be run](#cancellation-safe)
+- [Task starvation](#starvation)
 - [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
 - [Futures-Aware Types](#futures-aware-types)
 - [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness)
@@ -485,6 +486,21 @@ In particular, [`FutureExt::now_or_never`](https://docs.rs/futures/0.3.17/future
 
 So even if the future or service passed to `now_or_never` is cloned,
 the task won't be awoken when it is ready again.
+
+## Task starvation
+[starvation]: #starvation
+
+Tokio [tasks are scheduled cooperatively](https://docs.rs/tokio/1.15.0/tokio/task/index.html#what-are-tasks):
+> a task is allowed to run until it yields, indicating to the Tokio runtime’s scheduler
+> that it cannot currently continue executing.
+> When a task yields, the Tokio runtime switches to executing the next task.
+
+If a task doesn't yield during a CPU-intensive operation, or a tight loop,
+it can starve other tasks on the same thread. This can cause hangs or timeouts.
+
+There are a few different ways to avoid task starvation:
+- run the operation on another thread using [`spawn_blocking`](https://docs.rs/tokio/1.15.0/tokio/task/fn.spawn_blocking.html) or [`block_in_place`](https://docs.rs/tokio/1.15.0/tokio/task/fn.block_in_place.html)
+- [manually yield using `yield_now`](https://docs.rs/tokio/1.15.0/tokio/task/fn.yield_now.html)
 
 ## `Poll::Pending` and Wakeups
 [poll-pending-and-wakeups]: #poll-pending-and-wakeups
@@ -627,7 +643,9 @@ priority (for example, cancellation), you might want to use biased selection.
 
 The [`futures::select!`](https://docs.rs/futures/0.3.13/futures/macro.select.html) and
 [`tokio::select!`](https://docs.rs/tokio/0.3.6/tokio/macro.select.html) macros select
-ready arguments at random.
+ready arguments at random by default.
+
+To poll a `select!` in order, pass `biased;` as the first argument to the macro.
 
 Also consider the `FuturesUnordered` stream for unbiased selection of a large number
 of futures. However, this macro and stream require mapping all arguments to the same
@@ -686,7 +704,7 @@ Since Zebra's CI all runs on x86 (as of June 2021), our tests get `AcqRel` order
 when we specify `Relaxed`. But ARM processors like the Apple M1
 [implement weaker memory orderings, including genuinely `Relaxed` access](https://stackoverflow.com/questions/59089084/loads-and-stores-reordering-on-arm#59089757). For more details, see the [hardware reordering](https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering)
 section of the Rust nomicon.
- 
+
 But if a Zebra feature requires atomics:
 1. use an `AtomicUsize` with the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
 2. use a weaker memory ordering, with:
