@@ -454,6 +454,7 @@ async fn handle_client_request(&mut self, req: InProgressClientRequest) {
 [reference-level-explanation]: #reference-level-explanation
 
 The reference section contains in-depth information about concurrency in Zebra:
+- [After an await, the rest of the Future might not be run](#cancellation-safe)
 - [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
 - [Futures-Aware Types](#futures-aware-types)
 - [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness)
@@ -468,6 +469,22 @@ The reference section contains in-depth information about concurrency in Zebra:
 - [Monitoring Async Code](#monitoring-async-code)
 
 Most Zebra designs or code changes will only touch on one or two of these areas.
+
+## After an await, the rest of the Future might not be run
+[cancellation-safe]: #cancellation-safe
+
+> Futures can be "canceled" at any await point. Authors of futures must be aware that after an await, the code might not run.
+> Futures might be polled to completion causing the code to work. But then many years later, the code is changed and the future might conditionally not be polled to completion which breaks things.
+> The burden falls on the user of the future to poll to completion, and there is no way for the lib author to enforce this - they can only document this invariant.
+
+https://github.com/rust-lang/wg-async-foundations/blob/master/src/vision/submitted_stories/status_quo/alan_builds_a_cache.md#-frequently-asked-questions
+
+In particular, [`FutureExt::now_or_never`](https://docs.rs/futures/0.3.17/futures/future/trait.FutureExt.html#method.now_or_never):
+- drops the future, and
+- doesn't schedule the task for wakeups.
+
+So even if the future or service passed to `now_or_never` is cloned,
+the task won't be awoken when it is ready again.
 
 ## `Poll::Pending` and Wakeups
 [poll-pending-and-wakeups]: #poll-pending-and-wakeups

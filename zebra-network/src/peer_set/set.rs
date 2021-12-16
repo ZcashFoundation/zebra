@@ -469,6 +469,9 @@ where
                     self.remove(&key);
                 }
                 Change::Insert(key, svc) => {
+                    // We add peers as unready, so that we:
+                    // - always do the same checks on every ready peer, and
+                    // - check for any errors that happened right after the handshake
                     trace!(?key, "got Change::Insert from Discover");
                     self.remove(&key);
                     self.push_unready(key, svc);
