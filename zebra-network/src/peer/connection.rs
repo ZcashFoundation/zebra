@@ -7,7 +7,7 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{collections::HashSet, fmt, pin::Pin, sync::Arc};
+use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc};
 
 use futures::{
     future::{self, Either},
@@ -27,8 +27,8 @@ use zebra_chain::{
 use crate::{
     constants,
     peer::{
-        ClientRequestReceiver, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
-        SharedPeerError,
+        error::AlreadyErrored, ClientRequestReceiver, ErrorSlot, InProgressClientRequest,
+        MustUseOneshotSender, PeerError, SharedPeerError,
     },
     peer_set::ConnectionTracker,
     protocol::{
@@ -37,6 +37,9 @@ use crate::{
     },
     BoxError,
 };
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 pub(super) enum Handler {
@@ -92,6 +95,25 @@ impl fmt::Display for Handler {
 }
 
 impl Handler {
+    /// Returns the Zebra internal handler type as a string.
+    pub fn command(&self) -> Cow<'static, str> {
+        match self {
+            Handler::Finished(Ok(response)) => format!("Finished({})", response.command()).into(),
+            Handler::Finished(Err(error)) => format!("Finished({})", error.kind()).into(),
+
+            Handler::Ping(_) => "Ping".into(),
+            Handler::Peers => "Peers".into(),
+
+            Handler::FindBlocks { .. } => "FindBlocks".into(),
+            Handler::FindHeaders { .. } => "FindHeaders".into(),
+
+            Handler::BlocksByHash { .. } => "BlocksByHash".into(),
+            Handler::TransactionsById { .. } => "TransactionsById".into(),
+
+            Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
+        }
+    }
+
     /// Try to handle `msg` as a response to a client request, possibly consuming
     /// it in the process.
     ///
@@ -165,7 +187,7 @@ impl Handler {
                     if !transactions.is_empty() {
                         // if our peers start sending mixed solicited and unsolicited transactions,
                         // we should update this code to handle those responses
-                        error!("unexpected transaction from peer: transaction responses should be sent in a continuous batch, followed by notfound. Using partial received transactions as the peer response");
+                        info!("unexpected transaction from peer: transaction responses should be sent in a continuous batch, followed by notfound. Using partial received transactions as the peer response");
                         // TODO: does the caller need a list of missing transactions? (#1515)
                         Handler::Finished(Ok(Response::Transactions(transactions)))
                     } else {
@@ -198,11 +220,11 @@ impl Handler {
                 if missing_transaction_ids != pending_ids {
                     trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
                     // if these errors are noisy, we should replace them with debugs
-                    error!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
+                    info!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
                 }
                 if missing_transaction_ids.len() != missing_invs.len() {
                     trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
-                    error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
+                    info!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
                 }
 
                 if !transactions.is_empty() {
@@ -297,11 +319,11 @@ impl Handler {
                 if missing_blocks != pending_hashes {
                     trace!(?items, ?missing_blocks, ?pending_hashes);
                     // if these errors are noisy, we should replace them with debugs
-                    error!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
+                    info!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
                 }
                 if missing_blocks.len() != items.len() {
                     trace!(?items, ?missing_blocks, ?pending_hashes);
-                    error!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
+                    info!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
                 }
 
                 if !blocks.is_empty() {
@@ -375,6 +397,19 @@ impl fmt::Display for State {
     }
 }
 
+impl State {
+    /// Returns the Zebra internal state as a string.
+    pub fn command(&self) -> Cow<'static, str> {
+        match self {
+            State::AwaitingRequest => "AwaitingRequest".into(),
+            State::AwaitingResponse { handler, .. } => {
+                format!("AwaitingResponse({})", handler.command()).into()
+            }
+            State::Failed => "Failed".into(),
+        }
+    }
+}
+
 /// The state associated with a peer connection.
 pub struct Connection<S, Tx> {
     /// The state of this connection's current request or response.
@@ -388,9 +423,9 @@ pub struct Connection<S, Tx> {
     /// The `inbound` service, used to answer requests from this connection's peer.
     pub(super) svc: S,
 
-    /// A channel that receives network requests from the rest of Zebra.
+    /// A channel for requests that Zebra's internal services want to send to remote peers.
     ///
-    /// This channel produces `InProgressClientRequest`s.
+    /// This channel accepts [`Request`]s, and produces [`InProgressClientRequest`]s.
     pub(super) client_rx: ClientRequestReceiver,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
@@ -398,7 +433,13 @@ pub struct Connection<S, Tx> {
     /// `None` unless the connection or client have errored.
     pub(super) error_slot: ErrorSlot,
 
-    /// A channel for sending requests to the connected peer.
+    /// A channel for sending Zcash messages to the connected peer.
+    ///
+    /// This channel accepts [`Message`]s.
+    ///
+    /// The corresponding peer message receiver is passed to [`Connection::run`].
+    ///
+    /// TODO: add a timeout when sending messages to the remote peer (#3234)
     pub(super) peer_tx: Tx,
 
     /// A connection tracker that reduces the open connection count when dropped.
@@ -410,10 +451,15 @@ pub struct Connection<S, Tx> {
     ///
     /// If this connection tracker or `Connection`s are leaked,
     /// the number of active connections will appear higher than it actually is.
-    ///
-    /// Eventually, Zebra could stop making connections entirely.
+    /// If enough connections leak, Zebra will stop making new connections.
     #[allow(dead_code)]
     pub(super) connection_tracker: ConnectionTracker,
+
+    /// The metrics label for this peer. Usually the remote IP and port.
+    pub(super) metrics_label: String,
+
+    /// The state for this peer, when the metrics were last updated.
+    pub(super) last_metrics_state: Option<Cow<'static, str>>,
 }
 
 impl<S, Tx> Connection<S, Tx>
@@ -423,6 +469,9 @@ where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
+    ///
+    /// `peer_rx` is a channel for receiving Zcash [`Message`]s from the connected peer.
+    /// The corresponding peer message receiver is [`Connection.peer_tx`].
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
@@ -446,7 +495,11 @@ where
         //
         // If there is a pending request, we wait only on an incoming peer message, and
         // check whether it can be interpreted as a response to the pending request.
+        //
+        // TODO: turn this comment into a module-level comment, after splitting the module.
         loop {
+            self.update_state_metrics(None);
+
             match self.state {
                 State::AwaitingRequest => {
                     trace!("awaiting client request or peer message");
@@ -476,7 +529,11 @@ where
                         }
                         Either::Right((None, _)) => {
                             trace!("client_rx closed, ending connection");
-                            return;
+
+                            // There are no requests to be flushed,
+                            // but we need to set an error and update metrics.
+                            self.shutdown(PeerError::ClientDropped);
+                            break;
                         }
                         Either::Right((Some(req), _)) => {
                             let span = req.span.clone();
@@ -498,6 +555,7 @@ where
                         .request_timer
                         .as_mut()
                         .expect("timeout must be set while awaiting response");
+
                     // CORRECTNESS
                     //
                     // Currently, select prefers the first future if multiple
@@ -513,6 +571,8 @@ where
                         Either::Right((None, _)) => self.fail_with(PeerError::ConnectionClosed),
                         Either::Right((Some(Err(e)), _)) => self.fail_with(e),
                         Either::Right((Some(Ok(peer_msg)), _cancel)) => {
+                            self.update_state_metrics(format!("Out::Rsp::{}", peer_msg.command()));
+
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
                             // keeping a live reference to handler across the
@@ -531,9 +591,14 @@ where
                                 ),
                             };
 
+                            self.update_state_metrics(None);
+
                             // Check whether the handler is finished
                             // processing messages and update the state.
-                            self.state = match self.state {
+                            //
+                            // Replace the state with a temporary value,
+                            // so we can take ownership of the response sender.
+                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
                                 State::AwaitingResponse {
                                     handler: Handler::Finished(response),
                                     tx,
@@ -541,6 +606,13 @@ where
                                 } => {
                                     if let Ok(response) = response.as_ref() {
                                         debug!(%response, "finished receiving peer response to Zebra request");
+                                        // Add a metric for inbound responses to outbound requests.
+                                        metrics::counter!(
+                                            "zebra.net.in.responses",
+                                            1,
+                                            "command" => response.command(),
+                                            "addr" => self.metrics_label.clone(),
+                                        );
                                     } else {
                                         debug!(error = ?response, "error in peer response to Zebra request");
                                     }
@@ -568,6 +640,8 @@ where
                                 ),
                             };
 
+                            self.update_state_metrics(None);
+
                             // If the message was not consumed, check whether it
                             // should be handled as a request.
                             if let Some(msg) = request_msg {
@@ -579,12 +653,20 @@ where
                         Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
                             let e = PeerError::ClientRequestTimeout;
-                            self.state = match self.state {
+
+                            // Replace the state with a temporary value,
+                            // so we can take ownership of the response sender.
+                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
                                 // Special case: ping timeouts fail the connection.
                                 State::AwaitingResponse {
                                     handler: Handler::Ping(_),
+                                    tx,
                                     ..
                                 } => {
+                                    // We replaced the original state, which means `fail_with` won't see it.
+                                    // So we do the state request cleanup manually.
+                                    let e = SharedPeerError::from(e);
+                                    let _ = tx.send(Err(e.clone()));
                                     self.fail_with(e);
                                     State::Failed
                                 }
@@ -600,97 +682,35 @@ where
                             };
                         }
                         Either::Left((Either::Left(_), _peer_fut)) => {
+                            // The client receiver was dropped, so we don't need to send on `tx` here.
                             trace!(parent: &span, "client request was cancelled");
                             self.state = State::AwaitingRequest;
                         }
                     }
                 }
-                // We've failed, but we need to flush all pending client
-                // requests before we can return and complete the future.
-                State::Failed => {
-                    match self.client_rx.next().await {
-                        Some(InProgressClientRequest { tx, span, .. }) => {
-                            trace!(
-                                parent: &span,
-                                "sending an error response to a pending request on a failed connection"
-                            );
-                            // Correctness
-                            //
-                            // Error slots use a threaded `std::sync::Mutex`, so
-                            // accessing the slot can block the async task's
-                            // current thread. So we only hold the lock for long
-                            // enough to get a reference to the error.
-                            let e = self
-                                .error_slot
-                                .try_get_error()
-                                .expect("cannot enter failed state without setting error slot");
-                            let _ = tx.send(Err(e));
-                            // Continue until we've errored all queued reqs
-                            continue;
-                        }
-                        None => return,
-                    }
-                }
+                // This connection has failed: stop the event loop, and complete the future.
+                State::Failed => break,
             }
         }
+
+        assert!(
+            self.error_slot.try_get_error().is_some(),
+            "closing connections must call fail_with() or shutdown() to set the error slot"
+        );
     }
 
-    /// Marks the peer as having failed with error `e`.
+    /// Fail this connection.
     ///
-    /// # Panics
-    ///
-    /// If `self` has already failed with a previous error.
-    fn fail_with<E>(&mut self, e: E)
-    where
-        E: Into<SharedPeerError>,
-    {
-        let e = e.into();
-        debug!(%e,
-               connection_state = ?self.state,
+    /// If the connection has errored already, re-use the original error.
+    /// Otherwise, fail the connection with `error`.
+    fn fail_with(&mut self, error: impl Into<SharedPeerError>) {
+        let error = error.into();
+
+        debug!(%error,
                client_receiver = ?self.client_rx,
                "failing peer service with error");
 
-        // Update the shared error slot
-        //
-        // # Correctness
-        //
-        // Error slots use a threaded `std::sync::Mutex`, so accessing the slot
-        // can block the async task's current thread. We only perform a single
-        // slot update per `Client`, and panic to enforce this constraint.
-        //
-        // This assertion typically fails due to these bugs:
-        // * we mark a connection as failed without using fail_with
-        // * we call fail_with without checking for a failed connection
-        //   state
-        // * we continue processing messages after calling fail_with
-        //
-        // See the original bug #1510 and PR #1531, and the later bug #1599
-        // and PR #1600.
-        assert!(
-            self.error_slot.try_update_error(e).is_ok(),
-            "calling fail_with on already-failed connection state: failed connections must stop processing pending requests and responses, then close the connection. state: {:?} client receiver: {:?}",
-            self.state,
-            self.client_rx
-        );
-
-        // We want to close the client channel and set State::Failed so
-        // that we can flush any pending client requests. However, we may have
-        // an outstanding client request in State::AwaitingResponse, so
-        // we need to deal with it first if it exists.
-        self.client_rx.close();
-        let old_state = std::mem::replace(&mut self.state, State::Failed);
-        if let State::AwaitingResponse { tx, .. } = old_state {
-            // # Correctness
-            //
-            // We know the slot has Some(e) because we just set it above,
-            // and the error slot is never unset.
-            //
-            // Accessing the error slot locks a threaded std::sync::Mutex, which
-            // can block the current async task thread. We briefly lock the mutex
-            // to get a reference to the error.
-            let e = self.error_slot.try_get_error().unwrap();
-            let _ = tx.send(Err(e));
-        }
+        self.shutdown(error);
     }
 
     /// Handle an incoming client request, possibly generating outgoing messages to the
@@ -706,10 +726,28 @@ where
         if tx.is_canceled() {
             metrics::counter!("peer.canceled", 1);
             debug!(state = %self.state, %request, "ignoring canceled request");
+
+            metrics::counter!(
+                "zebra.net.out.requests.canceled",
+                1,
+                "command" => request.command(),
+                "addr" => self.metrics_label.clone(),
+            );
+            self.update_state_metrics(format!("Out::Req::Canceled::{}", request.command()));
+
             return;
         }
 
         debug!(state = %self.state, %request, "sending request from Zebra to peer");
+
+        // Add a metric for outbound requests.
+        metrics::counter!(
+            "zebra.net.out.requests",
+            1,
+            "command" => request.command(),
+            "addr" => self.metrics_label.clone(),
+        );
+        self.update_state_metrics(format!("Out::Req::{}", request.command()));
 
         // These matches return a Result with (new_state, Option<Sender>) or an (error, Sender)
         let new_state_result = match (&self.state, request) {
@@ -867,7 +905,9 @@ where
                 // send a response before dropping tx.
                 let _ = tx.send(Ok(Response::Nil));
                 self.state = AwaitingRequest;
-                self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+                // We only need a timer when we're waiting for a response.
+                // (And we don't want to accidentally re-use old timers.)
+                self.request_timer = None;
             }
             Ok((new_state @ AwaitingResponse { .. }, None)) => {
                 self.state = new_state;
@@ -899,6 +939,8 @@ where
     async fn handle_message_as_request(&mut self, msg: Message) {
         trace!(?msg);
         debug!(state = %self.state, %msg, "received peer request to Zebra");
+
+        self.update_state_metrics(format!("In::Msg::{}", msg.command()));
 
         let req = match msg {
             Message::Ping(nonce) => {
@@ -1040,6 +1082,15 @@ where
         trace!(?req);
         use tower::{load_shed::error::Overloaded, ServiceExt};
 
+        // Add a metric for inbound requests
+        metrics::counter!(
+            "zebra.net.in.requests",
+            1,
+            "command" => req.command(),
+            "addr" => self.metrics_label.clone(),
+        );
+        self.update_state_metrics(format!("In::Req::{}", req.command()));
+
         if self.svc.ready().await.is_err() {
             // Treat all service readiness errors as Overloaded
             // TODO: treat `TryRecvError::Closed` in `Inbound::poll_ready` as a fatal error (#1655)
@@ -1050,7 +1101,7 @@ where
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
-                    tracing::warn!("inbound service is overloaded, closing connection");
+                    tracing::info!("inbound service is overloaded, closing connection");
                     metrics::counter!("pool.closed.loadshed", 1);
                     self.fail_with(PeerError::Overloaded);
                 } else {
@@ -1058,15 +1109,24 @@ where
                     // them to disconnect, and we might be using them to sync blocks.
                     // For similar reasons, we don't want to fail_with() here - we
                     // only close the connection if the peer is doing something wrong.
-                    error!(%e,
-                           connection_state = ?self.state,
-                           client_receiver = ?self.client_rx,
-                           "error processing peer request");
+                    info!(%e,
+                          connection_state = ?self.state,
+                          client_receiver = ?self.client_rx,
+                          "error processing peer request");
                 }
                 return;
             }
             Ok(rsp) => rsp,
         };
+
+        // Add a metric for outbound responses to inbound requests
+        metrics::counter!(
+            "zebra.net.out.responses",
+            1,
+            "command" => rsp.command(),
+            "addr" => self.metrics_label.clone(),
+        );
+        self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
 
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
@@ -1119,6 +1179,132 @@ where
         }
 
         debug!(state = %self.state, %req, %rsp, "sent Zebra response to peer");
+    }
+}
+
+impl<S, Tx> Connection<S, Tx> {
+    /// Update the connection state metrics for this connection,
+    /// using `extra_state_info` as additional state information.
+    fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
+        let current_metrics_state = if let Some(extra_state_info) = extra_state_info.into() {
+            format!("{}::{}", self.state.command(), extra_state_info).into()
+        } else {
+            self.state.command()
+        };
+
+        if self.last_metrics_state.as_ref() == Some(&current_metrics_state) {
+            return;
+        }
+
+        self.erase_state_metrics();
+
+        // Set the new state
+        metrics::increment_gauge!(
+            "zebra.net.connection.state",
+            1.0,
+            "command" => current_metrics_state.clone(),
+            "addr" => self.metrics_label.clone(),
+        );
+
+        self.last_metrics_state = Some(current_metrics_state);
+    }
+
+    /// Erase the connection state metrics for this connection.
+    fn erase_state_metrics(&mut self) {
+        if let Some(last_metrics_state) = self.last_metrics_state.take() {
+            metrics::gauge!(
+                "zebra.net.connection.state",
+                0.0,
+                "command" => last_metrics_state,
+                "addr" => self.metrics_label.clone(),
+            );
+        }
+    }
+
+    /// Marks the peer as having failed with `error`, and performs connection cleanup.
+    ///
+    /// If the connection has errored already, re-use the original error.
+    /// Otherwise, fail the connection with `error`.
+    fn shutdown(&mut self, error: impl Into<SharedPeerError>) {
+        let mut error = error.into();
+
+        // Close channels first, so other tasks can start shutting down.
+        //
+        // TODO: close peer_tx and peer_rx, after:
+        // - adapting them using a struct with a Stream impl, rather than closures
+        // - making the struct forward `close` to the inner channel
+        self.client_rx.close();
+
+        // Update the shared error slot
+        //
+        // # Correctness
+        //
+        // Error slots use a threaded `std::sync::Mutex`, so accessing the slot
+        // can block the async task's current thread. We only perform a single
+        // slot update per `Client`. We ignore subsequent error slot updates.
+        let slot_result = self.error_slot.try_update_error(error.clone());
+
+        if let Err(AlreadyErrored { original_error }) = slot_result {
+            debug!(
+                new_error = %error,
+                %original_error,
+                connection_state = ?self.state,
+                "multiple errors on connection: \
+                 failed connections should stop processing pending requests and responses, \
+                 then close the connection"
+            );
+
+            error = original_error;
+        } else {
+            debug!(%error,
+                   connection_state = ?self.state,
+                   "shutting down peer service with error");
+        }
+
+        // Prepare to flush any pending client requests.
+        //
+        // We've already closed the client channel, so setting State::Failed
+        // will make the main loop flush any pending requests.
+        //
+        // However, we may have an outstanding client request in State::AwaitingResponse,
+        // so we need to deal with it first.
+        if let State::AwaitingResponse { tx, .. } =
+            std::mem::replace(&mut self.state, State::Failed)
+        {
+            // # Correctness
+            //
+            // We know the slot has Some(error), because we just set it above,
+            // and the error slot is never unset.
+            //
+            // Accessing the error slot locks a threaded std::sync::Mutex, which
+            // can block the current async task thread. We briefly lock the mutex
+            // to clone the error.
+            let _ = tx.send(Err(error.clone()));
+        }
+
+        // Make the timer and metrics consistent with the Failed state.
+        self.request_timer = None;
+        self.update_state_metrics(None);
+
+        // Finally, flush pending client requests.
+        while let Some(InProgressClientRequest { tx, span, .. }) =
+            self.client_rx.close_and_flush_next()
+        {
+            trace!(
+                parent: &span,
+                %error,
+                "sending an error response to a pending request on a failed connection"
+            );
+            let _ = tx.send(Err(error.clone()));
+        }
+    }
+}
+
+impl<S, Tx> Drop for Connection<S, Tx> {
+    fn drop(&mut self) {
+        self.shutdown(PeerError::ConnectionDropped);
+
+        self.erase_state_metrics();
     }
 }
 

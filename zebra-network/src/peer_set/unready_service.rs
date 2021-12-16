@@ -12,6 +12,9 @@ use tower::Service;
 
 use crate::peer_set::set::CancelClientWork;
 
+#[cfg(test)]
+mod tests;
+
 /// A Future that becomes satisfied when an `S`-typed service is ready.
 ///
 /// May fail due to cancellation, i.e. if the service is removed from discovery.
@@ -26,9 +29,11 @@ pub(super) struct UnreadyService<K, S, Req> {
     pub(super) _req: PhantomData<Req>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub(super) enum Error<E> {
     Inner(E),
     Canceled,
+    CancelHandleDropped(oneshot::Canceled),
 }
 
 impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
@@ -37,12 +42,22 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        if let Poll::Ready(Ok(CancelClientWork)) = this.cancel.poll(cx) {
+        if let Poll::Ready(oneshot_result) = this.cancel.poll(cx) {
             let key = this.key.take().expect("polled after ready");
-            return Poll::Ready(Err((key, Error::Canceled)));
+
+            // # Correctness
+            //
+            // Return an error if the service is explicitly canceled,
+            // or its cancel handle is dropped, implicitly cancelling it.
+            match oneshot_result {
+                Ok(CancelClientWork) => return Poll::Ready(Err((key, Error::Canceled))),
+                Err(canceled_error) => {
+                    return Poll::Ready(Err((key, Error::CancelHandleDropped(canceled_error))))
+                }
+            }
         }
 
-        // CORRECTNESS
+        // # Correctness
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
@@ -54,7 +69,7 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
         let res = ready!(this
             .service
             .as_mut()
-            .expect("poll after ready")
+            .expect("polled after ready")
             .poll_ready(cx));
 
         let key = this.key.take().expect("polled after ready");
