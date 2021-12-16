@@ -97,8 +97,10 @@ let res = ready!(this
 ## Futures-Aware Mutexes
 [futures-aware-mutexes]: #futures-aware-mutexes
 
-To avoid hangs or slowdowns, use futures-aware types. For more details, see the
-[Futures-Aware Types](#futures-aware-types) section.
+To avoid hangs or slowdowns, prefer futures-aware types,
+particularly for complex waiting or locking code.
+But in some simple cases, [std::sync::Mutex is more efficient](https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use).
+For more details, see the [Futures-Aware Types](#futures-aware-types) section.
 
 Zebra's [`Handshake`](https://github.com/ZcashFoundation/zebra/blob/a63c2e8c40fa847a86d00c754fb10a4729ba34e5/zebra-network/src/peer/handshake.rs#L204)
 won't block other tasks on its thread, because it uses `futures::lock::Mutex`:
@@ -483,7 +485,8 @@ Note: `poll` functions often have a qualifier, like `poll_ready` or `poll_next`.
 ## Futures-Aware Types
 [futures-aware-types]: #futures-aware-types
 
-Use futures-aware types, rather than types which will block the current thread.
+Prefer futures-aware types in complex locking or waiting code,
+rather than types which will block the current thread.
 
 For example:
 - Use `futures::lock::Mutex` rather than `std::sync::Mutex`
@@ -496,6 +499,17 @@ If you are unable to use futures-aware types:
 - block the thread for as short a time as possible
 - document the correctness of each blocking call
 - consider re-designing the code to use `tower::Services`, or other futures-aware types
+
+In some simple cases, `std::sync::Mutex` is correct and more efficient, when:
+- the value behind the mutex is just data, and
+- the locking behaviour is simple.
+
+In these cases:
+> wrap the `Arc<Mutex<...>>` in a struct
+> that provides non-async methods for performing operations on the data within,
+> and only lock the mutex inside these methods
+
+For more details, see [the tokio documentation](https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use).
 
 ## Acquiring Buffer Slots, Mutexes, or Readiness
 [acquiring-buffer-slots-mutexes-readiness]: #acquiring-buffer-slots-mutexes-readiness
@@ -511,6 +525,11 @@ orders, they can deadlock, each holding a lock that the other needs.
 If a buffer, mutex, future or service has complex readiness dependencies,
 schedule those dependencies separate tasks using `tokio::spawn`. Otherwise,
 it might deadlock due to a dependency loop within a single executor task.
+
+Carefully read the documentation of the channel methods you call, to check if they lock.
+For example, [`tokio::sync::watch::Receiver::borrow`](https://docs.rs/tokio/1.15.0/tokio/sync/watch/struct.Receiver.html#method.borrow)
+holds a read lock, so the borrowed data should always be cloned.
+Use `Arc` for efficient clones if needed.
 
 In all of these cases:
 - make critical sections as short as possible, and
