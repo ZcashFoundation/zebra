@@ -53,7 +53,9 @@ impl PeerVersions {
         let mut harnesses = Vec::with_capacity(self.peer_versions.len());
 
         for peer_version in &self.peer_versions {
-            let (client, harness) = ClientTestHarness::build(*peer_version).finish();
+            let (client, harness) = ClientTestHarness::build()
+                .with_version(*peer_version)
+                .finish();
 
             clients.push(client.into());
             harnesses.push(harness);
