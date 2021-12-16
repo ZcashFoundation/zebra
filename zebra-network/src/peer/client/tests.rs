@@ -19,27 +19,10 @@ pub struct ClientTestHarness {
 }
 
 impl ClientTestHarness {
-    /// Create a new mocked [`Client`] instance, returning it together with a harness to track it.
-    pub fn new(version: Version) -> (Self, Client) {
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let (client_request_sender, client_request_receiver) = mpsc::channel(1);
-        let error_slot = ErrorSlot::default();
-
-        let client = Client {
-            shutdown_tx: Some(shutdown_sender),
-            server_tx: client_request_sender,
-            error_slot: error_slot.clone(),
-            version,
-        };
-
-        let harness = ClientTestHarness {
-            client_request_receiver: Some(client_request_receiver),
-            shutdown_receiver: Some(shutdown_receiver),
-            error_slot,
-            version,
-        };
-
-        (harness, client)
+    /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
+    /// and a [`ClientTestHarness`] to track it.
+    pub fn build(version: Version) -> ClientTestHarnessBuilder {
+        ClientTestHarnessBuilder { version }
     }
 
     /// Gets the peer protocol version associated to the [`Client`].
@@ -161,5 +144,40 @@ impl ReceiveRequestAttempt {
             ReceiveRequestAttempt::Request(request) => Some(request),
             ReceiveRequestAttempt::Closed | ReceiveRequestAttempt::Empty => None,
         }
+    }
+}
+
+/// A builder for a [`Client`] and [`ClientTestHarness`] instance.
+///
+/// Mocked data is used to construct a real [`Client`] instance. The mocked data is initialized by
+/// the [`ClientTestHarnessBuilder`], and can be accessed and changed through the
+/// [`ClientTestHarness`].
+pub struct ClientTestHarnessBuilder {
+    version: Version,
+}
+
+impl ClientTestHarnessBuilder {
+    /// Build a [`Client`] instance with the mocked data and a [`ClientTestHarness`] to track it.
+    pub fn finish(self) -> (Client, ClientTestHarness) {
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        let (client_request_sender, client_request_receiver) = mpsc::channel(1);
+        let error_slot = ErrorSlot::default();
+        let version = self.version;
+
+        let client = Client {
+            shutdown_tx: Some(shutdown_sender),
+            server_tx: client_request_sender,
+            error_slot: error_slot.clone(),
+            version,
+        };
+
+        let harness = ClientTestHarness {
+            client_request_receiver: Some(client_request_receiver),
+            shutdown_receiver: Some(shutdown_receiver),
+            error_slot,
+            version,
+        };
+
+        (client, harness)
     }
 }
