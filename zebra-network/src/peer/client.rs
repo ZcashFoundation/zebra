@@ -266,22 +266,31 @@ impl Client {
             .expect("only taken on drop")
             .poll_canceled(cx)
         {
-            // Make sure there is an error in the slot
-            let heartbeat_error: SharedPeerError = PeerError::HeartbeatTaskExited.into();
-            let original_error = self.error_slot.try_update_error(heartbeat_error.clone());
-            debug!(
-                ?original_error,
-                latest_error = ?heartbeat_error,
-                "client heartbeat task exited"
-            );
-
-            if let Err(AlreadyErrored { original_error }) = original_error {
-                Err(original_error)
-            } else {
-                Err(heartbeat_error)
-            }
+            self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited)
         } else {
             Ok(())
+        }
+    }
+
+    /// Properly update the error slot after a background task has unexpectedly stopped.
+    fn set_task_exited_error(
+        &mut self,
+        task_name: &str,
+        error: PeerError,
+    ) -> Result<(), SharedPeerError> {
+        // Make sure there is an error in the slot
+        let task_error = SharedPeerError::from(error);
+        let original_error = self.error_slot.try_update_error(task_error.clone());
+        debug!(
+            ?original_error,
+            latest_error = ?task_error,
+            "client {} task exited", task_name
+        );
+
+        if let Err(AlreadyErrored { original_error }) = original_error {
+            Err(original_error)
+        } else {
+            Err(task_error)
         }
     }
 
