@@ -12,7 +12,7 @@ use crate::{
 
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
-    request_receiver: mpsc::Receiver<ClientRequest>,
+    request_receiver: Option<mpsc::Receiver<ClientRequest>>,
     shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
     error_slot: ErrorSlot,
     version: Version,
@@ -33,7 +33,7 @@ impl ClientTestHarness {
         };
 
         let harness = ClientTestHarness {
-            request_receiver,
+            request_receiver: Some(request_receiver),
             shutdown_receiver,
             error_slot,
             version,
@@ -64,12 +64,28 @@ impl ClientTestHarness {
 
     /// Closes the request receiver endpoint.
     pub fn close_request_receiver(&mut self) {
-        self.request_receiver.close();
+        self.request_receiver
+            .as_mut()
+            .expect("request receiver endpoint has been dropped")
+            .close();
+    }
+
+    /// Drops the request receiver endpoint, forcefully closing the channel.
+    pub fn drop_request_receiver(&mut self) {
+        self.request_receiver
+            .take()
+            .expect("request receiver endpoint has already been dropped");
     }
 
     /// Tries to receive a [`ClientRequest`] sent by the mocked [`Client`] instance.
     pub(crate) fn try_to_receive_request(&mut self) -> ReceiveRequestAttempt {
-        match self.request_receiver.try_next() {
+        let receive_result = self
+            .request_receiver
+            .as_mut()
+            .expect("request receiver endpoint has been dropped")
+            .try_next();
+
+        match receive_result {
             Ok(Some(request)) => ReceiveRequestAttempt::Request(request),
             Ok(None) => ReceiveRequestAttempt::Closed,
             Err(_) => ReceiveRequestAttempt::Empty,
