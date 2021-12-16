@@ -13,7 +13,7 @@ use crate::{
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
     client_request_receiver: Option<mpsc::Receiver<ClientRequest>>,
-    shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
+    shutdown_receiver: Option<oneshot::Receiver<CancelHeartbeatTask>>,
     error_slot: ErrorSlot,
     version: Version,
 }
@@ -34,7 +34,7 @@ impl ClientTestHarness {
 
         let harness = ClientTestHarness {
             client_request_receiver: Some(client_request_receiver),
-            shutdown_receiver,
+            shutdown_receiver: Some(shutdown_receiver),
             error_slot,
             version,
         };
@@ -54,12 +54,24 @@ impl ClientTestHarness {
     /// - has not closed or dropped the mocked heartbeat task channel, and
     /// - has not asked the mocked heartbeat task to shut down.
     pub fn wants_connection_heartbeats(&mut self) -> bool {
-        let receive_result = self.shutdown_receiver.try_recv();
+        let receive_result = self
+            .shutdown_receiver
+            .as_mut()
+            .expect("heartbeat shutdown receiver endpoint has been dropped")
+            .try_recv();
 
         match receive_result {
             Ok(None) => true,
             Ok(Some(CancelHeartbeatTask)) | Err(oneshot::Canceled) => false,
         }
+    }
+
+    /// Drops the shutdown receiver endpoint.
+    pub fn drop_shutdown_receiver(&mut self) {
+        let _ = self
+            .shutdown_receiver
+            .take()
+            .expect("heartbeat shutdown receiver endpoint has already been dropped");
     }
 
     /// Closes the receiver endpoint of [`ClientRequests`] that are supposed to be sent to the
