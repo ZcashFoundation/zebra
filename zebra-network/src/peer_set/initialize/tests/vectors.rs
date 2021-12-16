@@ -42,7 +42,7 @@ use crate::{
         set::MorePeers,
         ActiveConnectionCounter, CandidateSet,
     },
-    protocol::{external::types::Version, types::PeerServices},
+    protocol::types::PeerServices,
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -348,7 +348,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
                 connection_tracker,
             } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Fake the connection closing.
             std::mem::drop(connection_tracker);
@@ -412,7 +412,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
@@ -523,7 +523,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
                 connection_tracker,
             } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Fake the connection closing.
             std::mem::drop(connection_tracker);
@@ -589,7 +589,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
@@ -732,7 +732,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             connection_tracker,
         } = req;
 
-        let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+        let (fake_client, _harness) = ClientTestHarness::build().finish();
 
         // Actually close the connection.
         std::mem::drop(connection_tracker);
@@ -800,7 +800,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
@@ -920,7 +920,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             connection_tracker,
         } = req;
 
-        let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+        let (fake_client, _harness) = ClientTestHarness::build().finish();
 
         // Actually close the connection.
         std::mem::drop(connection_tracker);
@@ -988,7 +988,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build(Version(1)).finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
