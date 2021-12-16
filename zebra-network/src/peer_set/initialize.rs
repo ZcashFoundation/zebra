@@ -95,7 +95,7 @@ where
 
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (address_book, address_book_updater, address_book_updater_guard) =
+    let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
         AddressBookUpdater::spawn(&config, listen_addr);
 
     // Create a broadcast channel for peer inventory advertisements.
@@ -158,7 +158,7 @@ where
         demand_tx.clone(),
         handle_rx,
         inv_receiver,
-        address_book.clone(),
+        address_metrics,
         MinimumPeerVersion::new(latest_chain_tip, config.network),
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
