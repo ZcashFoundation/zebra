@@ -75,6 +75,17 @@ impl ClientTestHarness {
     pub fn current_error(&self) -> Option<SharedPeerError> {
         self.error_slot.try_get_error()
     }
+
+    /// Sets the error in the [`ErrorSlot`], assuming there isn't one already.
+    ///
+    /// # Panics
+    ///
+    /// If there's already an error in the [`ErrorSlot`].
+    pub fn set_error(&self, error: impl Into<SharedPeerError>) {
+        self.error_slot
+            .try_update_error(error.into())
+            .expect("unexpected earlier error in error slot")
+    }
 }
 
 /// A representation of the result of an attempt to receive a [`ClientRequest`] sent by the mocked
