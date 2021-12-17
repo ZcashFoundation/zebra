@@ -479,10 +479,10 @@ impl TryFrom<[u8; 32]> for AuthorizingKey {
     ///
     /// It must decode to a prime-order point:
     ///
-    /// > When decoding this representation, the key MUST be considered invalid
+    /// > When decoding this representation, the key [MUST] be considered invalid
     /// > if abst_J returns ⊥ for either ak or nk, or if ak not in J^{(r)*}
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
+    /// [MUST]: https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let affine_point = jubjub::AffinePoint::from_bytes(bytes);
         if affine_point.is_none().into() {
