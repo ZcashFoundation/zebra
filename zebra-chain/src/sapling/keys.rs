@@ -1002,6 +1002,8 @@ impl FromStr for FullViewingKey {
 
 /// An ephemeral public key for Sapling key agreement.
 ///
+/// It is denoted by `epk` in the specification.
+///
 /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
 pub struct EphemeralPublicKey(
@@ -1040,13 +1042,24 @@ impl PartialEq<[u8; 32]> for EphemeralPublicKey {
 impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     type Error = &'static str;
 
+    /// Read an EphemeralPublicKey from a byte array.
+    ///
+    /// Returns an error if the key is non-canonical, or [it is of small order][1].
+    ///
+    /// > Check that a Output description's cv and epk are not of small order,
+    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let possible_point = jubjub::AffinePoint::from_bytes(bytes);
 
-        if possible_point.is_some().into() {
-            Ok(Self(possible_point.unwrap()))
+        if possible_point.is_none().into() {
+            return Err("Invalid jubjub::AffinePoint value");
+        }
+        if possible_point.unwrap().is_small_order().into() {
+            Err("point has small order")
         } else {
-            Err("Invalid jubjub::AffinePoint value")
+            Ok(Self(possible_point.unwrap()))
         }
     }
 }

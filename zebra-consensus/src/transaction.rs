@@ -733,13 +733,6 @@ where
             }
 
             for output in sapling_shielded_data.outputs() {
-                // Consensus rule: cv and wpk MUST NOT be of small
-                // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]wpk
-                // MUST NOT be 𝒪_J.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
-                check::output_cv_epk_not_small_order(output)?;
-
                 // Consensus rule: The proof π_ZKOutput MUST be
                 // valid given a primary input formed from the other
                 // fields except C^enc and C^out.

@@ -149,6 +149,8 @@ impl NoteCommitment {
 /// A Homomorphic Pedersen commitment to the value of a note, used in Spend and
 /// Output descriptions.
 ///
+/// This is denoted by `cv` in the specification.
+///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
@@ -190,7 +192,12 @@ impl TryFrom<jubjub::ExtendedPoint> for ValueCommitment {
 
     /// Convert a JubJub point into a ValueCommitment.
     ///
-    /// Returns an error if the point is of small order.
+    /// Returns an error if [the point is of small order][1].
+    ///
+    /// > Check that a Spend description's cv and rk are not of small order,
+    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     fn try_from(extended_point: jubjub::ExtendedPoint) -> Result<Self, Self::Error> {
         if extended_point.is_small_order().into() {
             Err("small order point")

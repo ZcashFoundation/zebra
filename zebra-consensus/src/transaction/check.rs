@@ -12,7 +12,7 @@ use zebra_chain::{
     orchard::Flags,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
-    sapling::{Output, PerSpendAnchor, Spend},
+    sapling::{PerSpendAnchor, Spend},
     transaction::{LockTime, Transaction},
 };
 
@@ -135,22 +135,6 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 pub fn spend_cv_rk_not_small_order(spend: &Spend<PerSpendAnchor>) -> Result<(), TransactionError> {
     if bool::from(
         jubjub::AffinePoint::from_bytes(spend.rk.into())
-            .unwrap()
-            .is_small_order(),
-    ) {
-        Err(TransactionError::SmallOrder)
-    } else {
-        Ok(())
-    }
-}
-
-/// Check that a Output description's cv and epk are not of small order,
-/// i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
-///
-/// https://zips.z.cash/protocol/protocol.pdf#outputdesc
-pub fn output_cv_epk_not_small_order(output: &Output) -> Result<(), TransactionError> {
-    if bool::from(
-        jubjub::AffinePoint::from_bytes(output.ephemeral_key.into())
             .unwrap()
             .is_small_order(),
     ) {

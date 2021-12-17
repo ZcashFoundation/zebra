@@ -56,9 +56,6 @@ fn v5_fake_transactions() -> Result<(), Report> {
                 for spend in transaction.sapling_spends_per_anchor() {
                     check::spend_cv_rk_not_small_order(&spend)?;
                 }
-                for output in transaction.sapling_outputs() {
-                    check::output_cv_epk_not_small_order(output)?;
-                }
             } else {
                 panic!("we should have no tx other than 5");
             }
