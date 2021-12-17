@@ -11,7 +11,7 @@ pub trait IsReady<Request>: Service<Request> {
     fn is_ready(&mut self) -> BoxFuture<bool>;
 
     /// Check if the [`Service`] is not immediately ready because it returns an error.
-    fn not_ready_due_to_error(&mut self) -> BoxFuture<bool>;
+    fn is_failed(&mut self) -> BoxFuture<bool>;
 }
 
 impl<S, Request> IsReady<Request> for S
@@ -25,7 +25,7 @@ where
             .boxed()
     }
 
-    fn not_ready_due_to_error(&mut self) -> BoxFuture<bool> {
+    fn is_failed(&mut self) -> BoxFuture<bool> {
         NowOrLater(self.ready())
             .map(|ready_result| matches!(ready_result, Some(Err(_))))
             .boxed()
