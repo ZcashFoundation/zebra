@@ -5,9 +5,13 @@ mod test_vectors;
 
 pub mod pedersen_hashes;
 
-use std::{convert::TryFrom, fmt, io};
+use std::{
+    convert::{TryFrom, TryInto},
+    fmt, io,
+};
 
 use bitvec::prelude::*;
+use jubjub::ExtendedPoint;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -200,7 +204,7 @@ impl TryFrom<jubjub::ExtendedPoint> for ValueCommitment {
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     fn try_from(extended_point: jubjub::ExtendedPoint) -> Result<Self, Self::Error> {
         if extended_point.is_small_order().into() {
-            Err("small order point")
+            Err("jubjub::AffinePoint value for Sapling ValueCommitment is of small order")
         } else {
             Ok(Self(jubjub::AffinePoint::from(extended_point)))
         }
@@ -265,11 +269,7 @@ impl TryFrom<[u8; 32]> for ValueCommitment {
 
         if possible_point.is_some().into() {
             let point = possible_point.unwrap();
-            if point.is_small_order().into() {
-                Err("small order point")
-            } else {
-                Ok(Self(possible_point.unwrap()))
-            }
+            ExtendedPoint::from(point).try_into()
         } else {
             Err("Invalid jubjub::AffinePoint value")
         }

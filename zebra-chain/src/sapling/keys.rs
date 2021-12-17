@@ -475,25 +475,26 @@ impl Eq for AuthorizingKey {}
 impl TryFrom<[u8; 32]> for AuthorizingKey {
     type Error = &'static str;
 
-    /// Decode an AuthorizingKey from a byte array.
+    /// Convert an array into an AuthorizingKey.
     ///
-    /// It must decode to a prime-order point:
+    /// Returns an error if the encoding is malformed or if [it does not encode
+    /// a prime-order point][1]:
     ///
-    /// > When decoding this representation, the key [MUST] be considered invalid
+    /// > When decoding this representation, the key MUST be considered invalid
     /// > if abst_J returns ⊥ for either ak or nk, or if ak not in J^{(r)*}
     ///
-    /// [MUST]: https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let affine_point = jubjub::AffinePoint::from_bytes(bytes);
         if affine_point.is_none().into() {
-            return Err("derived an invalid Sapling transmission key");
+            return Err("Invalid jubjub::AffinePoint for Sapling AuthorizingKey");
         }
         if affine_point.unwrap().is_prime_order().into() {
             Ok(Self(redjubjub::VerificationKey::try_from(bytes).map_err(
-                |_e| "derived an invalid Sapling transmission key",
+                |_e| "Invalid jubjub::AffinePoint for Sapling AuthorizingKey",
             )?))
         } else {
-            Err("derived an invalid Sapling transmission key")
+            Err("jubjub::AffinePoint value for Sapling AuthorizingKey is not of prime order")
         }
     }
 }
@@ -877,7 +878,7 @@ impl TryFrom<[u8; 32]> for TransmissionKey {
         if affine_point.is_torsion_free().into() {
             Ok(Self(affine_point))
         } else {
-            Err("derived an invalid Sapling transmission key")
+            Err("Invalid jubjub::AffinePoint value for Sapling TransmissionKey")
         }
     }
 }
@@ -1054,10 +1055,10 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
         let possible_point = jubjub::AffinePoint::from_bytes(bytes);
 
         if possible_point.is_none().into() {
-            return Err("Invalid jubjub::AffinePoint value");
+            return Err("Invalid jubjub::AffinePoint value for Sapling EphemeralPublicKey");
         }
         if possible_point.unwrap().is_small_order().into() {
-            Err("EphemeralPublicKey point has small order")
+            Err("jubjub::AffinePoint value for Sapling EphemeralPublicKey point is of small order")
         } else {
             Ok(Self(possible_point.unwrap()))
         }
@@ -1102,7 +1103,7 @@ impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
                 .unwrap()
                 .is_small_order(),
         ) {
-            Err("ValidatingKey is of small order")
+            Err("jubjub::AffinePoint value for Sapling ValidatingKey is of small order")
         } else {
             Ok(Self(key))
         }
@@ -1114,7 +1115,7 @@ impl TryFrom<[u8; 32]> for ValidatingKey {
 
     fn try_from(value: [u8; 32]) -> Result<Self, Self::Error> {
         let vk = redjubjub::VerificationKey::<SpendAuth>::try_from(value)
-            .map_err(|_| "malformed ValidatingKey")?;
+            .map_err(|_| "Invalid redjubjub::ValidatingKey for Sapling ValidatingKey")?;
         vk.try_into()
     }
 }

@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 
-use jubjub::AffinePoint;
+use group::Group;
+use jubjub::{AffinePoint, ExtendedPoint};
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -8,7 +9,7 @@ use rand_chacha::ChaChaRng;
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys::{self, find_group_hash, ValidatingKey},
+    keys::{self, ValidatingKey},
     note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4, PerSpendAnchor,
     SharedAnchor, Spend,
 };
@@ -26,10 +27,7 @@ impl Arbitrary for Spend<PerSpendAnchor> {
         )
             .prop_map(|(per_spend_anchor, nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor,
-                // Use an arbitrary string to generate a dummy point
-                cv: find_group_hash(*b"arbitrar", b"a")
-                    .try_into()
-                    .expect("find_group_hash returns point in prime-order subgroup"),
+                cv: ExtendedPoint::generator().try_into().unwrap(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -57,10 +55,7 @@ impl Arbitrary for Spend<SharedAnchor> {
         )
             .prop_map(|(nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor: FieldNotPresent,
-                // Use an arbitrary string to generate a dummy point
-                cv: find_group_hash(*b"arbitrar", b"a")
-                    .try_into()
-                    .expect("find_group_hash returns point in prime-order subgroup"),
+                cv: ExtendedPoint::generator().try_into().unwrap(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -86,16 +81,10 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(|(enc_ciphertext, out_ciphertext, zkproof)| Self {
-                // Use an arbitrary string to generate a dummy point
-                cv: find_group_hash(*b"arbitrar", b"a")
-                    .try_into()
-                    .expect("find_group_hash returns point in prime-order subgroup"),
+                cv: ExtendedPoint::generator().try_into().unwrap(),
                 cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
-                // Use an arbitrary string to generate a dummy point
                 ephemeral_key: keys::EphemeralPublicKey(
-                    find_group_hash(*b"arbitrar", b"b")
-                        .try_into()
-                        .expect("find_group_hash returns point in prime-order subgroup"),
+                    ExtendedPoint::generator().try_into().unwrap(),
                 ),
                 enc_ciphertext,
                 out_ciphertext,

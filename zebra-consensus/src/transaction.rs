@@ -721,7 +721,6 @@ where
                 async_checks.push(
                     primitives::redjubjub::VERIFIER
                         .clone()
-                        // TODO: instead of converting rk, change the verifier to receive the correct type
                         .oneshot((spend.rk.into(), spend.spend_auth_sig, shielded_sighash).into()),
                 );
             }

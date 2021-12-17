@@ -1087,7 +1087,8 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
 
     /// Convert an array into a EphemeralPublicKey.
     ///
-    /// Returns an error if the point is malformed or [if it is the identity][1].
+    /// Returns an error if the encoding is malformed or if [it encodes the
+    /// identity point][1].
     ///
     /// > epk cannot be 𝒪_P
     ///
