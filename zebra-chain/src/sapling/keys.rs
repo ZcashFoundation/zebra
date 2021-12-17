@@ -873,7 +873,8 @@ impl TryFrom<[u8; 32]> for TransmissionKey {
     /// https://zips.z.cash/zip-0216
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let affine_point = jubjub::AffinePoint::from_bytes(bytes).unwrap();
-        if (affine_point.is_identity() | affine_point.is_prime_order()).into() {
+        // Check if it's identity or has prime order (i.e. is in the prime-order subgroup).
+        if affine_point.is_torsion_free().into() {
             Ok(Self(affine_point))
         } else {
             Err("derived an invalid Sapling transmission key")
