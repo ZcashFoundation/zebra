@@ -120,7 +120,7 @@ where
 
     for harness in harnesses {
         let is_outdated = harness.version() < minimum_version;
-        let is_connected = harness.is_connected();
+        let is_connected = harness.wants_connection_heartbeats();
 
         prop_assert!(
             is_connected != is_outdated,
