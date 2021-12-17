@@ -584,7 +584,7 @@ impl Clone for AddressBook {
     ///
     /// All address books update the same prometheus metrics.
     fn clone(&self) -> AddressBook {
-        // The default value is wrong, but we avoid calling `update_metrics`,
+        // The existing metrics might be outdated, but we avoid calling `update_metrics`,
         // so we don't overwrite the prometheus metrics from the main address book.
         let (address_metrics_tx, _address_metrics_rx) =
             watch::channel(*self.address_metrics_tx.borrow());
