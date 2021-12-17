@@ -30,15 +30,20 @@ fn peer_set_drop() {
             .with_minimum_peer_version(minimum_peer_version.clone())
             .build();
 
-        // Wait until the peer set is ready
+        // Get a ready future
+        let peer_ready_future = peer_set.ready();
+        // Drop the future
+        std::mem::drop(peer_ready_future);
+
+        // Wait until the peer set is ready awaiting in the ready() future
         let peer_ready1 = peer_set
             .ready()
             .await
             .expect("peer set service is always ready");
 
-        // make a call that returns a future
+        // Make a call to the peer set that returns a future
         let fut = peer_ready1.call(Request::Peers);
-        // drop the future
+        // Drop the future
         std::mem::drop(fut);
 
         // Peer set will still be ready
@@ -47,7 +52,7 @@ fn peer_set_drop() {
             .await
             .expect("peer set service is always ready");
 
-        // make a new call
+        // Get a new future with a call to the peer set
         let _fut = peer_ready2.call(Request::Peers);
     });
 }
