@@ -194,7 +194,7 @@ impl fmt::Debug for ValueCommitment {
 impl TryFrom<jubjub::ExtendedPoint> for ValueCommitment {
     type Error = &'static str;
 
-    /// Convert a JubJub point into a ValueCommitment.
+    /// Convert a Jubjub point into a ValueCommitment.
     ///
     /// Returns an error if [the point is of small order][1].
     ///
