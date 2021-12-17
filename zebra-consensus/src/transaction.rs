@@ -728,7 +728,7 @@ where
                 async_checks.push(
                     primitives::redjubjub::VERIFIER
                         .clone()
-                        .oneshot((spend.rk, spend.spend_auth_sig, shielded_sighash).into()),
+                        .oneshot((spend.rk.into(), spend.spend_auth_sig, shielded_sighash).into()),
                 );
             }
 

@@ -1057,7 +1057,7 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
             return Err("Invalid jubjub::AffinePoint value");
         }
         if possible_point.unwrap().is_small_order().into() {
-            Err("point has small order")
+            Err("EphemeralPublicKey point has small order")
         } else {
             Ok(Self(possible_point.unwrap()))
         }

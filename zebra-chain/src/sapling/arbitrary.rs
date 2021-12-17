@@ -91,7 +91,12 @@ impl Arbitrary for Output {
                     .try_into()
                     .expect("find_group_hash returns point in prime-order subgroup"),
                 cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
-                ephemeral_key: keys::EphemeralPublicKey(AffinePoint::identity()),
+                // Use an arbitrary string to generate a dummy point
+                ephemeral_key: keys::EphemeralPublicKey(
+                    find_group_hash(*b"arbitrar", b"b")
+                        .try_into()
+                        .expect("find_group_hash returns point in prime-order subgroup"),
+                ),
                 enc_ciphertext,
                 out_ciphertext,
                 zkproof,
@@ -115,11 +120,11 @@ impl Arbitrary for OutputInTransactionV4 {
 /// Creates Strategy for generation VerificationKeyBytes, since the `redjubjub`
 /// crate does not provide an Arbitrary implementation for it.
 fn spendauth_verification_key_bytes(
-) -> impl Strategy<Value = redjubjub::VerificationKeyBytes<redjubjub::SpendAuth>> {
+) -> impl Strategy<Value = redjubjub::VerificationKey<redjubjub::SpendAuth>> {
     prop::array::uniform32(any::<u8>()).prop_map(|bytes| {
         let mut rng = ChaChaRng::from_seed(bytes);
         let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
-        redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk).into()
+        redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk)
     })
 }
 

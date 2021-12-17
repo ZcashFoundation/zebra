@@ -3,7 +3,7 @@
 //! Zebra uses a generic spend type for `V4` and `V5` transactions.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
-use std::{fmt, io};
+use std::{convert::TryInto, fmt, io};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
@@ -31,7 +31,7 @@ use super::{commitment, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnch
 /// `V5` transactions split them into multiple arrays.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
@@ -48,7 +48,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    pub rk: redjubjub::VerificationKey<SpendAuth>,
     /// The ZK spend proof.
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
@@ -63,15 +63,23 @@ pub struct Spend<AnchorV: AnchorVariant> {
 /// Serialized as `SpendDescriptionV5` in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    pub rk: redjubjub::VerificationKey<SpendAuth>,
 }
+
+// We can't derive Eq because `VerificationKey` does not implement it,
+// even if it is valid for it.
+impl<AnchorV: AnchorVariant + PartialEq> Eq for Spend<AnchorV> {}
+
+// We can't derive Eq because `VerificationKey` does not implement it,
+// even if it is valid for it.
+impl Eq for SpendPrefixInTransactionV5 {}
 
 impl<AnchorV> fmt::Display for Spend<AnchorV>
 where
@@ -165,7 +173,11 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
             cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             per_spend_anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
-            rk: reader.read_32_bytes()?.into(),
+            rk: redjubjub::VerificationKeyBytes::<SpendAuth>::from(reader.read_32_bytes()?)
+                .try_into()
+                .map_err(|_: redjubjub::Error| {
+                    SerializationError::Parse("malformed verification key")
+                })?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
         })
@@ -192,7 +204,11 @@ impl ZcashDeserialize for SpendPrefixInTransactionV5 {
         Ok(SpendPrefixInTransactionV5 {
             cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
-            rk: reader.read_32_bytes()?.into(),
+            rk: redjubjub::VerificationKeyBytes::<SpendAuth>::from(reader.read_32_bytes()?)
+                .try_into()
+                .map_err(|_: redjubjub::Error| {
+                    SerializationError::Parse("malformed verification key")
+                })?,
         })
     }
 }
