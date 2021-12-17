@@ -274,6 +274,8 @@ where
             responses.push(peer_service.call(Request::Peers));
         }
 
+        let mut address_book_updates = FuturesUnordered::new();
+
         // Process responses
         while let Some(rsp) = responses.next().await {
             match rsp {
@@ -284,7 +286,7 @@ where
                         "got response to GetPeers"
                     );
                     let addrs = validate_addrs(addrs, DateTime32::now());
-                    self.send_addrs(addrs).await;
+                    address_book_updates.push(self.send_addrs(addrs));
                     more_peers = Some(MorePeers);
                 }
                 Err(e) => {
@@ -296,6 +298,9 @@ where
             }
         }
 
+        // Wait until all the address book updates have finished
+        while let Some(()) = address_book_updates.next().await {}
+
         Ok(more_peers)
     }
 
@@ -306,6 +311,13 @@ where
             .map(MetaAddr::new_gossiped_change)
             .map(|maybe_addr| maybe_addr.expect("Received gossiped peers always have services set"))
             .collect();
+
+        debug!(count = ?addrs.len(), "sending gossiped addresses to the address book");
+
+        // Don't bother spawning a task if there are no addresses left.
+        if addrs.is_empty() {
+            return;
+        }
 
         // # Correctness
         //
