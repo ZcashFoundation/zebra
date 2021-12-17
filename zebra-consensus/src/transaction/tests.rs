@@ -50,15 +50,6 @@ fn v5_fake_transactions() -> Result<(), Report> {
 
             // make sure there are no joinsplits nor spends in coinbase
             check::coinbase_tx_no_prevout_joinsplit_spend(&transaction)?;
-
-            // validate the sapling shielded data
-            if transaction.version() == 5 {
-                for spend in transaction.sapling_spends_per_anchor() {
-                    check::spend_cv_rk_not_small_order(&spend)?;
-                }
-            } else {
-                panic!("we should have no tx other than 5");
-            }
         }
     }
 

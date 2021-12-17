@@ -8,7 +8,7 @@ use rand_chacha::ChaChaRng;
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys::{self, find_group_hash},
+    keys::{self, find_group_hash, ValidatingKey},
     note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4, PerSpendAnchor,
     SharedAnchor, Spend,
 };
@@ -119,12 +119,13 @@ impl Arbitrary for OutputInTransactionV4 {
 
 /// Creates Strategy for generation VerificationKeyBytes, since the `redjubjub`
 /// crate does not provide an Arbitrary implementation for it.
-fn spendauth_verification_key_bytes(
-) -> impl Strategy<Value = redjubjub::VerificationKey<redjubjub::SpendAuth>> {
+fn spendauth_verification_key_bytes() -> impl Strategy<Value = ValidatingKey> {
     prop::array::uniform32(any::<u8>()).prop_map(|bytes| {
         let mut rng = ChaChaRng::from_seed(bytes);
         let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
         redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk)
+            .try_into()
+            .unwrap()
     })
 }
 

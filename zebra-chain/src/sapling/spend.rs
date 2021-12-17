@@ -17,7 +17,10 @@ use crate::{
     },
 };
 
-use super::{commitment, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor};
+use super::{
+    commitment, keys::ValidatingKey, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnchor,
+    SharedAnchor,
+};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -48,7 +51,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKey<SpendAuth>,
+    pub rk: ValidatingKey,
     /// The ZK spend proof.
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
@@ -70,7 +73,7 @@ pub struct SpendPrefixInTransactionV5 {
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKey<SpendAuth>,
+    pub rk: ValidatingKey,
 }
 
 // We can't derive Eq because `VerificationKey` does not implement it,
@@ -160,7 +163,7 @@ impl ZcashSerialize for Spend<PerSpendAnchor> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&self.per_spend_anchor.0[..])?;
         writer.write_32_bytes(&self.nullifier.into())?;
-        writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
+        writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 64]>::from(self.spend_auth_sig)[..])?;
         Ok(())
@@ -173,11 +176,10 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
             cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             per_spend_anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
-            rk: redjubjub::VerificationKeyBytes::<SpendAuth>::from(reader.read_32_bytes()?)
+            rk: reader
+                .read_32_bytes()?
                 .try_into()
-                .map_err(|_: redjubjub::Error| {
-                    SerializationError::Parse("malformed verification key")
-                })?,
+                .map_err(SerializationError::Parse)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
         })
@@ -194,7 +196,7 @@ impl ZcashSerialize for SpendPrefixInTransactionV5 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.nullifier.into())?;
-        writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
+        writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         Ok(())
     }
 }
@@ -204,11 +206,10 @@ impl ZcashDeserialize for SpendPrefixInTransactionV5 {
         Ok(SpendPrefixInTransactionV5 {
             cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
-            rk: redjubjub::VerificationKeyBytes::<SpendAuth>::from(reader.read_32_bytes()?)
+            rk: reader
+                .read_32_bytes()?
                 .try_into()
-                .map_err(|_: redjubjub::Error| {
-                    SerializationError::Parse("malformed verification key")
-                })?,
+                .map_err(SerializationError::Parse)?,
         })
     }
 }

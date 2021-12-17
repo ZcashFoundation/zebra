@@ -694,13 +694,6 @@ where
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for spend in sapling_shielded_data.spends_per_anchor() {
-                // Consensus rule: cv and rk MUST NOT be of small
-                // order, i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk
-                // MUST NOT be 𝒪_J.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                check::spend_cv_rk_not_small_order(&spend)?;
-
                 // Consensus rule: The proof π_ZKSpend MUST be valid
                 // given a primary input formed from the other
                 // fields except spendAuthSig.
@@ -728,6 +721,7 @@ where
                 async_checks.push(
                     primitives::redjubjub::VERIFIER
                         .clone()
+                        // TODO: instead of converting rk, change the verifier to receive the correct type
                         .oneshot((spend.rk.into(), spend.spend_auth_sig, shielded_sighash).into()),
                 );
             }

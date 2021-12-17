@@ -16,7 +16,7 @@ mod test_vectors;
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom},
+    convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
     str::FromStr,
@@ -1074,5 +1074,59 @@ impl ZcashSerialize for EphemeralPublicKey {
 impl ZcashDeserialize for EphemeralPublicKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Self::try_from(reader.read_32_bytes()?).map_err(SerializationError::Parse)
+    }
+}
+
+/// A randomized [validating][1] key that should be used to validate `spendAuthSig`.
+///
+/// It is denoted by `rk` in the specification.
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
+
+impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
+    type Error = &'static str;
+
+    /// Convert an array into a ValidatingKey.
+    ///
+    /// Returns an error if the key is malformed or [is of small order][1].
+    ///
+    /// > Check that a Spend description's cv and rk are not of small order,
+    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    fn try_from(key: redjubjub::VerificationKey<SpendAuth>) -> Result<Self, Self::Error> {
+        if bool::from(
+            jubjub::AffinePoint::from_bytes(key.into())
+                .unwrap()
+                .is_small_order(),
+        ) {
+            Err("ValidatingKey is of small order")
+        } else {
+            Ok(Self(key))
+        }
+    }
+}
+
+impl TryFrom<[u8; 32]> for ValidatingKey {
+    type Error = &'static str;
+
+    fn try_from(value: [u8; 32]) -> Result<Self, Self::Error> {
+        let vk = redjubjub::VerificationKey::<SpendAuth>::try_from(value)
+            .map_err(|_| "malformed ValidatingKey")?;
+        vk.try_into()
+    }
+}
+
+impl From<ValidatingKey> for [u8; 32] {
+    fn from(key: ValidatingKey) -> Self {
+        key.0.into()
+    }
+}
+
+impl From<ValidatingKey> for redjubjub::VerificationKeyBytes<SpendAuth> {
+    fn from(key: ValidatingKey) -> Self {
+        key.0.into()
     }
 }
