@@ -1,4 +1,3 @@
-use futures::FutureExt;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::parameters::{Network, NetworkUpgrade};
@@ -32,32 +31,23 @@ fn peer_set_drop() {
             .build();
 
         // Wait until the peer set is ready
-        let peer_set1 = peer_set.ready().now_or_never();
+        let peer_ready1 = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
 
-        //
-        match peer_set1 {
-            Some(ready) => {
-                // make a call that returns a future
-                let fut = ready
-                    .expect("peer set service is always ready")
-                    .call(Request::Peers);
-                // drop the future
-                std::mem::drop(fut);
+        // make a call that returns a future
+        let fut = peer_ready1.call(Request::Peers);
+        // drop the future
+        std::mem::drop(fut);
 
-                // Peer set will still be ready
-                let peer_set2 = peer_set.ready().now_or_never();
-                match peer_set2 {
-                    Some(ready2) => {
-                        // make a new call
-                        let _response = ready2
-                            .expect("peer set service is always ready")
-                            .call(Request::Peers)
-                            .now_or_never();
-                    }
-                    None => panic!("peer set service is always ready"),
-                }
-            }
-            None => panic!("peer set service is always ready"),
-        }
+        // Peer set will still be ready
+        let peer_ready2 = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        // make a new call
+        let _fut = peer_ready2.call(Request::Peers);
     });
 }
