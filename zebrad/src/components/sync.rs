@@ -21,6 +21,7 @@ use zebra_consensus::{
 };
 use zebra_network as zn;
 use zebra_state as zs;
+use zs::LatestChainTip;
 
 use crate::{
     async_ext::NowOrLater, components::sync::downloads::BlockDownloadVerifyError,
@@ -79,6 +80,15 @@ pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GA
 ///
 /// See [`MIN_LOOKAHEAD_LIMIT`] for details.
 pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 5;
+
+/// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
+///
+/// This is used to allow block heights that are slightly beyond the lookahead limit,
+/// but still limit the number of blocks in the pipeline between the downloader and
+/// the state.
+///
+/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 
 /// Controls how long we wait for a tips response to return.
 ///
@@ -236,11 +246,18 @@ where
     /// Returns a new syncer instance, using:
     ///  - chain: the zebra-chain `Network` to download (Mainnet or Testnet)
     ///  - peers: the zebra-network peers to contact for downloads
-    ///  - state: the zebra-state that stores the chain
     ///  - verifier: the zebra-consensus verifier that checks the chain
+    ///  - state: the zebra-state that stores the chain
+    ///  - latest_chain_tip: the latest chain tip from `state`
     ///
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
-    pub fn new(config: &ZebradConfig, peers: ZN, state: ZS, verifier: ZV) -> (Self, SyncStatus) {
+    pub fn new(
+        config: &ZebradConfig,
+        peers: ZN,
+        verifier: ZV,
+        state: ZS,
+        latest_chain_tip: LatestChainTip,
+    ) -> (Self, SyncStatus) {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
@@ -282,7 +299,12 @@ where
             genesis_hash: genesis_hash(config.network.network),
             lookahead_limit: config.sync.lookahead_limit,
             tip_network,
-            downloads: Box::pin(Downloads::new(block_network, verifier)),
+            downloads: Box::pin(Downloads::new(
+                block_network,
+                verifier,
+                latest_chain_tip,
+                config.sync.lookahead_limit,
+            )),
             state,
             prospective_tips: HashSet::new(),
             recent_syncs,
