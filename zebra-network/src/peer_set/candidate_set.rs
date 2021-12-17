@@ -284,7 +284,7 @@ where
                         "got response to GetPeers"
                     );
                     let addrs = validate_addrs(addrs, DateTime32::now());
-                    self.send_addrs(addrs);
+                    self.send_addrs(addrs).await;
                     more_peers = Some(MorePeers);
                 }
                 Err(e) => {
@@ -300,7 +300,7 @@ where
     }
 
     /// Add new `addrs` to the address book.
-    fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
+    async fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
         let addrs: Vec<MetaAddrChange> = addrs
             .into_iter()
             .map(MetaAddr::new_gossiped_change)
@@ -314,7 +314,9 @@ where
         //
         // Extend handles duplicate addresses internally.
         let address_book = self.address_book.clone();
-        tokio::task::spawn_blocking(move || address_book.lock().unwrap().extend(addrs));
+        tokio::task::spawn_blocking(move || address_book.lock().unwrap().extend(addrs))
+            .await
+            .expect("panic in new peers address book update task");
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -363,10 +365,9 @@ where
         };
 
         // Correctness: Spawn address book accesses on a blocking threadd, to avoid deadlocks (see #1976).
-        let next_peer = match tokio::task::spawn_blocking(next_peer).await {
-            Ok(next_peer) => next_peer?,
-            Err(task_panic) => panic!("panic in next peer task: {:?}", task_panic),
-        };
+        let next_peer = tokio::task::spawn_blocking(next_peer)
+            .await
+            .expect("panic in next peer address book task")?;
 
         // Security: rate-limit new outbound peer connections
         sleep_until(self.min_next_handshake).await;
@@ -376,14 +377,17 @@ where
     }
 
     /// Mark `addr` as a failed peer.
-    pub fn report_failed(&mut self, addr: &MetaAddr) {
+    pub async fn report_failed(&mut self, addr: &MetaAddr) {
         let addr = MetaAddr::new_errored(&addr.addr, addr.services);
+
         // # Correctness
         //
         // Spawn address book accesses on a blocking thread,
         // to avoid deadlocks (see #1976).
         let address_book = self.address_book.clone();
-        tokio::task::spawn_blocking(move || address_book.lock().unwrap().update(addr));
+        tokio::task::spawn_blocking(move || address_book.lock().unwrap().update(addr))
+            .await
+            .expect("panic in peer failure address book update task");
     }
 }
 

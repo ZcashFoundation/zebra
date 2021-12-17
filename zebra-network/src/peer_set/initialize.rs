@@ -766,7 +766,7 @@ where
                 // The connection was never opened, or it failed the handshake and was dropped.
 
                 debug!(?failed_addr.addr, "marking candidate as failed");
-                candidates.report_failed(&failed_addr);
+                candidates.report_failed(&failed_addr).await;
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
