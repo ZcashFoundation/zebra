@@ -1010,9 +1010,7 @@ async fn send_periodic_heartbeats(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         //
-        // TODO: await heartbeat and shutdown. The select
-        // function needs pinned types, but pinned generics
-        // are hard (#1678)
+        // TODO: await heartbeat and shutdown (#3254)
         let heartbeat = send_one_heartbeat(&mut server_tx);
         if heartbeat_timeout(
             heartbeat,
