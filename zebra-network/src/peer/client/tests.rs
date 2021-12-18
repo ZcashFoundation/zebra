@@ -10,15 +10,15 @@ use crate::{
     protocol::external::types::Version,
 };
 
-/// A handle to a mocked [`Client`] instance.
-pub struct MockedClientHandle {
+/// A harness with mocked channels for testing a [`Client`] instance.
+pub struct ClientTestHarness {
     _request_receiver: mpsc::Receiver<ClientRequest>,
     shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
     version: Version,
 }
 
-impl MockedClientHandle {
-    /// Create a new mocked [`Client`] instance, returning it together with a handle to track it.
+impl ClientTestHarness {
+    /// Create a new mocked [`Client`] instance, returning it together with a harness to track it.
     pub fn new(version: Version) -> (Self, LoadTrackedClient) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (request_sender, _request_receiver) = mpsc::channel(1);
@@ -30,13 +30,13 @@ impl MockedClientHandle {
             version,
         };
 
-        let handle = MockedClientHandle {
+        let harness = ClientTestHarness {
             _request_receiver,
             shutdown_receiver,
             version,
         };
 
-        (handle, client.into())
+        (harness, client.into())
     }
 
     /// Gets the peer protocol version associated to the [`Client`].

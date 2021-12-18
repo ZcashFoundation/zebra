@@ -16,7 +16,7 @@ mod load_tracked_client;
 mod minimum_peer_version;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use client::tests::MockedClientHandle;
+pub use client::tests::ClientTestHarness;
 #[cfg(not(test))]
 use client::ClientRequest;
 #[cfg(test)]
