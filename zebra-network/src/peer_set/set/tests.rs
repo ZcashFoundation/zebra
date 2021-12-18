@@ -46,6 +46,8 @@ impl PeerVersions {
     /// element is the [`LeadTrackedClient`], which is the actual service for the peer connection.
     /// The second element is a [`ClientTestHarness`], which contains the open endpoints of the
     /// mock channels used by the peer service.
+    ///
+    /// The clients and the harnesses are collected into separate [`Vec`] lists and returned.
     pub fn mock_peers(&self) -> (Vec<LoadTrackedClient>, Vec<ClientTestHarness>) {
         let mut clients = Vec::with_capacity(self.peer_versions.len());
         let mut harnesses = Vec::with_capacity(self.peer_versions.len());
