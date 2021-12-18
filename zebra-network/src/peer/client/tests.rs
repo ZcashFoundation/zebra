@@ -12,7 +12,7 @@ use crate::{
 
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
-    request_receiver: Option<mpsc::Receiver<ClientRequest>>,
+    client_request_receiver: Option<mpsc::Receiver<ClientRequest>>,
     shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
     error_slot: ErrorSlot,
     version: Version,
@@ -22,18 +22,18 @@ impl ClientTestHarness {
     /// Create a new mocked [`Client`] instance, returning it together with a harness to track it.
     pub fn new(version: Version) -> (Self, Client) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let (request_sender, request_receiver) = mpsc::channel(1);
+        let (client_request_sender, client_request_receiver) = mpsc::channel(1);
         let error_slot = ErrorSlot::default();
 
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
-            server_tx: request_sender,
+            server_tx: client_request_sender,
             error_slot: error_slot.clone(),
             version,
         };
 
         let harness = ClientTestHarness {
-            request_receiver: Some(request_receiver),
+            client_request_receiver: Some(client_request_receiver),
             shutdown_receiver,
             error_slot,
             version,
@@ -62,25 +62,32 @@ impl ClientTestHarness {
         }
     }
 
-    /// Closes the request receiver endpoint.
-    pub fn close_request_receiver(&mut self) {
-        self.request_receiver
+    /// Closes the receiver endpoint of [`ClientRequests`] that are supposed to be sent to the
+    /// remote peer.
+    ///
+    /// The remote peer that would receive the requests is mocked for testing.
+    pub fn close_outbound_client_request_receiver(&mut self) {
+        self.client_request_receiver
             .as_mut()
             .expect("request receiver endpoint has been dropped")
             .close();
     }
 
-    /// Drops the request receiver endpoint, forcefully closing the channel.
-    pub fn drop_request_receiver(&mut self) {
-        self.request_receiver
+    /// Drops the receiver endpoint of [`ClientRequests`], forcefully closing the channel.
+    ///
+    /// The remote peer that would receive the requests is mocked for testing.
+    pub fn drop_outbound_client_request_receiver(&mut self) {
+        self.client_request_receiver
             .take()
             .expect("request receiver endpoint has already been dropped");
     }
 
-    /// Tries to receive a [`ClientRequest`] sent by the mocked [`Client`] instance.
-    pub(crate) fn try_to_receive_request(&mut self) -> ReceiveRequestAttempt {
+    /// Tries to receive a [`ClientRequest`] sent by the [`Client`] instance.
+    ///
+    /// The remote peer that would receive the requests is mocked for testing.
+    pub(crate) fn try_to_receive_outbound_client_request(&mut self) -> ReceiveRequestAttempt {
         let receive_result = self
-            .request_receiver
+            .client_request_receiver
             .as_mut()
             .expect("request receiver endpoint has been dropped")
             .try_next();
@@ -109,10 +116,11 @@ impl ClientTestHarness {
     }
 }
 
-/// A representation of the result of an attempt to receive a [`ClientRequest`] sent by the mocked
-/// [`Client`] instance.
+/// The result of an attempt to receive a [`ClientRequest`] sent by the [`Client`] instance.
+///
+/// The remote peer that would receive the request is mocked for testing.
 pub(crate) enum ReceiveRequestAttempt {
-    /// The mocked [`Client`] instance has closed the sender endpoint of the channel.
+    /// The [`Client`] instance has closed the sender endpoint of the channel.
     Closed,
 
     /// There were no queued requests in the channel.
