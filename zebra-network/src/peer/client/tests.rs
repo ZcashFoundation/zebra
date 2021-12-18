@@ -22,7 +22,9 @@ impl ClientTestHarness {
     /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
     /// and a [`ClientTestHarness`] to track it.
     pub fn build(version: Version) -> ClientTestHarnessBuilder {
-        ClientTestHarnessBuilder { version }
+        ClientTestHarnessBuilder {
+            version: Some(version),
+        }
     }
 
     /// Gets the peer protocol version associated to the [`Client`].
@@ -153,16 +155,22 @@ impl ReceiveRequestAttempt {
 /// the [`ClientTestHarnessBuilder`], and can be accessed and changed through the
 /// [`ClientTestHarness`].
 pub struct ClientTestHarnessBuilder {
-    version: Version,
+    version: Option<Version>,
 }
 
 impl ClientTestHarnessBuilder {
+    /// Configure the mocked version for the peer.
+    pub fn with_version(mut self, version: Version) -> Self {
+        self.version = Some(version);
+        self
+    }
+
     /// Build a [`Client`] instance with the mocked data and a [`ClientTestHarness`] to track it.
     pub fn finish(self) -> (Client, ClientTestHarness) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (client_request_sender, client_request_receiver) = mpsc::channel(1);
         let error_slot = ErrorSlot::default();
-        let version = self.version;
+        let version = self.version.unwrap_or(Version(0));
 
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
