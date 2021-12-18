@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use futures::{
     channel::{mpsc, oneshot},
-    future::{self, AbortHandle, FutureExt},
+    future::{self, AbortHandle, Future, FutureExt},
 };
 use tokio::task::JoinHandle;
 
@@ -33,7 +33,11 @@ impl ClientTestHarness {
     /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
     /// and a [`ClientTestHarness`] to track it.
     pub fn build() -> ClientTestHarnessBuilder {
-        ClientTestHarnessBuilder { version: None }
+        ClientTestHarnessBuilder {
+            version: None,
+            connection_task: None,
+            heartbeat_task: None,
+        }
     }
 
     /// Gets the peer protocol version associated to the [`Client`].
@@ -179,15 +183,45 @@ impl ReceiveRequestAttempt {
 /// Mocked data is used to construct a real [`Client`] instance. The mocked data is initialized by
 /// the [`ClientTestHarnessBuilder`], and can be accessed and changed through the
 /// [`ClientTestHarness`].
-pub struct ClientTestHarnessBuilder {
+pub struct ClientTestHarnessBuilder<C = future::Ready<()>, H = future::Ready<()>> {
+    connection_task: Option<C>,
+    heartbeat_task: Option<H>,
     version: Option<Version>,
 }
 
-impl ClientTestHarnessBuilder {
+impl<C, H> ClientTestHarnessBuilder<C, H>
+where
+    C: Future<Output = ()> + Send + 'static,
+    H: Future<Output = ()> + Send + 'static,
+{
     /// Configure the mocked version for the peer.
     pub fn with_version(mut self, version: Version) -> Self {
         self.version = Some(version);
         self
+    }
+
+    /// Configure the mock connection task future to use.
+    pub fn with_connection_task<NewC>(
+        self,
+        connection_task: NewC,
+    ) -> ClientTestHarnessBuilder<NewC, H> {
+        ClientTestHarnessBuilder {
+            connection_task: Some(connection_task),
+            heartbeat_task: self.heartbeat_task,
+            version: self.version,
+        }
+    }
+
+    /// Configure the mock heartbeat task future to use.
+    pub fn with_heartbeat_task<NewH>(
+        self,
+        heartbeat_task: NewH,
+    ) -> ClientTestHarnessBuilder<C, NewH> {
+        ClientTestHarnessBuilder {
+            connection_task: self.connection_task,
+            heartbeat_task: Some(heartbeat_task),
+            version: self.version,
+        }
     }
 
     /// Build a [`Client`] instance with the mocked data and a [`ClientTestHarness`] to track it.
@@ -197,8 +231,10 @@ impl ClientTestHarnessBuilder {
         let error_slot = ErrorSlot::default();
         let version = self.version.unwrap_or(Version(0));
 
-        let (connection_task, connection_aborter) = Self::mock_background_task();
-        let (heartbeat_task, heartbeat_aborter) = Self::mock_background_task();
+        let (connection_task, connection_aborter) =
+            Self::spawn_background_task_or_fallback(self.connection_task);
+        let (heartbeat_task, heartbeat_aborter) =
+            Self::spawn_background_task_or_fallback(self.heartbeat_task);
 
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
@@ -221,12 +257,26 @@ impl ClientTestHarnessBuilder {
         (client, harness)
     }
 
-    /// Spawn a dummy background task.
+    /// Spawn a mock background abortable task `task_future` if provided, or a fallback task
+    /// otherwise.
     ///
-    /// The task lives as long as [`MAX_PEER_CONNECTION_TIME`] or until it is aborted through the
-    /// [`AbortHandle`].
-    fn mock_background_task() -> (JoinHandle<()>, AbortHandle) {
-        let (task, abort_handle) = future::abortable(tokio::time::sleep(MAX_PEER_CONNECTION_TIME));
+    /// The fallback task lives as long as [`MAX_PEER_CONNECTION_TIME`].
+    fn spawn_background_task_or_fallback<T>(task_future: Option<T>) -> (JoinHandle<()>, AbortHandle)
+    where
+        T: Future<Output = ()> + Send + 'static,
+    {
+        match task_future {
+            Some(future) => Self::spawn_background_task(future),
+            None => Self::spawn_background_task(tokio::time::sleep(MAX_PEER_CONNECTION_TIME)),
+        }
+    }
+
+    /// Spawn a mock background abortable task to run `task_future`.
+    fn spawn_background_task<T>(task_future: T) -> (JoinHandle<()>, AbortHandle)
+    where
+        T: Future<Output = ()> + Send + 'static,
+    {
+        let (task, abort_handle) = future::abortable(task_future);
         let task_handle = tokio::spawn(task.map(|_result| ()));
 
         (task_handle, abort_handle)
