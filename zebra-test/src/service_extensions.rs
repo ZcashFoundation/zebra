@@ -10,6 +10,9 @@ pub trait IsReady<Request>: Service<Request> {
     /// Check if the [`Service`] is immediately ready to be called.
     fn is_ready(&mut self) -> BoxFuture<bool>;
 
+    /// Check if the [`Service`] is not ready to be called.
+    fn is_pending(&mut self) -> BoxFuture<bool>;
+
     /// Check if the [`Service`] is not immediately ready because it returns an error.
     fn is_failed(&mut self) -> BoxFuture<bool>;
 }
@@ -22,6 +25,12 @@ where
     fn is_ready(&mut self) -> BoxFuture<bool> {
         NowOrLater(self.ready())
             .map(|ready_result| matches!(ready_result, Some(Ok(_))))
+            .boxed()
+    }
+
+    fn is_pending(&mut self) -> BoxFuture<bool> {
+        NowOrLater(self.ready())
+            .map(|ready_result| ready_result.is_none())
             .boxed()
     }
 
