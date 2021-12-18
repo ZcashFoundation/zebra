@@ -21,10 +21,8 @@ pub struct ClientTestHarness {
 impl ClientTestHarness {
     /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
     /// and a [`ClientTestHarness`] to track it.
-    pub fn build(version: Version) -> ClientTestHarnessBuilder {
-        ClientTestHarnessBuilder {
-            version: Some(version),
-        }
+    pub fn build() -> ClientTestHarnessBuilder {
+        ClientTestHarnessBuilder { version: None }
     }
 
     /// Gets the peer protocol version associated to the [`Client`].
