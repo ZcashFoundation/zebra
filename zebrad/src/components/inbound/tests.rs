@@ -1,7 +1,11 @@
 //! Inbound service tests.
 
 use std::{
-    collections::HashSet, iter::FromIterator, net::SocketAddr, str::FromStr, sync::Arc,
+    collections::HashSet,
+    iter::{self, FromIterator},
+    net::SocketAddr,
+    str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -562,6 +566,92 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+/// Test that the inbound downloader rejects blocks above the lookahead limit.
+///
+/// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
+#[tokio::test]
+async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
+    // Get services
+    let (
+        inbound_service,
+        _mempool,
+        _committed_blocks,
+        _added_transactions,
+        mut tx_verifier,
+        mut peer_set,
+        state_service,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+
+    // Get the next block
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let block_hash = block.hash();
+
+    // Push test block hash
+    let _request = inbound_service
+        .clone()
+        .oneshot(Request::AdvertiseBlock(block_hash))
+        .await?;
+
+    // Block is fetched, and committed to the state
+    peer_set
+        .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
+        .await
+        .respond(Response::Blocks(vec![block]));
+
+    // TODO: check that the block is queued in the checkpoint verifier
+
+    // check that nothing unexpected happened
+    peer_set.expect_no_requests().await;
+    tx_verifier.expect_no_requests().await;
+
+    // Get a block that is a long way away from genesis
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+    let block_hash = block.hash();
+
+    // Push test block hash
+    let _request = inbound_service
+        .clone()
+        .oneshot(Request::AdvertiseBlock(block_hash))
+        .await?;
+
+    // Block is fetched, but the downloader drops it because it is too high
+    peer_set
+        .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
+        .await
+        .respond(Response::Blocks(vec![block]));
+
+    let response = state_service
+        .clone()
+        .oneshot(zebra_state::Request::Depth(block_hash))
+        .await?;
+    assert_eq!(response, zebra_state::Response::Depth(None));
+
+    // TODO: check that the block is not queued in the checkpoint verifier or non-finalized state
+
+    // check that nothing unexpected happened
+    peer_set.expect_no_requests().await;
+    tx_verifier.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(sync_gossip_result, None),
+        "unexpected error or panic in sync gossip task: {:?}",
+        sync_gossip_result,
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
+    Ok(())
+}
+
 async fn setup(
     add_transactions: bool,
 ) -> (
@@ -647,7 +737,7 @@ async fn setup(
         state_service.clone(),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
-        latest_chain_tip,
+        latest_chain_tip.clone(),
         chain_tip_change.clone(),
     );
 
@@ -677,6 +767,7 @@ async fn setup(
         block_verifier,
         mempool: mempool_service.clone(),
         state: state_service.clone(),
+        latest_chain_tip,
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
