@@ -158,7 +158,9 @@ impl Input {
         }
     }
 
-    /// Returns the sequence number for the source output for this input.
+    /// Sets the input's sequence number.
+    ///
+    /// Only for use in tests.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn set_sequence(&mut self, new_sequence: u32) {
         match self {
