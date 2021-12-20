@@ -38,6 +38,7 @@ added some metrics to help diagnose networking issues.
 - Stop ignoring panics in inbound handshakes (#3192)
 - When there are no new peers, stop crawler using CPU and writing logs  (#3177)
 - Limit address book size to limit memory usage (#3162)
+- Security: drop blocks that are a long way ahead of the tip (#3167)
 
 
 ## [Zebra 1.0.0-beta.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.2) - 2021-12-03
