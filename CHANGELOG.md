@@ -18,7 +18,7 @@ added some metrics to help diagnose networking issues.
 
 #### Networking
 
-- Add and use `debug_skip_parameter_preload` config option (#3197)
+- Add and use `debug_skip_parameter_preload` config option in tests (#3197)
 - Disconnect from outdated peers on network upgrade (#3108)
 
 #### Metrics
@@ -29,8 +29,8 @@ added some metrics to help diagnose networking issues.
 ### Fixed
 
 - Stop ignoring some connection errors that could make the peer set hang (#3200)
-- Spawn initial handshakes in separated task (#3189)
-- Fix coinbase height deserialization (#3129)
+- Spawn initial handshakes in a separate task, Credit: Equilibrium (#3189)
+- Fix coinbase height deserialization to reject non-minimal encodings (#3129)
 - Stop doing thousands of time checks each time we connect to a peer  (#3106)
 
 ### Security
