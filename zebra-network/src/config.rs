@@ -242,7 +242,7 @@ impl Default for Config {
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
-            crawl_new_peer_interval: Duration::from_secs(60),
+            crawl_new_peer_interval: constants::DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
             // The default peerset target size should be large enough to ensure
             // nodes have a reliable set of peers. But it should also be limited

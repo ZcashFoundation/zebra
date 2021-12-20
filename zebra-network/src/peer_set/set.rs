@@ -97,12 +97,10 @@ use std::{
     marker::PhantomData,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Instant,
 };
 
-use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     future::{FutureExt, TryFutureExt},
@@ -110,7 +108,7 @@ use futures::{
     stream::FuturesUnordered,
 };
 use tokio::{
-    sync::{broadcast, oneshot::error::TryRecvError},
+    sync::{broadcast, oneshot::error::TryRecvError, watch},
     task::JoinHandle,
 };
 use tower::{
@@ -122,6 +120,7 @@ use tower::{
 use zebra_chain::chain_tip::ChainTip;
 
 use crate::{
+    address_book::AddressMetrics,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
@@ -131,7 +130,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    AddressBook, BoxError, Config,
+    BoxError, Config,
 };
 
 #[cfg(test)]
@@ -210,10 +209,10 @@ where
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxError>>>,
 
-    /// A shared list of peer addresses.
+    /// Address book metrics watch channel.
     ///
     /// Used for logging diagnostics.
-    address_book: Arc<std::sync::Mutex<AddressBook>>,
+    address_metrics: watch::Receiver<AddressMetrics>,
 
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
@@ -266,7 +265,7 @@ where
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
-        address_book: Arc<std::sync::Mutex<AddressBook>>,
+        address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
     ) -> Self {
         Self {
@@ -287,7 +286,7 @@ where
 
             // Metrics
             last_peer_log: None,
-            address_book,
+            address_metrics,
             peerset_total_connection_limit: config.peerset_total_connection_limit(),
 
             // Real-time parameters
@@ -773,19 +772,7 @@ where
 
         self.last_peer_log = Some(Instant::now());
 
-        // # Correctness
-        //
-        // Only log address metrics in exceptional circumstances, to avoid lock contention.
-        //
-        // Get the current time after acquiring the address book lock.
-        //
-        // TODO: replace with a watch channel that is updated in `AddressBook::update_metrics()`,
-        //       or turn the address book into a service (#1976)
-        let address_metrics = self
-            .address_book
-            .lock()
-            .unwrap()
-            .address_metrics(Utc::now());
+        let address_metrics = self.address_metrics.borrow();
         if unready_services_len == 0 {
             warn!(
                 ?address_metrics,
@@ -812,12 +799,7 @@ where
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {
-            // Correctness: Get the current time after acquiring the address book lock.
-            let address_metrics = self
-                .address_book
-                .lock()
-                .unwrap()
-                .address_metrics(Utc::now());
+            let address_metrics = self.address_metrics.borrow();
             panic!(
                 "unexpectedly exceeded configured peer set connection limit: \n\
                  peers: {:?}, ready: {:?}, unready: {:?}, \n\
