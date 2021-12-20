@@ -4,7 +4,7 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-17
+## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-20
 
 Zebra's latest beta works towards enforcing all consensus rules by validating JoinSplit Groth16 proofs
 used by Sprout transactions. We have also added security and network improvements, and have also
@@ -174,7 +174,7 @@ This is the first beta release of Zebra. Today the mempool work is fully finishe
 
 ### Documentation
 
-- Improve main `README` documentation and other book sections (#2967, #2894) 
+- Improve main `README` documentation and other book sections (#2967, #2894)
 - Expand documentation for the mempool::crawler module (#2968)
 - Improve mempool documentation (#2942, #2963, #2964, #2965)
 - Improve documentation and types in the PeerSet (#2925)
@@ -346,11 +346,11 @@ Zebra's latest alpha continues work on the mempool.
 #### Documentation
 
 - Document consensus rules for version group IDs (#2719)
-- Specify Zebra Client will only support Unified Addresses (#2706) 
+- Specify Zebra Client will only support Unified Addresses (#2706)
 
 ### Fixed
 
--  Stop calculating transaction hashes twice in the checkpoint verifier (#2696) 
+-  Stop calculating transaction hashes twice in the checkpoint verifier (#2696)
 
 ### Security
 
@@ -727,7 +727,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Stop panicking on out-of-range version timestamps (#2148)
   - This security issue was reported by Equilibrium
 - Stop gossiping temporary inbound remote addresses to peers (#2120)
-  - If Zebra was configured with a valid (not unspecified) listener address, it would gossip the ephemeral ports of inbound connections to its peers. This fix stops Zebra sending these useless addresses to its mainnet and testnet peers. 
+  - If Zebra was configured with a valid (not unspecified) listener address, it would gossip the ephemeral ports of inbound connections to its peers. This fix stops Zebra sending these useless addresses to its mainnet and testnet peers.
 - Avoid silently corrupting invalid times during serialization (#2149)
 - Do version checks first, then send a verack response (#2121)
 - Remove checkout credentials from GitHub actions (#2158)
@@ -742,7 +742,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 
 #### Network Upgrade 5
 
-- Continue implementation of Transaction V5 (#2070, #2075, #2100) 
+- Continue implementation of Transaction V5 (#2070, #2075, #2100)
 - Implementation of data structures for Orchard support in Zebra (#1885)
 - Implementation of redpallas in Zebra (#2099)
 
@@ -862,7 +862,7 @@ The Zebra project now has a [Code of Conduct](https://github.com/ZcashFoundation
   - Make shielded data and spends generic over Transaction V4 and V5 (#1946, #1989)
 - Async batching for:
   - Sprout `JoinSplit` signatures (#1952)
-  - Sapling `Spend` and `Output` Groth16 proofs (#1713) 
+  - Sapling `Spend` and `Output` Groth16 proofs (#1713)
 - Enable `Joinsplit` and `Spend` spend auth sighash verification (#1940)
 - Randomised property tests for `InventoryHash` and `MetaAddr` (#1985)
 
@@ -910,7 +910,7 @@ Some notable changes include:
 - Fix CI disk space usage by disabling incremental compilation in coverage builds (#1923)
 
 ### Security
-- Stop relying on unchecked length fields when preallocating vectors (#1925) 
+- Stop relying on unchecked length fields when preallocating vectors (#1925)
 
 ## [Zebra v1.0.0-alpha.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.4) - 2021-03-17
 
