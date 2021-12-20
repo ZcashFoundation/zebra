@@ -5,6 +5,7 @@ use std::{cmp::Reverse, iter::Extend, net::SocketAddr, time::Instant};
 
 use chrono::Utc;
 use ordered_map::OrderedMap;
+use tokio::sync::watch;
 use tracing::Span;
 
 use crate::{
@@ -48,7 +49,7 @@ mod tests;
 /// Updates must not be based on:
 /// - the remote addresses of inbound connections, or
 /// - the canonical address of any connection.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AddressBook {
     /// Peer listener addresses, suitable for outbound connections,
     /// in connection attempt order.
@@ -71,12 +72,15 @@ pub struct AddressBook {
     /// The span for operations on this address book.
     span: Span,
 
+    /// A channel used to send the latest address book metrics.
+    address_metrics_tx: watch::Sender<AddressMetrics>,
+
     /// The last time we logged a message about the address metrics.
     last_address_log: Option<Instant>,
 }
 
 /// Metrics about the states of the addresses in an [`AddressBook`].
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AddressMetrics {
     /// The number of addresses in the `Responded` state.
     responded: usize,
@@ -111,11 +115,16 @@ impl AddressBook {
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
+        // The default value is correct for an empty address book,
+        // and it gets replaced by `update_metrics` anyway.
+        let (address_metrics_tx, _address_metrics_rx) = watch::channel(AddressMetrics::default());
+
         let mut new_book = AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             local_listener: canonical_socket_addr(local_listener),
             span,
+            address_metrics_tx,
             last_address_log: None,
         };
 
@@ -167,6 +176,17 @@ impl AddressBook {
 
         new_book.update_metrics(instant_now, chrono_now);
         new_book
+    }
+
+    /// Return a watch channel for the address book metrics.
+    ///
+    /// The metrics in the watch channel are only updated when the address book updates,
+    /// so they can be significantly outdated if Zebra is disconnected or hung.
+    ///
+    /// The current metrics value is marked as seen.
+    /// So `Receiver::changed` will only return after the next address book update.
+    pub fn address_metrics_watcher(&self) -> watch::Receiver<AddressMetrics> {
+        self.address_metrics_tx.subscribe()
     }
 
     /// Get the local listener address.
@@ -422,7 +442,25 @@ impl AddressBook {
     }
 
     /// Returns metrics for the addresses in this address book.
+    /// Only for use in tests.
+    ///
+    /// # Correctness
+    ///
+    /// Use [`AddressBook::address_metrics_watcher().borrow()`] in production code,
+    /// to avoid deadlocks.
+    #[cfg(test)]
     pub fn address_metrics(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
+        self.address_metrics_internal(now)
+    }
+
+    /// Returns metrics for the addresses in this address book.
+    ///
+    /// # Correctness
+    ///
+    /// External callers should use [`AddressBook::address_metrics_watcher().borrow()`]
+    /// in production code, to avoid deadlocks.
+    /// (Using the watch channel receiver does not lock the address book mutex.)
+    fn address_metrics_internal(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
         let responded = self.state_peers(PeerAddrState::Responded).count();
         let never_attempted_gossiped = self
             .state_peers(PeerAddrState::NeverAttemptedGossiped)
@@ -453,7 +491,10 @@ impl AddressBook {
     fn update_metrics(&mut self, instant_now: Instant, chrono_now: chrono::DateTime<Utc>) {
         let _guard = self.span.enter();
 
-        let m = self.address_metrics(chrono_now);
+        let m = self.address_metrics_internal(chrono_now);
+
+        // Ignore errors: we don't care if any receivers are listening.
+        let _ = self.address_metrics_tx.send(m);
 
         // TODO: rename to address_book.[state_name]
         metrics::gauge!("candidate_set.responded", m.responded as f64);
@@ -533,6 +574,29 @@ impl Extend<MetaAddrChange> for AddressBook {
     {
         for change in iter.into_iter() {
             self.update(change);
+        }
+    }
+}
+
+impl Clone for AddressBook {
+    /// Clone the addresses, address limit, local listener address, and span.
+    ///
+    /// Cloned address books have a separate metrics struct watch channel, and an empty last address log.
+    ///
+    /// All address books update the same prometheus metrics.
+    fn clone(&self) -> AddressBook {
+        // The existing metrics might be outdated, but we avoid calling `update_metrics`,
+        // so we don't overwrite the prometheus metrics from the main address book.
+        let (address_metrics_tx, _address_metrics_rx) =
+            watch::channel(*self.address_metrics_tx.borrow());
+
+        AddressBook {
+            by_addr: self.by_addr.clone(),
+            addr_limit: self.addr_limit,
+            local_listener: self.local_listener,
+            span: self.span.clone(),
+            address_metrics_tx,
+            last_address_log: None,
         }
     }
 }

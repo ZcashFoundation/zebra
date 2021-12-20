@@ -158,6 +158,18 @@ impl Input {
         }
     }
 
+    /// Sets the input's sequence number.
+    ///
+    /// Only for use in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_sequence(&mut self, new_sequence: u32) {
+        match self {
+            Input::PrevOut { sequence, .. } | Input::Coinbase { sequence, .. } => {
+                *sequence = new_sequence
+            }
+        }
+    }
+
     /// If this is a `PrevOut` input, returns this input's outpoint.
     /// Otherwise, returns `None`.
     pub fn outpoint(&self) -> Option<OutPoint> {

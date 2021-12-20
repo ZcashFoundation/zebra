@@ -31,6 +31,9 @@ use super::{check, Request, Verifier};
 use crate::{error::TransactionError, script};
 use color_eyre::eyre::Report;
 
+#[cfg(test)]
+mod prop;
+
 #[test]
 fn v5_fake_transactions() -> Result<(), Report> {
     zebra_test::init();
@@ -346,7 +349,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
 
     // Create a V4 transaction
     let transaction = Transaction::V4 {
@@ -446,7 +449,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should not succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false, 0);
 
     // Create a V4 transaction
     let transaction = Transaction::V4 {
@@ -497,7 +500,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
 
     // Create a V4 transaction
     let transaction = Transaction::V4 {
@@ -688,7 +691,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
 
     // Create a V5 transaction
     let transaction = Transaction::V5 {
@@ -793,7 +796,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should not succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false);
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false, 0);
 
     // Create a V5 transaction
     let transaction = Transaction::V5 {
@@ -846,7 +849,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true);
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
 
     // Create a V4 transaction
     let transaction = Transaction::V5 {
@@ -1318,6 +1321,7 @@ fn v5_with_duplicate_orchard_action() {
 fn mock_transparent_transfer(
     previous_utxo_height: block::Height,
     script_should_succeed: bool,
+    outpoint_index: u32,
 ) -> (
     transparent::Input,
     transparent::Output,
@@ -1331,7 +1335,7 @@ fn mock_transparent_transfer(
     // Mock an unspent transaction output
     let previous_outpoint = transparent::OutPoint {
         hash: Hash([1u8; 32]),
-        index: 0,
+        index: outpoint_index,
     };
 
     let lock_script = if script_should_succeed {
