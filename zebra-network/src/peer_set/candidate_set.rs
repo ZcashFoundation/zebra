@@ -376,7 +376,7 @@ where
             guard.update(next_peer)
         };
 
-        // Correctness: Spawn address book accesses on a blocking threadd, to avoid deadlocks (see #1976).
+        // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
         let next_peer = tokio::task::spawn_blocking(next_peer)
             .await
             .expect("panic in next peer address book task")?;
