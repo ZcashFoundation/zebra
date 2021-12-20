@@ -1001,11 +1001,16 @@ impl FromStr for FullViewingKey {
     }
 }
 
-/// An ephemeral public key for Sapling key agreement.
+/// An [ephemeral public key][1] for Sapling key agreement.
 ///
-/// It is denoted by `epk` in the specification.
+/// Public keys containing points of small order are not allowed.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+/// It is denoted by `epk` in the specification. (This type does _not_
+/// represent [KA^{Sapling}.Public][2], which allows any points, including
+/// of small order).
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
+/// [2]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
 pub struct EphemeralPublicKey(
     #[serde(with = "serde_helpers::AffinePoint")] pub(crate) jubjub::AffinePoint,
@@ -1078,11 +1083,14 @@ impl ZcashDeserialize for EphemeralPublicKey {
     }
 }
 
-/// A randomized [validating][1] key that should be used to validate `spendAuthSig`.
+/// A randomized [validating key][1] that should be used to validate `spendAuthSig`.
 ///
-/// It is denoted by `rk` in the specification.
+/// It is denoted by `rk` in the specification. (This type does _not_
+/// represent [SpendAuthSig^{Sapling}.Public][2], which allows any points, including
+/// of small order).
 ///
 /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+/// [2]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
 

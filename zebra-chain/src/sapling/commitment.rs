@@ -296,7 +296,9 @@ impl ValueCommitment {
 /// A Homomorphic Pedersen commitment to the value of a note, used in Spend and
 /// Output descriptions.
 ///
-/// Elements that are of small order are not allowed.
+/// Elements that are of small order are not allowed. This is a separate
+/// consensus rule and not intrinsic of value commitments; which is why this
+/// type exists.
 ///
 /// This is denoted by `cv` in the specification.
 ///

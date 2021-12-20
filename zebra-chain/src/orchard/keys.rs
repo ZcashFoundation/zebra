@@ -1092,7 +1092,13 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     ///
     /// > epk cannot be 𝒪_P
     ///
+    /// Note that this is [intrinsic to the EphemeralPublicKey][2] type and it is not
+    /// a separate consensus rule:
+    ///
+    /// > Define KA^{Orchard}.Public := P^*.
+    ///
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#actiondesc
+    /// [2]: https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let possible_point = pallas::Affine::from_bytes(&bytes);
 
