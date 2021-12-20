@@ -68,6 +68,9 @@ pub struct InboundSetupData {
 
     /// A service that manages cached blockchain state.
     pub state: State,
+
+    /// Allows efficient access to the best tip of the blockchain.
+    pub latest_chain_tip: zs::LatestChainTip,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -199,12 +202,14 @@ impl Service<zn::Request> for Inbound {
                         block_verifier,
                         mempool,
                         state,
+                        latest_chain_tip,
                     } = setup_data;
 
                     let block_downloads = Box::pin(BlockDownloads::new(
                         Timeout::new(block_download_peer_set.clone(), BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         state.clone(),
+                        latest_chain_tip,
                     ));
 
                     result = Ok(());

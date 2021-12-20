@@ -69,7 +69,13 @@ mod tests;
 const FANOUT: usize = 3;
 
 /// The delay between crawl events.
-const RATE_LIMIT_DELAY: Duration = Duration::from_secs(75);
+///
+/// This should be less than the target block interval,
+/// so that we crawl peer mempools at least once per block.
+///
+/// Using a prime number makes sure that mempool crawler fanouts
+/// don't synchronise with other crawls.
+const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
 
 /// The time to wait for a peer response.
 ///
@@ -194,7 +200,14 @@ where
 
         let mut requests = FuturesUnordered::new();
         // get readiness for one peer at a time, to avoid peer set contention
-        for _ in 0..FANOUT {
+        for attempt in 0..FANOUT {
+            if attempt > 0 {
+                // Let other tasks run, so we're more likely to choose a different peer.
+                //
+                // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                tokio::task::yield_now().await;
+            }
+
             let mut peer_set = peer_set.clone();
             // end the task on permanent peer set errors
             let peer_set = peer_set.ready().await?;

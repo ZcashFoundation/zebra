@@ -73,7 +73,7 @@ pub use crate::{
     meta_addr::PeerAddrState,
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
-    policies::{RetryErrors, RetryLimit},
+    policies::RetryLimit,
     protocol::internal::{Request, Response},
 };
 
