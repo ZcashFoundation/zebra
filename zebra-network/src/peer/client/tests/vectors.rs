@@ -7,6 +7,20 @@ use zebra_test::service_extensions::IsReady;
 use crate::{peer::ClientTestHarness, PeerError};
 
 #[tokio::test]
+async fn client_service_init_ok() {
+    zebra_test::init();
+
+    let (client, mut harness) = ClientTestHarness::build().finish();
+
+    assert!(harness.current_error().is_none());
+    assert!(harness.wants_connection_heartbeats());
+    assert!(harness.try_to_receive_outbound_client_request().is_empty());
+
+    // Do the readiness check last, so we don't have to deal with any capacity limits.
+    assert!(client.is_ready().await);
+}
+
+#[tokio::test]
 async fn client_service_ready_ok() {
     zebra_test::init();
 
