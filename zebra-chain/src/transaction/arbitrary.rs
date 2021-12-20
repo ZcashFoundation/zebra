@@ -9,7 +9,9 @@ use std::{
 };
 
 use chrono::{TimeZone, Utc};
-use proptest::{arbitrary::any, array, collection::vec, option, prelude::*};
+use proptest::{
+    arbitrary::any, array, collection::vec, option, prelude::*, test_runner::TestRunner,
+};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
@@ -22,7 +24,7 @@ use crate::{
         Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
     },
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::ZcashDeserializeInto,
     sprout, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     LedgerState,
@@ -975,11 +977,12 @@ pub fn fake_v5_transactions_for_network<'b>(
 pub fn insert_fake_orchard_shielded_data(
     transaction: &mut Transaction,
 ) -> &mut orchard::ShieldedData {
-    // Create a dummy action, it doesn't need to be valid
-    let dummy_action_bytes = [0u8; 820];
-    let mut dummy_action_bytes_reader = &dummy_action_bytes[..];
-    let dummy_action = orchard::Action::zcash_deserialize(&mut dummy_action_bytes_reader)
-        .expect("Dummy action should deserialize");
+    // Create a dummy action
+    let mut runner = TestRunner::default();
+    let dummy_action = orchard::Action::arbitrary()
+        .new_tree(&mut runner)
+        .unwrap()
+        .current();
 
     // Pair the dummy action with a fake signature
     let dummy_authorized_action = orchard::AuthorizedAction {
