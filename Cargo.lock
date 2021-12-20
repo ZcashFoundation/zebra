@@ -4579,7 +4579,6 @@ dependencies = [
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
- "now-or-later",
  "once_cell",
  "pin-project 1.0.7",
  "proptest",

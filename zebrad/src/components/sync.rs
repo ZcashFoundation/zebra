@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{collections::HashSet, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -12,7 +12,6 @@ use tower::{
     Service, ServiceExt,
 };
 
-use now_or_later::NowOrLater;
 use zebra_chain::{
     block::{self, Block},
     parameters::genesis_hash,
@@ -343,7 +342,7 @@ where
 
             while !self.prospective_tips.is_empty() {
                 // Check whether any block tasks are currently ready:
-                while let Some(Some(rsp)) = NowOrLater(self.downloads.next()).await {
+                while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
                     match rsp {
                         Ok(hash) => {
                             tracing::trace!(?hash, "verified and committed block to state");
