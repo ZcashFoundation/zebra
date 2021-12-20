@@ -1,5 +1,7 @@
 //! Fixed peer [`Client`] test vectors.
 
+use tower::buffer::Buffer;
+
 use zebra_test::service_extensions::IsReady;
 
 use crate::{peer::ClientTestHarness, PeerError};
@@ -9,6 +11,18 @@ async fn client_service_ready_ok() {
     zebra_test::init();
 
     let (client, mut harness) = ClientTestHarness::build().finish();
+
+    // Keep the client alive until we've finished the test.
+    //
+    // Correctness: This won't cause capacity bugs, because:
+    // - we only call `is_ready` (`poll_ready`) once, and:
+    //     - the client's Buffer has a capacity of 1,
+    //     - the ClientTestHarness request sender capacity is 1, and
+    //     - none of the other channels have capacity limits.
+    //
+    // If any of these details change, the test could hang or panic.
+    let client = Buffer::new(client, 1);
+    let _client_guard = client.clone();
 
     assert!(client.is_ready().await);
     assert!(harness.current_error().is_none());
