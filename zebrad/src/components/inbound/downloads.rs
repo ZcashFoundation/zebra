@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -15,13 +16,17 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    chain_tip::ChainTip,
+};
 use zebra_network as zn;
 use zebra_state as zs;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The maximum number of concurrent inbound download and verify tasks.
+/// Also used as the maximum lookahead limit, before block verification.
 ///
 /// We expect the syncer to download and verify checkpoints, so this bound
 /// can be small.
@@ -33,6 +38,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///
 /// The maximum block size is 2 million bytes. A deserialized malicious
 /// block with ~225_000 transparent outputs can take up 9MB of RAM.
+/// So the maximum inbound queue usage is `MAX_INBOUND_CONCURRENCY * 9 MB`.
 /// (See #1880 for more details.)
 ///
 /// Malicious blocks will eventually timeout or fail contextual validation.
@@ -41,7 +47,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-const MAX_INBOUND_CONCURRENCY: usize = 10;
+const MAX_INBOUND_CONCURRENCY: usize = 20;
 
 /// The action taken in response to a peer's gossiped block hash.
 pub enum DownloadAction {
@@ -82,6 +88,9 @@ where
 
     /// A service that manages cached blockchain state.
     state: ZS,
+
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: zs::LatestChainTip,
 
     // Internal downloads state
     /// A list of pending block download and verify tasks.
@@ -145,17 +154,18 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    /// Initialize a new download stream with the provided `network` and
-    /// `verifier` services.
+    /// Initialize a new download stream with the provided `network`, `verifier`, and `state` services.
+    /// The `latest_chain_tip` must be linked to the provided `state` service.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+    pub fn new(network: ZN, verifier: ZV, state: ZS, latest_chain_tip: zs::LatestChainTip) -> Self {
         Self {
             network,
             verifier,
             state,
+            latest_chain_tip,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
         }
@@ -173,19 +183,23 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "block hash already queued for inbound download: ignored block"
             );
+
             metrics::gauge!("gossip.queued.block.count", self.pending.len() as _);
+            metrics::counter!("gossip.already.queued.dropped.block.hash.count", 1);
 
             return DownloadAction::AlreadyQueued;
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
-            tracing::info!(
+            tracing::debug!(
                 ?hash,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many blocks queued for inbound download: ignored block"
             );
+
             metrics::gauge!("gossip.queued.block.count", self.pending.len() as _);
+            metrics::counter!("gossip.full.queue.dropped.block.hash.count", 1);
 
             return DownloadAction::FullQueue;
         }
@@ -196,6 +210,7 @@ where
         let state = self.state.clone();
         let network = self.network.clone();
         let verifier = self.verifier.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         let fut = async move {
             // Check if the block is already in the state.
@@ -212,6 +227,12 @@ where
                 .oneshot(zn::Request::BlocksByHash(std::iter::once(hash).collect()))
                 .await?
             {
+                assert_eq!(
+                    blocks.len(),
+                    1,
+                    "wrong number of blocks in response to a single hash"
+                );
+
                 blocks
                     .into_iter()
                     .next()
@@ -220,6 +241,75 @@ where
                 unreachable!("wrong response to block request");
             };
             metrics::counter!("gossip.downloaded.block.count", 1);
+
+            // # Security & Performance
+            //
+            // Reject blocks that are too far ahead of our tip,
+            // and blocks that are behind the finalized tip.
+            //
+            // Avoids denial of service attacks. Also reduces wasted work on high blocks
+            // that will timeout before being verified, and low blocks that can never be finalized.
+            let tip_height = latest_chain_tip.best_tip_height();
+
+            let max_lookahead_height = if let Some(tip_height) = tip_height {
+                let lookahead = i32::try_from(MAX_INBOUND_CONCURRENCY).expect("fits in i32");
+                (tip_height + lookahead).expect("tip is much lower than Height::MAX")
+            } else {
+                let genesis_lookahead =
+                    u32::try_from(MAX_INBOUND_CONCURRENCY - 1).expect("fits in u32");
+                block::Height(genesis_lookahead)
+            };
+
+            // Get the finalized tip height, assuming we're using the non-finalized state.
+            //
+            // It doesn't matter if we're a few blocks off here, because blocks this low
+            // are part of a fork with much less work. So they would be rejected anyway.
+            //
+            // And if we're still checkpointing, the checkpointer will reject blocks behind
+            // the finalized tip anyway.
+            //
+            // TODO: get the actual finalized tip height
+            let min_accepted_height = tip_height
+                .map(|tip_height| {
+                    block::Height(tip_height.0.saturating_sub(zs::MAX_BLOCK_REORG_HEIGHT))
+                })
+                .unwrap_or(block::Height(0));
+
+            if let Some(block_height) = block.coinbase_height() {
+                if block_height > max_lookahead_height {
+                    tracing::info!(
+                        ?hash,
+                        ?block_height,
+                        ?tip_height,
+                        ?max_lookahead_height,
+                        lookahead_limit = ?MAX_INBOUND_CONCURRENCY,
+                        "gossiped block height too far ahead of the tip: dropped downloaded block"
+                    );
+                    metrics::counter!("gossip.max.height.limit.dropped.block.count", 1);
+
+                    Err("gossiped block height too far ahead")?;
+                } else if block_height < min_accepted_height {
+                    tracing::debug!(
+                        ?hash,
+                        ?block_height,
+                        ?tip_height,
+                        ?min_accepted_height,
+                        behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
+                        "gossiped block height behind the finalized tip: dropped downloaded block"
+                    );
+                    metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
+
+                    Err("gossiped block height behind the finalized tip")?;
+                }
+            } else {
+                tracing::info!(
+                    ?hash,
+                    "gossiped block with no height: dropped downloaded block"
+                );
+                metrics::counter!("gossip.no.height.dropped.block.count", 1);
+
+                Err("gossiped block with no height")?;
+            }
 
             verifier.oneshot(block).await
         }

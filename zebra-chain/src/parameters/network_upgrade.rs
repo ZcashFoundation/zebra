@@ -138,7 +138,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
 const PRE_BLOSSOM_POW_TARGET_SPACING: i64 = 150;
 
 /// The target block spacing after Blossom activation.
-const POST_BLOSSOM_POW_TARGET_SPACING: i64 = 75;
+pub const POST_BLOSSOM_POW_TARGET_SPACING: i64 = 75;
 
 /// The averaging window for difficulty threshold arithmetic mean calculations.
 ///

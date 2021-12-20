@@ -22,12 +22,12 @@ serde = { version = "1", features = ["serde_derive"] }
 thiserror = "1"
 
 futures = "0.3"
-tokio = { version = "1.14.0", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.15.0", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.7", features = ["sync", "time"] }
 tokio-util = { version = "0.6.9", features = ["codec"] }
 tower = { version = "0.4.11", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
-metrics = "0.17.0"
+metrics = "0.17.1"
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
@@ -37,7 +37,7 @@ zebra-chain = { path = "../zebra-chain" }
 [dev-dependencies]
 proptest = "0.10"
 proptest-derive = "0.3"
-tokio = { version = "1.14.0", features = ["test-util"] }
+tokio = { version = "1.15.0", features = ["test-util"] }
 toml = "0.5"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
