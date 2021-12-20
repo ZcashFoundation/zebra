@@ -25,7 +25,7 @@ use super::{commitment, keys, note};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Output {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
+    pub cv: commitment::NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Fq")]
     pub cm_u: jubjub::Fq,
@@ -56,7 +56,7 @@ pub struct OutputInTransactionV4(pub Output);
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OutputPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
+    pub cv: commitment::NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Fq")]
     pub cm_u: jubjub::Fq,
@@ -135,7 +135,7 @@ impl ZcashSerialize for OutputInTransactionV4 {
 impl ZcashDeserialize for OutputInTransactionV4 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(OutputInTransactionV4(Output {
-            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
@@ -165,7 +165,7 @@ impl ZcashSerialize for OutputPrefixInTransactionV5 {
 impl ZcashDeserialize for OutputPrefixInTransactionV5 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(OutputPrefixInTransactionV5 {
-            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,

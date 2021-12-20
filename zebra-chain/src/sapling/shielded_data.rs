@@ -291,8 +291,8 @@ where
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingbalance
     pub fn binding_verification_key(&self) -> redjubjub::VerificationKeyBytes<Binding> {
-        let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv).sum();
-        let cv_new: ValueCommitment = self.outputs().map(|output| output.cv).sum();
+        let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv.into()).sum();
+        let cv_new: ValueCommitment = self.outputs().map(|output| output.cv.into()).sum();
         let cv_balance: ValueCommitment =
             ValueCommitment::new(jubjub::Fr::zero(), self.value_balance);
 

@@ -150,10 +150,11 @@ impl NoteCommitment {
     }
 }
 
-/// A Homomorphic Pedersen commitment to the value of a note, used in Spend and
-/// Output descriptions.
+/// A Homomorphic Pedersen commitment to the value of a note.
 ///
-/// This is denoted by `cv` in the specification.
+/// This can be used as an intermediate value in some computations. For the
+/// type actually stored in Spend and Output descriptions, see
+/// [`NotSmallOrderValueCommitment`].
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
@@ -191,23 +192,10 @@ impl fmt::Debug for ValueCommitment {
     }
 }
 
-impl TryFrom<jubjub::ExtendedPoint> for ValueCommitment {
-    type Error = &'static str;
-
+impl From<jubjub::ExtendedPoint> for ValueCommitment {
     /// Convert a Jubjub point into a ValueCommitment.
-    ///
-    /// Returns an error if [the point is of small order][1].
-    ///
-    /// > Check that a Spend description's cv and rk are not of small order,
-    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
-    ///
-    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
-    fn try_from(extended_point: jubjub::ExtendedPoint) -> Result<Self, Self::Error> {
-        if extended_point.is_small_order().into() {
-            Err("jubjub::AffinePoint value for Sapling ValueCommitment is of small order")
-        } else {
-            Ok(Self(jubjub::AffinePoint::from(extended_point)))
-        }
+    fn from(extended_point: jubjub::ExtendedPoint) -> Self {
+        Self(jubjub::AffinePoint::from(extended_point))
     }
 }
 
@@ -269,23 +257,10 @@ impl TryFrom<[u8; 32]> for ValueCommitment {
 
         if possible_point.is_some().into() {
             let point = possible_point.unwrap();
-            ExtendedPoint::from(point).try_into()
+            Ok(ExtendedPoint::from(point).into())
         } else {
             Err("Invalid jubjub::AffinePoint value")
         }
-    }
-}
-
-impl ZcashSerialize for ValueCommitment {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for ValueCommitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Self::try_from(reader.read_32_bytes()?).map_err(SerializationError::Parse)
     }
 }
 
@@ -314,10 +289,79 @@ impl ValueCommitment {
         let V = find_group_hash(*b"Zcash_cv", b"v");
         let R = find_group_hash(*b"Zcash_cv", b"r");
 
-        // find_group_hash() returns points in the prime-order subgroup,
-        // so we know this result is also in the same subgroup and we don't
-        // need to check the error.
-        Self::try_from(V * v + R * rcv).expect("is in prime-order subgroup")
+        Self::from(V * v + R * rcv)
+    }
+}
+
+/// A Homomorphic Pedersen commitment to the value of a note, used in Spend and
+/// Output descriptions.
+///
+/// Elements that are of small order are not allowed.
+///
+/// This is denoted by `cv` in the specification.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#spenddesc
+/// https://zips.z.cash/protocol/protocol.pdf#outputdesc
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+pub struct NotSmallOrderValueCommitment(ValueCommitment);
+
+impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
+    type Error = &'static str;
+
+    /// Convert a ValueCommitment into a NotSmallOrderValueCommitment.
+    ///
+    /// Returns an error if the point is of small order.
+    ///
+    /// > cv and rk [MUST NOT be of small order][1], i.e. [h_J]cv MUST NOT be 𝒪_J
+    /// > and [h_J]rk MUST NOT be 𝒪_J.
+    ///
+    /// > cv and epk [MUST NOT be of small order][2], i.e. [h_J]cv MUST NOT be 𝒪_J
+    /// > and [ℎ_J]epk MUST NOT be 𝒪_J.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    /// [2]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
+    fn try_from(value_commitment: ValueCommitment) -> Result<Self, Self::Error> {
+        if value_commitment.0.is_small_order().into() {
+            Err("jubjub::AffinePoint value for Sapling ValueCommitment is of small order")
+        } else {
+            Ok(Self(value_commitment))
+        }
+    }
+}
+
+impl TryFrom<jubjub::ExtendedPoint> for NotSmallOrderValueCommitment {
+    type Error = &'static str;
+
+    /// Convert a Jubjub point into a NotSmallOrderValueCommitment.
+    fn try_from(extended_point: jubjub::ExtendedPoint) -> Result<Self, Self::Error> {
+        ValueCommitment::from(extended_point).try_into()
+    }
+}
+
+impl From<NotSmallOrderValueCommitment> for ValueCommitment {
+    fn from(cv: NotSmallOrderValueCommitment) -> Self {
+        cv.0
+    }
+}
+
+impl From<NotSmallOrderValueCommitment> for jubjub::AffinePoint {
+    fn from(cv: NotSmallOrderValueCommitment) -> Self {
+        cv.0 .0
+    }
+}
+
+impl ZcashSerialize for NotSmallOrderValueCommitment {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 32]>::from(self.0)[..])?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for NotSmallOrderValueCommitment {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let vc = ValueCommitment::try_from(reader.read_32_bytes()?)
+            .map_err(SerializationError::Parse)?;
+        vc.try_into().map_err(SerializationError::Parse)
     }
 }
 

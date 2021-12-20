@@ -37,7 +37,7 @@ use super::{
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
+    pub cv: commitment::NotSmallOrderValueCommitment,
     /// An anchor for this spend.
     ///
     /// The anchor is the root of the Sapling note commitment tree in a previous
@@ -69,7 +69,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
+    pub cv: commitment::NotSmallOrderValueCommitment,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
@@ -173,7 +173,7 @@ impl ZcashSerialize for Spend<PerSpendAnchor> {
 impl ZcashDeserialize for Spend<PerSpendAnchor> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Spend {
-            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             per_spend_anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             rk: reader
@@ -204,7 +204,7 @@ impl ZcashSerialize for SpendPrefixInTransactionV5 {
 impl ZcashDeserialize for SpendPrefixInTransactionV5 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(SpendPrefixInTransactionV5 {
-            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             rk: reader
                 .read_32_bytes()?
