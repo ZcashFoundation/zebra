@@ -457,8 +457,9 @@ impl AddressBook {
     ///
     /// # Correctness
     ///
-    /// Use [`AddressBook::address_metrics_watcher().borrow()`] in production code,
-    /// to avoid deadlocks.
+    /// External callers should use [`AddressBook::address_metrics_watcher().borrow()`]
+    /// in production code, to avoid deadlocks.
+    /// (Using the watch channel receiver does not lock the address book mutex.)
     fn address_metrics_internal(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
         let responded = self.state_peers(PeerAddrState::Responded).count();
         let never_attempted_gossiped = self
