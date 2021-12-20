@@ -37,8 +37,8 @@ tracing-flame = "0.1.0"
 tracing-journald = "0.1.0"
 tracing-subscriber = { version = "0.2.25", features = ["tracing-log"] }
 tracing-error = "0.1.2"
-metrics = "0.17.0"
-metrics-exporter-prometheus = "0.6.1"
+metrics = "0.17.1"
+metrics-exporter-prometheus = "0.7.0"
 
 dirs = "4.0.0"
 inferno = { version = "0.10.8", default-features = false }

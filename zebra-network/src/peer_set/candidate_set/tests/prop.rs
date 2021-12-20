@@ -6,7 +6,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::FutureExt;
 use proptest::{collection::vec, prelude::*};
 use tokio::time::{sleep, timeout};
 use tracing::Span;
@@ -71,8 +70,12 @@ proptest! {
 
         // Make sure that the rate-limit is never triggered, even after multiple calls
         for _ in 0..next_peer_attempts {
-            // An empty address book immediately returns "no next peer"
-            assert!(matches!(candidate_set.next().now_or_never(), Some(None)));
+            // An empty address book immediately returns "no next peer".
+            //
+            // Check that it takes less than the peer set candidate delay,
+            // and hope that is enough time for test machines with high CPU load.
+            let less_than_min_interval = MIN_PEER_CONNECTION_INTERVAL - Duration::from_millis(1);
+            assert_eq!(runtime.block_on(timeout(less_than_min_interval, candidate_set.next())), Ok(None));
         }
     }
 }
