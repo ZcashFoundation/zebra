@@ -24,6 +24,7 @@ pub mod mock_service;
 pub mod net;
 pub mod network_addr;
 pub mod prelude;
+pub mod service_extensions;
 pub mod transcript;
 pub mod vectors;
 pub mod zip0143;
