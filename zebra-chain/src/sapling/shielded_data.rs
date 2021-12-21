@@ -289,7 +289,7 @@ where
     /// of the value commitments in the Spend descriptions and Output
     /// descriptions of the transaction, and the balancing value.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#saplingbalance
+    /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
     pub fn binding_verification_key(&self) -> redjubjub::VerificationKeyBytes<Binding> {
         let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv.into()).sum();
         let cv_new: ValueCommitment = self.outputs().map(|output| output.cv.into()).sum();
