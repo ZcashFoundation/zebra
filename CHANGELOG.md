@@ -4,7 +4,7 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-20
+## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-21
 
 Zebra's latest beta works towards enforcing all consensus rules by validating JoinSplit Groth16 proofs
 used by Sprout transactions. We have also added security and network improvements, and have also
@@ -32,6 +32,7 @@ added some metrics to help diagnose networking issues.
 - Spawn initial handshakes in a separate task, Credit: Equilibrium (#3189)
 - Fix coinbase height deserialization to reject non-minimal encodings (#3129)
 - Stop doing thousands of time checks each time we connect to a peer  (#3106)
+- Revert "Stop ignoring some completed Responses" (#3274)
 
 ### Security
 
