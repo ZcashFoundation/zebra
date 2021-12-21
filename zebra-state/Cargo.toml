@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -16,7 +16,7 @@ displaydoc = "0.2.2"
 futures = "0.3.18"
 hex = "0.4.3"
 lazy_static = "1.4.0"
-metrics = "0.17.0"
+metrics = "0.17.1"
 # TODO: this crate is not maintained anymore. Replace it?
 # https://github.com/ZcashFoundation/zebra/issues/2523
 #
@@ -31,7 +31,7 @@ rocksdb = "0.16.0"
 serde = { version = "1", features = ["serde_derive"] }
 tempdir = "0.3.7"
 thiserror = "1.0.30"
-tokio = { version = "1.14.0", features = ["sync"] }
+tokio = { version = "1.15.0", features = ["sync"] }
 tower = { version = "0.4.11", features = ["buffer", "util"] }
 tracing = "0.1"
 
@@ -50,7 +50,7 @@ proptest = "0.10.1"
 proptest-derive = "0.3"
 spandoc = "0.2"
 tempdir = "0.3.7"
-tokio = { version = "1.14.0", features = ["full"] }
+tokio = { version = "1.15.0", features = ["full"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

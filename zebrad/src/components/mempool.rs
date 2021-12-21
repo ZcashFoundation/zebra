@@ -219,7 +219,7 @@ pub struct Mempool {
     /// If the state's best chain tip has reached this height, always enable the mempool.
     debug_enable_at_height: Option<Height>,
 
-    /// Allow efficient access to the best tip of the blockchain.
+    /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: zs::LatestChainTip,
 
     /// Allows the detection of newly added chain tip blocks,

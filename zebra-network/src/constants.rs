@@ -64,7 +64,21 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// This avoids explicit synchronization, but relies on the peer
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
-pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(60 + 20 + 20 + 20);
+pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 20 + 20);
+
+/// The default peer address crawler interval.
+///
+/// This should be at least [`HANDSHAKE_TIMEOUT`](constants::HANDSHAKE_TIMEOUT)
+/// lower than all other crawler intervals.
+///
+/// This makes the following sequence of events more likely:
+/// 1. a peer address crawl,
+/// 2. new peer connections,
+/// 3. peer requests from other crawlers.
+///
+/// Using a prime number makes sure that peer address crawls
+/// don't synchronise with other crawls.
+pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
 
 /// The maximum duration since a peer was last seen to consider it reachable.
 ///
@@ -89,7 +103,9 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 
 /// Regular interval for sending keepalive `Ping` messages to each
 /// connected peer.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+///
+/// Using a prime number makes sure that heartbeats don't synchronise with crawls.
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
 /// The minimum time between successive calls to [`CandidateSet::next()`][Self::next].
 ///
@@ -97,15 +113,17 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 ///
 /// Zebra resists distributed denial of service attacks by making sure that new peer connections
 /// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
-pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
+pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(25);
 
 /// The minimum time between successive calls to [`CandidateSet::update()`][Self::update].
+///
+/// Using a prime number makes sure that peer address crawls don't synchronise with other crawls.
 ///
 /// ## Security
 ///
 /// Zebra resists distributed denial of service attacks by making sure that requests for more
 /// peer addresses are sent at least `MIN_PEER_GET_ADDR_INTERVAL` apart.
-pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(30);
+pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(31);
 
 /// The combined timeout for all the requests in [`CandidateSet::update()`][Self::update].
 ///
@@ -174,7 +192,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 //
 // TODO: generate this from crate metadata (#2375)
-pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.2/";
+pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.3/";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.
@@ -255,6 +273,8 @@ pub mod magics {
 #[cfg(test)]
 mod tests {
 
+    use std::convert::TryFrom;
+
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
@@ -287,6 +307,22 @@ mod tests {
 
         assert!(EWMA_DECAY_TIME_NANOS > request_timeout_nanos,
                 "The EWMA decay time should be higher than the request timeout, so timed out peers are penalised by the EWMA.");
+
+        assert!(
+            u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
+                * MIN_PEER_CONNECTION_INTERVAL
+                < MIN_PEER_RECONNECTION_DELAY,
+            "each peer should get at least one connection attempt in each connection interval",
+        );
+
+        assert!(
+            MIN_PEER_RECONNECTION_DELAY.as_secs()
+                / (u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
+                    * MIN_PEER_CONNECTION_INTERVAL)
+                    .as_secs()
+                <= 2,
+            "each peer should only have a few connection attempts in each connection interval",
+        );
     }
 
     /// Make sure that peer age limits are consistent with each other.

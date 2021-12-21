@@ -89,6 +89,14 @@ impl PeerError {
 /// Error slots are shared between sync and async code. In async code, the error
 /// mutex should be held for as short a time as possible. This avoids blocking
 /// the async task thread on acquiring the mutex.
+///
+/// > If the value behind the mutex is just data, it’s usually appropriate to use a blocking mutex
+/// > ...
+/// > wrap the `Arc<Mutex<...>>` in a struct
+/// > that provides non-async methods for performing operations on the data within,
+/// > and only lock the mutex inside these methods
+///
+/// https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use
 #[derive(Default, Clone)]
 pub struct ErrorSlot(Arc<std::sync::Mutex<Option<SharedPeerError>>>);
 
