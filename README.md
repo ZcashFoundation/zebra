@@ -83,9 +83,6 @@ for all active consensus rules as of NU5 activation.
 
 Currently, Zebra does not validate the following Zcash consensus rules:
 
-#### NU1 - Sapling
-- Validation of Sprout JoinSplit-on-Groth16 proofs
-
 #### Sprout
 - Validation of Sprout anchors (root of the Sprout note commitment tree)
 
@@ -108,7 +105,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.2 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.3 zebrad`
 4. Run `zebrad start` (see [Running Zebra](user/run.md) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -186,9 +183,6 @@ See our [roadmap](#future-work) for details.
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [Zebra's address book can use all available memory #1873](https://github.com/ZcashFoundation/zebra/issues/1873)
-- [Zebra does not evict pre-upgrade peers from the peer set across a network upgrade #706](https://github.com/ZcashFoundation/zebra/issues/706)
-- [Zebra accepts non-minimal height encodings #2226](https://github.com/ZcashFoundation/zebra/issues/2226)
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
   - These panics can be ignored, unless they happen frequently

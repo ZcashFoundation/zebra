@@ -4,6 +4,43 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-21
+
+Zebra's latest beta works towards enforcing all consensus rules by validating JoinSplit Groth16 proofs
+used by Sprout transactions. We have also added security and network improvements, and have also
+added some metrics to help diagnose networking issues.
+
+### Added
+
+#### Consensus
+
+- Validate JoinSplit proofs (#3128, #3180)
+
+#### Networking
+
+- Add and use `debug_skip_parameter_preload` config option in tests (#3197)
+- Disconnect from outdated peers on network upgrade (#3108)
+
+#### Metrics
+
+- Add diagnostics for peer set hangs (#3203)
+- Add debug-level Zebra network message tracing (#3170)
+
+### Fixed
+
+- Stop ignoring some connection errors that could make the peer set hang (#3200)
+- Spawn initial handshakes in separate tasks, Credit: Equilibrium (#3189)
+- Fix coinbase height deserialization to reject non-minimal encodings (#3129)
+- Stop doing thousands of time checks each time we connect to a peer  (#3106)
+
+### Security
+
+- Stop ignoring panics in inbound handshakes (#3192)
+- When there are no new peers, stop crawler using CPU and writing logs  (#3177)
+- Limit address book size to limit memory usage (#3162)
+- Drop blocks that are a long way ahead of the tip, or behind the finalized tip (#3167)
+
+
 ## [Zebra 1.0.0-beta.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.2) - 2021-12-03
 
 Zebra's latest beta continues implementing zero-knowledge proof and note commitment tree validation. In this release, we have finished implementing transaction header, transaction amount, and Zebra-specific NU5 validation. (NU5 mainnet validation is waiting on an `orchard` crate update, and some consensus parameter updates.)
@@ -12,41 +49,41 @@ We also fix a number of security issues that could pose a local denial of servic
 
 As of this release, Zebra will automatically download and cache the Sprout and Sapling Groth16 circuit parameters. The cache uses around 1 GB of disk space. These cached parameters are shared across all Zebra and `zcashd` instances run by the same user.
 
-## Added
+### Added
 
-### Network Upgrade 5
+#### Network Upgrade 5
 
 - Validate orchard anchors (#3084)
 
-### Groth16 Circuit Parameters
+#### Groth16 Circuit Parameters
 
 - Automatically download and cache Zcash Sapling and Sprout parameters (#3057, #3085)
 - Stop linking the Sapling parameters into the `zebrad` and Zebra test executables (#3057)
 
-### Proof & Anchor Verification
+#### Proof & Anchor Verification
 
 - Use prepared verifying key for non-batch Sapling Groth16 verification (#3092)
 - Validate sapling anchors⚓ (#3084)
 - Add Sprout anchors to `zebra-state` (#3100)
 
-### Transaction Amount & Header Validation
+#### Transaction Amount & Header Validation
 
 - Validate miner transaction fees (#3067, #3093)
 - Validate transaction lock times (#3060)
 - Validate transaction expiry height (#3082, #3103)
 
-### Dashboards
+#### Dashboards
 
 - Add transaction-verification.json Grafana dashboard (#3122)
 
-## Fixed
+### Fixed
 
 - Shut down channels and tasks on PeerSet Drop (#3078)
 - Re-order Zebra startup, so slow services are launched last (#3091)
 - Fix slow Zebra startup times, to reduce CI failures (#3104)
 - Speed up CI, and split unrelated and conflicting CI jobs (#3077)
 
-## Security
+### Security
 
 - Stop closing connections on unexpected messages, Credit: Equilibrium (#3120, #3131)
 - Stop routing inventory requests by peer address (#3090)
@@ -138,7 +175,7 @@ This is the first beta release of Zebra. Today the mempool work is fully finishe
 
 ### Documentation
 
-- Improve main `README` documentation and other book sections (#2967, #2894) 
+- Improve main `README` documentation and other book sections (#2967, #2894)
 - Expand documentation for the mempool::crawler module (#2968)
 - Improve mempool documentation (#2942, #2963, #2964, #2965)
 - Improve documentation and types in the PeerSet (#2925)
@@ -310,11 +347,11 @@ Zebra's latest alpha continues work on the mempool.
 #### Documentation
 
 - Document consensus rules for version group IDs (#2719)
-- Specify Zebra Client will only support Unified Addresses (#2706) 
+- Specify Zebra Client will only support Unified Addresses (#2706)
 
 ### Fixed
 
--  Stop calculating transaction hashes twice in the checkpoint verifier (#2696) 
+-  Stop calculating transaction hashes twice in the checkpoint verifier (#2696)
 
 ### Security
 
@@ -691,7 +728,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Stop panicking on out-of-range version timestamps (#2148)
   - This security issue was reported by Equilibrium
 - Stop gossiping temporary inbound remote addresses to peers (#2120)
-  - If Zebra was configured with a valid (not unspecified) listener address, it would gossip the ephemeral ports of inbound connections to its peers. This fix stops Zebra sending these useless addresses to its mainnet and testnet peers. 
+  - If Zebra was configured with a valid (not unspecified) listener address, it would gossip the ephemeral ports of inbound connections to its peers. This fix stops Zebra sending these useless addresses to its mainnet and testnet peers.
 - Avoid silently corrupting invalid times during serialization (#2149)
 - Do version checks first, then send a verack response (#2121)
 - Remove checkout credentials from GitHub actions (#2158)
@@ -706,7 +743,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 
 #### Network Upgrade 5
 
-- Continue implementation of Transaction V5 (#2070, #2075, #2100) 
+- Continue implementation of Transaction V5 (#2070, #2075, #2100)
 - Implementation of data structures for Orchard support in Zebra (#1885)
 - Implementation of redpallas in Zebra (#2099)
 
@@ -826,7 +863,7 @@ The Zebra project now has a [Code of Conduct](https://github.com/ZcashFoundation
   - Make shielded data and spends generic over Transaction V4 and V5 (#1946, #1989)
 - Async batching for:
   - Sprout `JoinSplit` signatures (#1952)
-  - Sapling `Spend` and `Output` Groth16 proofs (#1713) 
+  - Sapling `Spend` and `Output` Groth16 proofs (#1713)
 - Enable `Joinsplit` and `Spend` spend auth sighash verification (#1940)
 - Randomised property tests for `InventoryHash` and `MetaAddr` (#1985)
 
@@ -874,7 +911,7 @@ Some notable changes include:
 - Fix CI disk space usage by disabling incremental compilation in coverage builds (#1923)
 
 ### Security
-- Stop relying on unchecked length fields when preallocating vectors (#1925) 
+- Stop relying on unchecked length fields when preallocating vectors (#1925)
 
 ## [Zebra v1.0.0-alpha.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-alpha.4) - 2021-03-17
 
