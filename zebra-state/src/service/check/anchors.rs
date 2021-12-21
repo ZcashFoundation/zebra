@@ -1,7 +1,7 @@
 //! Checks for whether cited anchors are previously-computed note commitment
 //! tree roots.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use zebra_chain::sprout;
 
@@ -55,12 +55,24 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
             // > output treestate of any prior JoinSplit description in the same transaction.
             //
             // https://zips.z.cash/protocol/protocol.pdf#joinsplit
-            let mut interstitial_roots: HashSet<sprout::tree::Root> = HashSet::new();
+            let mut interstitial_roots: HashMap<
+                sprout::tree::Root,
+                sprout::tree::NoteCommitmentTree,
+            > = HashMap::new();
 
-            let mut interstitial_note_commitment_tree = parent_chain.sprout_note_commitment_tree();
-
-            for joinsplit in transaction.sprout_groth16_joinsplits() {
+            for joinsplit in transaction.sprout_groth16_joinsplits().peekable() {
                 // Check all anchor sets, including the one for interstitial anchors.
+                //
+                // The anchor is checked and the matching tree is obtained, which
+                // is used to create the interstitial tree state for this JoinSplit:
+                //
+                // > For each JoinSplit description in a transaction, an interstitial output
+                // > treestate is constructed which adds the note commitments and nullifiers
+                // > specified in that JoinSplit description to the input treestate referred
+                // > to by its anchor. This interstitial output treestate is available for use
+                // > as the anchor of subsequent JoinSplit descriptions in the same transaction.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
                 //
                 // Note that [`interstitial_roots`] is always empty in the first
                 // iteration of the loop. This is because:
@@ -68,33 +80,42 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 // > "The anchor of each JoinSplit description in a transaction
                 // > MUST refer to [...] to the interstitial output treestate of
                 // > any **prior** JoinSplit description in the same transaction."
-                if !parent_chain.sprout_anchors.contains(&joinsplit.anchor)
-                    && !finalized_state.contains_sprout_anchor(&joinsplit.anchor)
-                    && (!interstitial_roots.contains(&joinsplit.anchor))
-                {
-                    // TODO: This check fails near:
-                    // - mainnet block 1_047_908
-                    //   with anchor 019c435cd1e8aca9a4165f7e126ac6e548952439d50213f4d15c546df9d49b61
-                    // - testnet block 1_057_737
-                    //   with anchor 3ad623811ffa4fe8498b23f3d6bb4e086dca32269afef6c8e572fd9ee6d0c0ea
-                    //
-                    // Restore after finding the cause and fixing it.
-                    // return Err(ValidateContextError::UnknownSproutAnchor {
-                    //     anchor: joinsplit.anchor,
-                    // });
-                    tracing::warn!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor")
-                }
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
+                let input_tree = interstitial_roots
+                    .get(&joinsplit.anchor)
+                    .cloned()
+                    .or_else(|| {
+                        parent_chain
+                            .sprout_trees_by_anchor
+                            .get(&joinsplit.anchor)
+                            .cloned()
+                            .or_else(|| {
+                                finalized_state
+                                    .sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
+                            })
+                    });
+
+                let mut input_tree = match input_tree {
+                    Some(tree) => tree,
+                    None => {
+                        tracing::warn!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor");
+                        return Err(ValidateContextError::UnknownSproutAnchor {
+                            anchor: joinsplit.anchor,
+                        });
+                    }
+                };
 
                 tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
 
                 // Add new anchors to the interstitial note commitment tree.
                 for cm in joinsplit.commitments {
-                    interstitial_note_commitment_tree
+                    input_tree
                         .append(cm)
                         .expect("note commitment should be appendable to the tree");
                 }
 
-                interstitial_roots.insert(interstitial_note_commitment_tree.root());
+                interstitial_roots.insert(input_tree.root(), input_tree);
 
                 tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
             }
