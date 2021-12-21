@@ -21,10 +21,7 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::{
-    channel::{mpsc, oneshot},
-    FutureExt, StreamExt,
-};
+use futures::{channel::mpsc, FutureExt, StreamExt};
 use tokio::{net::TcpStream, task::JoinHandle};
 use tower::{service_fn, Service};
 use tracing::Span;
@@ -36,7 +33,7 @@ use crate::{
     address_book_updater::AddressBookUpdater,
     constants, init,
     meta_addr::MetaAddr,
-    peer::{self, ErrorSlot, HandshakeRequest, OutboundConnectorRequest},
+    peer::{self, ClientTestHarness, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
         initialize::{
             accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
@@ -45,7 +42,7 @@ use crate::{
         set::MorePeers,
         ActiveConnectionCounter, CandidateSet,
     },
-    protocol::{external::types::Version, types::PeerServices},
+    protocol::types::PeerServices,
     AddressBook, BoxError, Config, Request, Response,
 };
 
@@ -351,16 +348,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
                 connection_tracker,
             } = req;
 
-            let (server_tx, _server_rx) = mpsc::channel(0);
-            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-            let error_slot = ErrorSlot::default();
-
-            let fake_client = peer::Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx,
-                error_slot,
-                version: Version(1),
-            };
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Fake the connection closing.
             std::mem::drop(connection_tracker);
@@ -424,16 +412,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (server_tx, _server_rx) = mpsc::channel(0);
-            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-            let error_slot = ErrorSlot::default();
-
-            let fake_client = peer::Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx,
-                error_slot,
-                version: Version(1),
-            };
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
@@ -544,16 +523,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
                 connection_tracker,
             } = req;
 
-            let (server_tx, _server_rx) = mpsc::channel(0);
-            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-            let error_slot = ErrorSlot::default();
-
-            let fake_client = peer::Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx,
-                error_slot,
-                version: Version(1),
-            };
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Fake the connection closing.
             std::mem::drop(connection_tracker);
@@ -619,16 +589,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (server_tx, _server_rx) = mpsc::channel(0);
-            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-            let error_slot = ErrorSlot::default();
-
-            let fake_client = peer::Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx,
-                error_slot,
-                version: Version(1),
-            };
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
@@ -771,16 +732,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             connection_tracker,
         } = req;
 
-        let (server_tx, _server_rx) = mpsc::channel(0);
-        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-        let error_slot = ErrorSlot::default();
-
-        let fake_client = peer::Client {
-            shutdown_tx: Some(shutdown_tx),
-            server_tx,
-            error_slot,
-            version: Version(1),
-        };
+        let (fake_client, _harness) = ClientTestHarness::build().finish();
 
         // Actually close the connection.
         std::mem::drop(connection_tracker);
@@ -848,16 +800,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (server_tx, _server_rx) = mpsc::channel(0);
-            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-            let error_slot = ErrorSlot::default();
-
-            let fake_client = peer::Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx,
-                error_slot,
-                version: Version(1),
-            };
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
@@ -977,16 +920,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             connection_tracker,
         } = req;
 
-        let (server_tx, _server_rx) = mpsc::channel(0);
-        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-        let error_slot = ErrorSlot::default();
-
-        let fake_client = peer::Client {
-            shutdown_tx: Some(shutdown_tx),
-            server_tx,
-            error_slot,
-            version: Version(1),
-        };
+        let (fake_client, _harness) = ClientTestHarness::build().finish();
 
         // Actually close the connection.
         std::mem::drop(connection_tracker);
@@ -1054,16 +988,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
                 connection_tracker,
             } = req;
 
-            let (server_tx, _server_rx) = mpsc::channel(0);
-            let (shutdown_tx, _shutdown_rx) = oneshot::channel();
-            let error_slot = ErrorSlot::default();
-
-            let fake_client = peer::Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx,
-                error_slot,
-                version: Version(1),
-            };
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
             // Make the connection staying open.
             peer_tracker_tx
