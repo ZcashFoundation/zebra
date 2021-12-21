@@ -593,6 +593,14 @@ where
 
                             self.update_state_metrics(None);
 
+                            // # Correctness
+                            //
+                            // Handle any unsolicited messages first, to clear the queue.
+                            // Then check for responses to our request messages.
+                            //
+                            // This significantly reduces our message failure rate.
+                            // (Otherwise, every unsolicited message can disrupt our pending request.)
+
                             // If the message was not consumed, check whether it
                             // should be handled as a request.
                             if let Some(msg) = request_msg {
