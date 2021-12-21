@@ -23,7 +23,7 @@ use super::MorePeers;
 use crate::{
     address_book::AddressMetrics,
     peer::{
-        CancelHeartbeatTask, Client, ClientRequest, ClientTestHarness, ErrorSlot,
+        ClientTestHarness,
         LoadTrackedClient, MinimumPeerVersion,
     },
     peer_set::PeerSet,
