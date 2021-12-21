@@ -29,17 +29,16 @@ added some metrics to help diagnose networking issues.
 ### Fixed
 
 - Stop ignoring some connection errors that could make the peer set hang (#3200)
-- Spawn initial handshakes in a separate task, Credit: Equilibrium (#3189)
+- Spawn initial handshakes in separate tasks, Credit: Equilibrium (#3189)
 - Fix coinbase height deserialization to reject non-minimal encodings (#3129)
 - Stop doing thousands of time checks each time we connect to a peer  (#3106)
-- Revert "Stop ignoring some completed Responses" (#3274)
 
 ### Security
 
 - Stop ignoring panics in inbound handshakes (#3192)
 - When there are no new peers, stop crawler using CPU and writing logs  (#3177)
 - Limit address book size to limit memory usage (#3162)
-- Security: drop blocks that are a long way ahead of the tip (#3167)
+- Drop blocks that are a long way ahead of the tip, or behind the finalized tip (#3167)
 
 
 ## [Zebra 1.0.0-beta.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.2) - 2021-12-03
