@@ -4532,7 +4532,6 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
- "now-or-later",
  "once_cell",
  "owo-colors 3.1.1",
  "proptest",
