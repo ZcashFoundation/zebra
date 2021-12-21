@@ -69,11 +69,9 @@ After you have your changes pushed start a PR with them using this template by a
 
 You can use `fastmod` to interactively find and replace versions.
 
-For example, for `zebra-1.0.0-alpha.12`, we did:
+For example, you can do something like:
 ```
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13'
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.11' '1.0.0-alpha.12'
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.10' '1.0.0-alpha.11'
 fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch
 fastmod --extensions rs,toml,md --fixed-strings '0.2.8' '0.2.9' tower-fallback
 ```

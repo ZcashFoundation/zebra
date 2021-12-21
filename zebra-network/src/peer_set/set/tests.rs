@@ -1,9 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use futures::{
-    channel::{mpsc, oneshot},
-    stream, Stream, StreamExt,
-};
+use futures::{channel::mpsc, stream, Stream, StreamExt};
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 use tokio::{
@@ -25,10 +22,7 @@ use zebra_chain::{
 use super::MorePeers;
 use crate::{
     address_book::AddressMetrics,
-    peer::{
-        CancelHeartbeatTask, Client, ClientRequest, ErrorSlot, LoadTrackedClient,
-        MinimumPeerVersion,
-    },
+    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::PeerSet,
     protocol::external::{types::Version, InventoryHash},
     AddressBook, Config,
@@ -42,50 +36,6 @@ mod prop;
 /// This affects the maximum number of peer connections added to the [`PeerSet`] during the tests.
 const MAX_PEERS: usize = 20;
 
-/// A handle to a mocked [`Client`] instance.
-struct MockedClientHandle {
-    _request_receiver: mpsc::Receiver<ClientRequest>,
-    shutdown_receiver: oneshot::Receiver<CancelHeartbeatTask>,
-    version: Version,
-}
-
-impl MockedClientHandle {
-    /// Create a new mocked [`Client`] instance, returning it together with a handle to track it.
-    pub fn new(version: Version) -> (Self, LoadTrackedClient) {
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let (request_sender, _request_receiver) = mpsc::channel(1);
-
-        let client = Client {
-            shutdown_tx: Some(shutdown_sender),
-            server_tx: request_sender,
-            error_slot: ErrorSlot::default(),
-            version,
-        };
-
-        let handle = MockedClientHandle {
-            _request_receiver,
-            shutdown_receiver,
-            version,
-        };
-
-        (handle, client.into())
-    }
-
-    /// Gets the peer protocol version associated to the [`Client`].
-    pub fn version(&self) -> Version {
-        self.version
-    }
-
-    /// Checks if the [`Client`] instance has not been dropped, which would have disconnected from
-    /// the peer.
-    pub fn is_connected(&mut self) -> bool {
-        match self.shutdown_receiver.try_recv() {
-            Ok(None) => true,
-            Ok(Some(CancelHeartbeatTask)) | Err(oneshot::Canceled) => false,
-        }
-    }
-}
-
 /// A helper type to generate arbitrary peer versions which can then become mock peer services.
 #[derive(Arbitrary, Debug)]
 struct PeerVersions {
@@ -98,40 +48,44 @@ impl PeerVersions {
     ///
     /// Each peer versions results in a mock peer service, which is returned as a tuple. The first
     /// element is the [`LeadTrackedClient`], which is the actual service for the peer connection.
-    /// The second element is a [`MockedClientHandle`], which contains the open endpoints of the
+    /// The second element is a [`ClientTestHarness`], which contains the open endpoints of the
     /// mock channels used by the peer service.
-    pub fn mock_peers(&self) -> (Vec<LoadTrackedClient>, Vec<MockedClientHandle>) {
+    ///
+    /// The clients and the harnesses are collected into separate [`Vec`] lists and returned.
+    pub fn mock_peers(&self) -> (Vec<LoadTrackedClient>, Vec<ClientTestHarness>) {
         let mut clients = Vec::with_capacity(self.peer_versions.len());
-        let mut handles = Vec::with_capacity(self.peer_versions.len());
+        let mut harnesses = Vec::with_capacity(self.peer_versions.len());
 
         for peer_version in &self.peer_versions {
-            let (handle, client) = MockedClientHandle::new(*peer_version);
+            let (client, harness) = ClientTestHarness::build()
+                .with_version(*peer_version)
+                .finish();
 
-            clients.push(client);
-            handles.push(handle);
+            clients.push(client.into());
+            harnesses.push(harness);
         }
 
-        (clients, handles)
+        (clients, harnesses)
     }
 
     /// Convert the arbitrary peer versions into mock peer services available through a
     /// [`Discover`] compatible stream.
     ///
     /// A tuple is returned, where the first item is a stream with the mock peers available through
-    /// a [`Discover`] interface, and the second is a list of handles to the mocked services.
+    /// a [`Discover`] interface, and the second is a list of harnesses to the mocked services.
     ///
     /// The returned stream never finishes, so it is ready to be passed to the [`PeerSet`]
     /// constructor.
     ///
-    /// See [`Self::mock_peers`] for details on how the peers are mocked and on what the handles
+    /// See [`Self::mock_peers`] for details on how the peers are mocked and on what the harnesses
     /// contain.
     pub fn mock_peer_discovery(
         &self,
     ) -> (
         impl Stream<Item = Result<Change<SocketAddr, LoadTrackedClient>, BoxError>>,
-        Vec<MockedClientHandle>,
+        Vec<ClientTestHarness>,
     ) {
-        let (clients, handles) = self.mock_peers();
+        let (clients, harnesses) = self.mock_peers();
         let fake_ports = 1_u16..;
 
         let discovered_peers_iterator = fake_ports.zip(clients).map(|(port, client)| {
@@ -142,7 +96,7 @@ impl PeerVersions {
 
         let discovered_peers = stream::iter(discovered_peers_iterator).chain(stream::pending());
 
-        (discovered_peers, handles)
+        (discovered_peers, harnesses)
     }
 }
 
