@@ -16,7 +16,7 @@ displaydoc = "0.2.2"
 futures = "0.3.18"
 hex = "0.4.3"
 lazy_static = "1.4.0"
-metrics = "0.17.0"
+metrics = "0.17.1"
 # TODO: this crate is not maintained anymore. Replace it?
 # https://github.com/ZcashFoundation/zebra/issues/2523
 #
