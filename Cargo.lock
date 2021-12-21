@@ -2079,15 +2079,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
 
 [[package]]
-name = "now-or-later"
-version = "0.0.1"
-dependencies = [
- "futures",
- "pin-project 1.0.7",
- "tokio",
-]
-
-[[package]]
 name = "ntapi"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4531,7 +4522,6 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
- "now-or-later",
  "once_cell",
  "owo-colors 3.1.1",
  "proptest",
@@ -4578,7 +4568,6 @@ dependencies = [
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
- "now-or-later",
  "once_cell",
  "pin-project 1.0.7",
  "proptest",

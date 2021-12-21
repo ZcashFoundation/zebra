@@ -1,19 +1,19 @@
 //! Extension traits for [`Service`] types to help with testing.
 
+use std::task::Poll;
+
 use futures::future::{BoxFuture, FutureExt};
 use tower::{Service, ServiceExt};
 
-use now_or_later::NowOrLater;
-
 /// An extension trait to check if a [`Service`] is immediately ready to be called.
 pub trait IsReady<Request>: Service<Request> {
-    /// Check if the [`Service`] is immediately ready to be called.
+    /// Poll the [`Service`] once, and return true if it is immediately ready to be called.
     fn is_ready(&mut self) -> BoxFuture<bool>;
 
-    /// Check if the [`Service`] is not ready to be called.
+    /// Poll the [`Service`] once, and return true if it is pending.
     fn is_pending(&mut self) -> BoxFuture<bool>;
 
-    /// Check if the [`Service`] is not immediately ready because it returns an error.
+    /// Poll the [`Service`] once, and return true if it has failed.
     fn is_failed(&mut self) -> BoxFuture<bool>;
 }
 
@@ -23,20 +23,26 @@ where
     Request: 'static,
 {
     fn is_ready(&mut self) -> BoxFuture<bool> {
-        NowOrLater(self.ready())
-            .map(|ready_result| matches!(ready_result, Some(Ok(_))))
-            .boxed()
+        async move {
+            let ready_result = futures::poll!(self.ready());
+            matches!(ready_result, Poll::Ready(Ok(_)))
+        }
+        .boxed()
     }
 
     fn is_pending(&mut self) -> BoxFuture<bool> {
-        NowOrLater(self.ready())
-            .map(|ready_result| ready_result.is_none())
-            .boxed()
+        async move {
+            let ready_result = futures::poll!(self.ready());
+            ready_result.is_pending()
+        }
+        .boxed()
     }
 
     fn is_failed(&mut self) -> BoxFuture<bool> {
-        NowOrLater(self.ready())
-            .map(|ready_result| matches!(ready_result, Some(Err(_))))
-            .boxed()
+        async move {
+            let ready_result = futures::poll!(self.ready());
+            matches!(ready_result, Poll::Ready(Err(_)))
+        }
+        .boxed()
     }
 }
