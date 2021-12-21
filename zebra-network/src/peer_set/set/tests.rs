@@ -22,10 +22,7 @@ use zebra_chain::{
 use super::MorePeers;
 use crate::{
     address_book::AddressMetrics,
-    peer::{
-        ClientTestHarness,
-        LoadTrackedClient, MinimumPeerVersion,
-    },
+    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::PeerSet,
     protocol::external::{types::Version, InventoryHash},
     AddressBook, Config,
