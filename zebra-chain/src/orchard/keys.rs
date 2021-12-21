@@ -1085,7 +1085,7 @@ impl PartialEq<[u8; 32]> for EphemeralPublicKey {
 impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     type Error = &'static str;
 
-    /// Convert an array into a EphemeralPublicKey.
+    /// Convert an array into a [`EphemeralPublicKey`].
     ///
     /// Returns an error if the encoding is malformed or if [it encodes the
     /// identity point][1].
