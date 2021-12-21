@@ -156,12 +156,14 @@ pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
 /// This delay is particularly important on instances with slow or unreliable
 /// networks, and on testnet, which has a small number of slow peers.
 ///
+/// Using a prime number makes sure that syncer fanouts don't synchronise with other crawls.
+///
 /// ## Correctness
 ///
 /// If this delay is removed (or set too low), the syncer will
 /// sometimes get stuck in a failure loop, due to leftover downloads from
 /// previous sync runs.
-const SYNC_RESTART_DELAY: Duration = Duration::from_secs(61);
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 
 /// Controls how long we wait to retry a failed attempt to download
 /// and verify the genesis block.
@@ -433,7 +435,14 @@ where
         tracing::debug!(?block_locator, "got block locator");
 
         let mut requests = FuturesUnordered::new();
-        for _ in 0..FANOUT {
+        for attempt in 0..FANOUT {
+            if attempt > 0 {
+                // Let other tasks run, so we're more likely to choose a different peer.
+                //
+                // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                tokio::task::yield_now().await;
+            }
+
             requests.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
                 zn::Request::FindBlocks {
                     known_blocks: block_locator.clone(),
@@ -552,7 +561,14 @@ where
         for tip in tips {
             tracing::debug!(?tip, "asking peers to extend chain tip");
             let mut responses = FuturesUnordered::new();
-            for _ in 0..FANOUT {
+            for attempt in 0..FANOUT {
+                if attempt > 0 {
+                    // Let other tasks run, so we're more likely to choose a different peer.
+                    //
+                    // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                    tokio::task::yield_now().await;
+                }
+
                 responses.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
                     zn::Request::FindBlocks {
                         known_blocks: vec![tip.tip],

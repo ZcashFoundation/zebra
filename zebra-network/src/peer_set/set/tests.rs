@@ -3,7 +3,10 @@ use std::{net::SocketAddr, sync::Arc};
 use futures::{channel::mpsc, stream, Stream, StreamExt};
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinHandle,
+};
 use tower::{
     discover::{Change, Discover},
     BoxError,
@@ -18,7 +21,11 @@ use zebra_chain::{
 
 use super::MorePeers;
 use crate::{
-    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
+    address_book::AddressMetrics,
+    peer::{
+        CancelHeartbeatTask, Client, ClientRequest, ClientTestHarness, ErrorSlot,
+        LoadTrackedClient, MinimumPeerVersion,
+    },
     peer_set::PeerSet,
     protocol::external::{types::Version, InventoryHash},
     AddressBook, Config,
@@ -178,7 +185,7 @@ where
             .inv_stream
             .unwrap_or_else(|| guard.create_inventory_receiver());
 
-        let address_book = guard.prepare_address_book(self.address_book);
+        let address_metrics = guard.prepare_address_book(self.address_book);
 
         let peer_set = PeerSet::new(
             &config,
@@ -186,7 +193,7 @@ where
             demand_signal,
             handle_rx,
             inv_stream,
-            address_book,
+            address_metrics,
             minimum_peer_version,
         );
 
@@ -256,17 +263,21 @@ impl PeerSetGuard {
     /// inside the [`PeerSetGuard`] to keep track of it. Otherwise, a new instance is created with
     /// the [`Self::fallback_address_book`] method.
     ///
-    /// A reference to the [`AddressBook`] instance tracked by the [`PeerSetGuard`] is returned to
-    /// be passed to the [`PeerSet`] constructor.
+    /// Returns a metrics watch channel for the [`AddressBook`] instance tracked by the [`PeerSetGuard`],
+    /// so it can be passed to the [`PeerSet`] constructor.
     pub fn prepare_address_book(
         &mut self,
         maybe_address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
-    ) -> Arc<std::sync::Mutex<AddressBook>> {
+    ) -> watch::Receiver<AddressMetrics> {
         let address_book = maybe_address_book.unwrap_or_else(Self::fallback_address_book);
+        let metrics_watcher = address_book
+            .lock()
+            .expect("unexpected panic in previous address book mutex guard")
+            .address_metrics_watcher();
 
-        self.address_book = Some(address_book.clone());
+        self.address_book = Some(address_book);
 
-        address_book
+        metrics_watcher
     }
 
     /// Create an empty [`AddressBook`] instance using a dummy local listener address.

@@ -10,10 +10,7 @@ use std::{
 };
 
 use chrono::{TimeZone, Utc};
-use futures::{
-    channel::{mpsc, oneshot},
-    future, FutureExt, SinkExt, StreamExt,
-};
+use futures::{channel::oneshot, future, FutureExt, SinkExt, StreamExt};
 use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
@@ -54,7 +51,7 @@ use crate::{
 pub struct Handshake<S, C = NoChainTip> {
     config: Config,
     inbound_service: S,
-    address_book_updater: mpsc::Sender<MetaAddrChange>,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
     user_agent: String,
@@ -306,7 +303,7 @@ impl fmt::Debug for ConnectedAddr {
 pub struct Builder<S, C = NoChainTip> {
     config: Option<Config>,
     inbound_service: Option<S>,
-    address_book_updater: Option<mpsc::Sender<MetaAddrChange>>,
+    address_book_updater: Option<tokio::sync::mpsc::Sender<MetaAddrChange>>,
     our_services: Option<PeerServices>,
     user_agent: Option<String>,
     relay: Option<bool>,
@@ -350,7 +347,7 @@ where
     /// make outbound connections to peers.
     pub fn with_address_book_updater(
         mut self,
-        address_book_updater: mpsc::Sender<MetaAddrChange>,
+        address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     ) -> Self {
         self.address_book_updater = Some(address_book_updater);
         self
@@ -415,7 +412,7 @@ where
         let address_book_updater = self.address_book_updater.unwrap_or_else(|| {
             // No `AddressBookUpdater` for timestamp collection was passed, so create a stub
             // channel. Dropping the receiver means sends will fail, but we don't care.
-            let (tx, _rx) = mpsc::channel(1);
+            let (tx, _rx) = tokio::sync::mpsc::channel(1);
             tx
         });
         let nonces = Arc::new(futures::lock::Mutex::new(HashSet::new()));
@@ -713,7 +710,7 @@ where
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
         let inbound_service = self.inbound_service.clone();
-        let mut address_book_updater = self.address_book_updater.clone();
+        let address_book_updater = self.address_book_updater.clone();
         let inv_collector = self.inv_collector.clone();
         let config = self.config.clone();
         let user_agent = self.user_agent.clone();
@@ -787,7 +784,7 @@ where
 
             // These channels should not be cloned more than they are
             // in this block, see constants.rs for more.
-            let (server_tx, server_rx) = mpsc::channel(0);
+            let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
@@ -831,7 +828,7 @@ where
                 .then(move |msg| {
                     // Add a metric for inbound messages and errors.
                     // Fire a timestamp or failure event.
-                    let mut inbound_ts_collector = inbound_ts_collector.clone();
+                    let inbound_ts_collector = inbound_ts_collector.clone();
                     let span =
                         debug_span!(parent: ts_inner_conn_span.clone(), "inbound_ts_collector");
                     async move {
@@ -1018,7 +1015,9 @@ where
 }
 
 /// Send one heartbeat using `server_tx`.
-async fn send_one_heartbeat(server_tx: &mut mpsc::Sender<ClientRequest>) -> Result<(), BoxError> {
+async fn send_one_heartbeat(
+    server_tx: &mut futures::channel::mpsc::Sender<ClientRequest>,
+) -> Result<(), BoxError> {
     // We just reached a heartbeat interval, so start sending
     // a heartbeat.
     let (tx, rx) = oneshot::channel();
@@ -1065,7 +1064,7 @@ async fn send_one_heartbeat(server_tx: &mut mpsc::Sender<ClientRequest>) -> Resu
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout<F, T>(
     fut: F,
-    address_book_updater: &mut mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, BoxError>
@@ -1099,7 +1098,7 @@ where
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    address_book_updater: &mut mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, E>
