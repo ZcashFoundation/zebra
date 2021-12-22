@@ -603,22 +603,25 @@ where
 
                             // If the message was not consumed, check whether it
                             // should be handled as a request.
-                            if let Some(msg) = request_msg {
+                            if let Some(msg) = request_msg.clone() {
                                 // do NOT instrument with the request span, this is
                                 // independent work
                                 self.handle_message_as_request(msg).await;
-                            } else {
-                                // Otherwise, check whether the handler is finished
-                                // processing messages and update the state.
-                                //
-                                // Replace the state with a temporary value,
-                                // so we can take ownership of the response sender.
-                                self.state = match std::mem::replace(&mut self.state, State::Failed) {
-                                    State::AwaitingResponse {
-                                        handler: Handler::Finished(response),
-                                        tx,
-                                        ..
-                                    } => {
+                            }
+
+                            // Check whether the handler is finished processing messages,
+                            // and update the state.
+                            // (Some messages can indicate that a response has finished,
+                            // even if the message wasn't consumed by the response.)
+                            //
+                            // Replace the state with a temporary value,
+                            // so we can take ownership of the response sender.
+                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
+                                State::AwaitingResponse {
+                                    handler: Handler::Finished(response),
+                                    tx,
+                                    ..
+                                } => {
                                     if let Ok(response) = response.as_ref() {
                                         debug!(%response, "finished receiving peer response to Zebra request");
                                         // Add a metric for inbound responses to outbound requests.
@@ -631,28 +634,27 @@ where
                                     } else {
                                         debug!(error = ?response, "error in peer response to Zebra request");
                                     }
-                                        let _ = tx.send(response.map_err(Into::into));
-                                        State::AwaitingRequest
-                                    }
-                                    pending @ State::AwaitingResponse { .. } => {
-                                        // Drop the new request message from the remote peer,
-                                        // because we can't process multiple requests at the same time.
-                                        debug!(
-                                            new_request = %request_msg
-                                                .as_ref()
-                                                .map(|m| m.to_string())
-                                                .unwrap_or_else(|| "None".into()),
-                                            awaiting_response = %pending,
+                                    let _ = tx.send(response.map_err(Into::into));
+                                    State::AwaitingRequest
+                                }
+                                pending @ State::AwaitingResponse { .. } => {
+                                    // Drop the new request message from the remote peer,
+                                    // because we can't process multiple requests at the same time.
+                                    debug!(
+                                        new_request = %request_msg
+                                            .as_ref()
+                                            .map(|m| m.to_string())
+                                            .unwrap_or_else(|| "None".into()),
+                                        awaiting_response = %pending,
                                         "ignoring new request while awaiting a response"
-                                        );
-                                        pending
-                                    },
-                                    _ => unreachable!(
-                                        "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
-                                        self.client_rx
-                                    ),
-                                };
-                            }
+                                    );
+                                    pending
+                                },
+                                _ => unreachable!(
+                                    "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
+                                    self.client_rx
+                                ),
+                            };
                         }
                         Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
