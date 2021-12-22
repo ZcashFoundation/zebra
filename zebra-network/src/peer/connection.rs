@@ -941,7 +941,7 @@ where
 
     // This function has its own span, because we're creating a new work
     // context (namely, the work of processing the inbound msg as a request)
-    #[instrument(name = "msg_as_req", skip(self, msg), fields(%msg))]
+    #[instrument(name = "msg_as_req", skip(self, msg), fields(msg = msg.command()))]
     async fn handle_message_as_request(&mut self, msg: Message) {
         trace!(?msg);
         debug!(state = %self.state, %msg, "received peer request to Zebra");
@@ -970,23 +970,23 @@ where
             // sent unsolicited, or they were sent in response to a canceled request
             // that we've already forgotten about.
             Message::Reject { .. } => {
-                tracing::debug!("got reject message unsolicited or from canceled request");
+                tracing::debug!(%msg, "got reject message unsolicited or from canceled request");
                 return;
             }
             Message::NotFound { .. } => {
-                tracing::debug!("got notfound message unsolicited or from canceled request");
+                tracing::debug!(%msg, "got notfound message unsolicited or from canceled request");
                 return;
             }
             Message::Pong(_) => {
-                tracing::debug!("got pong message unsolicited or from canceled request");
+                tracing::debug!(%msg, "got pong message unsolicited or from canceled request");
                 return;
             }
             Message::Block(_) => {
-                tracing::debug!("got block message unsolicited or from canceled request");
+                tracing::debug!(%msg, "got block message unsolicited or from canceled request");
                 return;
             }
             Message::Headers(_) => {
-                tracing::debug!("got headers message unsolicited or from canceled request");
+                tracing::debug!(%msg, "got headers message unsolicited or from canceled request");
                 return;
             }
             // These messages should never be sent by peers.
@@ -1000,17 +1000,17 @@ where
                 //
                 // Since we can't verify their source, Zebra needs to ignore unexpected messages,
                 // because closing the connection could cause a denial of service or eclipse attack.
-                debug!("got BIP111 message without advertising NODE_BLOOM");
+                debug!(%msg, "got BIP111 message without advertising NODE_BLOOM");
                 return;
             }
             // Zebra crawls the network proactively, to prevent
             // peers from inserting data into our address book.
             Message::Addr(_) => {
-                trace!("ignoring unsolicited addr message");
+                trace!(%msg, "ignoring unsolicited addr message");
                 return;
             }
             Message::Tx(transaction) => Request::PushTransaction(transaction),
-            Message::Inv(items) => match &items[..] {
+            Message::Inv(ref items) => match &items[..] {
                 // We don't expect to be advertised multiple blocks at a time,
                 // so we ignore any advertisements of multiple blocks.
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
@@ -1021,24 +1021,24 @@ where
                 // TODO: split mixed invs into multiple requests,
                 //       but skip runs of multiple blocks.
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
-                    Request::AdvertiseTransactionIds(transaction_ids(&items).collect())
+                    Request::AdvertiseTransactionIds(transaction_ids(items).collect())
                 }
 
                 // Log detailed messages for ignored inv advertisement messages.
                 [] => {
-                    debug!("ignoring empty inv");
+                    debug!(%msg, "ignoring empty inv");
                     return;
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
-                    debug!("ignoring inv with multiple blocks");
+                    debug!(%msg, "ignoring inv with multiple blocks");
                     return;
                 }
                 _ => {
-                    debug!("ignoring inv with no transactions");
+                    debug!(%msg, "ignoring inv with no transactions");
                     return;
                 }
             },
-            Message::GetData(items) => match &items[..] {
+            Message::GetData(ref items) => match &items[..] {
                 // Some peers advertise invs with mixed item types.
                 // So we suspect they might do the same with getdata.
                 //
@@ -1052,19 +1052,19 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Request::BlocksByHash(block_hashes(&items).collect())
+                    Request::BlocksByHash(block_hashes(items).collect())
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
-                    Request::TransactionsById(transaction_ids(&items).collect())
+                    Request::TransactionsById(transaction_ids(items).collect())
                 }
 
                 // Log detailed messages for ignored getdata request messages.
                 [] => {
-                    debug!("ignoring empty getdata");
+                    debug!(%msg, "ignoring empty getdata");
                     return;
                 }
                 _ => {
-                    debug!("ignoring getdata with no blocks or transactions");
+                    debug!(%msg, "ignoring getdata with no blocks or transactions");
                     return;
                 }
             },
