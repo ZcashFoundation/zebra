@@ -49,14 +49,17 @@ impl AddressBookUpdater {
         // based on the maximum number of inbound and outbound peers.
         let (worker_tx, mut worker_rx) = mpsc::channel(config.peerset_total_connection_limit());
 
-        let address_book =
-            AddressBook::new(local_listener, span!(Level::TRACE, "address book updater"));
+        let address_book = AddressBook::new(local_listener, span!(Level::TRACE, "address book"));
         let address_metrics = address_book.address_metrics_watcher();
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         let worker_address_book = address_book.clone();
         let worker = move || {
+            info!("starting the address book updater");
+
             while let Some(event) = worker_rx.blocking_recv() {
+                debug!(?event, "got address book change");
+
                 // # Correctness
                 //
                 // Briefly hold the address book threaded mutex, to update the
@@ -67,7 +70,9 @@ impl AddressBookUpdater {
                     .update(event);
             }
 
-            Err(AllAddressBookUpdaterSendersClosed.into())
+            let error = Err(AllAddressBookUpdaterSendersClosed.into());
+            info!(?error, "stopping address book updater");
+            error
         };
 
         // Correctness: spawn address book accesses on a blocking thread,

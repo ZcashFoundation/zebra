@@ -650,6 +650,12 @@ where
     // - use the `select!` macro for all actions, because the `select` function
     //   is biased towards the first ready future
 
+    info!(
+        crawl_new_peer_interval = ?config.crawl_new_peer_interval,
+        outbound_connections = ?active_outbound_connections.update_count(),
+        "starting the peer address crawler",
+    );
+
     let mut handshakes = FuturesUnordered::new();
     // <FuturesUnordered as Stream> returns None when empty.
     // Keeping an unresolved future in the pool means the stream
