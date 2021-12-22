@@ -28,7 +28,8 @@ use crate::{
     constants,
     meta_addr::MetaAddrChange,
     peer::{
-        Client, ClientRequest, Connection, ErrorSlot, HandshakeError, MinimumPeerVersion, PeerError,
+        CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
+        MinimumPeerVersion, PeerError,
     },
     peer_set::ConnectionTracker,
     protocol::{
@@ -788,13 +789,6 @@ where
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
-            let client = Client {
-                shutdown_tx: Some(shutdown_tx),
-                server_tx: server_tx.clone(),
-                error_slot: error_slot.clone(),
-                version: remote_version,
-            };
-
             let (peer_tx, peer_rx) = peer_conn.split();
 
             // Instrument the peer's rx and tx streams.
@@ -918,91 +912,39 @@ where
                 request_timer: None,
                 svc: inbound_service,
                 client_rx: server_rx.into(),
-                error_slot,
+                error_slot: error_slot.clone(),
                 peer_tx,
                 connection_tracker,
                 metrics_label: connected_addr.get_transient_addr_label(),
                 last_metrics_state: None,
             };
 
-            tokio::spawn(
+            let connection_task = tokio::spawn(
                 server
                     .run(peer_rx)
                     .instrument(connection_span.clone())
                     .boxed(),
             );
 
-            // CORRECTNESS
-            //
-            // To prevent hangs:
-            // - every await that depends on the network must have a timeout (or interval)
-            // - every error/shutdown must update the address book state and return
-            //
-            // The address book state can be updated via `ClientRequest.tx`, or the
-            // heartbeat_ts_collector.
-            //
-            // Returning from the spawned closure terminates the connection's heartbeat task.
-            let heartbeat_span = tracing::debug_span!(parent: connection_span, "heartbeat");
-            let heartbeat_ts_collector = address_book_updater.clone();
-            tokio::spawn(
-                async move {
-                    use futures::future::Either;
-
-                    let mut shutdown_rx = shutdown_rx;
-                    let mut server_tx = server_tx;
-                    let mut heartbeat_ts_collector = heartbeat_ts_collector.clone();
-                    let mut interval_stream =
-                        IntervalStream::new(tokio::time::interval(constants::HEARTBEAT_INTERVAL));
-
-                    loop {
-                        let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
-
-                        // CORRECTNESS
-                        //
-                        // Currently, select prefers the first future if multiple
-                        // futures are ready.
-                        //
-                        // Starvation is impossible here, because interval has a
-                        // slow rate, and shutdown is a oneshot. If both futures
-                        // are ready, we want the shutdown to take priority over
-                        // sending a useless heartbeat.
-                        if matches!(
-                            future::select(shutdown_rx_ref, interval_stream.next()).await,
-                            Either::Left(_)
-                        ) {
-                            tracing::trace!("shutting down due to Client shut down");
-                            if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                                // awaiting a local task won't hang
-                                let _ = heartbeat_ts_collector
-                                    .send(MetaAddr::new_shutdown(&book_addr, remote_services))
-                                    .await;
-                            }
-                            return;
-                        }
-
-                        // We've reached another heartbeat interval without
-                        // shutting down, so do a heartbeat request.
-                        //
-                        // TODO: await heartbeat and shutdown. The select
-                        // function needs pinned types, but pinned generics
-                        // are hard (#1678)
-                        let heartbeat = send_one_heartbeat(&mut server_tx);
-                        if heartbeat_timeout(
-                            heartbeat,
-                            &mut heartbeat_ts_collector,
-                            &connected_addr,
-                            &remote_services,
-                        )
-                        .await
-                        .is_err()
-                        {
-                            return;
-                        }
-                    }
-                }
-                .instrument(heartbeat_span)
-                .boxed(),
+            let heartbeat_task = tokio::spawn(
+                send_periodic_heartbeats(
+                    connected_addr,
+                    remote_services,
+                    shutdown_rx,
+                    server_tx.clone(),
+                    address_book_updater.clone(),
+                )
+                .instrument(tracing::debug_span!(parent: connection_span, "heartbeat")),
             );
+
+            let client = Client {
+                shutdown_tx: Some(shutdown_tx),
+                server_tx,
+                error_slot,
+                version: remote_version,
+                connection_task,
+                heartbeat_task,
+            };
 
             Ok(client)
         };
@@ -1011,6 +953,76 @@ where
         tokio::spawn(fut.instrument(negotiator_span))
             .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
             .boxed()
+    }
+}
+
+/// Send periodical heartbeats to `server_tx`, and update the peer status through
+/// `heartbeat_ts_collector`.
+///
+/// # Correctness
+///
+/// To prevent hangs:
+/// - every await that depends on the network must have a timeout (or interval)
+/// - every error/shutdown must update the address book state and return
+///
+/// The address book state can be updated via `ClientRequest.tx`, or the
+/// heartbeat_ts_collector.
+///
+/// Returning from this function terminates the connection's heartbeat task.
+async fn send_periodic_heartbeats(
+    connected_addr: ConnectedAddr,
+    remote_services: PeerServices,
+    mut shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
+    mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
+    mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+) {
+    use futures::future::Either;
+
+    let mut interval_stream =
+        IntervalStream::new(tokio::time::interval(constants::HEARTBEAT_INTERVAL));
+
+    loop {
+        let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
+
+        // CORRECTNESS
+        //
+        // Currently, select prefers the first future if multiple
+        // futures are ready.
+        //
+        // Starvation is impossible here, because interval has a
+        // slow rate, and shutdown is a oneshot. If both futures
+        // are ready, we want the shutdown to take priority over
+        // sending a useless heartbeat.
+        if matches!(
+            future::select(shutdown_rx_ref, interval_stream.next()).await,
+            Either::Left(_)
+        ) {
+            tracing::trace!("shutting down due to Client shut down");
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                // awaiting a local task won't hang
+                let _ = heartbeat_ts_collector
+                    .send(MetaAddr::new_shutdown(&book_addr, remote_services))
+                    .await;
+            }
+            return;
+        }
+
+        // We've reached another heartbeat interval without
+        // shutting down, so do a heartbeat request.
+        //
+        // TODO: await heartbeat and shutdown (#3254)
+        let heartbeat = send_one_heartbeat(&mut server_tx);
+        if heartbeat_timeout(
+            heartbeat,
+            &mut heartbeat_ts_collector,
+            &connected_addr,
+            &remote_services,
+        )
+        .await
+        .is_err()
+        {
+            return;
+        }
     }
 }
 
