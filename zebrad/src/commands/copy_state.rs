@@ -37,9 +37,9 @@ use std::{cmp::min, path::PathBuf};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
-
 use tokio::time::Instant;
 use tower::{Service, ServiceExt};
+
 use zebra_chain::{block::Height, parameters::Network};
 use zebra_state as old_zs;
 use zebra_state as new_zs;
@@ -51,7 +51,7 @@ use crate::{
     BoxError,
 };
 
-/// How often we log info-level progress locks
+/// How often we log info-level progress messages
 const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 
 /// `copy-state` subcommand

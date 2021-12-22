@@ -26,6 +26,7 @@ pub const CONFIG_FILE: &str = "zebrad.toml";
 #[derive(Command, Debug, Options)]
 pub enum ZebradCmd {
     /// The `copy-state` subcommand, used to debug cached chain state
+    // TODO: hide this command from users in release builds (#3279)
     #[options(help = "copy cached chain state (debug only)")]
     CopyState(CopyStateCmd),
 
