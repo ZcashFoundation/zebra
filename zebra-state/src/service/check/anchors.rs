@@ -60,7 +60,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 sprout::tree::NoteCommitmentTree,
             > = HashMap::new();
 
-            for joinsplit in transaction.sprout_groth16_joinsplits().peekable() {
+            for joinsplit in transaction.sprout_groth16_joinsplits() {
                 // Check all anchor sets, including the one for interstitial anchors.
                 //
                 // The anchor is checked and the matching tree is obtained, which

@@ -600,29 +600,29 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Column Family                  | Keys                   | Values                               | Updates |
-|--------------------------------|------------------------|--------------------------------------|---------|
-| `hash_by_height`               | `block::Height`        | `block::Hash`                        | Never   |
-| `height_tx_count_by_hash`      | `block::Hash`          | `BlockTransactionCount`              | Never   |
-| `block_header_by_height`       | `block::Height`        | `block::Header`                      | Never   |
-| `tx_by_location`               | `TransactionLocation`  | `Transaction`                        | Never   |
-| `hash_by_tx`                   | `TransactionLocation`  | `transaction::Hash`                  | Never   |
-| `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`                | Never   |
-| `utxo_by_outpoint`             | `OutLocation`          | `transparent::Output`                | Delete  |
-| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| FirstOutLocation`       | Update  |
-| `utxo_by_transparent_addr_loc` | `FirstOutLocation`     | `AtLeastOne<OutLocation>`            | Up/Del  |
-| `tx_by_transparent_addr_loc`   | `FirstOutLocation`     | `AtLeastOne<TransactionLocation>`    | Append  |
-| `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                 | Never   |
-| `sprout_anchors`               | `sprout::tree::Root`   | `()`                                 | Never   |
-| `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`   | Delete  |
-| `sapling_nullifiers`           | `sapling::Nullifier`   | `()`                                 | Never   |
-| `sapling_anchors`              | `sapling::tree::Root`  | `()`                                 | Never   |
-| `sapling_note_commitment_tree` | `block::Height`        | `sapling::tree::NoteCommitmentTree`  | Delete  |
-| `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                 | Never   |
-| `orchard_anchors`              | `orchard::tree::Root`  | `()`                                 | Never   |
-| `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree`  | Delete  |
-| `history_tree`                 | `block::Height`        | `NonEmptyHistoryTree`                | Delete  |
-| `tip_chain_value_pool`         | `()`                   | `ValueBalance`                       | Update  |
+| Column Family                  | Keys                   | Values                              | Updates |
+| ------------------------------ | ---------------------- | ----------------------------------- | ------- |
+| `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
+| `height_tx_count_by_hash`      | `block::Hash`          | `BlockTransactionCount`             | Never   |
+| `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
+| `tx_by_location`               | `TransactionLocation`  | `Transaction`                       | Never   |
+| `hash_by_tx`                   | `TransactionLocation`  | `transaction::Hash`                 | Never   |
+| `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`               | Never   |
+| `utxo_by_outpoint`             | `OutLocation`          | `transparent::Output`               | Delete  |
+| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| FirstOutLocation`      | Update  |
+| `utxo_by_transparent_addr_loc` | `FirstOutLocation`     | `AtLeastOne<OutLocation>`           | Up/Del  |
+| `tx_by_transparent_addr_loc`   | `FirstOutLocation`     | `AtLeastOne<TransactionLocation>`   | Append  |
+| `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
+| `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
+| `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`  | Delete  |
+| `sapling_nullifiers`           | `sapling::Nullifier`   | `()`                                | Never   |
+| `sapling_anchors`              | `sapling::tree::Root`  | `()`                                | Never   |
+| `sapling_note_commitment_tree` | `block::Height`        | `sapling::tree::NoteCommitmentTree` | Delete  |
+| `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                | Never   |
+| `orchard_anchors`              | `orchard::tree::Root`  | `()`                                | Never   |
+| `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree` | Delete  |
+| `history_tree`                 | `block::Height`        | `NonEmptyHistoryTree`               | Delete  |
+| `tip_chain_value_pool`         | `()`                   | `ValueBalance`                      | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
@@ -753,15 +753,25 @@ So they should not be used for consensus-critical checks.
   It also includes the `TransactionLocation` from the `FirstOutLocation`.
   (This duplicate data is small, and helps simplify the code.)
 
-- Each incremental tree consists of nodes for a small number of peaks.
-  Peaks are written once, then deleted when they are no longer required.
-  New incremental tree nodes can be added each time the finalized tip changes,
-  and unused nodes can be deleted.
-  We only keep the nodes needed for the incremental tree for the finalized tip.
-  TODO: update this description based on the incremental merkle tree code
+- Each `*_note_commitment_tree` stores the note commitment tree state
+  at the tip of the finalized state, for the specific pool. There is always
+  a single entry for those; they are indexed by height just to make testing
+  and debugging easier (so for each block committed, the old tree is
+  deleted and a new one is inserted by its new height). Each tree is stored
+  as a "Merkle tree frontier" which is basically a (logarithmic) subset of
+  the Merkle tree nodes as required to insert new items.
 
-- The history tree indexes its peaks using blocks since the last network upgrade.
-  But we map those peak indexes to heights, to make testing and debugging easier.
+- `history_tree` stores the ZIP-221 history tree state at the tip of the finalized
+  state. There is always a single entry for it; it is indexed by height just
+  to make testing and debugging easier. The tree is stored as the set of "peaks"
+  of the "Merkle mountain range" tree structure, which is what is required to
+  insert new items.
+
+- Each `*_anchors` stores the anchor (the root of a Merkle tree) of the note commitment
+  tree of a certain block. We only use the keys since we just need the set of anchors,
+  regardless from where they come from. The exception is `sprout_anchors` which also maps
+  the anchor to the matching note commitment tree. This is required to support interstitial
+  treestates, which are unique to Sprout.
 
 - The value pools are only stored for the finalized tip.
 
