@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 
-use jubjub::AffinePoint;
+use group::Group;
+use jubjub::{AffinePoint, ExtendedPoint};
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -8,8 +9,9 @@ use rand_chacha::ChaChaRng;
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys, note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4,
-    PerSpendAnchor, SharedAnchor, Spend, ValueCommitment,
+    keys::{self, ValidatingKey},
+    note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4, PerSpendAnchor,
+    SharedAnchor, Spend,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -25,7 +27,7 @@ impl Arbitrary for Spend<PerSpendAnchor> {
         )
             .prop_map(|(per_spend_anchor, nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor,
-                cv: ValueCommitment(AffinePoint::identity()),
+                cv: ExtendedPoint::generator().try_into().unwrap(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -53,7 +55,7 @@ impl Arbitrary for Spend<SharedAnchor> {
         )
             .prop_map(|(nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor: FieldNotPresent,
-                cv: ValueCommitment(AffinePoint::identity()),
+                cv: ExtendedPoint::generator().try_into().unwrap(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -79,9 +81,11 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(|(enc_ciphertext, out_ciphertext, zkproof)| Self {
-                cv: ValueCommitment(AffinePoint::identity()),
+                cv: ExtendedPoint::generator().try_into().unwrap(),
                 cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
-                ephemeral_key: keys::EphemeralPublicKey(AffinePoint::identity()),
+                ephemeral_key: keys::EphemeralPublicKey(
+                    ExtendedPoint::generator().try_into().unwrap(),
+                ),
                 enc_ciphertext,
                 out_ciphertext,
                 zkproof,
@@ -104,12 +108,13 @@ impl Arbitrary for OutputInTransactionV4 {
 
 /// Creates Strategy for generation VerificationKeyBytes, since the `redjubjub`
 /// crate does not provide an Arbitrary implementation for it.
-fn spendauth_verification_key_bytes(
-) -> impl Strategy<Value = redjubjub::VerificationKeyBytes<redjubjub::SpendAuth>> {
+fn spendauth_verification_key_bytes() -> impl Strategy<Value = ValidatingKey> {
     prop::array::uniform32(any::<u8>()).prop_map(|bytes| {
         let mut rng = ChaChaRng::from_seed(bytes);
         let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
-        redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk).into()
+        redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk)
+            .try_into()
+            .unwrap()
     })
 }
 

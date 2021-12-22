@@ -16,7 +16,7 @@ mod test_vectors;
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom},
+    convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
     str::FromStr,
@@ -472,9 +472,30 @@ pub struct AuthorizingKey(pub(crate) redjubjub::VerificationKey<SpendAuth>);
 
 impl Eq for AuthorizingKey {}
 
-impl From<[u8; 32]> for AuthorizingKey {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(redjubjub::VerificationKey::try_from(bytes).unwrap())
+impl TryFrom<[u8; 32]> for AuthorizingKey {
+    type Error = &'static str;
+
+    /// Convert an array into an AuthorizingKey.
+    ///
+    /// Returns an error if the encoding is malformed or if [it does not encode
+    /// a prime-order point][1]:
+    ///
+    /// > When decoding this representation, the key MUST be considered invalid
+    /// > if abst_J returns ⊥ for either ak or nk, or if ak not in J^{(r)*}
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let affine_point = jubjub::AffinePoint::from_bytes(bytes);
+        if affine_point.is_none().into() {
+            return Err("Invalid jubjub::AffinePoint for Sapling AuthorizingKey");
+        }
+        if affine_point.unwrap().is_prime_order().into() {
+            Ok(Self(redjubjub::VerificationKey::try_from(bytes).map_err(
+                |_e| "Invalid jubjub::AffinePoint for Sapling AuthorizingKey",
+            )?))
+        } else {
+            Err("jubjub::AffinePoint value for Sapling AuthorizingKey is not of prime order")
+        }
     }
 }
 
@@ -822,7 +843,13 @@ impl Diversifier {
 /// Derived by multiplying a JubJub point [derived][ps] from a
 /// _Diversifier_ by the _IncomingViewingKey_ scalar.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash
+/// The diversified TransmissionKey is denoted `pk_d` in the specification.
+/// Note that it can be the identity point, since its type is
+/// [`KA^{Sapling}.PublicPrimeSubgroup`][ka] which in turn is [`J^{(r)}`][jubjub].
+///
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+/// [ka]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+/// [jubjub]: https://zips.z.cash/protocol/protocol.pdf#jubjub
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub(crate) jubjub::AffinePoint);
 
@@ -837,14 +864,22 @@ impl fmt::Debug for TransmissionKey {
 
 impl Eq for TransmissionKey {}
 
-impl From<[u8; 32]> for TransmissionKey {
-    /// Attempts to interpret a byte representation of an
-    /// affine point, failing if the element is not on
-    /// the curve or non-canonical.
+impl TryFrom<[u8; 32]> for TransmissionKey {
+    type Error = &'static str;
+
+    /// Attempts to interpret a byte representation of an affine Jubjub point, failing if the
+    /// element is not on the curve, non-canonical, or not in the prime-order subgroup.
     ///
     /// https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(jubjub::AffinePoint::from_bytes(bytes).unwrap())
+    /// https://zips.z.cash/zip-0216
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let affine_point = jubjub::AffinePoint::from_bytes(bytes).unwrap();
+        // Check if it's identity or has prime order (i.e. is in the prime-order subgroup).
+        if affine_point.is_torsion_free().into() {
+            Ok(Self(affine_point))
+        } else {
+            Err("Invalid jubjub::AffinePoint value for Sapling TransmissionKey")
+        }
     }
 }
 
@@ -854,16 +889,23 @@ impl From<TransmissionKey> for [u8; 32] {
     }
 }
 
-impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
+impl TryFrom<(IncomingViewingKey, Diversifier)> for TransmissionKey {
+    type Error = &'static str;
+
     /// This includes _KA^Sapling.DerivePublic(ivk, G_d)_, which is just a
     /// scalar mult _\[ivk\]G_d_.
     ///
     /// https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     /// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
-    fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
-        Self(jubjub::AffinePoint::from(
-            diversify_hash(d.0).unwrap() * ivk.scalar,
-        ))
+    fn try_from((ivk, d): (IncomingViewingKey, Diversifier)) -> Result<Self, Self::Error> {
+        let affine_point = jubjub::AffinePoint::from(
+            diversify_hash(d.0).ok_or("invalid diversifier")? * ivk.scalar,
+        );
+        // We need to ensure that the result point is in the prime-order subgroup.
+        // Since diversify_hash() returns a point in the prime-order subgroup,
+        // then the result point will also be in the prime-order subgroup
+        // and there is no need to check anything.
+        Ok(Self(affine_point))
     }
 }
 
@@ -946,7 +988,8 @@ impl FromStr for FullViewingKey {
                         fvk_hrp::MAINNET => Network::Mainnet,
                         _ => Network::Testnet,
                     },
-                    authorizing_key: AuthorizingKey::from(authorizing_key_bytes),
+                    authorizing_key: AuthorizingKey::try_from(authorizing_key_bytes)
+                        .map_err(SerializationError::Parse)?,
                     nullifier_deriving_key: NullifierDerivingKey::from(
                         nullifier_deriving_key_bytes,
                     ),
@@ -958,9 +1001,16 @@ impl FromStr for FullViewingKey {
     }
 }
 
-/// An ephemeral public key for Sapling key agreement.
+/// An [ephemeral public key][1] for Sapling key agreement.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+/// Public keys containing points of small order are not allowed.
+///
+/// It is denoted by `epk` in the specification. (This type does _not_
+/// represent [KA^{Sapling}.Public][2], which allows any points, including
+/// of small order).
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
+/// [2]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
 pub struct EphemeralPublicKey(
     #[serde(with = "serde_helpers::AffinePoint")] pub(crate) jubjub::AffinePoint,
@@ -998,13 +1048,24 @@ impl PartialEq<[u8; 32]> for EphemeralPublicKey {
 impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     type Error = &'static str;
 
+    /// Read an EphemeralPublicKey from a byte array.
+    ///
+    /// Returns an error if the key is non-canonical, or [it is of small order][1].
+    ///
+    /// > Check that a Output description's cv and epk are not of small order,
+    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let possible_point = jubjub::AffinePoint::from_bytes(bytes);
 
-        if possible_point.is_some().into() {
-            Ok(Self(possible_point.unwrap()))
+        if possible_point.is_none().into() {
+            return Err("Invalid jubjub::AffinePoint value for Sapling EphemeralPublicKey");
+        }
+        if possible_point.unwrap().is_small_order().into() {
+            Err("jubjub::AffinePoint value for Sapling EphemeralPublicKey point is of small order")
         } else {
-            Err("Invalid jubjub::AffinePoint value")
+            Ok(Self(possible_point.unwrap()))
         }
     }
 }
@@ -1019,5 +1080,62 @@ impl ZcashSerialize for EphemeralPublicKey {
 impl ZcashDeserialize for EphemeralPublicKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Self::try_from(reader.read_32_bytes()?).map_err(SerializationError::Parse)
+    }
+}
+
+/// A randomized [validating key][1] that should be used to validate `spendAuthSig`.
+///
+/// It is denoted by `rk` in the specification. (This type does _not_
+/// represent [SpendAuthSig^{Sapling}.Public][2], which allows any points, including
+/// of small order).
+///
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+/// [2]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
+
+impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
+    type Error = &'static str;
+
+    /// Convert an array into a ValidatingKey.
+    ///
+    /// Returns an error if the key is malformed or [is of small order][1].
+    ///
+    /// > Check that a Spend description's cv and rk are not of small order,
+    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    fn try_from(key: redjubjub::VerificationKey<SpendAuth>) -> Result<Self, Self::Error> {
+        if bool::from(
+            jubjub::AffinePoint::from_bytes(key.into())
+                .unwrap()
+                .is_small_order(),
+        ) {
+            Err("jubjub::AffinePoint value for Sapling ValidatingKey is of small order")
+        } else {
+            Ok(Self(key))
+        }
+    }
+}
+
+impl TryFrom<[u8; 32]> for ValidatingKey {
+    type Error = &'static str;
+
+    fn try_from(value: [u8; 32]) -> Result<Self, Self::Error> {
+        let vk = redjubjub::VerificationKey::<SpendAuth>::try_from(value)
+            .map_err(|_| "Invalid redjubjub::ValidatingKey for Sapling ValidatingKey")?;
+        vk.try_into()
+    }
+}
+
+impl From<ValidatingKey> for [u8; 32] {
+    fn from(key: ValidatingKey) -> Self {
+        key.0.into()
+    }
+}
+
+impl From<ValidatingKey> for redjubjub::VerificationKeyBytes<SpendAuth> {
+    fn from(key: ValidatingKey) -> Self {
+        key.0.into()
     }
 }

@@ -3,7 +3,7 @@
 //! Zebra uses a generic spend type for `V4` and `V5` transactions.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
-use std::{fmt, io};
+use std::{convert::TryInto, fmt, io};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
@@ -17,7 +17,10 @@ use crate::{
     },
 };
 
-use super::{commitment, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnchor, SharedAnchor};
+use super::{
+    commitment, keys::ValidatingKey, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnchor,
+    SharedAnchor,
+};
 
 /// A _Spend Description_, as described in [protocol specification §7.3][ps].
 ///
@@ -31,10 +34,10 @@ use super::{commitment, note, tree, AnchorVariant, FieldNotPresent, PerSpendAnch
 /// `V5` transactions split them into multiple arrays.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
+    pub cv: commitment::NotSmallOrderValueCommitment,
     /// An anchor for this spend.
     ///
     /// The anchor is the root of the Sapling note commitment tree in a previous
@@ -48,7 +51,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    pub rk: ValidatingKey,
     /// The ZK spend proof.
     pub zkproof: Groth16Proof,
     /// A signature authorizing this spend.
@@ -63,15 +66,23 @@ pub struct Spend<AnchorV: AnchorVariant> {
 /// Serialized as `SpendDescriptionV5` in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::ValueCommitment,
+    pub cv: commitment::NotSmallOrderValueCommitment,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
-    pub rk: redjubjub::VerificationKeyBytes<SpendAuth>,
+    pub rk: ValidatingKey,
 }
+
+// We can't derive Eq because `VerificationKey` does not implement it,
+// even if it is valid for it.
+impl<AnchorV: AnchorVariant + PartialEq> Eq for Spend<AnchorV> {}
+
+// We can't derive Eq because `VerificationKey` does not implement it,
+// even if it is valid for it.
+impl Eq for SpendPrefixInTransactionV5 {}
 
 impl<AnchorV> fmt::Display for Spend<AnchorV>
 where
@@ -152,7 +163,7 @@ impl ZcashSerialize for Spend<PerSpendAnchor> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&self.per_spend_anchor.0[..])?;
         writer.write_32_bytes(&self.nullifier.into())?;
-        writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
+        writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 64]>::from(self.spend_auth_sig)[..])?;
         Ok(())
@@ -162,10 +173,13 @@ impl ZcashSerialize for Spend<PerSpendAnchor> {
 impl ZcashDeserialize for Spend<PerSpendAnchor> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Spend {
-            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             per_spend_anchor: tree::Root(reader.read_32_bytes()?),
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
-            rk: reader.read_32_bytes()?.into(),
+            rk: reader
+                .read_32_bytes()?
+                .try_into()
+                .map_err(SerializationError::Parse)?,
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             spend_auth_sig: reader.read_64_bytes()?.into(),
         })
@@ -182,7 +196,7 @@ impl ZcashSerialize for SpendPrefixInTransactionV5 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.nullifier.into())?;
-        writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
+        writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         Ok(())
     }
 }
@@ -190,9 +204,12 @@ impl ZcashSerialize for SpendPrefixInTransactionV5 {
 impl ZcashDeserialize for SpendPrefixInTransactionV5 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(SpendPrefixInTransactionV5 {
-            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
-            rk: reader.read_32_bytes()?.into(),
+            rk: reader
+                .read_32_bytes()?
+                .try_into()
+                .map_err(SerializationError::Parse)?,
         })
     }
 }
