@@ -525,7 +525,14 @@ where
                         }
                         Either::Left((Some(Err(e)), _)) => self.fail_with(e),
                         Either::Left((Some(Ok(msg)), _)) => {
-                            self.handle_message_as_request(msg).await
+                            let unhandled_msg = self.handle_message_as_request(msg).await;
+
+                            if let Some(unhandled_msg) = unhandled_msg {
+                                debug!(
+                                    %unhandled_msg,
+                                "ignoring unhandled request while awaiting a request"
+                                );
+                            }
                         }
                         Either::Right((None, _)) => {
                             trace!("client_rx closed, ending connection");
@@ -593,26 +600,10 @@ where
 
                             self.update_state_metrics(None);
 
-                            // # Correctness
-                            //
-                            // Handle any unsolicited messages first, to clear the queue.
-                            // Then check for responses to our request messages.
-                            //
-                            // This significantly reduces our message failure rate.
-                            // (Otherwise, every unsolicited message can disrupt our pending request.)
-
-                            // If the message was not consumed, check whether it
-                            // should be handled as a request.
-                            if let Some(msg) = request_msg.clone() {
-                                // do NOT instrument with the request span, this is
-                                // independent work
-                                self.handle_message_as_request(msg).await;
-                            }
-
                             // Check whether the handler is finished processing messages,
                             // and update the state.
                             // (Some messages can indicate that a response has finished,
-                            // even if the message wasn't consumed by the response.)
+                            // even if the message wasn't consumed as a response or a request.)
                             //
                             // Replace the state with a temporary value,
                             // so we can take ownership of the response sender.
@@ -637,24 +628,34 @@ where
                                     let _ = tx.send(response.map_err(Into::into));
                                     State::AwaitingRequest
                                 }
-                                pending @ State::AwaitingResponse { .. } => {
-                                    // Drop the new request message from the remote peer,
-                                    // because we can't process multiple requests at the same time.
-                                    debug!(
-                                        new_request = %request_msg
-                                            .as_ref()
-                                            .map(|m| m.to_string())
-                                            .unwrap_or_else(|| "None".into()),
-                                        awaiting_response = %pending,
-                                        "ignoring new request while awaiting a response"
-                                    );
+                                pending @ State::AwaitingResponse { .. } =>
                                     pending
-                                },
+                                ,
                                 _ => unreachable!(
                                     "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
                                     self.client_rx
                                 ),
                             };
+
+                            self.update_state_metrics(None);
+
+                            // If the message was not consumed as a response,
+                            // check whether it can be handled as a request.
+                            let unused_msg = if let Some(request_msg) = request_msg {
+                                // do NOT instrument with the request span, this is
+                                // independent work
+                                self.handle_message_as_request(request_msg).await
+                            } else {
+                                None
+                            };
+
+                            if let Some(unused_msg) = unused_msg {
+                                debug!(
+                                    %unused_msg,
+                                    %self.state,
+                                    "ignoring peer message: not a response or a request",
+                                );
+                            }
                         }
                         Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
@@ -939,12 +940,15 @@ where
         };
     }
 
+    /// Handle `msg` as a request from a peer to this Zebra instance.
+    ///
+    /// If the message is not handled, it is returned.
     // This function has its own span, because we're creating a new work
     // context (namely, the work of processing the inbound msg as a request)
     #[instrument(name = "msg_as_req", skip(self, msg), fields(msg = msg.command()))]
-    async fn handle_message_as_request(&mut self, msg: Message) {
+    async fn handle_message_as_request(&mut self, msg: Message) -> Option<Message> {
         trace!(?msg);
-        debug!(state = %self.state, %msg, "received peer request to Zebra");
+        debug!(state = %self.state, %msg, "received inbound peer message");
 
         self.update_state_metrics(format!("In::Msg::{}", msg.command()));
 
@@ -954,40 +958,40 @@ where
                 if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
                     self.fail_with(e);
                 }
-                return;
+                None
             }
             // These messages shouldn't be sent outside of a handshake.
             Message::Version { .. } => {
                 self.fail_with(PeerError::DuplicateHandshake);
-                return;
+                None
             }
             Message::Verack { .. } => {
                 self.fail_with(PeerError::DuplicateHandshake);
-                return;
+                None
             }
             // These messages should already be handled as a response if they
             // could be a response, so if we see them here, they were either
             // sent unsolicited, or they were sent in response to a canceled request
             // that we've already forgotten about.
             Message::Reject { .. } => {
-                tracing::debug!(%msg, "got reject message unsolicited or from canceled request");
-                return;
+                debug!(%msg, "got reject message unsolicited or from canceled request");
+                None
             }
             Message::NotFound { .. } => {
-                tracing::debug!(%msg, "got notfound message unsolicited or from canceled request");
-                return;
+                debug!(%msg, "got notfound message unsolicited or from canceled request");
+                None
             }
             Message::Pong(_) => {
-                tracing::debug!(%msg, "got pong message unsolicited or from canceled request");
-                return;
+                debug!(%msg, "got pong message unsolicited or from canceled request");
+                None
             }
             Message::Block(_) => {
-                tracing::debug!(%msg, "got block message unsolicited or from canceled request");
-                return;
+                debug!(%msg, "got block message unsolicited or from canceled request");
+                None
             }
             Message::Headers(_) => {
-                tracing::debug!(%msg, "got headers message unsolicited or from canceled request");
-                return;
+                debug!(%msg, "got headers message unsolicited or from canceled request");
+                None
             }
             // These messages should never be sent by peers.
             Message::FilterLoad { .. }
@@ -1001,41 +1005,41 @@ where
                 // Since we can't verify their source, Zebra needs to ignore unexpected messages,
                 // because closing the connection could cause a denial of service or eclipse attack.
                 debug!(%msg, "got BIP111 message without advertising NODE_BLOOM");
-                return;
+                None
             }
             // Zebra crawls the network proactively, to prevent
             // peers from inserting data into our address book.
             Message::Addr(_) => {
-                trace!(%msg, "ignoring unsolicited addr message");
-                return;
+                debug!(%msg, "ignoring unsolicited addr message");
+                None
             }
-            Message::Tx(transaction) => Request::PushTransaction(transaction),
+            Message::Tx(ref transaction) => Some(Request::PushTransaction(transaction.clone())),
             Message::Inv(ref items) => match &items[..] {
                 // We don't expect to be advertised multiple blocks at a time,
                 // so we ignore any advertisements of multiple blocks.
-                [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash),
+                [InventoryHash::Block(hash)] => Some(Request::AdvertiseBlock(*hash)),
 
                 // Some peers advertise invs with mixed item types.
                 // But we're just interested in the transaction invs.
                 //
                 // TODO: split mixed invs into multiple requests,
                 //       but skip runs of multiple blocks.
-                tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
-                    Request::AdvertiseTransactionIds(transaction_ids(items).collect())
-                }
+                tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => Some(
+                    Request::AdvertiseTransactionIds(transaction_ids(items).collect()),
+                ),
 
                 // Log detailed messages for ignored inv advertisement messages.
                 [] => {
                     debug!(%msg, "ignoring empty inv");
-                    return;
+                    None
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
                     debug!(%msg, "ignoring inv with multiple blocks");
-                    return;
+                    None
                 }
                 _ => {
                     debug!(%msg, "ignoring inv with no transactions");
-                    return;
+                    None
                 }
             },
             Message::GetData(ref items) => match &items[..] {
@@ -1052,31 +1056,47 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Request::BlocksByHash(block_hashes(items).collect())
+                    Some(Request::BlocksByHash(block_hashes(items).collect()))
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
-                    Request::TransactionsById(transaction_ids(items).collect())
+                    Some(Request::TransactionsById(transaction_ids(items).collect()))
                 }
 
                 // Log detailed messages for ignored getdata request messages.
                 [] => {
                     debug!(%msg, "ignoring empty getdata");
-                    return;
+                    None
                 }
                 _ => {
                     debug!(%msg, "ignoring getdata with no blocks or transactions");
-                    return;
+                    None
                 }
             },
-            Message::GetAddr => Request::Peers,
-            Message::GetBlocks { known_blocks, stop } => Request::FindBlocks { known_blocks, stop },
-            Message::GetHeaders { known_blocks, stop } => {
-                Request::FindHeaders { known_blocks, stop }
-            }
-            Message::Mempool => Request::MempoolTransactionIds,
+            Message::GetAddr => Some(Request::Peers),
+            Message::GetBlocks {
+                ref known_blocks,
+                stop,
+            } => Some(Request::FindBlocks {
+                known_blocks: known_blocks.clone(),
+                stop,
+            }),
+            Message::GetHeaders {
+                ref known_blocks,
+                stop,
+            } => Some(Request::FindHeaders {
+                known_blocks: known_blocks.clone(),
+                stop,
+            }),
+            Message::Mempool => Some(Request::MempoolTransactionIds),
         };
 
-        self.drive_peer_request(req).await
+        if let Some(req) = req {
+            self.drive_peer_request(req).await;
+            None
+        } else {
+            // return the unused message
+            Some(msg)
+        }
     }
 
     /// Given a `req` originating from the peer, drive it to completion and send
