@@ -16,7 +16,7 @@ use aes::Aes256;
 use bech32::{self, ToBase32, Variant};
 use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
-use group::{Group, GroupEncoding};
+use group::{prime::PrimeCurveAffine, Group, GroupEncoding};
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, FieldExt},
     pasta::pallas,
@@ -1085,11 +1085,30 @@ impl PartialEq<[u8; 32]> for EphemeralPublicKey {
 impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     type Error = &'static str;
 
+    /// Convert an array into a [`EphemeralPublicKey`].
+    ///
+    /// Returns an error if the encoding is malformed or if [it encodes the
+    /// identity point][1].
+    ///
+    /// > epk cannot be 𝒪_P
+    ///
+    /// Note that this is [intrinsic to the EphemeralPublicKey][2] type and it is not
+    /// a separate consensus rule:
+    ///
+    /// > Define KA^{Orchard}.Public := P^*.
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#actiondesc
+    /// [2]: https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let possible_point = pallas::Affine::from_bytes(&bytes);
 
         if possible_point.is_some().into() {
-            Ok(Self(possible_point.unwrap()))
+            let point = possible_point.unwrap();
+            if point.to_curve().is_identity().into() {
+                Err("pallas::Affine value for Orchard EphemeralPublicKey is the identity")
+            } else {
+                Ok(Self(possible_point.unwrap()))
+            }
         } else {
             Err("Invalid pallas::Affine value for Orchard EphemeralPublicKey")
         }

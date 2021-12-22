@@ -24,6 +24,8 @@ pub(crate) use client::{tests::ReceiveRequestAttempt, CancelHeartbeatTask, Clien
 
 use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 
+pub(crate) use client::CancelHeartbeatTask;
+
 pub use client::Client;
 pub use connection::Connection;
 pub use connector::{Connector, OutboundConnectorRequest};

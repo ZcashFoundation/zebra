@@ -162,11 +162,11 @@ impl Description for Spend<PerSpendAnchor> {
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let mut inputs = vec![];
 
-        let rk_affine = jubjub::AffinePoint::from_bytes(self.rk.into()).unwrap();
+        let rk_affine = jubjub::AffinePoint::from_bytes(self.rk.clone().into()).unwrap();
         inputs.push(rk_affine.get_u());
         inputs.push(rk_affine.get_v());
 
-        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.into()).unwrap();
+        let cv_affine = jubjub::AffinePoint::from(self.cv);
         inputs.push(cv_affine.get_u());
         inputs.push(cv_affine.get_v());
 
@@ -197,7 +197,7 @@ impl Description for Output {
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let mut inputs = vec![];
 
-        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.into()).unwrap();
+        let cv_affine = jubjub::AffinePoint::from(self.cv);
         inputs.push(cv_affine.get_u());
         inputs.push(cv_affine.get_v());
 

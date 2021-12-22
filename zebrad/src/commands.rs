@@ -1,12 +1,16 @@
 //! Zebrad Subcommands
 
+mod copy_state;
 mod download;
 mod generate;
 mod start;
 mod version;
 
 use self::ZebradCmd::*;
-use self::{download::DownloadCmd, generate::GenerateCmd, start::StartCmd, version::VersionCmd};
+use self::{
+    copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd, start::StartCmd,
+    version::VersionCmd,
+};
 
 use crate::config::ZebradConfig;
 
@@ -21,6 +25,11 @@ pub const CONFIG_FILE: &str = "zebrad.toml";
 /// Zebrad Subcommands
 #[derive(Command, Debug, Options)]
 pub enum ZebradCmd {
+    /// The `copy-state` subcommand, used to debug cached chain state
+    // TODO: hide this command from users in release builds (#3279)
+    #[options(help = "copy cached chain state (debug only)")]
+    CopyState(CopyStateCmd),
+
     /// The `download` subcommand
     #[options(help = "pre-download required parameter files")]
     Download(DownloadCmd),
@@ -49,7 +58,7 @@ impl ZebradCmd {
     pub(crate) fn is_server(&self) -> bool {
         match self {
             // List all the commands, so new commands have to make a choice here
-            Start(_) => true,
+            CopyState(_) | Start(_) => true,
             Download(_) | Generate(_) | Help(_) | Version(_) => false,
         }
     }
@@ -58,6 +67,7 @@ impl ZebradCmd {
 impl Runnable for ZebradCmd {
     fn run(&self) {
         match self {
+            CopyState(cmd) => cmd.run(),
             Download(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
             ZebradCmd::Help(cmd) => cmd.run(),
