@@ -15,12 +15,16 @@ mod load_tracked_client;
 /// Watches for chain tip height updates to determine the minimum support peer protocol version.
 mod minimum_peer_version;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use client::tests::ClientTestHarness;
 #[cfg(not(test))]
 use client::ClientRequest;
 #[cfg(test)]
-pub(crate) use client::{CancelHeartbeatTask, ClientRequest};
+pub(crate) use client::ClientRequest;
 
 use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
+
+pub(crate) use client::CancelHeartbeatTask;
 
 pub use client::Client;
 pub use connection::Connection;

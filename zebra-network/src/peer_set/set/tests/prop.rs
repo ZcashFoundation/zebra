@@ -6,11 +6,9 @@ use tower::{discover::Discover, BoxError, ServiceExt};
 
 use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
 
-use super::{
-    BlockHeightPairAcrossNetworkUpgrades, MockedClientHandle, PeerSetBuilder, PeerVersions,
-};
+use super::{BlockHeightPairAcrossNetworkUpgrades, PeerSetBuilder, PeerVersions};
 use crate::{
-    peer::{LoadTrackedClient, MinimumPeerVersion},
+    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::PeerSet,
     protocol::external::types::Version,
 };
@@ -25,7 +23,6 @@ proptest! {
     ) {
         let runtime = zebra_test::init_async();
 
-        let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
         let (mut minimum_peer_version, best_tip_height) =
             MinimumPeerVersion::with_mock_chain_tip(network);
 
@@ -36,6 +33,7 @@ proptest! {
         let current_minimum_version = minimum_peer_version.current();
 
         runtime.block_on(async move {
+            let (discovered_peers, mut harnesses) = peer_versions.mock_peer_discovery();
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version)
@@ -43,7 +41,7 @@ proptest! {
 
             check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,
-                &mut handles,
+                &mut harnesses,
                 current_minimum_version,
             )?;
 
@@ -59,7 +57,6 @@ proptest! {
     ) {
         let runtime = zebra_test::init_async();
 
-        let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
         let (mut minimum_peer_version, best_tip_height) =
             MinimumPeerVersion::with_mock_chain_tip(block_heights.network);
 
@@ -68,6 +65,7 @@ proptest! {
             .expect("receiving endpoint lives as long as `minimum_peer_version`");
 
         runtime.block_on(async move {
+            let (discovered_peers, mut harnesses) = peer_versions.mock_peer_discovery();
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version.clone())
@@ -75,7 +73,7 @@ proptest! {
 
             check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,
-                &mut handles,
+                &mut harnesses,
                 minimum_peer_version.current(),
             )?;
 
@@ -85,7 +83,7 @@ proptest! {
 
             check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,
-                &mut handles,
+                &mut harnesses,
                 minimum_peer_version.current(),
             )?;
 
@@ -97,10 +95,10 @@ proptest! {
 /// Check if only peers with up-to-date protocol versions are live.
 ///
 /// This will poll the `peer_set` to allow it to drop outdated peers, and then check the peer
-/// `handles` to assert that only up-to-date peers are kept by the `peer_set`.
+/// `harnesses` to assert that only up-to-date peers are kept by the `peer_set`.
 fn check_if_only_up_to_date_peers_are_live<D, C>(
     peer_set: &mut PeerSet<D, C>,
-    handles: &mut Vec<MockedClientHandle>,
+    harnesses: &mut Vec<ClientTestHarness>,
     minimum_version: Version,
 ) -> Result<(), TestCaseError>
 where
@@ -110,9 +108,9 @@ where
 {
     // Force `poll_discover` to be called to process all discovered peers.
     let poll_result = peer_set.ready().now_or_never();
-    let all_peers_are_outdated = handles
+    let all_peers_are_outdated = harnesses
         .iter()
-        .all(|handle| handle.version() < minimum_version);
+        .all(|harness| harness.version() < minimum_version);
 
     if all_peers_are_outdated {
         prop_assert!(matches!(poll_result, None));
@@ -120,9 +118,9 @@ where
         prop_assert!(matches!(poll_result, Some(Ok(_))));
     }
 
-    for handle in handles {
-        let is_outdated = handle.version() < minimum_version;
-        let is_connected = handle.is_connected();
+    for harness in harnesses {
+        let is_outdated = harness.version() < minimum_version;
+        let is_connected = harness.wants_connection_heartbeats();
 
         prop_assert!(
             is_connected != is_outdated,
