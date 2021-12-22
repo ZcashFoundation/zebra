@@ -16,14 +16,14 @@ parsers:
       method: yes
       macro: yes
 
-# comment:
-#   layout: "diff"
-#   # if true: only post the comment if coverage changes
-#   require_changes: true
+comment:
+  layout: "diff"
+  # post a coverage comment, even if coverage hasn't changed
+  require_changes: false
 
-# This turns off the extra comment; the coverage %'s are still
-# reported on the main PR page as check results
-comment: false
+# This turns off the codecov PR comment.
+# The coverage percentage is still reported in the list of PR checks.
+#comment: false
 
 github_checks:
-    annotations: false
+  annotations: false
