@@ -59,11 +59,13 @@ impl RuntimeRun for Runtime {
 
         match result {
             Ok(()) => {
+                info!("shutting down Zebra");
+
                 // Don't wait for the runtime to shut down all the tasks.
                 app_writer().shutdown(Shutdown::Graceful);
             }
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
+            Err(error) => {
+                warn!(?error, "shutting down Zebra due to an error");
                 app_writer().shutdown(Shutdown::Forced);
             }
         }
