@@ -8,7 +8,9 @@ use futures::{
     channel::{mpsc, oneshot},
     future, ready,
     stream::{Stream, StreamExt},
+    FutureExt,
 };
+use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::{
@@ -40,6 +42,12 @@ pub struct Client {
 
     /// The peer connection's protocol version.
     pub(crate) version: Version,
+
+    /// A handle to the task responsible for connecting to the peer.
+    pub(crate) connection_task: JoinHandle<()>,
+
+    /// A handle to the task responsible for sending periodic heartbeats.
+    pub(crate) heartbeat_task: JoinHandle<()>,
 }
 
 /// A signal sent by the [`Client`] half of a peer connection,
@@ -253,28 +261,70 @@ impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
 impl Client {
     /// Check if this connection's heartbeat task has exited.
     fn check_heartbeat(&mut self, cx: &mut Context<'_>) -> Result<(), SharedPeerError> {
-        if let Poll::Ready(()) = self
+        let is_canceled = self
             .shutdown_tx
             .as_mut()
             .expect("only taken on drop")
             .poll_canceled(cx)
-        {
-            // Make sure there is an error in the slot
-            let heartbeat_error: SharedPeerError = PeerError::HeartbeatTaskExited.into();
-            let original_error = self.error_slot.try_update_error(heartbeat_error.clone());
-            debug!(
-                ?original_error,
-                latest_error = ?heartbeat_error,
-                "client heartbeat task exited"
-            );
+            .is_ready();
 
-            if let Err(AlreadyErrored { original_error }) = original_error {
-                Err(original_error)
-            } else {
-                Err(heartbeat_error)
+        if is_canceled {
+            return self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited);
+        }
+
+        match self.heartbeat_task.poll_unpin(cx) {
+            Poll::Pending => {
+                // Heartbeat task is still running.
+                Ok(())
             }
+            Poll::Ready(Ok(())) => {
+                // Heartbeat task stopped unexpectedly, without panicking.
+                self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited)
+            }
+            Poll::Ready(Err(error)) => {
+                // Heartbeat task stopped unexpectedly with a panic.
+                panic!("heartbeat task has panicked: {}", error);
+            }
+        }
+    }
+
+    /// Check if the connection's task has exited.
+    fn check_connection(&mut self, context: &mut Context<'_>) -> Result<(), SharedPeerError> {
+        match self.connection_task.poll_unpin(context) {
+            Poll::Pending => {
+                // Connection task is still running.
+                Ok(())
+            }
+            Poll::Ready(Ok(())) => {
+                // Connection task stopped unexpectedly, without panicking.
+                self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
+            }
+            Poll::Ready(Err(error)) => {
+                // Connection task stopped unexpectedly with a panic.
+                panic!("connection task has panicked: {}", error);
+            }
+        }
+    }
+
+    /// Properly update the error slot after a background task has unexpectedly stopped.
+    fn set_task_exited_error(
+        &mut self,
+        task_name: &str,
+        error: PeerError,
+    ) -> Result<(), SharedPeerError> {
+        // Make sure there is an error in the slot
+        let task_error = SharedPeerError::from(error);
+        let original_error = self.error_slot.try_update_error(task_error.clone());
+        debug!(
+            ?original_error,
+            latest_error = ?task_error,
+            "client {} task exited", task_name
+        );
+
+        if let Err(AlreadyErrored { original_error }) = original_error {
+            Err(original_error)
         } else {
-            Ok(())
+            Err(task_error)
         }
     }
 
@@ -318,13 +368,15 @@ impl Service<Request> for Client {
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
-        // `poll_canceled` schedules the client task for wakeup
-        // if the heartbeat task exits and drops the cancel handle.
+        // `check_heartbeat` and `check_connection` schedule the client task for wakeup
+        // if either task exits, or if the heartbeat task drops the cancel handle.
         //
         //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
         // schedules this task for wakeup.
 
-        let mut result = self.check_heartbeat(cx);
+        let mut result = self
+            .check_heartbeat(cx)
+            .and_then(|()| self.check_connection(cx));
 
         if result.is_ok() {
             result = ready!(self.poll_request(cx));
@@ -340,8 +392,6 @@ impl Service<Request> for Client {
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        use futures::future::FutureExt;
-
         let (tx, rx) = oneshot::channel();
         // get the current Span to propagate it to the peer connection task.
         // this allows the peer connection to enter the correct tracing context
