@@ -18,6 +18,7 @@ To check if any of the top-level crates need version increments, go to the zebra
 - [ ] Use the `zebrad` crate version in the `zebra-network` user agent string
       (currently the constant `USER_AGENT` in `zebra-network/src/constants.rs`)
 - [ ] Use the latest git tag in `README.md`
+- [ ] Use the latest git tag in `book/src/user/install.md`
 
 ### How to Increment Versions
 
