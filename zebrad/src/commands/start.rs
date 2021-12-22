@@ -1,8 +1,8 @@
 //! `start` subcommand - entry point for starting a zebra node
 //!
-//!  ## Application Structure
+//! ## Application Structure
 //!
-//!  A zebra node consists of the following services and tasks:
+//! A zebra node consists of the following services and tasks:
 //!
 //! Peers:
 //!  * Network Service
@@ -268,6 +268,8 @@ impl Runnable for StartCmd {
 
         rt.expect("runtime should not already be taken")
             .run(self.start());
+
+        info!("stopping zebrad");
     }
 }
 
