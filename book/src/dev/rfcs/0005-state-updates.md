@@ -603,10 +603,15 @@ We use the following rocksdb column families:
 | Column Family                  | Keys                   | Values                               | Updates |
 |--------------------------------|------------------------|--------------------------------------|---------|
 | `hash_by_height`               | `block::Height`        | `block::Hash`                        | Never   |
-| `height_by_hash`               | `block::Hash`          | `block::Height`                      | Never   |
-| `block_by_height`              | `block::Height`        | `Block`                              | Never   |
+| `height_tx_count_by_hash`      | `block::Hash`          | `BlockTransactionCount`              | Never   |
+| `block_header_by_height`       | `block::Height`        | `block::Header`                      | Never   |
+| `tx_by_location`               | `TransactionLocation`  | `Transaction`                        | Never   |
+| `hash_by_tx`                   | `TransactionLocation`  | `transaction::Hash`                  | Never   |
 | `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`                | Never   |
-| `utxo_by_outpoint`             | `OutPoint`             | `transparent::Utxo`                  | Delete  |
+| `utxo_by_outpoint`             | `OutLocation`          | `transparent::Output`                | Delete  |
+| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| FirstOutLocation`       | Update  |
+| `utxo_by_transparent_addr_loc` | `FirstOutLocation`     | `AtLeastOne<OutLocation>`            | Up/Del  |
+| `tx_by_transparent_addr_loc`   | `FirstOutLocation`     | `AtLeastOne<TransactionLocation>`    | Append  |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                 | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `()`                                 | Never   |
 | `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`   | Delete  |
@@ -623,13 +628,18 @@ Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
 
 Block and Transaction Data:
-- `Height`: 32 bits, big-endian, unsigned
-- `TransactionIndex`: 32 bits, big-endian, unsigned
+- `Height`: 24 bits, big-endian, unsigned (allows for ~30 years worth of blocks)
+- `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
+- `TransactionCount`: same as `TransactionIndex`
 - `TransactionLocation`: `Height \|\| TransactionIndex`
-- `TransparentOutputIndex`: 32 bits, big-endian, unsigned
-- `OutPoint`: `transaction::Hash \|\| TransparentOutputIndex`
-- `IsFromCoinbase` : 8 bits, boolean, zero or one
-- `Utxo`: `Height \|\| IsFromCoinbase \|\| Output`
+- `HeightTransactionCount`: `Height \|\| TransactionCount`
+- `TransparentOutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
+- transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
+- `OutLocation`: `TransactionLocation \|\| TransparentOutputIndex`
+- `FirstOutLocation`: the first `OutLocation` used by a `transparent::Address`.
+  Always has the same value for each address, even if the first output is spent.
+- `Utxo`: `Output`, derives extra fields from the `OutLocation` key
+- `AtLeastOne<T>`: `[T; AtLeastOne::len()]` (for known-size `T`)
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
@@ -649,6 +659,10 @@ Each column family handles updates differently, based on its specific consensus 
 - Delete: Keys can be deleted, but values are never updated. The value for each key is inserted once.
   - TODO: should we prevent re-inserts of keys that have been deleted?
 - Update: Keys are never deleted, but values can be updated.
+- Append: Keys are never deleted, existing values are never updated,
+  but sets of values can be extended with more entries.
+- Up/Del: Keys can be deleted, existing entries can be removed,
+  sets of values can be extended with more entries.
 
 Currently, there are no column families that both delete and update keys.
 
@@ -673,16 +687,30 @@ So they should not be used for consensus-critical checks.
 
 ### Notes on rocksdb column families
 
-- The `hash_by_height` and `height_by_hash` column families provide a bijection between
+- The `hash_by_height` and `height_tx_count_by_hash` column families provide a bijection between
   block heights and block hashes.  (Since the rocksdb state only stores finalized
   state, they are actually a bijection).
 
-- The `block_by_height` column family provides a bijection between block
-  heights and block data. There is no corresponding `height_by_block` column
-  family: instead, hash the block, and use `height_by_hash`. (Since the
-  rocksdb state only stores finalized state, they are actually a bijection).
+- Similarly, the `tx_by_hash` and `hash_by_tx` column families provide a bijection between
+  transaction locations and transaction hashes.
 
-- Blocks are stored by height, not by hash.  This has the downside that looking
+- The `block_header_by_height` column family provides a bijection between block
+  heights and block header data. There is no corresponding `height_by_block` column
+  family: instead, hash the block, and use the hash from `height_tx_count_by_hash`. (Since the
+  rocksdb state only stores finalized state, they are actually a bijection).
+  Similarly, there are no column families that go from transaction data
+  to transaction locations: hash the transaction and use `tx_by_hash`.
+
+- Block headers and transactions are stored separately in the database,
+  so that individual transactions can be accessed efficiently.
+  Blocks can be re-created on request using the following process:
+  - Look up `height` and `tx_count` in `height_tx_count_by_hash`
+  - Get the block header for `height` from `block_header_by_height`
+  - Use [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
+    or [`multi_get`](https://github.com/facebook/rocksdb/wiki/MultiGet-Performance)
+    to get each transaction from `0..tx_count` from `tx_by_location`
+
+- Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
   that blocks with adjacent heights are adjacent in the database, and many
   common access patterns, such as helping a client sync the chain or doing
@@ -690,10 +718,40 @@ So they should not be used for consensus-critical checks.
   the fact that we commit blocks in order means we're writing only to the end
   of the rocksdb column family, which may help save space.
 
+- Similarly, transaction data is stored in chain order in `tx_by_location`,
+  and chain order within each vector in `tx_by_transparent_address`.
+
 - `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
   block.  This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
+  Transaction hashes can be looked up using `hash_by_tx`.
+
+- Similarly, UTXOs are stored in `utxo_by_outpoint` by `OutLocation`,
+  rather than `OutPoint`. `OutPoint`s can be looked up using `tx_by_hash`,
+  and reconstructed using `hash_by_tx`.
+
+- The `Utxo` type can be constructed from the `Output` data,
+  `height: TransactionLocation.height`, and
+  `is_coinbase: OutLocation.output_index == 1`.
+
+- `balance_by_transparent_addr` is the sum of all `utxo_by_transparent_addr_loc`s
+  that are still in `utxo_by_outpoint`. It is cached to improve performance for
+  addresses with large UTXO sets. It also stores the `FirstOutLocation` for each
+  address, which allows for efficient lookups.
+
+- `utxo_by_transparent_addr_loc` stores unspent transparent output locations by address.
+  UTXO locations are appended by each block. If an address lookup discovers a UTXO
+  has been spent in `utxo_by_outpoint`, that UTXO location can be deleted from
+  `utxo_by_transparent_addr_loc`. (We don't do these deletions every time a block is
+  committed, because that requires an expensive full index search.)
+  This list includes the `FirstOutLocation`, if it has not been spent.
+  (This duplicate data is small, and helps simplify the code.)
+
+- `tx_by_transparent_addr_loc` stores transaction locations by address.
+  This list includes transactions containing spent UTXOs.
+  It also includes the `TransactionLocation` from the `FirstOutLocation`.
+  (This duplicate data is small, and helps simplify the code.)
 
 - Each incremental tree consists of nodes for a small number of peaks.
   Peaks are written once, then deleted when they are no longer required.
