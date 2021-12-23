@@ -21,6 +21,7 @@ fn peer_set_drop() {
 
     // Start the runtime
     let runtime = zebra_test::init_async();
+    let _guard = runtime.enter();
 
     // Get peers and client handles of them
     let (discovered_peers, handles) = peer_versions.mock_peer_discovery();

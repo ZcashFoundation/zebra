@@ -20,7 +20,7 @@ pub use client::tests::ClientTestHarness;
 #[cfg(not(test))]
 use client::ClientRequest;
 #[cfg(test)]
-pub(crate) use client::{tests::ReceiveRequestAttempt, CancelHeartbeatTask, ClientRequest};
+pub(crate) use client::{tests::ReceiveRequestAttempt, ClientRequest};
 
 use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 
