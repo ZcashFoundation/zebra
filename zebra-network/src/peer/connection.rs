@@ -700,10 +700,13 @@ where
             }
         }
 
+        let error = self.error_slot.try_get_error();
         assert!(
-            self.error_slot.try_get_error().is_some(),
+            error.is_some(),
             "closing connections must call fail_with() or shutdown() to set the error slot"
         );
+
+        self.update_state_metrics(error.expect("checked is_some").to_string());
     }
 
     /// Fail this connection.
