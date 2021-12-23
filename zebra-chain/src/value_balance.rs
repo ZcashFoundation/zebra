@@ -142,13 +142,15 @@ where
 }
 
 impl ValueBalance<NegativeAllowed> {
-    /// [Consensus rule]: The remaining value in the transparent transaction value pool MUST
-    /// be nonnegative.
+    /// # Consensus
+    ///
+    /// > The remaining value in the transparent transaction value pool MUST be nonnegative.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
     ///
     /// This rule applies to Block and Mempool transactions.
     ///
-    /// [Consensus rule]: https://zips.z.cash/protocol/protocol.pdf#transactions
-    /// Design: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions
+    /// Design: <https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions>
     //
     // TODO: move this method to Transaction, so it can handle coinbase transactions as well?
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
@@ -165,17 +167,36 @@ impl ValueBalance<NonNegative> {
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
-    /// "If any of the "Sprout chain value pool balance", "Sapling chain value pool balance",
-    /// or "Orchard chain value pool balance" would become negative in the block chain created
-    /// as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    /// # Consensus
     ///
-    /// Nodes MAY relay transactions even if one or more of them cannot be mined due to the
-    /// aforementioned restriction."
+    /// > If the Sprout chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
     ///
-    /// https://zips.z.cash/zip-0209#specification
+    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance>
+    ///
+    /// > If the Sapling chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
+    ///
+    /// > If the Orchard chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block , then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
     ///
     /// Zebra also checks that the transparent value pool is non-negative,
     /// which is a consensus rule derived from Bitcoin.
+    /// Individual transactions have a value pool that must be non-negative,
+    /// so the Transparent chain value pool balance (which is the sum of all the value pools for each
+    /// transaction and for each block in the chain) must be non-negative too.
+    /// > The remaining value in the transparent transaction value pool MUST be nonnegative.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
+    ///
+    /// > Nodes MAY relay transactions even if one or more of them cannot be mined due to the
+    /// > aforementioned restriction."
+    ///
+    /// <https://zips.z.cash/zip-0209#specification>
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.
@@ -261,13 +282,7 @@ impl ValueBalance<NonNegative> {
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
-        // Consensus rule: If any of the "Sprout chain value pool balance",
-        // "Sapling chain value pool balance", or "Orchard chain value pool balance"
-        // would become negative in the block chain created as a result of accepting a block,
-        // then all nodes MUST reject the block as invalid.
-        //
-        // Zebra also checks that the transparent value pool is non-negative,
-        // which is a consensus rule derived from Bitcoin.
+        // This will error if the chain value pool balance gets negative with the change.
         chain_value_pool.constrain()
     }
 
