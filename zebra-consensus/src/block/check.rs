@@ -71,6 +71,12 @@ pub fn difficulty_is_valid(
         ))?;
     }
 
+    // # Consensus
+    //
+    // > The block MUST pass the difficulty filter.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    //
     // The difficulty filter is also context-free.
     //
     // ZIP 205 and ZIP 208 incorrectly describe testnet minimum difficulty blocks
