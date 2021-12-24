@@ -17,6 +17,9 @@ use crate::{
     BoxError, Config, Request, Response,
 };
 
+// TODO: tor feature
+mod tor;
+
 #[cfg(test)]
 mod tests;
 

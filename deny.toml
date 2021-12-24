@@ -68,6 +68,9 @@ skip-tree = [
 
     # wait for lots of crates in the tokio ecosystem to upgrade
     { name = "socket2", version = "=0.3.16" },
+
+    # wait for arti to stabilise
+    { name = "arti-client" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -85,6 +88,8 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
+    "https://gitlab.torproject.org/tpo/core/arti.git",
+
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
 

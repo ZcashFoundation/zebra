@@ -32,6 +32,13 @@ tracing = "0.1"
 tracing-futures = "0.2"
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
 
+# Use the latest working arti version
+# This commit is from 2021-12-22, later commits fail arti's CI
+#
+# TODO: default-features = false
+arti-client = { git = "https://gitlab.torproject.org/tpo/core/arti.git", rev = "0be9558629d6a02181b3a321398cf8a027b1e12e" }
+tor-rtcompat  = { git = "https://gitlab.torproject.org/tpo/core/arti.git", rev = "0be9558629d6a02181b3a321398cf8a027b1e12e" }
+
 zebra-chain = { path = "../zebra-chain" }
 
 [dev-dependencies]
