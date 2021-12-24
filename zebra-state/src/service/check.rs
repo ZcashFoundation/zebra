@@ -246,6 +246,11 @@ fn difficulty_threshold_is_valid(
         })?
     }
 
+    // # Consensus
+    //
+    // > For a  block at block height `Height`, `nBits` MUST be equal to `ThresholdBits(Height)`.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
     if difficulty_threshold != expected_difficulty {
         Err(ValidateContextError::InvalidDifficultyThreshold {
