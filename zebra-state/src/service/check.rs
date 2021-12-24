@@ -229,6 +229,13 @@ fn difficulty_threshold_is_valid(
     let median_time_past = difficulty_adjustment.median_time_past();
     let block_time_max =
         median_time_past + Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);
+
+    // # Consensus
+    //
+    // > For each block other than the genesis block, `nTime` MUST be strictly greater
+    // than the median-time-past of that block.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     if candidate_time <= median_time_past {
         Err(ValidateContextError::TimeTooEarly {
             candidate_time,
@@ -248,7 +255,7 @@ fn difficulty_threshold_is_valid(
 
     // # Consensus
     //
-    // > For a  block at block height `Height`, `nBits` MUST be equal to `ThresholdBits(Height)`.
+    // > For a block at block height `Height`, `nBits` MUST be equal to `ThresholdBits(Height)`.
     //
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
