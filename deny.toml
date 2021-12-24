@@ -59,9 +59,6 @@ skip-tree = [
     # ticket #2998: hdrhistogram dependencies
     { name = "hdrhistogram", version = "=6.3.4" },
 
-    # ticket #2999: http dependencies
-    { name = "bytes", version = "=0.5.6" },
-
     # ticket #3061: reqwest and minreq dependencies
     { name = "webpki-roots", version = "=0.18.0" },
 
@@ -81,6 +78,7 @@ skip-tree = [
 
     # wait for lots of crates in the tokio ecosystem to upgrade
     { name = "redox_syscall", version = "=0.1.57" },
+    { name = "rustls", version = "=0.19.1" },
     { name = "socket2", version = "=0.3.16" },
 ]
 
