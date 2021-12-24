@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::future::{FutureExt, TryFutureExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tower::{
     util::{BoxService, Oneshot},
     Service,
@@ -21,10 +21,11 @@ use crate::{
     BoxError, Config, Request, Response,
 };
 
-/// Use the provided TCP connection to create a Zcash connection completely
+/// Use the provided data stream to create a Zcash connection completely
 /// isolated from all other node state.
 ///
-/// The connection pool returned by `init` should be used for all requests that
+/// The connection pool returned by [`init`](zebra_network::init)
+/// should be used for all requests that
 /// don't require isolated state or use of an existing TCP connection. However,
 /// this low-level API is useful for custom network crawlers or Tor connections.
 ///
@@ -36,23 +37,26 @@ use crate::{
 ///
 /// # Inputs
 ///
-/// - `conn`: an existing TCP connection to use. Passing an existing TCP
-/// connection allows this method to be used with clearnet or Tor transports.
+/// - `data_stream`: an existing data stream. This can be a non-anonymised TCP connection,
+///                  or a Tor client [`DataStream`].
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
 ///
-/// # Bug
+/// # Bugs
 ///
 /// `connect_isolated` only works on `Mainnet`, see #1687.
-pub fn connect_isolated(
-    conn: TcpStream,
+pub fn connect_isolated<AsyncReadWrite>(
+    data_stream: AsyncReadWrite,
     user_agent: String,
 ) -> impl Future<
     Output = Result<
         BoxService<Request, Response, Box<dyn std::error::Error + Send + Sync + 'static>>,
         Box<dyn std::error::Error + Send + Sync + 'static>,
     >,
-> {
+>
+where
+    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let handshake = peer::Handshake::builder()
         .with_config(Config::default())
         .with_inbound_service(tower::service_fn(|_req| async move {
@@ -70,7 +74,7 @@ pub fn connect_isolated(
     Oneshot::new(
         handshake,
         HandshakeRequest {
-            tcp_stream: conn,
+            data_stream,
             connected_addr,
             connection_tracker,
         },
