@@ -98,6 +98,11 @@ pub fn difficulty_is_valid(
 
 /// Returns `Ok(())` if the `EquihashSolution` is valid for `header`
 pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error> {
+    // # Consensus
+    //
+    // > `solution` MUST represent a valid Equihash solution.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     header.solution.check(header)
 }
 
