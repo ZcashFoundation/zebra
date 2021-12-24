@@ -67,6 +67,12 @@ impl ZcashDeserialize for Header {
                 "high bit was set in version field",
             ));
         }
+
+        // # Consensus
+        //
+        // > The block version number MUST be greater than or equal to 4.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#blockheader
         if version < 4 {
             return Err(SerializationError::Parse("version must be at least 4"));
         }
