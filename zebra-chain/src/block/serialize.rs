@@ -121,6 +121,12 @@ impl ZcashSerialize for Block {
 
 impl ZcashDeserialize for Block {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // # Consensus
+        //
+        // > The size of a block MUST be less than or equal to 2000000 bytes.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#blockheader
+        //
         // If the limit is reached, we'll get an UnexpectedEof error
         let limited_reader = &mut reader.take(MAX_BLOCK_BYTES);
         Ok(Block {
