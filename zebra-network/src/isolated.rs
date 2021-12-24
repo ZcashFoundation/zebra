@@ -1,16 +1,12 @@
 //! Code for creating isolated connections to specific peers.
 
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::future::Future;
 
-use futures::future::{FutureExt, TryFutureExt};
+use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::{
     util::{BoxService, Oneshot},
-    Service,
+    ServiceExt,
 };
 
 use zebra_chain::chain_tip::NoChainTip;
@@ -48,19 +44,14 @@ use crate::{
 pub fn connect_isolated<AsyncReadWrite>(
     data_stream: AsyncReadWrite,
     user_agent: String,
-) -> impl Future<
-    Output = Result<
-        BoxService<Request, Response, Box<dyn std::error::Error + Send + Sync + 'static>>,
-        Box<dyn std::error::Error + Send + Sync + 'static>,
-    >,
->
+) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
 where
     AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let handshake = peer::Handshake::builder()
         .with_config(Config::default())
         .with_inbound_service(tower::service_fn(|_req| async move {
-            Ok::<Response, Box<dyn std::error::Error + Send + Sync + 'static>>(Response::Nil)
+            Ok::<Response, BoxError>(Response::Nil)
         }))
         .with_user_agent(user_agent)
         .with_latest_chain_tip(NoChainTip)
@@ -79,25 +70,7 @@ where
             connection_tracker,
         },
     )
-    .map_ok(|client| BoxService::new(Wrapper(client)))
-}
-
-// This can be deleted when a new version of Tower with map_err is released.
-struct Wrapper(peer::Client);
-
-impl Service<Request> for Wrapper {
-    type Response = Response;
-    type Error = BoxError;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.0.poll_ready(cx).map_err(Into::into)
-    }
-
-    fn call(&mut self, req: Request) -> Self::Future {
-        self.0.call(req).map_err(Into::into).boxed()
-    }
+    .map_ok(|client| BoxService::new(client.map_err(Into::into)))
 }
 
 #[cfg(test)]
