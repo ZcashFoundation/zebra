@@ -159,7 +159,6 @@ proptest! {
 
             // Make sure the message wass broadcasted to the right number of peers
             assert_eq!(received, number_of_peers_to_broadcast);
-            //dbg!(received);
 
             Ok::<_, TestCaseError>(())
         })?;
