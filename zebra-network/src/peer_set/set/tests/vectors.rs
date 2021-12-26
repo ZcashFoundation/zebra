@@ -1,3 +1,5 @@
+use std::time::Duration;
+use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::parameters::{Network, NetworkUpgrade};
@@ -10,7 +12,7 @@ use crate::{
 };
 
 #[test]
-fn peer_set_drop() {
+fn peer_set_ready_single_connection() {
     // We are going to use just one peer version in this test
     let peer_versions = PeerVersions {
         peer_versions: vec![Version::min_specified_for_upgrade(
@@ -95,5 +97,65 @@ fn peer_set_drop() {
             }
             _ => unreachable!(),
         };
+    });
+}
+
+#[test]
+fn peer_set_ready_multiple_connections() {
+    // Use three peers with the same version
+    let peer_version = Version::min_specified_for_upgrade(Network::Mainnet, NetworkUpgrade::Canopy);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version, peer_version, peer_version],
+    };
+
+    // Start the runtime
+    let runtime = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // Get peers and client handles of them
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+
+    // Make sure we have the right number of peers
+    assert_eq!(handles.len(), 3);
+
+    // Build a peerset
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .build();
+
+        // Get peerset ready
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        // Check we have the right amount of ready services
+        assert_eq!(peer_ready.ready_services.len(), 3);
+
+        // Stop some peer connections but not all
+        handles[0].stop_connection_task().await;
+        handles[1].stop_connection_task().await;
+
+        // We can still make the peer set ready
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        // We should have less ready peers
+        assert_eq!(peer_ready.ready_services.len(), 1);
+
+        // Stop the connection of the last peer
+        handles[2].stop_connection_task().await;
+
+        // Peer set hangs when no more connections are present
+        let peer_ready = peer_set.ready();
+        assert!(timeout(Duration::from_millis(10), peer_ready)
+            .await
+            .is_err());
     });
 }
