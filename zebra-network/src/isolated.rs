@@ -31,6 +31,8 @@ mod tests;
 /// In addition to being completely isolated from all other node state, this
 /// method also aims to be minimally distinguishable from other clients.
 ///
+/// SECURITY TODO: check if the timestamp field can be zeroed, to remove another distinguisher (#3300)
+///
 /// Note that this method does not implement any timeout behavior, so callers may
 /// want to layer it with a timeout as appropriate for their application.
 ///
