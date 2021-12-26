@@ -9,7 +9,7 @@ use tower::{
     ServiceExt,
 };
 
-use zebra_chain::chain_tip::NoChainTip;
+use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
 
 use crate::{
     peer::{self, ConnectedAddr, HandshakeRequest},
@@ -38,23 +38,27 @@ mod tests;
 ///
 /// # Inputs
 ///
+/// - `network`: the Zcash [`Network`] used for this connection.
+///
 /// - `data_stream`: an existing data stream. This can be a non-anonymised TCP connection,
 ///                  or a Tor client [`DataStream`].
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
-///
-/// # Bugs
-///
-/// `connect_isolated` only works on `Mainnet`, see #1687.
 pub fn connect_isolated<AsyncReadWrite>(
+    network: Network,
     data_stream: AsyncReadWrite,
     user_agent: String,
 ) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
 where
     AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let config = Config {
+        network,
+        ..Config::default()
+    };
+
     let handshake = peer::Handshake::builder()
-        .with_config(Config::default())
+        .with_config(config)
         .with_inbound_service(tower::service_fn(|_req| async move {
             Ok::<Response, BoxError>(Response::Nil)
         }))

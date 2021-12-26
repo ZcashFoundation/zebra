@@ -13,10 +13,17 @@ use crate::{
 
 use super::super::*;
 
+use Network::*;
+
 /// Test that `connect_isolated` sends a version message with minimal distinguishing features,
 /// when sent over TCP.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_tcp() {
+    connect_isolated_sends_anonymised_version_message_tcp_net(Mainnet).await;
+    connect_isolated_sends_anonymised_version_message_tcp_net(Testnet).await;
+}
+
+async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Network) {
     zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
@@ -31,11 +38,13 @@ async fn connect_isolated_sends_anonymised_version_message_tcp() {
 
     let outbound_conn = tokio::net::TcpStream::connect(listen_addr).await.unwrap();
 
-    let outbound_join_handle = tokio::spawn(connect_isolated(outbound_conn, "".to_string()));
+    let outbound_join_handle =
+        tokio::spawn(connect_isolated(network, outbound_conn, "".to_string()));
 
     let (inbound_conn, _) = listener.accept().await.unwrap();
 
-    let mut inbound_stream = Framed::new(inbound_conn, Codec::builder().finish());
+    let mut inbound_stream =
+        Framed::new(inbound_conn, Codec::builder().for_network(network).finish());
 
     // We don't need to send any bytes to get a version message.
     if let Message::Version {
@@ -61,7 +70,9 @@ async fn connect_isolated_sends_anonymised_version_message_tcp() {
         // The nonce must be randomised for security.
         //
         // SECURITY TODO: check if the timestamp field can be zeroed, to remove another distinguisher (#3300)
-        let fixed_isolated_addr: SocketAddr = "0.0.0.0:8233".parse().unwrap();
+
+        let mut fixed_isolated_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        fixed_isolated_addr.set_port(network.default_port());
 
         // Required fields should be accurate and match most other peers.
         // (We can't test nonce randomness here.)
@@ -110,14 +121,23 @@ async fn connect_isolated_sends_anonymised_version_message_tcp() {
 /// - runs even if network tests are disabled.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_mem() {
+    connect_isolated_sends_anonymised_version_message_mem_net(Mainnet).await;
+    connect_isolated_sends_anonymised_version_message_mem_net(Testnet).await;
+}
+
+async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Network) {
     zebra_test::init();
 
     // We expect version messages to be ~100 bytes
     let (inbound_stream, outbound_stream) = tokio::io::duplex(1024);
 
-    let outbound_join_handle = tokio::spawn(connect_isolated(outbound_stream, "".to_string()));
+    let outbound_join_handle =
+        tokio::spawn(connect_isolated(network, outbound_stream, "".to_string()));
 
-    let mut inbound_stream = Framed::new(inbound_stream, Codec::builder().finish());
+    let mut inbound_stream = Framed::new(
+        inbound_stream,
+        Codec::builder().for_network(network).finish(),
+    );
 
     // We don't need to send any bytes to get a version message.
     if let Message::Version {
@@ -143,7 +163,9 @@ async fn connect_isolated_sends_anonymised_version_message_mem() {
         // The nonce must be randomised for security.
         //
         // SECURITY TODO: check if the timestamp field can be zeroed, to remove another distinguisher (#3300)
-        let fixed_isolated_addr: SocketAddr = "0.0.0.0:8233".parse().unwrap();
+
+        let mut fixed_isolated_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        fixed_isolated_addr.set_port(network.default_port());
 
         // Required fields should be accurate and match most other peers.
         // (We can't test nonce randomness here.)
