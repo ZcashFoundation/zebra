@@ -71,6 +71,7 @@ pub fn init() {
                 .add_directive("zebra_network=error".parse().unwrap())
                 .add_directive("zebra_state=error".parse().unwrap())
                 .add_directive("zebrad=error".parse().unwrap())
+                .add_directive("tor_circmgr=error".parse().unwrap())
         });
 
         tracing_subscriber::registry()
