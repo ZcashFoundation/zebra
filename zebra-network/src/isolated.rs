@@ -1,6 +1,6 @@
-//! Code for creating isolated connections to specific peers.
+//! Creating isolated connections to specific peers.
 
-use std::future::Future;
+use std::{future::Future, net::SocketAddr};
 
 use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -20,8 +20,8 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// Use the provided data stream to create a Zcash connection completely
-/// isolated from all other node state.
+/// Creates a Zcash peer connection using the provided data stream.
+/// This connection is completely isolated from all other node state.
 ///
 /// The connection pool returned by [`init`](zebra_network::init)
 /// should be used for all requests that
@@ -80,4 +80,23 @@ where
         },
     )
     .map_ok(|client| BoxService::new(client.map_err(Into::into)))
+}
+
+/// Creates a direct TCP Zcash peer connection to `addr`.
+/// This connection is completely isolated from all other node state.
+///
+/// See [`connect_isolated`] for details.
+///
+/// # Privacy
+///
+/// Transactions sent over this connection can be linked to the sending and receiving IP address
+/// by passive internet observers.
+pub fn connect_isolated_tcp_direct(
+    network: Network,
+    addr: SocketAddr,
+    user_agent: String,
+) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>> {
+    tokio::net::TcpStream::connect(addr)
+        .err_into()
+        .and_then(move |tcp_stream| connect_isolated(network, tcp_stream, user_agent))
 }

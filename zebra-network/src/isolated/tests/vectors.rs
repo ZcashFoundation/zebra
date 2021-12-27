@@ -36,10 +36,13 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let listen_addr = listener.local_addr().unwrap();
 
-    let outbound_conn = tokio::net::TcpStream::connect(listen_addr).await.unwrap();
-
-    let outbound_join_handle =
-        tokio::spawn(connect_isolated(network, outbound_conn, "".to_string()));
+    // Connection errors are detected using the JoinHandle.
+    // (They might also make the test hang.)
+    let outbound_join_handle = tokio::spawn(connect_isolated_tcp_direct(
+        network,
+        listen_addr,
+        "".to_string(),
+    ));
 
     let (inbound_conn, _) = listener.accept().await.unwrap();
 

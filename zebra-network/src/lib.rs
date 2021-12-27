@@ -69,7 +69,7 @@ mod protocol;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
-    isolated::connect_isolated,
+    isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
