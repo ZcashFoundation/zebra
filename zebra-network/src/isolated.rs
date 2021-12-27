@@ -18,7 +18,7 @@ use crate::{
 };
 
 // TODO: tor feature
-mod tor;
+pub(crate) mod tor;
 
 #[cfg(test)]
 mod tests;
@@ -94,6 +94,8 @@ where
 ///
 /// Transactions sent over this connection can be linked to the sending and receiving IP address
 /// by passive internet observers.
+///
+/// Prefer [`connect_isolated_run_tor`](tor::connect_isolated_run_tor) if available.
 pub fn connect_isolated_tcp_direct(
     network: Network,
     addr: SocketAddr,

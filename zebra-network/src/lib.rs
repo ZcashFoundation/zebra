@@ -156,7 +156,7 @@ mod protocol;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
-    isolated::{connect_isolated, connect_isolated_tcp_direct},
+    isolated::{connect_isolated, connect_isolated_tcp_direct, tor::connect_isolated_tor},
     meta_addr::PeerAddrState,
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
