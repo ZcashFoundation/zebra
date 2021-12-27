@@ -7,6 +7,9 @@ use zebra_chain::parameters::Network;
 
 use crate::{connect_isolated, BoxError, Request, Response};
 
+#[cfg(test)]
+mod tests;
+
 /// Creates a Zcash peer connection to `hostname` via Tor.
 /// This connection is completely isolated from all other node state.
 ///
