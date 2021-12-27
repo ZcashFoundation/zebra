@@ -1,6 +1,6 @@
 //! Fixed test vectors for isolated Zebra connections.
 
-use std::{net::SocketAddr, task::Poll};
+use std::{net::SocketAddr, task::Poll, time::Duration};
 
 use futures::stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -19,17 +19,17 @@ use Network::*;
 /// when sent over TCP.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_tcp() {
-    connect_isolated_sends_anonymised_version_message_tcp_net(Mainnet).await;
-    connect_isolated_sends_anonymised_version_message_tcp_net(Testnet).await;
-}
-
-async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Network) {
     zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
     }
 
+    connect_isolated_sends_anonymised_version_message_tcp_net(Mainnet).await;
+    connect_isolated_sends_anonymised_version_message_tcp_net(Testnet).await;
+}
+
+async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Network) {
     // These tests might fail on machines with no configured IPv4 addresses.
     // (Localhost should be enough.)
 
@@ -38,7 +38,7 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
 
     // Connection errors are detected using the JoinHandle.
     // (They might also make the test hang.)
-    let outbound_join_handle = tokio::spawn(connect_isolated_tcp_direct(
+    let mut outbound_join_handle = tokio::spawn(connect_isolated_tcp_direct(
         network,
         listen_addr,
         "".to_string(),
@@ -102,6 +102,9 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
         panic!("handshake did not send version message");
     }
 
+    // Let the spawned task run for a short time.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     // Make sure that the isolated connection did not:
     // - panic, or
     // - return a service.
@@ -112,8 +115,10 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
     // A timeout error would be acceptable,
     // but a TCP connection error indicates a potential test setup issue.
     // So we fail on them both, because we expect this test to complete before the timeout.
-    let outbound_result = futures::poll!(outbound_join_handle);
+    let outbound_result = futures::poll!(&mut outbound_join_handle);
     assert!(matches!(outbound_result, Poll::Pending));
+
+    outbound_join_handle.abort();
 }
 
 /// Test that `connect_isolated` sends a version message with minimal distinguishing features,
@@ -124,17 +129,17 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
 /// - runs even if network tests are disabled.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_mem() {
+    zebra_test::init();
+
     connect_isolated_sends_anonymised_version_message_mem_net(Mainnet).await;
     connect_isolated_sends_anonymised_version_message_mem_net(Testnet).await;
 }
 
 async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Network) {
-    zebra_test::init();
-
     // We expect version messages to be ~100 bytes
     let (inbound_stream, outbound_stream) = tokio::io::duplex(1024);
 
-    let outbound_join_handle =
+    let mut outbound_join_handle =
         tokio::spawn(connect_isolated(network, outbound_stream, "".to_string()));
 
     let mut inbound_stream = Framed::new(
@@ -195,6 +200,9 @@ async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Netw
         panic!("handshake did not send version message");
     }
 
+    // Let the spawned task run for a short time.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     // Make sure that the isolated connection did not:
     // - panic, or
     // - return a service.
@@ -202,9 +210,11 @@ async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Netw
     // This test doesn't send a version message on `inbound_conn`,
     // so providing a service is incorrect behaviour.
     // (But a timeout error would be acceptable.)
-    let outbound_result = futures::poll!(outbound_join_handle);
+    let outbound_result = futures::poll!(&mut outbound_join_handle);
     assert!(matches!(
         outbound_result,
         Poll::Pending | Poll::Ready(Ok(Err(_)))
     ));
+
+    outbound_join_handle.abort();
 }
