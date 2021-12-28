@@ -153,10 +153,13 @@ mod peer_set;
 mod policies;
 mod protocol;
 
+#[cfg(feature = "tor")]
+pub use crate::isolated::tor::connect_isolated_tor;
+
 pub use crate::{
     address_book::AddressBook,
     config::Config,
-    isolated::{connect_isolated, connect_isolated_tcp_direct, tor::connect_isolated_tor},
+    isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,

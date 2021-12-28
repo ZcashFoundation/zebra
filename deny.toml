@@ -88,8 +88,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    "https://gitlab.torproject.org/tpo/core/arti.git",
-
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
 
