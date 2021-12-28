@@ -78,12 +78,6 @@ pub fn difficulty_is_valid(
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
     //
     // The difficulty filter is also context-free.
-    //
-    // ZIP 205 and ZIP 208 incorrectly describe testnet minimum difficulty blocks
-    // as a change to the difficulty filter. But in `zcashd`, it is implemented
-    // as a change to the difficulty adjustment algorithm. So we don't need to
-    // do anything special for testnet here.
-    // For details, see https://github.com/zcash/zips/issues/416
     if hash > &difficulty_threshold {
         Err(BlockError::DifficultyFilter(
             *height,
