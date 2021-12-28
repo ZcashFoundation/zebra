@@ -137,8 +137,11 @@ proptest! {
             // The number of active peers is never greater than the total
             prop_assert!(total_number_of_peers >= total_number_of_active_peers);
 
-            // Get the total number of peers to broadcast
+            // Get the number of peers to broadcast
             let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
+
+            // The number of peers to broadcast is never greater than the actives
+            prop_assert!(total_number_of_active_peers >= number_of_peers_to_broadcast);
 
             // Send a request to all peers
             let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
@@ -152,7 +155,7 @@ proptest! {
                 };
             }
 
-            // Make sure the message wass broadcasted to the right number of peers
+            // Make sure the message was broadcasted to the right number of peers
             prop_assert_eq!(received, number_of_peers_to_broadcast);
 
             Ok::<_, TestCaseError>(())
