@@ -151,8 +151,6 @@ impl ValueBalance<NegativeAllowed> {
     /// This rule applies to Block and Mempool transactions.
     ///
     /// Design: <https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions>
-    //
-    // TODO: move this method to Transaction, so it can handle coinbase transactions as well?
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
         // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
         // as specified in:
@@ -189,12 +187,13 @@ impl ValueBalance<NonNegative> {
     /// Individual transactions have a value pool that must be non-negative,
     /// so the Transparent chain value pool balance (which is the sum of all the value pools for each
     /// transaction and for each block in the chain) must be non-negative too.
+    ///
     /// > The remaining value in the transparent transaction value pool MUST be nonnegative.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
     ///
     /// > Nodes MAY relay transactions even if one or more of them cannot be mined due to the
-    /// > aforementioned restriction."
+    /// > aforementioned restriction.
     ///
     /// <https://zips.z.cash/zip-0209#specification>
     ///
