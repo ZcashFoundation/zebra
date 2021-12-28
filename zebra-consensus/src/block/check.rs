@@ -135,10 +135,14 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
             .expect("We always expect a funding stream hashmap response even if empty");
 
-        // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
-        // MUST contain at least one output per funding stream `fs` active at `height`,
-        // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
-        // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+        // # Consensus
+        //
+        // > [Canopy onward] The coinbase transaction at block height `height`
+        // > MUST contain at least one output per funding stream `fs` active at `height`,
+        // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
+        // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
         for (receiver, expected_amount) in funding_streams {
             let address =
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);
