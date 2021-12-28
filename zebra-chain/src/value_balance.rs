@@ -155,6 +155,7 @@ impl ValueBalance<NegativeAllowed> {
         // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
         // as specified in:
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+        // This will error if the chain value pool balance gets negative with the change.
         (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
     }
 }
@@ -208,6 +209,7 @@ impl ValueBalance<NonNegative> {
     ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
 
+        // This will error if the chain value pool balance gets negative with the change.
         self.add_chain_value_pool_change(chain_value_pool_change)
     }
 
@@ -281,7 +283,6 @@ impl ValueBalance<NonNegative> {
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
-        // This will error if the chain value pool balance gets negative with the change.
         chain_value_pool.constrain()
     }
 
