@@ -5,14 +5,12 @@ use proptest::prelude::*;
 use tower::{discover::Discover, BoxError, ServiceExt};
 
 use zebra_chain::{
-    block,
-    chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
-    serialization::ZcashDeserializeInto,
+    block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
 };
 
 use super::{BlockHeightPairAcrossNetworkUpgrades, PeerSetBuilder, PeerVersions};
 use crate::{
+    constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion, ReceiveRequestAttempt},
     peer_set::PeerSet,
     protocol::external::types::Version,
@@ -100,7 +98,7 @@ proptest! {
     /// Test if requests are broadcasted to the right number of peers.
     #[test]
     fn broadcast_to_peers(
-        peer_versions in any::<PeerVersions>(),
+        total_number_of_peers in (1..100usize)
     ) {
         // Get a dummy block hash to help us construct a valid request to be broadcasted
         let block: block::Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
@@ -108,15 +106,14 @@ proptest! {
             .unwrap();
         let block_hash = block::Hash::from(&block);
 
-        // Get the current valid peer version
-        let current_mainnet_version = Version::min_specified_for_upgrade(
-            Network::Mainnet,
-            NetworkUpgrade::Canopy
-        );
-
         // Start the runtime
         let runtime = zebra_test::init_async();
         let _guard = runtime.enter();
+
+        let peer_versions = vec![CURRENT_NETWORK_PROTOCOL_VERSION; total_number_of_peers];
+        let peer_versions = PeerVersions {
+            peer_versions,
+        };
 
         // Get peers and handles
         let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
@@ -134,13 +131,11 @@ proptest! {
             let total_number_of_active_peers = check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,
                 &mut handles,
-                current_mainnet_version,
+                CURRENT_NETWORK_PROTOCOL_VERSION,
             )?;
 
-            // Exit the test early if the total number of active peers is zero
-            if total_number_of_active_peers == 0 {
-                return Ok::<_, TestCaseError>(());
-            }
+            // The number of active peers is never greater than the total
+            prop_assert!(total_number_of_peers >= total_number_of_active_peers);
 
             // Get the total number of peers to broadcast
             let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
