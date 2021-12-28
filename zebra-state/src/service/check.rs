@@ -236,7 +236,11 @@ fn difficulty_threshold_is_valid(
     // than the median-time-past of that block.
     //
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    if candidate_time <= median_time_past {
+    let genesis_height = NetworkUpgrade::Genesis
+        .activation_height(network)
+        .expect("Zebra always has a genesis height available");
+
+    if candidate_time <= median_time_past && candidate_height != genesis_height {
         Err(ValidateContextError::TimeTooEarly {
             candidate_time,
             median_time_past,
