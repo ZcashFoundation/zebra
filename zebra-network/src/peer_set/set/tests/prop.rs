@@ -152,13 +152,13 @@ proptest! {
             let mut received = 0;
             for mut h in handles {
                 if let ReceiveRequestAttempt::Request(client_request) = h.try_to_receive_outbound_client_request() {
-                    assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash));
+                    prop_assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash));
                     received += 1;
                 };
             }
 
             // Make sure the message wass broadcasted to the right number of peers
-            assert_eq!(received, number_of_peers_to_broadcast);
+            prop_assert_eq!(received, number_of_peers_to_broadcast);
 
             Ok::<_, TestCaseError>(())
         })?;
