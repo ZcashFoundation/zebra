@@ -12,6 +12,12 @@ use bls12_381::Bls12;
 /// But `zebrad start` downloads blocks at the same time, so we allow some extra time.
 pub const PARAMETER_DOWNLOAD_TIMEOUT: u64 = 60 * 60;
 
+/// The maximum number of times to retry download parameters.
+///
+/// Zebra will retry to download Sprout of Sapling parameters only if they
+/// failed for whatever reason.
+pub const PARAMETER_DOWNLOAD_MAX_RETRIES: usize = 3;
+
 lazy_static::lazy_static! {
     /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
     ///
@@ -67,31 +73,56 @@ impl Groth16Parameters {
         //       (we check them on load anyway)
         if !sapling_spend_path.exists() || !sapling_output_path.exists() {
             tracing::info!("downloading Zcash Sapling parameters");
-            let new_sapling_paths =
-                zcash_proofs::download_sapling_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "error downloading Sapling parameter files: {:?}. {}",
-                            error,
-                            Groth16Parameters::failure_hint()
-                        )
-                    });
-            assert_eq!(sapling_spend_path, new_sapling_paths.spend);
-            assert_eq!(sapling_output_path, new_sapling_paths.output);
+
+            let mut sapling_retries = 0;
+            while sapling_retries < PARAMETER_DOWNLOAD_MAX_RETRIES {
+                let new_sapling_paths =
+                    zcash_proofs::download_sapling_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT));
+
+                if new_sapling_paths.is_err() {
+                    sapling_retries += 1;
+                    tracing::info!("error downloading Zcash Sapling parameters, retrying");
+                } else {
+                    assert_eq!(
+                        sapling_spend_path,
+                        new_sapling_paths.as_ref().unwrap().spend
+                    );
+                    assert_eq!(sapling_output_path, new_sapling_paths.unwrap().output);
+                    break;
+                }
+            }
+            if sapling_retries == PARAMETER_DOWNLOAD_MAX_RETRIES {
+                panic!(
+                    "error downloading Sapling parameter files after {} retries. {}",
+                    PARAMETER_DOWNLOAD_MAX_RETRIES,
+                    Groth16Parameters::failure_hint()
+                );
+            }
         }
 
         if !sprout_path.exists() {
             tracing::info!("downloading Zcash Sprout parameters");
-            let new_sprout_path =
-                zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "error downloading Sprout parameter files: {:?}. {}",
-                            error,
-                            Groth16Parameters::failure_hint()
-                        )
-                    });
-            assert_eq!(sprout_path, new_sprout_path);
+
+            let mut sprout_retries = 0;
+            while sprout_retries < PARAMETER_DOWNLOAD_MAX_RETRIES {
+                let new_sprout_path =
+                    zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT));
+
+                if new_sprout_path.is_err() {
+                    sprout_retries += 1;
+                    tracing::info!("error downloading Zcash Sprout parameters, retrying");
+                } else {
+                    assert_eq!(sprout_path, new_sprout_path.unwrap());
+                    break;
+                }
+            }
+            if sprout_retries == PARAMETER_DOWNLOAD_MAX_RETRIES {
+                panic!(
+                    "error downloading Sprout parameter files after {} retries. {}",
+                    PARAMETER_DOWNLOAD_MAX_RETRIES,
+                    Groth16Parameters::failure_hint()
+                );
+            }
         }
 
         // TODO: if loading fails, log a message including `failure_hint`
