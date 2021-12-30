@@ -134,8 +134,8 @@ proptest! {
                 CURRENT_NETWORK_PROTOCOL_VERSION,
             )?;
 
-            // The number of active peers is never greater than the total
-            prop_assert!(total_number_of_peers >= total_number_of_active_peers);
+            // Since peer addresses are unique, and versions are valid, every peer should be active
+            prop_assert_eq!(total_number_of_peers, total_number_of_active_peers);
 
             // Get the number of peers to broadcast
             let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
