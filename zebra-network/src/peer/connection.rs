@@ -530,7 +530,7 @@ where
                             if let Some(unhandled_msg) = unhandled_msg {
                                 debug!(
                                     %unhandled_msg,
-                                "ignoring unhandled request while awaiting a request"
+                                    "ignoring unhandled request while awaiting a request"
                                 );
                             }
                         }

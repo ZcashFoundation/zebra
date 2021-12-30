@@ -273,7 +273,7 @@ impl AddressBook {
 
         let updated = change.apply_to_meta_addr(previous);
 
-        debug!(
+        trace!(
             ?change,
             ?updated,
             ?previous,

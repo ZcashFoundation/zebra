@@ -58,7 +58,7 @@ impl AddressBookUpdater {
             info!("starting the address book updater");
 
             while let Some(event) = worker_rx.blocking_recv() {
-                debug!(?event, "got address book change");
+                trace!(?event, "got address book change");
 
                 // # Correctness
                 //
