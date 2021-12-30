@@ -116,29 +116,24 @@ impl Groth16Parameters {
         if !sapling_spend_path.exists() || !sapling_output_path.exists() {
             tracing::info!("downloading Zcash Sapling parameters");
 
-            let mut sapling_retries = 0;
-            while sapling_retries < PARAMETER_DOWNLOAD_MAX_RETRIES {
-                let new_sapling_paths =
-                    zcash_proofs::download_sapling_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT));
-
-                if new_sapling_paths.is_err() {
-                    sapling_retries += 1;
-                    tracing::info!("error downloading Zcash Sapling parameters, retrying");
-                } else {
-                    assert_eq!(
-                        sapling_spend_path,
-                        new_sapling_paths.as_ref().unwrap().spend
+            let mut retries = 0;
+            while let Err(error) =
+                zcash_proofs::download_sapling_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
+            {
+                retries += 1;
+                if retries >= PARAMETER_DOWNLOAD_MAX_RETRIES {
+                    panic!(
+                        "error downloading Sapling parameter files after {} retries. {:?} {}",
+                        PARAMETER_DOWNLOAD_MAX_RETRIES,
+                        error,
+                        Groth16Parameters::failure_hint(),
                     );
-                    assert_eq!(sapling_output_path, new_sapling_paths.unwrap().output);
-                    break;
+                } else {
+                    tracing::info!(
+                        ?error,
+                        "error downloading Zcash Sapling parameters, retrying"
+                    );
                 }
-            }
-            if sapling_retries == PARAMETER_DOWNLOAD_MAX_RETRIES {
-                panic!(
-                    "error downloading Sapling parameter files after {} retries. {}",
-                    PARAMETER_DOWNLOAD_MAX_RETRIES,
-                    Groth16Parameters::failure_hint()
-                );
             }
         }
     }
@@ -148,25 +143,24 @@ impl Groth16Parameters {
         if !sprout_path.exists() {
             tracing::info!("downloading Zcash Sprout parameters");
 
-            let mut sprout_retries = 0;
-            while sprout_retries < PARAMETER_DOWNLOAD_MAX_RETRIES {
-                let new_sprout_path =
-                    zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT));
-
-                if new_sprout_path.is_err() {
-                    sprout_retries += 1;
-                    tracing::info!("error downloading Zcash Sprout parameters, retrying");
+            let mut retries = 0;
+            while let Err(error) =
+                zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))
+            {
+                retries += 1;
+                if retries >= PARAMETER_DOWNLOAD_MAX_RETRIES {
+                    panic!(
+                        "error downloading Sprout parameter files after {} retries. {:?} {}",
+                        PARAMETER_DOWNLOAD_MAX_RETRIES,
+                        error,
+                        Groth16Parameters::failure_hint(),
+                    );
                 } else {
-                    assert_eq!(sprout_path, new_sprout_path.unwrap());
-                    break;
+                    tracing::info!(
+                        ?error,
+                        "error downloading Zcash Sprout parameters, retrying"
+                    );
                 }
-            }
-            if sprout_retries == PARAMETER_DOWNLOAD_MAX_RETRIES {
-                panic!(
-                    "error downloading Sprout parameter files after {} retries. {}",
-                    PARAMETER_DOWNLOAD_MAX_RETRIES,
-                    Groth16Parameters::failure_hint()
-                );
             }
         }
     }
