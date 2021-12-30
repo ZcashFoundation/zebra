@@ -142,6 +142,9 @@ where
 }
 
 impl ValueBalance<NegativeAllowed> {
+    /// Assumes that this value balance is a transaction value balance,
+    /// and returns the remaining value in the transaction value pool.
+    ///
     /// # Consensus
     ///
     /// > The remaining value in the transparent transaction value pool MUST be nonnegative.
@@ -155,16 +158,22 @@ impl ValueBalance<NegativeAllowed> {
         // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
         // as specified in:
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
-        // This will error if the chain value pool balance gets negative with the change.
+        //
+        // This will error if the remaining value in the transaction value pool is negative.
         (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
     }
 }
 
 impl ValueBalance<NonNegative> {
-    /// Return the sum of the chain value pool change from `block`, and this value balance.
+    /// Returns the sum of this value balance, and the chain value pool changes in `block`.
     ///
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note: the chain value pool has the opposite sign to the transaction
+    /// value pool.
+    ///
+    /// See [`Block::chain_value_pool_change`] for details.
     ///
     /// # Consensus
     ///
@@ -183,25 +192,22 @@ impl ValueBalance<NonNegative> {
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
     ///
-    /// Zebra also checks that the transparent value pool is non-negative,
-    /// which is a consensus rule derived from Bitcoin.
-    /// Individual transactions have a value pool that must be non-negative,
-    /// so the Transparent chain value pool balance (which is the sum of all the value pools for each
-    /// transaction and for each block in the chain) must be non-negative too.
-    ///
-    /// > The remaining value in the transparent transaction value pool MUST be nonnegative.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
-    ///
-    /// > Nodes MAY relay transactions even if one or more of them cannot be mined due to the
-    /// > aforementioned restriction.
+    /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
+    /// > "Orchard chain value pool balance" would become negative in the block chain created
+    /// > as a result of accepting a block, then all nodes MUST reject the block as invalid.
     ///
     /// <https://zips.z.cash/zip-0209#specification>
     ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
+    /// Zebra also checks that the transparent value pool is non-negative.
+    /// In Zebra, we define this pool as the sum of all unspent transaction outputs.
+    /// (Despite their encoding as an `int64`, transparent output values must be non-negative.)
     ///
-    /// See [`Block::chain_value_pool_change`] for details.
+    /// This is a consensus rule derived from Bitcoin:
+    ///
+    /// > because a UTXO can only be spent once,
+    /// > the full value of the included UTXOs must be spent or given to a miner as a transaction fee.
+    ///
+    /// <https://developer.bitcoin.org/devguide/transactions.html#transaction-fees-and-change>
     pub fn add_block(
         self,
         block: impl Borrow<Block>,
@@ -213,7 +219,7 @@ impl ValueBalance<NonNegative> {
         self.add_chain_value_pool_change(chain_value_pool_change)
     }
 
-    /// Return the sum of the chain value pool change from `transaction`, and this value balance.
+    /// Returns the sum of this value balance, and the chain value pool changes in `transaction`.
     ///
     /// `outputs` must contain the [`Output`]s of every input in this transaction,
     /// including UTXOs created by earlier transactions in its block.
@@ -223,6 +229,20 @@ impl ValueBalance<NonNegative> {
     ///
     /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
     /// for details.
+    ///
+    /// # Consensus
+    ///
+    /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
+    /// > "Orchard chain value pool balance" would become negative in the block chain created
+    /// > as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    /// >
+    /// > Nodes MAY relay transactions even if one or more of them cannot be mined due to the
+    /// > aforementioned restriction.
+    ///
+    /// <https://zips.z.cash/zip-0209#specification>
+    ///
+    /// Since this consensus rule is optional for mempool transactions,
+    /// Zebra does not check it in the mempool transaction verifier.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn add_transaction(
         self,
@@ -241,7 +261,7 @@ impl ValueBalance<NonNegative> {
         self.add_chain_value_pool_change(chain_value_pool_change)
     }
 
-    /// Return the sum of the chain value pool change from `input`, and this value balance.
+    /// Returns the sum of this value balance, and the chain value pool change in `input`.
     ///
     /// `outputs` must contain the [`Output`] spent by `input`,
     /// (including UTXOs created by earlier transactions in its block).
@@ -268,7 +288,7 @@ impl ValueBalance<NonNegative> {
         self.add_chain_value_pool_change(transparent_value_pool_change)
     }
 
-    /// Return the sum of the chain value pool change, and this value balance.
+    /// Returns the sum of this value balance, and the `chain_value_pool_change`.
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.
