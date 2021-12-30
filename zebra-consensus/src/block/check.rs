@@ -71,13 +71,13 @@ pub fn difficulty_is_valid(
         ))?;
     }
 
-    // The difficulty filter is also context-free.
+    // # Consensus
     //
-    // ZIP 205 and ZIP 208 incorrectly describe testnet minimum difficulty blocks
-    // as a change to the difficulty filter. But in `zcashd`, it is implemented
-    // as a change to the difficulty adjustment algorithm. So we don't need to
-    // do anything special for testnet here.
-    // For details, see https://github.com/zcash/zips/issues/416
+    // > The block MUST pass the difficulty filter.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    //
+    // The difficulty filter is also context-free.
     if hash > &difficulty_threshold {
         Err(BlockError::DifficultyFilter(
             *height,
@@ -92,6 +92,11 @@ pub fn difficulty_is_valid(
 
 /// Returns `Ok(())` if the `EquihashSolution` is valid for `header`
 pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error> {
+    // # Consensus
+    //
+    // > `solution` MUST represent a valid Equihash solution.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     header.solution.check(header)
 }
 
@@ -135,10 +140,14 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
             .expect("We always expect a funding stream hashmap response even if empty");
 
-        // Consensus rule:[Canopy onward] The coinbase transaction at block height `height`
-        // MUST contain at least one output per funding stream `fs` active at `height`,
-        // that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
-        // recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+        // # Consensus
+        //
+        // > [Canopy onward] The coinbase transaction at block height `height`
+        // > MUST contain at least one output per funding stream `fs` active at `height`,
+        // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
+        // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
         for (receiver, expected_amount) in funding_streams {
             let address =
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);

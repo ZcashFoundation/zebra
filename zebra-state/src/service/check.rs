@@ -229,14 +229,31 @@ fn difficulty_threshold_is_valid(
     let median_time_past = difficulty_adjustment.median_time_past();
     let block_time_max =
         median_time_past + Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);
-    if candidate_time <= median_time_past {
+
+    // # Consensus
+    //
+    // > For each block other than the genesis block, `nTime` MUST be strictly greater
+    // than the median-time-past of that block.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    let genesis_height = NetworkUpgrade::Genesis
+        .activation_height(network)
+        .expect("Zebra always has a genesis height available");
+
+    if candidate_time <= median_time_past && candidate_height != genesis_height {
         Err(ValidateContextError::TimeTooEarly {
             candidate_time,
             median_time_past,
         })?
     }
 
-    // The maximum time rule is only active on Testnet from a specific height
+    // # Consensus
+    //
+    // > For each block at block height 2 or greater on Mainnet, or block height 653_606
+    // or greater on Testnet, `nTime` MUST be less than or equal to the median-time-past
+    // of that block plus 90*60 seconds.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     if NetworkUpgrade::is_max_block_time_enforced(network, candidate_height)
         && candidate_time > block_time_max
     {
@@ -246,6 +263,11 @@ fn difficulty_threshold_is_valid(
         })?
     }
 
+    // # Consensus
+    //
+    // > For a block at block height `Height`, `nBits` MUST be equal to `ThresholdBits(Height)`.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
     if difficulty_threshold != expected_difficulty {
         Err(ValidateContextError::InvalidDifficultyThreshold {
