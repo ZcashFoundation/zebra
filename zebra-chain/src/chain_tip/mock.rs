@@ -6,6 +6,9 @@ use tokio::sync::watch;
 
 use crate::{block, chain_tip::ChainTip, transaction};
 
+/// A sender that sets the `best_tip_height` of a [`MockChainTip`].]
+pub type MockChainTipSender = watch::Sender<Option<block::Height>>;
+
 /// A mock [`ChainTip`] implementation that allows setting the `best_tip_height` externally.
 #[derive(Clone, Debug)]
 pub struct MockChainTip {
@@ -19,7 +22,7 @@ impl MockChainTip {
     /// height.
     ///
     /// Initially, the best tip height is [`None`].
-    pub fn new() -> (Self, watch::Sender<Option<block::Height>>) {
+    pub fn new() -> (Self, MockChainTipSender) {
         let (sender, receiver) = watch::channel(None);
 
         let mock_chain_tip = MockChainTip {

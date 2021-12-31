@@ -1,8 +1,9 @@
 //! Test utilities and tests for minimum network peer version requirements.
 
-use tokio::sync::watch;
-
-use zebra_chain::{block, chain_tip::mock::MockChainTip, parameters::Network};
+use zebra_chain::{
+    chain_tip::mock::{MockChainTip, MockChainTipSender},
+    parameters::Network,
+};
 
 use super::MinimumPeerVersion;
 
@@ -10,7 +11,7 @@ use super::MinimumPeerVersion;
 mod prop;
 
 impl MinimumPeerVersion<MockChainTip> {
-    pub fn with_mock_chain_tip(network: Network) -> (Self, watch::Sender<Option<block::Height>>) {
+    pub fn with_mock_chain_tip(network: Network) -> (Self, MockChainTipSender) {
         let (chain_tip, best_tip_height) = MockChainTip::new();
         let minimum_peer_version = MinimumPeerVersion::new(chain_tip, network);
 
