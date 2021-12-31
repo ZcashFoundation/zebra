@@ -92,7 +92,7 @@ pub enum BlockDownloadVerifyError {
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV>
+pub struct Downloads<ZN, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
@@ -102,6 +102,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Services
     /// A service that forwards requests to connected peers, and returns their
@@ -112,7 +113,7 @@ where
     verifier: ZV,
 
     /// Allows efficient access to the best tip of the blockchain.
-    latest_chain_tip: zs::LatestChainTip,
+    latest_chain_tip: ZSTip,
 
     // Configuration
     /// The configured lookahead limit, after applying the minimum limit.
@@ -129,7 +130,7 @@ where
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
 }
 
-impl<ZN, ZV> Stream for Downloads<ZN, ZV>
+impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
@@ -139,6 +140,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     type Item = Result<block::Hash, BlockDownloadVerifyError>;
 
@@ -174,7 +176,7 @@ where
     }
 }
 
-impl<ZN, ZV> Downloads<ZN, ZV>
+impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
@@ -184,6 +186,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network` and
     /// `verifier` services. Uses the `latest_chain_tip` and `lookahead_limit`
@@ -192,12 +195,7 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(
-        network: ZN,
-        verifier: ZV,
-        latest_chain_tip: zs::LatestChainTip,
-        lookahead_limit: usize,
-    ) -> Self {
+    pub fn new(network: ZN, verifier: ZV, latest_chain_tip: ZSTip, lookahead_limit: usize) -> Self {
         Self {
             network,
             verifier,

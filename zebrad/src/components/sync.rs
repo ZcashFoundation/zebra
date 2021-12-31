@@ -15,6 +15,7 @@ use tower::{
 
 use zebra_chain::{
     block::{self, Block},
+    chain_tip::ChainTip,
     parameters::genesis_hash,
 };
 use zebra_consensus::{
@@ -22,7 +23,6 @@ use zebra_consensus::{
 };
 use zebra_network as zn;
 use zebra_state as zs;
-use zs::LatestChainTip;
 
 use crate::{
     components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
@@ -185,7 +185,7 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
-pub struct ChainSync<ZN, ZS, ZV>
+pub struct ChainSync<ZN, ZS, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -205,6 +205,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Configuration
     /// The genesis hash for the configured network
@@ -227,6 +228,7 @@ where
             Downloads<
                 Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
                 Timeout<ZV>,
+                ZSTip,
             >,
         >,
     >,
@@ -248,7 +250,7 @@ where
 /// This component is used for initial block sync, but the `Inbound` service is
 /// responsible for participating in the gossip protocols used for block
 /// diffusion.
-impl<ZN, ZS, ZV> ChainSync<ZN, ZS, ZV>
+impl<ZN, ZS, ZV, ZSTip> ChainSync<ZN, ZS, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -268,6 +270,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Returns a new syncer instance, using:
     ///  - chain: the zebra-chain `Network` to download (Mainnet or Testnet)
@@ -282,7 +285,7 @@ where
         peers: ZN,
         verifier: ZV,
         state: ZS,
-        latest_chain_tip: LatestChainTip,
+        latest_chain_tip: ZSTip,
     ) -> (Self, SyncStatus) {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
