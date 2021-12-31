@@ -94,9 +94,13 @@ pub enum BlockDownloadVerifyError {
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
 {
     // Services
@@ -127,9 +131,13 @@ where
 
 impl<ZN, ZV> Stream for Downloads<ZN, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
 {
     type Item = Result<block::Hash, BlockDownloadVerifyError>;
@@ -168,9 +176,13 @@ where
 
 impl<ZN, ZV> Downloads<ZN, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
 {
     /// Initialize a new download stream with the provided `network` and
@@ -395,7 +407,7 @@ where
     }
 
     /// Get the number of currently in-flight download tasks.
-    pub fn in_flight(&self) -> usize {
+    pub fn in_flight(&mut self) -> usize {
         self.pending.len()
     }
 }

@@ -186,11 +186,23 @@ struct CheckedTip {
 
 pub struct ChainSync<ZN, ZS, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
 {
     // Configuration
@@ -237,11 +249,23 @@ where
 /// diffusion.
 impl<ZN, ZS, ZV> ChainSync<ZN, ZS, ZV>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
 {
     /// Returns a new syncer instance, using:
@@ -442,17 +466,21 @@ where
                 tokio::task::yield_now().await;
             }
 
-            requests.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
+            let ready_tip_network = self.tip_network.ready().await;
+            requests.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
                 zn::Request::FindBlocks {
                     known_blocks: block_locator.clone(),
                     stop: None,
                 },
-            ));
+            )));
         }
 
         let mut download_set = HashSet::new();
         while let Some(res) = requests.next().await {
-            match res.map_err::<Report, _>(|e| eyre!(e)) {
+            match res
+                .expect("panic in spawned obtain tips request")
+                .map_err::<Report, _>(|e| eyre!(e))
+            {
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     tracing::trace!(?hashes);
 
@@ -568,15 +596,19 @@ where
                     tokio::task::yield_now().await;
                 }
 
-                responses.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
+                let ready_tip_network = self.tip_network.ready().await;
+                responses.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
                     zn::Request::FindBlocks {
                         known_blocks: vec![tip.tip],
                         stop: None,
                     },
-                ));
+                )));
             }
             while let Some(res) = responses.next().await {
-                match res.map_err::<Report, _>(|e| eyre!(e)) {
+                match res
+                    .expect("panic in spawned extend tips request")
+                    .map_err::<Report, _>(|e| eyre!(e))
+                {
                     Ok(zn::Response::BlockHashes(hashes)) => {
                         tracing::debug!(first = ?hashes.first(), len = ?hashes.len());
                         tracing::trace!(?hashes);
@@ -740,7 +772,7 @@ where
         }
     }
 
-    fn update_metrics(&self) {
+    fn update_metrics(&mut self) {
         metrics::gauge!(
             "sync.prospective_tips.len",
             self.prospective_tips.len() as f64
