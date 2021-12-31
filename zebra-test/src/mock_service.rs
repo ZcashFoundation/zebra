@@ -306,12 +306,13 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// #     let mut service = mock_service.clone();
     /// #
     /// let call = tokio::spawn(mock_service.clone().oneshot("request"));
-    ///  
+    ///
     /// mock_service.expect_request("request").await.respond("response");
     ///
     /// assert!(matches!(call.await, Ok(Ok("response"))));
     /// # });
     /// ```
+    #[track_caller]
     pub async fn expect_request(
         &mut self,
         expected: Request,
@@ -321,7 +322,13 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     {
         let response_sender = self.next_request().await;
 
-        assert_eq!(response_sender.request, expected);
+        assert_eq!(
+            response_sender.request,
+            expected,
+            "received an unexpected request\n \
+             in {}",
+            std::any::type_name::<Self>(),
+        );
 
         response_sender
     }
@@ -362,13 +369,23 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// assert!(matches!(call.await, Ok(Ok("response"))));
     /// # });
     /// ```
+    #[track_caller]
     pub async fn expect_request_that(
         &mut self,
         condition: impl FnOnce(&Request) -> bool,
-    ) -> ResponseSender<Request, Response, Error> {
+    ) -> ResponseSender<Request, Response, Error>
+    where
+        Request: Debug,
+    {
         let response_sender = self.next_request().await;
 
-        assert!(condition(&response_sender.request));
+        assert!(
+            condition(&response_sender.request),
+            "condition was false for request: {:?},\n \
+             in {}",
+            response_sender.request,
+            std::any::type_name::<Self>(),
+        );
 
         response_sender
     }
@@ -400,14 +417,17 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// mock_service.expect_no_requests().await;
     /// # });
     /// ```
+    #[track_caller]
     pub async fn expect_no_requests(&mut self)
     where
         Request: Debug,
     {
         if let Some(response_sender) = self.try_next_request().await {
             panic!(
-                "Received an unexpected request: {:?}",
-                response_sender.request
+                "received an unexpected request: {:?},\n \
+                 in {}",
+                response_sender.request,
+                std::any::type_name::<Self>(),
             );
         }
     }
@@ -422,10 +442,15 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     ///
     /// If the queue is empty and a request is not received before the max request delay timeout
     /// expires.
+    #[track_caller]
     async fn next_request(&mut self) -> ResponseSender<Request, Response, Error> {
         match self.try_next_request().await {
             Some(request) => request,
-            None => panic!("Timeout while waiting for a request"),
+            None => panic!(
+                "timeout while waiting for a request\n \
+                 in {}",
+                std::any::type_name::<Self>(),
+            ),
         }
     }
 }
@@ -478,6 +503,7 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// #     test_code().await
     /// # }).unwrap();
     /// ```
+    #[track_caller]
     pub async fn expect_request(
         &mut self,
         expected: Request,
@@ -487,7 +513,13 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     {
         let response_sender = self.next_request().await?;
 
-        prop_assert_eq!(&response_sender.request, &expected);
+        prop_assert_eq!(
+            &response_sender.request,
+            &expected,
+            "received an unexpected request\n \
+             in {}",
+            std::any::type_name::<Self>(),
+        );
 
         Ok(response_sender)
     }
@@ -538,13 +570,23 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// #     test_code().await
     /// # }).unwrap();
     /// ```
+    #[track_caller]
     pub async fn expect_request_that(
         &mut self,
         condition: impl FnOnce(&Request) -> bool,
-    ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError> {
+    ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError>
+    where
+        Request: Debug,
+    {
         let response_sender = self.next_request().await?;
 
-        prop_assert!(condition(&response_sender.request));
+        prop_assert!(
+            condition(&response_sender.request),
+            "condition was false for request: {:?},\n \
+             in {}",
+            &response_sender.request,
+            std::any::type_name::<Self>(),
+        );
 
         Ok(response_sender)
     }
@@ -583,6 +625,7 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// #     test_code().await
     /// # }).unwrap();
     /// ```
+    #[track_caller]
     pub async fn expect_no_requests(&mut self) -> Result<(), TestCaseError>
     where
         Request: Debug,
@@ -591,8 +634,10 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
             Some(response_sender) => {
                 prop_assert!(
                     false,
-                    "Received an unexpected request: {:?}",
-                    response_sender.request
+                    "received an unexpected request: {:?},\n \
+                     in {}",
+                    response_sender.request,
+                    std::any::type_name::<Self>(),
                 );
                 unreachable!("prop_assert!(false) returns an early error");
             }
@@ -608,13 +653,19 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     ///
     /// If the queue is empty and a request is not received before the max request delay timeout
     /// expires, an error generated by a [`proptest`] assertion is returned.
+    #[track_caller]
     async fn next_request(
         &mut self,
     ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError> {
         match self.try_next_request().await {
             Some(request) => Ok(request),
             None => {
-                prop_assert!(false, "Timeout while waiting for a request");
+                prop_assert!(
+                    false,
+                    "timeout while waiting for a request\n \
+                     in {}",
+                    std::any::type_name::<Self>(),
+                );
                 unreachable!("prop_assert!(false) returns an early error");
             }
         }
@@ -643,7 +694,7 @@ impl<Request, Response, Assertion, Error> MockService<Request, Response, Asserti
                     }
                 }
                 Ok(Err(RecvError::Lagged(_))) => continue,
-                Ok(Err(RecvError::Closed)) => unreachable!("Sender is never closed"),
+                Ok(Err(RecvError::Closed)) => unreachable!("sender is never closed"),
                 Err(_timeout) => return None,
             }
         }
