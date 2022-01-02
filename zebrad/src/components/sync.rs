@@ -6,6 +6,7 @@ use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration}
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
+use indexmap::IndexSet;
 use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
@@ -475,7 +476,7 @@ where
             )));
         }
 
-        let mut download_set = HashSet::new();
+        let mut download_set = IndexSet::new();
         while let Some(res) = requests.next().await {
             match res
                 .expect("panic in spawned obtain tips request")
@@ -543,6 +544,9 @@ where
                         );
                     }
 
+                    // security: the first response determines our download order
+                    //
+                    // TODO: can we make the download order independent of response order?
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
@@ -571,7 +575,7 @@ where
         metrics::gauge!("sync.obtain.queued.hash.count", new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
-        // so a single trailing peer can't toggle our mempool
+        // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
         self.request_blocks(download_set).await?;
@@ -583,7 +587,7 @@ where
     async fn extend_tips(&mut self) -> Result<(), Report> {
         let tips = std::mem::take(&mut self.prospective_tips);
 
-        let mut download_set = HashSet::new();
+        let mut download_set = IndexSet::new();
         tracing::info!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             tracing::debug!(?tip, "asking peers to extend chain tip");
@@ -686,6 +690,9 @@ where
                             );
                         }
 
+                        // security: the first response determines our download order
+                        //
+                        // TODO: can we make the download order independent of response order?
                         let prev_download_len = download_set.len();
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
@@ -705,7 +712,7 @@ where
         metrics::gauge!("sync.extend.queued.hash.count", new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
-        // so a single trailing peer can't toggle our mempool
+        // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         self.request_blocks(download_set).await?;
@@ -742,7 +749,7 @@ where
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node
-    async fn request_blocks(&mut self, hashes: HashSet<block::Hash>) -> Result<(), Report> {
+    async fn request_blocks(&mut self, hashes: IndexSet<block::Hash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;

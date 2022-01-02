@@ -4564,6 +4564,7 @@ dependencies = [
  "futures",
  "gumdrop",
  "hyper",
+ "indexmap",
  "inferno",
  "lazy_static",
  "metrics",
