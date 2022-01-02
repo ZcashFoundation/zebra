@@ -736,7 +736,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
         &self.request
     }
 
-    /// Respond to the request.
+    /// Respond to the request using a fixed response value.
     ///
     /// The `response` can be of the `Response` type or a [`Result`]. This allows sending an error
     /// representing an error while processing the request.
@@ -744,7 +744,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
     ///
-    /// If this method is not called, the caller will panic.
+    /// If `respond` or `respond_with` are not called, the caller will panic.
     ///
     /// # Example
     ///
@@ -784,6 +784,60 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     pub fn respond(self, response: impl ResponseResult<Response, Error>) {
         let _ = self.response_sender.send(response.into_result());
     }
+
+    /// Respond to the request by calculating a value from the request.
+    ///
+    /// The response can be of the `Response` type or a [`Result`]. This allows sending an error
+    /// representing an error while processing the request.
+    ///
+    /// This method takes ownership of the [`ResponseSender`] so that only one response can be
+    /// sent.
+    ///
+    /// If `respond` or `respond_with` are not called, the caller will panic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use zebra_test::mock_service::MockService;
+    /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # let reactor = tokio::runtime::Builder::new_current_thread()
+    /// #     .enable_all()
+    /// #     .build()
+    /// #     .expect("Failed to build Tokio runtime");
+    /// #
+    /// # reactor.block_on(async {
+    /// // Mock a service with a `String` as the service `Error` type.
+    /// let mut mock_service: MockService<_, _, _, String> =
+    ///     MockService::build().for_unit_tests();
+    ///
+    /// # let mut service = mock_service.clone();
+    /// # let task = tokio::spawn(async move {
+    /// #     let first_call_result = (&mut service).oneshot(1).await;
+    /// #     let second_call_result = service.oneshot(1).await;
+    /// #
+    /// #     (first_call_result, second_call_result)
+    /// # });
+    /// #
+    /// mock_service
+    ///     .expect_request(1)
+    ///     .await
+    ///     .respond_with(|req| format!("Received: {}", req));
+    ///
+    /// mock_service
+    ///     .expect_request(1)
+    ///     .await
+    ///     .respond_with(|req| Err(format!("Duplicate request: {}", req)));
+    /// # });
+    /// ```
+    pub fn respond_with<F, R>(self, response_fn: F)
+    where
+        F: FnOnce(&Request) -> R,
+        R: ResponseResult<Response, Error>,
+    {
+        let response_result = response_fn(self.request()).into_result();
+        let _ = self.response_sender.send(response_result);
+    }
 }
 
 /// A representation of an assertion type.
@@ -808,7 +862,7 @@ impl AssertionType for PropTestAssertion {}
 /// A helper trait to improve ergonomics when sending a response.
 ///
 /// This allows the [`ResponseSender::respond`] method to receive either a [`Result`] or just the
-/// response type that is wrapped in an `Ok` variant.
+/// response type, which it automatically wraps in an `Ok` variant.
 pub trait ResponseResult<Response, Error> {
     /// Converts the type into a [`Result`] that can be sent as a response.
     fn into_result(self) -> Result<Response, Error>;
