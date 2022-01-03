@@ -25,13 +25,13 @@ use crate::{
     config::ZebradConfig,
 };
 
-/// Maximum time to wait for a network service request.
+/// Maximum time to wait for a request to any test service.
 ///
 /// The default [`MockService`] value can be too short for some of these tests that take a little
-/// longer than expected to actually send the network request.
+/// longer than expected to actually send the request.
 ///
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
-const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
+const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
 ///
@@ -942,13 +942,20 @@ fn setup() -> (
         ..Default::default()
     };
 
+    // These tests run multiple tasks in parallel.
+    // So machines under heavy load need a longer delay.
+    // (For example, CI machines with limited cores.)
     let peer_set = MockService::build()
-        .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
 
-    let chain_verifier = MockService::build().for_unit_tests();
+    let chain_verifier = MockService::build()
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+        .for_unit_tests();
 
-    let state_service = MockService::build().for_unit_tests();
+    let state_service = MockService::build()
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+        .for_unit_tests();
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
 
