@@ -29,7 +29,7 @@ impl Arbitrary for Action {
                 nullifier,
                 rk,
                 cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
-                ephemeral_key: keys::EphemeralPublicKey(pallas::Affine::identity()),
+                ephemeral_key: keys::EphemeralPublicKey(pallas::Affine::generator()),
                 enc_ciphertext,
                 out_ciphertext,
             })

@@ -1,12 +1,7 @@
 //! Randomised property tests for MetaAddr.
 
 use std::{
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-    env,
-    net::SocketAddr,
-    str::FromStr,
-    sync::Arc,
+    collections::HashMap, convert::TryFrom, env, net::SocketAddr, str::FromStr, sync::Arc,
     time::Duration,
 };
 
@@ -208,7 +203,7 @@ proptest! {
         let overall_test_time: Duration = MIN_PEER_RECONNECTION_DELAY * LIVE_PEER_INTERVALS;
         // Advance the clock by this much for every peer change
         let peer_change_interval: Duration =
-            overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
+            overall_test_time / u32::try_from(MAX_ADDR_CHANGE).unwrap();
 
         prop_assert!(
             u32::try_from(MAX_ADDR_CHANGE).unwrap() >= 3 * LIVE_PEER_INTERVALS,
@@ -309,7 +304,7 @@ proptest! {
         let overall_test_time: Duration = MIN_PEER_RECONNECTION_DELAY * LIVE_PEER_INTERVALS;
         // Advance the clock by this much for every peer change
         let peer_change_interval: Duration =
-            overall_test_time / MAX_ADDR_CHANGE.try_into().unwrap();
+            overall_test_time / u32::try_from(MAX_ADDR_CHANGE).unwrap();
 
         prop_assert!(
             u32::try_from(MAX_ADDR_CHANGE).unwrap() >= 3 * LIVE_PEER_INTERVALS,

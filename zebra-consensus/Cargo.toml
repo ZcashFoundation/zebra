@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -25,9 +25,9 @@ lazy_static = "1.4.0"
 once_cell = "1.9"
 serde = { version = "1", features = ["serde_derive"] }
 
-futures = "0.3.18"
-futures-util = "0.3.17"
-metrics = "0.17.0"
+futures = "0.3.19"
+futures-util = "0.3.19"
+metrics = "0.17.1"
 thiserror = "1.0.30"
 tokio = { version = "1.15.0", features = ["time", "sync", "tracing"] }
 tower = { version = "0.4.11", features = ["timeout", "util", "buffer"] }
@@ -38,7 +38,7 @@ tracing-futures = "0.2.5"
 orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
 
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "dea8d97d5ed09bdb6673cb64d0a63706f71c2f61", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }

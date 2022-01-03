@@ -1,6 +1,7 @@
 //! Shielded addresses.
 
 use std::{
+    convert::TryFrom,
     fmt,
     io::{self, Read, Write},
 };
@@ -81,7 +82,8 @@ impl std::str::FromStr for Address {
                         _ => Network::Testnet,
                     },
                     diversifier: keys::Diversifier::from(diversifier_bytes),
-                    transmission_key: keys::TransmissionKey::from(transmission_key_bytes),
+                    transmission_key: keys::TransmissionKey::try_from(transmission_key_bytes)
+                        .unwrap(),
                 })
             }
             _ => Err(SerializationError::Parse("bech32 decoding error")),
@@ -147,7 +149,8 @@ mod tests {
             keys::IncomingViewingKey::from((authorizing_key, nullifier_deriving_key));
 
         let diversifier = keys::Diversifier::new(&mut OsRng);
-        let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
+        let transmission_key = keys::TransmissionKey::try_from((incoming_viewing_key, diversifier))
+            .expect("should be a valid transmission key");
 
         let _sapling_shielded_address = Address {
             network: Network::Mainnet,

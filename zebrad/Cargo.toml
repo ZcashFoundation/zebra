@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 edition = "2018"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
@@ -37,7 +37,7 @@ tracing-flame = "0.1.0"
 tracing-journald = "0.1.0"
 tracing-subscriber = { version = "0.2.25", features = ["tracing-log"] }
 tracing-error = "0.1.2"
-metrics = "0.17.0"
+metrics = "0.17.1"
 metrics-exporter-prometheus = "0.7.0"
 
 dirs = "4.0.0"

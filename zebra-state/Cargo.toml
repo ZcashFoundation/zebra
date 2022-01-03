@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
@@ -13,10 +13,10 @@ bincode = "1"
 chrono = "0.4.19"
 dirs = "4.0.0"
 displaydoc = "0.2.2"
-futures = "0.3.18"
+futures = "0.3.19"
 hex = "0.4.3"
 lazy_static = "1.4.0"
-metrics = "0.17.0"
+metrics = "0.17.1"
 # TODO: this crate is not maintained anymore. Replace it?
 # https://github.com/ZcashFoundation/zebra/issues/2523
 #

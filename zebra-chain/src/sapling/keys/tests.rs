@@ -22,7 +22,7 @@ impl Arbitrary for TransmissionKey {
 
                 let diversifier = Diversifier::from(spending_key);
 
-                Self::from((incoming_viewing_key, diversifier))
+                Self::try_from((incoming_viewing_key, diversifier)).unwrap()
             })
             .boxed()
     }
@@ -60,7 +60,8 @@ mod tests {
             let diversifier = Diversifier::from(spending_key);
             assert_eq!(diversifier, test_vector.default_d);
 
-            let transmission_key = TransmissionKey::from((incoming_viewing_key, diversifier));
+            let transmission_key = TransmissionKey::try_from((incoming_viewing_key, diversifier))
+                .expect("should be a valid transmission key");
             assert_eq!(transmission_key, test_vector.default_pk_d);
 
             let _full_viewing_key = FullViewingKey {

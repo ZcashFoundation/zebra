@@ -468,6 +468,9 @@ where
                     self.remove(&key);
                 }
                 Change::Insert(key, svc) => {
+                    // We add peers as unready, so that we:
+                    // - always do the same checks on every ready peer, and
+                    // - check for any errors that happened right after the handshake
                     trace!(?key, "got Change::Insert from Discover");
                     self.remove(&key);
                     self.push_unready(key, svc);
@@ -734,11 +737,16 @@ where
 
     /// Broadcasts the same request to lots of ready peers, ignoring return values.
     fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        // Round up, so that if we have one ready peer, it gets the request
-        let half_ready_peers = (self.ready_services.len() + 1) / 2;
-
         // Broadcasts ignore the response
-        self.route_multiple(req, half_ready_peers)
+        self.route_multiple(req, self.number_of_peers_to_broadcast())
+    }
+
+    /// Given a number of ready peers calculate to how many of them Zebra will
+    /// actually send the request to. Return this number.
+    pub(crate) fn number_of_peers_to_broadcast(&self) -> usize {
+        // We are currently sending broadcast messages to half of the total peers.
+        // Round up, so that if we have one ready peer, it gets the request.
+        (self.ready_services.len() + 1) / 2
     }
 
     /// Logs the peer set size.
