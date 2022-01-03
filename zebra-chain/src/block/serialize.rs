@@ -67,6 +67,12 @@ impl ZcashDeserialize for Header {
                 "high bit was set in version field",
             ));
         }
+
+        // # Consensus
+        //
+        // > The block version number MUST be greater than or equal to 4.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#blockheader
         if version < 4 {
             return Err(SerializationError::Parse("version must be at least 4"));
         }
@@ -115,6 +121,12 @@ impl ZcashSerialize for Block {
 
 impl ZcashDeserialize for Block {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // # Consensus
+        //
+        // > The size of a block MUST be less than or equal to 2000000 bytes.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#blockheader
+        //
         // If the limit is reached, we'll get an UnexpectedEof error
         let limited_reader = &mut reader.take(MAX_BLOCK_BYTES);
         Ok(Block {

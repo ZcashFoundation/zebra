@@ -1096,7 +1096,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.1.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -2223,9 +2223,9 @@ checksum = "2386b4ebe91c2f7f51082d4cefa145d030e33a1842a96b12e4885cc3c01f7a55"
 
 [[package]]
 name = "owo-colors"
-version = "3.1.1"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d3b1ca05e7e4171727a5dab03790a344f248eaad925dce8ba0014fd78392b88"
+checksum = "20448fd678ec04e6ea15bbe0476874af65e98a01515d667aa49f1434dc44ebf4"
 
 [[package]]
 name = "pairing"
@@ -4228,7 +4228,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.0.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -4237,7 +4237,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.2.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "bigint",
  "blake2b_simd",
@@ -4247,7 +4247,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.0.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -4262,7 +4262,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.5.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "aes",
  "bip0039",
@@ -4296,7 +4296,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.5.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=dea8d97d5ed09bdb6673cb64d0a63706f71c2f61#dea8d97d5ed09bdb6673cb64d0a63706f71c2f61"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4523,7 +4523,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "once_cell",
- "owo-colors 3.1.1",
+ "owo-colors 3.2.0",
  "proptest",
  "rand 0.8.4",
  "regex",
