@@ -74,7 +74,7 @@ pub const FUNDING_STREAM_RECEIVERS_NUMBER: usize = FundingStreamReceiver::receiv
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
 lazy_static! {
-    /// The numerator for each funding stream reciever category
+    /// The numerator for each funding stream receiver category
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
@@ -97,7 +97,7 @@ lazy_static! {
         hash_map
     };
 
-    /// Convinient storage for all addresses, for all receivers and networks
+    /// Convenient storage for all addresses, for all receivers and networks
     pub static ref FUNDING_STREAM_ADDRESSES: HashMap<Network, HashMap<FundingStreamReceiver, Vec<String>>> = {
         let mut addresses_by_network = HashMap::with_capacity(2);
 
