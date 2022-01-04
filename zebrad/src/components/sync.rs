@@ -817,6 +817,14 @@ where
                 tracing::debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
+            BlockDownloadVerifyError::BehindTipHeightLimit => {
+                tracing::debug!(
+                    error = ?e,
+                    "block height is behind the current state tip, \
+                     assuming the syncer will eventually catch up to the state, continuing"
+                );
+                false
+            }
 
             // String matches
             BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
@@ -848,6 +856,7 @@ where
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
                     || err_str.contains("Cancelled")
+                    || err_str.contains("BehindTipHeight")
                     || err_str.contains("block is already committed to the state")
                     || err_str.contains("NotFound")
                 {

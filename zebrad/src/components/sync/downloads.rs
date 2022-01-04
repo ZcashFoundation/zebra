@@ -36,17 +36,20 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// `lookahead_limit / VERIFICATION_PIPELINE_SCALING_DIVISOR`.
 ///
 /// For the default lookahead limit, the extra number of blocks is
-/// `2 * MAX_TIPS_RESPONSE_HASH_COUNT`.
+/// `4 * MAX_TIPS_RESPONSE_HASH_COUNT`.
 ///
-/// This allows the verifier and state queues to hold an extra two tips responses worth of blocks,
+/// This allows the verifier and state queues to hold a few extra tips responses worth of blocks,
 /// even if the syncer queue is full. Any unused capacity is shared between both queues.
+///
+/// If this capacity is exceeded, the downloader will start failing download blocks with
+/// [`BlockDownloadVerifyError::AboveLookaheadHeightLimit`], and the syncer will reset.
 ///
 /// Since the syncer queue is limited to the `lookahead_limit`,
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
 const VERIFICATION_PIPELINE_SCALING_DIVISOR: usize =
-    DEFAULT_LOOKAHEAD_LIMIT / (2 * MAX_TIPS_RESPONSE_HASH_COUNT);
+    DEFAULT_LOOKAHEAD_LIMIT / (4 * MAX_TIPS_RESPONSE_HASH_COUNT);
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
