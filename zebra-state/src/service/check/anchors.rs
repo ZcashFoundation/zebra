@@ -55,7 +55,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
             // > output treestate of any prior JoinSplit description in the same transaction.
             //
             // https://zips.z.cash/protocol/protocol.pdf#joinsplit
-            let mut interstitial_roots: HashMap<
+            let mut interstitial_trees: HashMap<
                 sprout::tree::Root,
                 sprout::tree::NoteCommitmentTree,
             > = HashMap::new();
@@ -82,7 +82,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 // > any **prior** JoinSplit description in the same transaction."
                 //
                 // https://zips.z.cash/protocol/protocol.pdf#joinsplit
-                let input_tree = interstitial_roots
+                let input_tree = interstitial_trees
                     .get(&joinsplit.anchor)
                     .cloned()
                     .or_else(|| {
@@ -115,7 +115,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                         .expect("note commitment should be appendable to the tree");
                 }
 
-                interstitial_roots.insert(input_tree.root(), input_tree);
+                interstitial_trees.insert(input_tree.root(), input_tree);
 
                 tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
             }
