@@ -5,13 +5,13 @@
 //! A zebra node consists of the following services and tasks:
 //!
 //! Peers:
-//!  * Network Service
-//!    * primary external interface to the node
-//!    * handles all external network requests for the Zcash protocol
-//!      * via zebra_network::Message and zebra_network::Response
-//!    * provides an interface to the rest of the network for other services and
-//!      tasks running within this node
-//!      * via zebra_network::Request
+//!  * Peer Connection Pool Service
+//!    * primary external interface for outbound requests from this node to remote peers
+//!    * accepts requests from services and tasks in this node, and sends them to remote peers
+//!  * Peer Discovery Service
+//!    * maintains a list of peer addresses, and connection priority metadata
+//!    * discovers new peer addresses from existing peer connections
+//!    * initiates new outbound peer connections in response to demand from tasks within this node
 //!
 //! Blocks & Mempool Transactions:
 //!  * Consensus Service
@@ -23,6 +23,7 @@
 //!    * downloads the Sprout and Sapling Groth16 circuit parameter files
 //!    * finishes when the download is complete and the download file hashes have been checked
 //!  * Inbound Service
+//!    * primary external interface for inbound peer requests to this node
 //!    * handles requests from peers for network data, chain data, and mempool transactions
 //!    * spawns download and verify tasks for each gossiped block
 //!    * sends gossiped transactions to the mempool service
