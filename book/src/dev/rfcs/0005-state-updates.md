@@ -769,7 +769,7 @@ So they should not be used for consensus-critical checks.
 
 - Each `*_anchors` stores the anchor (the root of a Merkle tree) of the note commitment
   tree of a certain block. We only use the keys since we just need the set of anchors,
-  regardless from where they come from. The exception is `sprout_anchors` which also maps
+  regardless of where they come from. The exception is `sprout_anchors` which also maps
   the anchor to the matching note commitment tree. This is required to support interstitial
   treestates, which are unique to Sprout.
 
