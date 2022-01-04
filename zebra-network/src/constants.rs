@@ -133,14 +133,19 @@ pub const PEER_GET_ADDR_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The number of GetAddr requests sent when crawling for new peers.
 ///
-/// ## SECURITY
+/// # Security
 ///
 /// The fanout should be greater than 2, so that Zebra avoids getting a majority
 /// of its initial address book entries from a single peer.
 ///
 /// Zebra regularly crawls for new peers, initiating a new crawl every
 /// [`crawl_new_peer_interval`](crate::config::Config.crawl_new_peer_interval).
-pub const GET_ADDR_FANOUT: usize = 3;
+///
+/// TODO: Restore the fanout to 3, once fanouts are limited to the number of ready peers (#2214)
+///
+/// In #3110, we changed the fanout to 1, to make sure we actually use cached address responses.
+/// With a fanout of 3, we were dropping a lot of responses, because the overall crawl timed out.
+pub const GET_ADDR_FANOUT: usize = 1;
 
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///

@@ -25,7 +25,7 @@ lazy_static::lazy_static! {
     /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
     ///
     /// When this static is accessed:
-    /// - the parameters are downloded if needed, then cached to a shared directory,
+    /// - the parameters are downloaded if needed, then cached to a shared directory,
     /// - the file hashes are checked, for both newly downloaded and previously cached files,
     /// - the parameters are loaded into Zebra.
     ///
