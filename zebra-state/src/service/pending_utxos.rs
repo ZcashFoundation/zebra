@@ -39,7 +39,7 @@ impl PendingUtxos {
     /// [`transparent::OutPoint`] that the [`Utxo`] has arrived.
     pub fn respond(&mut self, outpoint: &transparent::OutPoint, utxo: transparent::Utxo) {
         if let Some(sender) = self.0.remove(outpoint) {
-            // Adding the outpoint as a field lets us crossreference
+            // Adding the outpoint as a field lets us cross-reference
             // with the trace of the verification that made the request.
             tracing::trace!(?outpoint, "found pending UTXO");
             let _ = sender.send(utxo);

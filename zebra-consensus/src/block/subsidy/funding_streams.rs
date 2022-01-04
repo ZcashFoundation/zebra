@@ -49,7 +49,7 @@ pub fn funding_stream_values(
     Ok(results)
 }
 
-/// Returns the minumum height after the first halving
+/// Returns the minimum height after the first halving
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
