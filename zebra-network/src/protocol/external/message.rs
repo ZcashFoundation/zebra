@@ -388,8 +388,10 @@ impl fmt::Display for Message {
                 user_agent,
             ),
             Message::Verack => "verack".to_string(),
+
             Message::Ping(_) => "ping".to_string(),
             Message::Pong(_) => "pong".to_string(),
+
             Message::Reject {
                 message,
                 reason,
@@ -401,25 +403,39 @@ impl fmt::Display for Message {
                 reason,
                 if data.is_some() { "Some" } else { "None" },
             ),
+
             Message::GetAddr => "getaddr".to_string(),
             Message::Addr(addrs) => format!("addr {{ addrs: {} }}", addrs.len()),
+
             Message::GetBlocks { known_blocks, stop } => format!(
                 "getblocks {{ known_blocks: {}, stop: {} }}",
                 known_blocks.len(),
                 if stop.is_some() { "Some" } else { "None" },
             ),
             Message::Inv(invs) => format!("inv {{ invs: {} }}", invs.len()),
+
             Message::GetHeaders { known_blocks, stop } => format!(
                 "getheaders {{ known_blocks: {}, stop: {} }}",
                 known_blocks.len(),
                 if stop.is_some() { "Some" } else { "None" },
             ),
             Message::Headers(headers) => format!("headers {{ headers: {} }}", headers.len()),
+
             Message::GetData(invs) => format!("getdata {{ invs: {} }}", invs.len()),
-            Message::Block(_) => "block".to_string(),
+            Message::Block(block) => format!(
+                "block {{ height: {}, hash: {} }}",
+                block
+                    .coinbase_height()
+                    .as_ref()
+                    .map(|h| h.0.to_string())
+                    .unwrap_or_else(|| "None".into()),
+                block.hash(),
+            ),
             Message::Tx(_) => "tx".to_string(),
             Message::NotFound(invs) => format!("notfound {{ invs: {} }}", invs.len()),
+
             Message::Mempool => "mempool".to_string(),
+
             Message::FilterLoad { .. } => "filterload".to_string(),
             Message::FilterAdd { .. } => "filteradd".to_string(),
             Message::FilterClear => "filterclear".to_string(),
