@@ -279,6 +279,7 @@ impl AddressBook {
             ?previous,
             total_peers = self.by_addr.len(),
             recent_peers = self.recently_live_peers(chrono_now).count(),
+            "calculated updated address book entry",
         );
 
         if let Some(updated) = updated {
@@ -303,6 +304,15 @@ impl AddressBook {
 
             self.by_addr.insert(updated.addr, updated);
 
+            debug!(
+                ?change,
+                ?updated,
+                ?previous,
+                total_peers = self.by_addr.len(),
+                recent_peers = self.recently_live_peers(chrono_now).count(),
+                "updated address book entry",
+            );
+
             // Security: Limit the number of peers in the address book.
             //
             // We only delete outdated peers when we have too many peers.
@@ -317,6 +327,14 @@ impl AddressBook {
                     .expect("just checked there is at least one peer");
 
                 self.by_addr.remove(&surplus_peer.addr);
+
+                debug!(
+                    surplus = ?surplus_peer,
+                    ?updated,
+                    total_peers = self.by_addr.len(),
+                    recent_peers = self.recently_live_peers(chrono_now).count(),
+                    "removed surplus address book entry",
+                );
             }
 
             assert!(self.len() <= self.addr_limit);

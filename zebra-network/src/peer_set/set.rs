@@ -777,7 +777,7 @@ where
 
         self.last_peer_log = Some(Instant::now());
 
-        let address_metrics = self.address_metrics.borrow();
+        let address_metrics = *self.address_metrics.borrow();
         if unready_services_len == 0 {
             warn!(
                 ?address_metrics,
@@ -804,7 +804,7 @@ where
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {
-            let address_metrics = self.address_metrics.borrow();
+            let address_metrics = *self.address_metrics.borrow();
             panic!(
                 "unexpectedly exceeded configured peer set connection limit: \n\
                  peers: {:?}, ready: {:?}, unready: {:?}, \n\
