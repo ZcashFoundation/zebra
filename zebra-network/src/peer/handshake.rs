@@ -915,6 +915,7 @@ where
             let server = Connection {
                 state: connection::State::AwaitingRequest,
                 request_timer: None,
+                cached_addrs: Vec::new(),
                 svc: inbound_service,
                 client_rx: server_rx.into(),
                 error_slot: error_slot.clone(),
