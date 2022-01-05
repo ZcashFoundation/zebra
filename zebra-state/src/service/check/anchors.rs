@@ -46,42 +46,46 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
 ) -> Result<(), ValidateContextError> {
     for transaction in prepared.block.transactions.iter() {
         // Sprout JoinSplits, with interstitial treestates to check as well.
-        //
-        // The FIRST JOINSPLIT in a transaction MUST refer to the output treestate
-        // of a previous block.
         if transaction.has_sprout_joinsplit_data() {
-            // > The anchor of each JoinSplit description in a transaction MUST refer to
-            // > either some earlier block’s final Sprout treestate, or to the interstitial
-            // > output treestate of any prior JoinSplit description in the same transaction.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#joinsplit
             let mut interstitial_trees: HashMap<
                 sprout::tree::Root,
                 sprout::tree::NoteCommitmentTree,
             > = HashMap::new();
 
             for joinsplit in transaction.sprout_groth16_joinsplits() {
-                // Check all anchor sets, including the one for interstitial anchors.
+                // Check all anchor sets, including the one for interstitial
+                // anchors.
                 //
-                // The anchor is checked and the matching tree is obtained, which
-                // is used to create the interstitial tree state for this JoinSplit:
+                // The anchor is checked and the matching tree is obtained,
+                // which is used to create the interstitial tree state for this
+                // JoinSplit:
                 //
-                // > For each JoinSplit description in a transaction, an interstitial output
-                // > treestate is constructed which adds the note commitments and nullifiers
-                // > specified in that JoinSplit description to the input treestate referred
-                // > to by its anchor. This interstitial output treestate is available for use
-                // > as the anchor of subsequent JoinSplit descriptions in the same transaction.
+                // > For each JoinSplit description in a transaction, an
+                // > interstitial output treestate is constructed which adds the
+                // > note commitments and nullifiers specified in that JoinSplit
+                // > description to the input treestate referred to by its
+                // > anchor. This interstitial output treestate is available for
+                // > use as the anchor of subsequent JoinSplit descriptions in
+                // > the same transaction.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
+                //
+                // # Consensus
+                //
+                // > The anchor of each JoinSplit description in a transaction
+                // > MUST refer to either some earlier block’s final Sprout
+                // > treestate, or to the interstitial output treestate of any
+                // > prior JoinSplit description in the same transaction.
+                //
+                // > For the first JoinSplit description of a transaction, the
+                // > anchor MUST be the output Sprout treestate of a previous
+                // > block.
                 //
                 // https://zips.z.cash/protocol/protocol.pdf#joinsplit
                 //
-                // Note that [`interstitial_roots`] is always empty in the first
-                // iteration of the loop. This is because:
-                //
-                // > "The anchor of each JoinSplit description in a transaction
-                // > MUST refer to [...] to the interstitial output treestate of
-                // > any **prior** JoinSplit description in the same transaction."
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
+                // Note that in order to satisfy the latter consensus rule above,
+                // [`interstitial_trees`] is always empty in the first iteration
+                // of the loop.
                 let input_tree = interstitial_trees
                     .get(&joinsplit.anchor)
                     .cloned()
