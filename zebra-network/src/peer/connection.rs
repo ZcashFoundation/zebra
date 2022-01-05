@@ -925,6 +925,8 @@ where
 
         self.update_state_metrics(format!("In::Msg::{}", msg.command()));
 
+        let mut unused_msg = None;
+
         let req = match msg {
             Message::Ping(nonce) => {
                 trace!(?nonce, "responding to heartbeat");
@@ -948,22 +950,27 @@ where
             // that we've already forgotten about.
             Message::Reject { .. } => {
                 debug!(%msg, "got reject message unsolicited or from canceled request");
+                unused_msg = Some(msg.clone());
                 None
             }
             Message::NotFound { .. } => {
                 debug!(%msg, "got notfound message unsolicited or from canceled request");
+                unused_msg = Some(msg.clone());
                 None
             }
             Message::Pong(_) => {
                 debug!(%msg, "got pong message unsolicited or from canceled request");
+                unused_msg = Some(msg.clone());
                 None
             }
             Message::Block(_) => {
                 debug!(%msg, "got block message unsolicited or from canceled request");
+                unused_msg = Some(msg.clone());
                 None
             }
             Message::Headers(_) => {
                 debug!(%msg, "got headers message unsolicited or from canceled request");
+                unused_msg = Some(msg.clone());
                 None
             }
             // These messages should never be sent by peers.
@@ -978,6 +985,7 @@ where
                 // Since we can't verify their source, Zebra needs to ignore unexpected messages,
                 // because closing the connection could cause a denial of service or eclipse attack.
                 debug!(%msg, "got BIP111 message without advertising NODE_BLOOM");
+                unused_msg = Some(msg.clone());
                 None
             }
             // Zebra crawls the network proactively, to prevent
@@ -988,18 +996,21 @@ where
                     // Always refresh the cache with multi-addr messages.
                     debug!(%msg, "caching unsolicited multi-addr message");
                     self.cached_addrs = addrs.clone();
+                    None
                 } else if addrs.len() == 1 && self.cached_addrs.len() <= 1 {
                     // Only refresh a cached single addr message with another single addr.
                     // (`zcashd` regularly advertises its own address.)
                     debug!(%msg, "caching unsolicited single addr message");
                     self.cached_addrs = addrs.clone();
+                    None
                 } else {
                     debug!(
                         %msg,
                         "ignoring unsolicited single addr message: already cached a multi-addr message"
                     );
+                    unused_msg = Some(msg.clone());
+                    None
                 }
-                None
             }
             Message::Tx(ref transaction) => Some(Request::PushTransaction(transaction.clone())),
             Message::Inv(ref items) => match &items[..] {
@@ -1019,14 +1030,17 @@ where
                 // Log detailed messages for ignored inv advertisement messages.
                 [] => {
                     debug!(%msg, "ignoring empty inv");
+                    unused_msg = Some(msg.clone());
                     None
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
                     debug!(%msg, "ignoring inv with multiple blocks");
+                    unused_msg = Some(msg.clone());
                     None
                 }
                 _ => {
                     debug!(%msg, "ignoring inv with no transactions");
+                    unused_msg = Some(msg.clone());
                     None
                 }
             },
@@ -1053,10 +1067,12 @@ where
                 // Log detailed messages for ignored getdata request messages.
                 [] => {
                     debug!(%msg, "ignoring empty getdata");
+                    unused_msg = Some(msg.clone());
                     None
                 }
                 _ => {
                     debug!(%msg, "ignoring getdata with no blocks or transactions");
+                    unused_msg = Some(msg.clone());
                     None
                 }
             },
@@ -1080,11 +1096,9 @@ where
 
         if let Some(req) = req {
             self.drive_peer_request(req).await;
-            None
-        } else {
-            // return the unused message
-            Some(msg)
         }
+
+        unused_msg
     }
 
     /// Given a `req` originating from the peer, drive it to completion and send
