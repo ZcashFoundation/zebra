@@ -10,34 +10,14 @@ use crate::{
     PreparedBlock, ValidateContextError,
 };
 
-/// Check that the Sprout, Sapling, and Orchard anchors specified by
+/// Checks that the Sprout, Sapling, and Orchard anchors specified by
 /// transactions in this block have been computed previously within the context
-/// of its parent chain. We do not check any anchors in checkpointed blocks, which avoids
-/// JoinSplits<BCTV14Proof>
+/// of its parent chain. We do not check any anchors in checkpointed blocks,
+/// which avoids JoinSplits<BCTV14Proof>
 ///
 /// Sprout anchors may refer to some earlier block's final treestate (like
 /// Sapling and Orchard do exclusively) _or_ to the interstisial output
 /// treestate of any prior `JoinSplit` _within the same transaction_.
-///
-/// > For the first JoinSplit description of a transaction, the anchor MUST be
-/// > the output Sprout treestate of a previous block.[^sprout]
-///
-/// > The anchor of each JoinSplit description in a transaction MUST refer to
-/// > either some earlier block’s final Sprout treestate, or to the interstitial
-/// > output treestate of any prior JoinSplit description in the same transaction.[^sprout]
-///
-/// > The anchor of each Spend description MUST refer to some earlier
-/// > block’s final Sapling treestate. The anchor is encoded separately in
-/// > each Spend description for v4 transactions, or encoded once and
-/// > shared between all Spend descriptions in a v5 transaction.[^sapling]
-///
-/// > The anchorOrchard field of the transaction, whenever it exists (i.e. when
-/// > there are any Action descriptions), MUST refer to some earlier block’s
-/// > final Orchard treestate.[^orchard]
-///
-/// [^sprout]: <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
-/// [^sapling]: <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
-/// [^orchard]: <https://zips.z.cash/protocol/protocol.pdf#actions>
 #[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
 pub(crate) fn anchors_refer_to_earlier_treestates(
     finalized_state: &FinalizedState,
@@ -68,7 +48,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 // > use as the anchor of subsequent JoinSplit descriptions in
                 // > the same transaction.
                 //
-                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
+                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
                 //
                 // # Consensus
                 //
@@ -81,7 +61,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 // > anchor MUST be the output Sprout treestate of a previous
                 // > block.
                 //
-                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
+                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
                 //
                 // Note that in order to satisfy the latter consensus rule above,
                 // [`interstitial_trees`] is always empty in the first iteration
@@ -128,6 +108,16 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // Sapling Spends
         //
         // MUST refer to some earlier block’s final Sapling treestate.
+        //
+        // # Consensus
+        //
+        // > The anchor of each Spend description MUST refer to some earlier
+        // > block’s final Sapling treestate. The anchor is encoded separately
+        // > in each Spend description for v4 transactions, or encoded once and
+        // > shared between all Spend descriptions in a v5
+        // > transaction.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
         if transaction.has_sapling_shielded_data() {
             for anchor in transaction.sapling_anchors() {
                 tracing::debug!(?anchor, "observed sapling anchor");
@@ -145,6 +135,14 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // Orchard Actions
         //
         // MUST refer to some earlier block’s final Orchard treestate.
+        //
+        // # Consensus
+        //
+        // > The anchorOrchard field of the transaction, whenever it exists
+        // > (i.e. when there are any Action descriptions), MUST refer to some
+        // > earlier block’s final Orchard treestate.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#actions>
         if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
             tracing::debug!(?orchard_shielded_data.shared_anchor, "observed orchard anchor");
 
