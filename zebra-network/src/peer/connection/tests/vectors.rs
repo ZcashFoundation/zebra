@@ -43,6 +43,7 @@ async fn connection_run_loop_ok() {
     let connection = Connection {
         state: State::AwaitingRequest,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
@@ -103,6 +104,7 @@ async fn connection_run_loop_future_drop() {
     let connection = Connection {
         state: State::AwaitingRequest,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
@@ -152,6 +154,7 @@ async fn connection_run_loop_client_close() {
     let connection = Connection {
         state: State::AwaitingRequest,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
@@ -208,6 +211,7 @@ async fn connection_run_loop_client_drop() {
     let connection = Connection {
         state: State::AwaitingRequest,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
@@ -263,6 +267,7 @@ async fn connection_run_loop_inbound_close() {
     let connection = Connection {
         state: State::AwaitingRequest,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
@@ -319,6 +324,7 @@ async fn connection_run_loop_inbound_drop() {
     let connection = Connection {
         state: State::AwaitingRequest,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
@@ -379,6 +385,7 @@ async fn connection_run_loop_failed() {
     let connection = Connection {
         state: State::Failed,
         request_timer: None,
+        cached_addrs: Vec::new(),
         svc: unused_inbound_service,
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
