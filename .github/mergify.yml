@@ -1,0 +1,70 @@
+queue_rules:
+  - name: urgent
+    speculative_checks: 2
+    batch_size: 2
+    conditions:
+      - check-success=CI
+      - check-success=Coverage
+
+  - name: medium
+    conditions:
+    speculative_checks: 2
+    batch_size: 3
+      - check-success=CI
+      - check-success=Coverage
+
+  - name: default
+    conditions:
+    speculative_checks: 2
+    batch_size: 4
+      - check-success=CI
+      - check-success=Coverage
+
+pull_request_rules:
+  - name: automatic update for PR marked as “Ready-to-Go“
+    conditions:
+      - -conflict # skip PRs with conflicts
+      - -draft # filter-out GH draft PRs
+      - label="Ready-to-Go"
+    actions:
+      update:
+
+  - name: move to critical queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - base=main
+      - check-success=CI
+      - check-success=Coverage
+      - "label~=^P-Critical"
+      - label!=work-in-progress
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: urgent
+
+  - name: move to high queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - base=main
+      - check-success=CI
+      - check-success=Coverage
+      - "label~=^P-High"
+      - label!=work-in-progress
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: medium
+
+  - name: move to default queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - base=main
+      - check-success=CI
+      - check-success=Coverage
+      - "-label~=^P-High"
+      - "-label~=^P-Critical"
+      - label!=work-in-progress
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: default
