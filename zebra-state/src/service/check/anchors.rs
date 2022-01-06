@@ -114,10 +114,14 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // > The anchor of each Spend description MUST refer to some earlier
         // > block’s final Sapling treestate. The anchor is encoded separately
         // > in each Spend description for v4 transactions, or encoded once and
-        // > shared between all Spend descriptions in a v5
-        // > transaction.
+        // > shared between all Spend descriptions in a v5 transaction.
         //
         // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+        //
+        // This rule is also implemented in
+        // [`zebra_chain::sapling::shielded_data`].
+        //
+        // The "earlier treestate" check is implemented here.
         if transaction.has_sapling_shielded_data() {
             for anchor in transaction.sapling_anchors() {
                 tracing::debug!(?anchor, "observed sapling anchor");
