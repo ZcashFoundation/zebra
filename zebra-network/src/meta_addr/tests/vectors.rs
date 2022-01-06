@@ -1,4 +1,4 @@
-//! Test vectors for MetaAddr.
+//! Fixed test cases for MetaAddr and MetaAddrChange.
 
 use std::net::SocketAddr;
 
