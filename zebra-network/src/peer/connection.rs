@@ -1049,7 +1049,7 @@ where
                 [] => {
                     debug!(%msg, "ignoring empty inv");
 
-                    // This might be a minor protocol error, or it might mean "not found"
+                    // This might be a minor protocol error, or it might mean "not found".
                     Unused
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
@@ -1085,7 +1085,7 @@ where
                 [] => {
                     debug!(%msg, "ignoring empty getdata");
 
-                    // This might be a minor protocol error, or it might mean "not found"
+                    // This might be a minor protocol error, or it might mean "not found".
                     Unused
                 }
                 _ => {
