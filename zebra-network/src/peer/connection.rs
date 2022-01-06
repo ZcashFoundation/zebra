@@ -411,6 +411,29 @@ impl State {
     }
 }
 
+/// The outcome of mapping an inbound [`Message`] to a [`Request`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "inbound messages must be handled"]
+pub enum InboundMessage {
+    /// The message was mapped to an inbound [`Request`].
+    AsRequest(Request),
+
+    /// The message was consumed by the mapping method.
+    ///
+    /// For example, it could be cached, treated as an error,
+    /// or an internally handled [`Message::Ping`].
+    Consumed,
+
+    /// The message was not used by the inbound message handler.
+    Unused,
+}
+
+impl From<Request> for InboundMessage {
+    fn from(request: Request) -> Self {
+        InboundMessage::AsRequest(request)
+    }
+}
+
 /// The state associated with a peer connection.
 pub struct Connection<S, Tx> {
     /// The state of this connection's current request or response.
@@ -925,7 +948,7 @@ where
 
         self.update_state_metrics(format!("In::Msg::{}", msg.command()));
 
-        let mut unused_msg = None;
+        use InboundMessage::*;
 
         let req = match msg {
             Message::Ping(nonce) => {
@@ -933,16 +956,16 @@ where
                 if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
                     self.fail_with(e);
                 }
-                None
+                Consumed
             }
             // These messages shouldn't be sent outside of a handshake.
             Message::Version { .. } => {
                 self.fail_with(PeerError::DuplicateHandshake);
-                None
+                Consumed
             }
             Message::Verack { .. } => {
                 self.fail_with(PeerError::DuplicateHandshake);
-                None
+                Consumed
             }
             // These messages should already be handled as a response if they
             // could be a response, so if we see them here, they were either
@@ -950,28 +973,23 @@ where
             // that we've already forgotten about.
             Message::Reject { .. } => {
                 debug!(%msg, "got reject message unsolicited or from canceled request");
-                unused_msg = Some(msg.clone());
-                None
+                Unused
             }
             Message::NotFound { .. } => {
                 debug!(%msg, "got notfound message unsolicited or from canceled request");
-                unused_msg = Some(msg.clone());
-                None
+                Unused
             }
             Message::Pong(_) => {
                 debug!(%msg, "got pong message unsolicited or from canceled request");
-                unused_msg = Some(msg.clone());
-                None
+                Unused
             }
             Message::Block(_) => {
                 debug!(%msg, "got block message unsolicited or from canceled request");
-                unused_msg = Some(msg.clone());
-                None
+                Unused
             }
             Message::Headers(_) => {
                 debug!(%msg, "got headers message unsolicited or from canceled request");
-                unused_msg = Some(msg.clone());
-                None
+                Unused
             }
             // These messages should never be sent by peers.
             Message::FilterLoad { .. }
@@ -985,8 +1003,9 @@ where
                 // Since we can't verify their source, Zebra needs to ignore unexpected messages,
                 // because closing the connection could cause a denial of service or eclipse attack.
                 debug!(%msg, "got BIP111 message without advertising NODE_BLOOM");
-                unused_msg = Some(msg.clone());
-                None
+
+                // Ignored, but consumed because it is technically a protocol error.
+                Consumed
             }
             // Zebra crawls the network proactively, to prevent
             // peers from inserting data into our address book.
@@ -996,52 +1015,50 @@ where
                     // Always refresh the cache with multi-addr messages.
                     debug!(%msg, "caching unsolicited multi-addr message");
                     self.cached_addrs = addrs.clone();
-                    None
+                    Consumed
                 } else if addrs.len() == 1 && self.cached_addrs.len() <= 1 {
                     // Only refresh a cached single addr message with another single addr.
                     // (`zcashd` regularly advertises its own address.)
                     debug!(%msg, "caching unsolicited single addr message");
                     self.cached_addrs = addrs.clone();
-                    None
+                    Consumed
                 } else {
                     debug!(
                         %msg,
                         "ignoring unsolicited single addr message: already cached a multi-addr message"
                     );
-                    unused_msg = Some(msg.clone());
-                    None
+                    Consumed
                 }
             }
-            Message::Tx(ref transaction) => Some(Request::PushTransaction(transaction.clone())),
+            Message::Tx(ref transaction) => Request::PushTransaction(transaction.clone()).into(),
             Message::Inv(ref items) => match &items[..] {
                 // We don't expect to be advertised multiple blocks at a time,
                 // so we ignore any advertisements of multiple blocks.
-                [InventoryHash::Block(hash)] => Some(Request::AdvertiseBlock(*hash)),
+                [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash).into(),
 
                 // Some peers advertise invs with mixed item types.
                 // But we're just interested in the transaction invs.
                 //
                 // TODO: split mixed invs into multiple requests,
                 //       but skip runs of multiple blocks.
-                tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => Some(
-                    Request::AdvertiseTransactionIds(transaction_ids(items).collect()),
-                ),
+                tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
+                    Request::AdvertiseTransactionIds(transaction_ids(items).collect()).into()
+                }
 
                 // Log detailed messages for ignored inv advertisement messages.
                 [] => {
                     debug!(%msg, "ignoring empty inv");
-                    unused_msg = Some(msg.clone());
-                    None
+
+                    // This might be a minor protocol error, or it might mean "not found"
+                    Unused
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
                     debug!(%msg, "ignoring inv with multiple blocks");
-                    unused_msg = Some(msg.clone());
-                    None
+                    Unused
                 }
                 _ => {
                     debug!(%msg, "ignoring inv with no transactions");
-                    unused_msg = Some(msg.clone());
-                    None
+                    Unused
                 }
             },
             Message::GetData(ref items) => match &items[..] {
@@ -1058,47 +1075,53 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Some(Request::BlocksByHash(block_hashes(items).collect()))
+                    Request::BlocksByHash(block_hashes(items).collect()).into()
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
-                    Some(Request::TransactionsById(transaction_ids(items).collect()))
+                    Request::TransactionsById(transaction_ids(items).collect()).into()
                 }
 
                 // Log detailed messages for ignored getdata request messages.
                 [] => {
                     debug!(%msg, "ignoring empty getdata");
-                    unused_msg = Some(msg.clone());
-                    None
+
+                    // This might be a minor protocol error, or it might mean "not found"
+                    Unused
                 }
                 _ => {
                     debug!(%msg, "ignoring getdata with no blocks or transactions");
-                    unused_msg = Some(msg.clone());
-                    None
+                    Unused
                 }
             },
-            Message::GetAddr => Some(Request::Peers),
+            Message::GetAddr => Request::Peers.into(),
             Message::GetBlocks {
                 ref known_blocks,
                 stop,
-            } => Some(Request::FindBlocks {
+            } => Request::FindBlocks {
                 known_blocks: known_blocks.clone(),
                 stop,
-            }),
+            }
+            .into(),
             Message::GetHeaders {
                 ref known_blocks,
                 stop,
-            } => Some(Request::FindHeaders {
+            } => Request::FindHeaders {
                 known_blocks: known_blocks.clone(),
                 stop,
-            }),
-            Message::Mempool => Some(Request::MempoolTransactionIds),
+            }
+            .into(),
+            Message::Mempool => Request::MempoolTransactionIds.into(),
         };
 
-        if let Some(req) = req {
-            self.drive_peer_request(req).await;
+        // Handle the request, and return unused messages.
+        match req {
+            AsRequest(req) => {
+                self.drive_peer_request(req).await;
+                None
+            }
+            Consumed => None,
+            Unused => Some(msg),
         }
-
-        unused_msg
     }
 
     /// Given a `req` originating from the peer, drive it to completion and send
