@@ -39,10 +39,10 @@ impl ChainTip for MockChainTip {
     }
 
     fn best_tip_hash(&self) -> Option<block::Hash> {
-        unreachable!("Method not used in `MinimumPeerVersion` tests");
+        unreachable!("Method not used in tests");
     }
 
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
-        unreachable!("Method not used in `MinimumPeerVersion` tests");
+        unreachable!("Method not used in tests");
     }
 }
