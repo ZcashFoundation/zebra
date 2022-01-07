@@ -79,7 +79,21 @@ impl fmt::Display for Response {
 
             Response::Peers(peers) => format!("Peers {{ peers: {} }}", peers.len()),
 
+            // Display heights for single-block responses (which Zebra requests and expects)
+            Response::Blocks(blocks) if blocks.len() == 1 => {
+                let block = blocks.first().expect("len is 1");
+                format!(
+                    "Block {{ height: {}, hash: {} }}",
+                    block
+                        .coinbase_height()
+                        .as_ref()
+                        .map(|h| h.0.to_string())
+                        .unwrap_or_else(|| "None".into()),
+                    block.hash(),
+                )
+            }
             Response::Blocks(blocks) => format!("Blocks {{ blocks: {} }}", blocks.len()),
+
             Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
             Response::BlockHeaders(headers) => {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())

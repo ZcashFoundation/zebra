@@ -11,7 +11,12 @@ use std::{
 
 use chrono::{TimeZone, Utc};
 use futures::{channel::oneshot, future, FutureExt, SinkExt, StreamExt};
-use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use tokio::{
+    net::TcpStream,
+    sync::broadcast,
+    task::JoinError,
+    time::{timeout, Instant},
+};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
 use tower::Service;
@@ -910,6 +915,7 @@ where
             let server = Connection {
                 state: connection::State::AwaitingRequest,
                 request_timer: None,
+                cached_addrs: Vec::new(),
                 svc: inbound_service,
                 client_rx: server_rx.into(),
                 error_slot: error_slot.clone(),
@@ -978,8 +984,16 @@ async fn send_periodic_heartbeats(
 ) {
     use futures::future::Either;
 
-    let mut interval_stream =
-        IntervalStream::new(tokio::time::interval(constants::HEARTBEAT_INTERVAL));
+    // Don't send the first heartbeat immediately - we've just completed the handshake!
+    let mut interval = tokio::time::interval_at(
+        Instant::now() + constants::HEARTBEAT_INTERVAL,
+        constants::HEARTBEAT_INTERVAL,
+    );
+    // If the heartbeat is delayed, also delay all future heartbeats.
+    // (Shorter heartbeat intervals just add load, without any benefit.)
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut interval_stream = IntervalStream::new(interval);
 
     loop {
         let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
