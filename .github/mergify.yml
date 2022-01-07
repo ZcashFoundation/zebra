@@ -7,16 +7,16 @@ queue_rules:
       - check-success=Coverage
 
   - name: medium
-    conditions:
     speculative_checks: 2
     batch_size: 3
+    conditions:
       - check-success=CI
       - check-success=Coverage
 
   - name: default
-    conditions:
     speculative_checks: 2
     batch_size: 4
+    conditions:
       - check-success=CI
       - check-success=Coverage
 
