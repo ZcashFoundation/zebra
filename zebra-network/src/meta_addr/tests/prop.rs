@@ -1,4 +1,4 @@
-//! Randomised property tests for MetaAddr.
+//! Randomised property tests for MetaAddr and MetaAddrChange.
 
 use std::{
     collections::HashMap, convert::TryFrom, env, net::SocketAddr, str::FromStr, sync::Arc,
@@ -174,10 +174,107 @@ proptest! {
             canonical_local_listener,
         );
     }
+
+    /// Make sure that [`MetaAddrChange`]s are correctly applied
+    /// when there is no [`MetaAddr`] in the address book.
+    ///
+    /// TODO: Make sure that [`MetaAddrChange`]s are correctly applied,
+    ///       regardless of the [`MetaAddr`] that is currently in the address book.
+    #[test]
+    fn new_meta_addr_from_meta_addr_change(
+        (addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
+    ) {
+        zebra_test::init();
+
+        let local_listener = "0.0.0.0:0".parse().expect("unexpected invalid SocketAddr");
+
+        for change in changes {
+            // Check direct application
+            let new_addr = change.apply_to_meta_addr(None);
+
+            prop_assert!(
+                new_addr.is_some(),
+                "applying a change to `None` should always result in a new address,\n \
+                 change: {:?}",
+                change,
+            );
+
+            let new_addr = new_addr.expect("just checked is_some");
+            prop_assert_eq!(new_addr.addr, addr.addr);
+
+            // Check address book update - return value
+            let mut address_book = AddressBook::new_with_addrs(
+                local_listener,
+                1,
+                Span::none(),
+                Vec::new(),
+            );
+
+            let expected_result = new_addr;
+            let book_result = address_book.update(change);
+            let book_contents: Vec<MetaAddr> = address_book.peers().collect();
+
+            // Ignore the same addresses that the address book ignores
+            let expected_result = if !expected_result.address_is_valid_for_outbound()
+                || ( !expected_result.last_known_info_is_valid_for_outbound()
+                      && expected_result.last_connection_state.is_never_attempted())
+            {
+               None
+            } else {
+                Some(expected_result)
+            };
+
+            prop_assert_eq!(
+                book_result.is_some(),
+                expected_result.is_some(),
+                "applying a change to an empty address book should return a new address,\n \
+                 unless its info is invalid,\n \
+                 change: {:?},\n \
+                 address book returned: {:?},\n \
+                 expected result: {:?}",
+                change,
+                book_result,
+                expected_result,
+            );
+
+            if let Some(book_result) = book_result {
+                prop_assert_eq!(book_result.addr, addr.addr);
+                // TODO: pass times to MetaAddrChange::apply_to_meta_addr and AddressBook::update,
+                //       so the times are equal
+                // prop_assert_eq!(new_addr, book_result);
+            }
+
+            // Check address book update - address book contents
+            prop_assert_eq!(
+                !book_contents.is_empty(), expected_result.is_some(),
+                "applying a change to an empty address book should add a new address,\n \
+                 unless its info is invalid,\n \
+                 change: {:?},\n \
+                 address book contains: {:?},\n \
+                 expected result: {:?}",
+                change,
+                book_contents,
+                expected_result,
+            );
+
+            if let Some(book_contents) = book_contents.first() {
+                prop_assert_eq!(book_contents.addr, addr.addr);
+                // TODO: pass times to MetaAddrChange::apply_to_meta_addr and AddressBook::update,
+                //       so the times are equal
+                //prop_assert_eq!(new_addr, *book_contents);
+            }
+
+            prop_assert_eq!(book_result.as_ref(), book_contents.first());
+
+            // TODO: do we need to check each field is calculated correctly as well?
+        }
+    }
 }
 
 proptest! {
-    // These tests can produce a lot of debug output, so we use a smaller number of cases by default.
+    // These tests can produce a lot of debug output,
+    // so we let developers configure them with a smaller number of cases.
+    //
     // Set the PROPTEST_CASES env var to override this default.
     #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
