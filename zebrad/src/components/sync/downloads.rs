@@ -36,17 +36,20 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// `lookahead_limit / VERIFICATION_PIPELINE_SCALING_DIVISOR`.
 ///
 /// For the default lookahead limit, the extra number of blocks is
-/// `2 * MAX_TIPS_RESPONSE_HASH_COUNT`.
+/// `4 * MAX_TIPS_RESPONSE_HASH_COUNT`.
 ///
-/// This allows the verifier and state queues to hold an extra two tips responses worth of blocks,
+/// This allows the verifier and state queues to hold a few extra tips responses worth of blocks,
 /// even if the syncer queue is full. Any unused capacity is shared between both queues.
+///
+/// If this capacity is exceeded, the downloader will start failing download blocks with
+/// [`BlockDownloadVerifyError::AboveLookaheadHeightLimit`], and the syncer will reset.
 ///
 /// Since the syncer queue is limited to the `lookahead_limit`,
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
 const VERIFICATION_PIPELINE_SCALING_DIVISOR: usize =
-    DEFAULT_LOOKAHEAD_LIMIT / (2 * MAX_TIPS_RESPONSE_HASH_COUNT);
+    DEFAULT_LOOKAHEAD_LIMIT / (4 * MAX_TIPS_RESPONSE_HASH_COUNT);
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -92,12 +95,17 @@ pub enum BlockDownloadVerifyError {
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV>
+pub struct Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Services
     /// A service that forwards requests to connected peers, and returns their
@@ -108,7 +116,7 @@ where
     verifier: ZV,
 
     /// Allows efficient access to the best tip of the blockchain.
-    latest_chain_tip: zs::LatestChainTip,
+    latest_chain_tip: ZSTip,
 
     // Configuration
     /// The configured lookahead limit, after applying the minimum limit.
@@ -125,12 +133,17 @@ where
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
 }
 
-impl<ZN, ZV> Stream for Downloads<ZN, ZV>
+impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     type Item = Result<block::Hash, BlockDownloadVerifyError>;
 
@@ -166,12 +179,17 @@ where
     }
 }
 
-impl<ZN, ZV> Downloads<ZN, ZV>
+impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network` and
     /// `verifier` services. Uses the `latest_chain_tip` and `lookahead_limit`
@@ -180,12 +198,7 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(
-        network: ZN,
-        verifier: ZV,
-        latest_chain_tip: zs::LatestChainTip,
-        lookahead_limit: usize,
-    ) -> Self {
+    pub fn new(network: ZN, verifier: ZV, latest_chain_tip: ZSTip, lookahead_limit: usize) -> Self {
         Self {
             network,
             verifier,
@@ -395,7 +408,7 @@ where
     }
 
     /// Get the number of currently in-flight download tasks.
-    pub fn in_flight(&self) -> usize {
+    pub fn in_flight(&mut self) -> usize {
         self.pending.len()
     }
 }

@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use crate::{block, transaction};
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod mock;
+
 /// An interface for querying the chain tip.
 ///
 /// This trait helps avoid dependencies between:
