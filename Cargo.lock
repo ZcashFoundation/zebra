@@ -245,7 +245,7 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0944d18a9a37691b87733b39c9360c9950af9aa5f97e2455bc108d8eb64fc1c1"
 dependencies = [
- "bitvec",
+ "bitvec 0.22.3",
  "blake2s_simd",
  "byteorder",
  "crossbeam-channel 0.5.1",
@@ -362,10 +362,22 @@ version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5237f00a8c86130a0cc317830e558b966dd7850d48a953d998c813f01a41b527"
 dependencies = [
- "funty",
- "radium",
+ "funty 1.2.0",
+ "radium 0.6.2",
  "tap",
- "wyz",
+ "wyz 0.4.0",
+]
+
+[[package]]
+name = "bitvec"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1489fcb93a5bb47da0462ca93ad252ad6af2145cce58d10d46a83931ba9f016b"
+dependencies = [
+ "funty 2.0.0",
+ "radium 0.7.0",
+ "tap",
+ "wyz 0.5.0",
 ]
 
 [[package]]
@@ -1118,7 +1130,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63eec06c61e487eecf0f7e6e6372e596a81922c28d33e645d6983ca6493a1af0"
 dependencies = [
- "bitvec",
+ "bitvec 0.22.3",
  "rand_core 0.6.3",
  "subtle",
 ]
@@ -1129,7 +1141,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2958d04124b9f27f175eaeb9a9f383d026098aa837eadd8ba22c11f13a05b9e"
 dependencies = [
- "bitvec",
+ "bitvec 0.22.3",
  "rand_core 0.6.3",
  "subtle",
 ]
@@ -1187,6 +1199,12 @@ name = "funty"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1847abb9cb65d566acd5942e94aea9c8f547ad02c98e1649326fc0e8910b8b1e"
+
+[[package]]
+name = "funty"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
@@ -1725,7 +1743,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "593fc4726ca80edb47ee18ab4d826719e25c2096991a79308b44fb915c6014ef"
 dependencies = [
- "bitvec",
+ "bitvec 0.22.3",
  "bls12_381 0.5.0",
  "ff 0.10.0",
  "group 0.10.0",
@@ -1739,7 +1757,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2e7baec19d4e83f9145d4891178101a604565edff9645770fc979804138b04c"
 dependencies = [
- "bitvec",
+ "bitvec 0.22.3",
  "bls12_381 0.6.0",
  "ff 0.11.0",
  "group 0.11.0",
@@ -2169,7 +2187,7 @@ dependencies = [
  "aes",
  "arrayvec 0.7.1",
  "bigint",
- "bitvec",
+ "bitvec 0.22.3",
  "blake2b_simd",
  "ff 0.11.0",
  "fpe",
@@ -2569,6 +2587,12 @@ name = "radium"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "643f8f41a8ebc4c5dc4515c82bb8abd397b527fc20fd681b7c011c2aee5d44fb"
+
+[[package]]
+name = "radium"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "radix_trie"
@@ -4214,6 +4238,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wyz"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30b31594f29d27036c383b53b59ed3476874d518f0efb151b27a4c275141390e"
+dependencies = [
+ "tap",
+]
+
+[[package]]
 name = "x25519-dalek"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4266,7 +4299,7 @@ source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebr
 dependencies = [
  "aes",
  "bip0039",
- "bitvec",
+ "bitvec 0.22.3",
  "blake2b_simd",
  "blake2s_simd",
  "bls12_381 0.6.0",
@@ -4339,7 +4372,7 @@ dependencies = [
  "bech32",
  "bigint",
  "bitflags",
- "bitvec",
+ "bitvec 1.0.0",
  "blake2b_simd",
  "blake2s_simd",
  "bls12_381 0.6.0",
