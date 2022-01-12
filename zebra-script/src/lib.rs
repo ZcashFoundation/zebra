@@ -6,6 +6,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
+#![deny(rust_2021_compatibility)]
 // we allow unsafe code, so we can call zcash_script
 
 use std::{convert::TryInto, sync::Arc};
