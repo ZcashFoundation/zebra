@@ -41,6 +41,10 @@ pub enum PeerError {
     #[error("Internal peer connection task exited")]
     ConnectionTaskExited,
 
+    /// Zebra's [`Client`] cancelled its heartbeat task.
+    #[error("Internal client cancelled its heartbeat task")]
+    ClientCancelledHeartbeatTask,
+
     /// Zebra's internal heartbeat task exited.
     #[error("Internal heartbeat task exited")]
     HeartbeatTaskExited,
@@ -75,6 +79,7 @@ impl PeerError {
             PeerError::ConnectionClosed => "ConnectionClosed".into(),
             PeerError::ConnectionDropped => "ConnectionDropped".into(),
             PeerError::ClientDropped => "ClientDropped".into(),
+            PeerError::ClientCancelledHeartbeatTask => "ClientCancelledHeartbeatTask".into(),
             PeerError::HeartbeatTaskExited => "HeartbeatTaskExited".into(),
             PeerError::ConnectionTaskExited => "ConnectionTaskExited".into(),
             PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
