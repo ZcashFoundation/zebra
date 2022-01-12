@@ -524,7 +524,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     zebra_test::init();
 
     let mut config = default_test_config()?;
-    let run_dir = TempDir::new("zebrad_tests")?;
+    let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
     if cache_dir_config == EphemeralConfig::MisconfiguredCacheDir {
@@ -1146,7 +1146,7 @@ async fn metrics_endpoint() -> Result<()> {
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
-    let dir = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir = testdir()?.with_config(&mut config)?;
     let child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
@@ -1202,7 +1202,7 @@ async fn tracing_endpoint() -> Result<()> {
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
-    let dir = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir = testdir()?.with_config(&mut config)?;
     let child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
@@ -1294,7 +1294,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     // Write a configuration that has our created network listen_addr
     let mut config = default_test_config()?;
     config.network.listen_addr = listen_addr.parse().unwrap();
-    let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
         "Opened Zcash protocol endpoint at {}",
         listen_addr
@@ -1303,7 +1303,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     // From another folder create a configuration with the same listener.
     // `network.listen_addr` will be the same in the 2 nodes.
     // (But since the config is ephemeral, they will have different state paths.)
-    let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir2 = testdir()?.with_config(&mut config)?;
 
     check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
 
@@ -1325,13 +1325,13 @@ fn zebra_metrics_conflict() -> Result<()> {
     // Write a configuration that has our created metrics endpoint_addr
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
-    let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {}", listen_addr));
 
     // From another folder create a configuration with the same endpoint.
     // `metrics.endpoint_addr` will be the same in the 2 nodes.
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
-    let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir2 = testdir()?.with_config(&mut config)?;
 
     check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
 
@@ -1353,13 +1353,13 @@ fn zebra_tracing_conflict() -> Result<()> {
     // Write a configuration that has our created tracing endpoint_addr
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
-    let dir1 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {}", listen_addr));
 
     // From another folder create a configuration with the same endpoint.
     // `tracing.endpoint_addr` will be the same in the 2 nodes.
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
-    let dir2 = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir2 = testdir()?.with_config(&mut config)?;
 
     check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
 
@@ -1376,7 +1376,7 @@ fn zebra_state_conflict() -> Result<()> {
     // A persistent config has a fixed temp state directory, but asks the OS to
     // automatically choose an unused port
     let mut config = persistent_test_config()?;
-    let dir_conflict = TempDir::new("zebrad_tests")?.with_config(&mut config)?;
+    let dir_conflict = testdir()?.with_config(&mut config)?;
 
     // Windows problems with this match will be worked on at #1654
     // We are matching the whole opened path only for unix by now.
