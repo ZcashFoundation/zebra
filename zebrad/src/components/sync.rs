@@ -6,6 +6,7 @@ use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration}
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
+use indexmap::IndexSet;
 use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
@@ -14,6 +15,7 @@ use tower::{
 
 use zebra_chain::{
     block::{self, Block},
+    chain_tip::ChainTip,
     parameters::genesis_hash,
 };
 use zebra_consensus::{
@@ -21,7 +23,6 @@ use zebra_consensus::{
 };
 use zebra_network as zn;
 use zebra_state as zs;
-use zs::LatestChainTip;
 
 use crate::{
     components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
@@ -184,14 +185,27 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
-pub struct ChainSync<ZN, ZS, ZV>
+pub struct ChainSync<ZN, ZS, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Configuration
     /// The genesis hash for the configured network
@@ -214,6 +228,7 @@ where
             Downloads<
                 Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
                 Timeout<ZV>,
+                ZSTip,
             >,
         >,
     >,
@@ -235,14 +250,27 @@ where
 /// This component is used for initial block sync, but the `Inbound` service is
 /// responsible for participating in the gossip protocols used for block
 /// diffusion.
-impl<ZN, ZS, ZV> ChainSync<ZN, ZS, ZV>
+impl<ZN, ZS, ZV, ZSTip> ChainSync<ZN, ZS, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZV::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Returns a new syncer instance, using:
     ///  - chain: the zebra-chain `Network` to download (Mainnet or Testnet)
@@ -257,7 +285,7 @@ where
         peers: ZN,
         verifier: ZV,
         state: ZS,
-        latest_chain_tip: LatestChainTip,
+        latest_chain_tip: ZSTip,
     ) -> (Self, SyncStatus) {
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
@@ -442,17 +470,21 @@ where
                 tokio::task::yield_now().await;
             }
 
-            requests.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
+            let ready_tip_network = self.tip_network.ready().await;
+            requests.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
                 zn::Request::FindBlocks {
                     known_blocks: block_locator.clone(),
                     stop: None,
                 },
-            ));
+            )));
         }
 
-        let mut download_set = HashSet::new();
+        let mut download_set = IndexSet::new();
         while let Some(res) = requests.next().await {
-            match res.map_err::<Report, _>(|e| eyre!(e)) {
+            match res
+                .expect("panic in spawned obtain tips request")
+                .map_err::<Report, _>(|e| eyre!(e))
+            {
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     tracing::trace!(?hashes);
 
@@ -515,6 +547,9 @@ where
                         );
                     }
 
+                    // security: the first response determines our download order
+                    //
+                    // TODO: can we make the download order independent of response order?
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
@@ -543,7 +578,7 @@ where
         metrics::gauge!("sync.obtain.queued.hash.count", new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
-        // so a single trailing peer can't toggle our mempool
+        // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
         self.request_blocks(download_set).await?;
@@ -555,7 +590,7 @@ where
     async fn extend_tips(&mut self) -> Result<(), Report> {
         let tips = std::mem::take(&mut self.prospective_tips);
 
-        let mut download_set = HashSet::new();
+        let mut download_set = IndexSet::new();
         tracing::info!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             tracing::debug!(?tip, "asking peers to extend chain tip");
@@ -568,15 +603,19 @@ where
                     tokio::task::yield_now().await;
                 }
 
-                responses.push(self.tip_network.ready().await.map_err(|e| eyre!(e))?.call(
+                let ready_tip_network = self.tip_network.ready().await;
+                responses.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
                     zn::Request::FindBlocks {
                         known_blocks: vec![tip.tip],
                         stop: None,
                     },
-                ));
+                )));
             }
             while let Some(res) = responses.next().await {
-                match res.map_err::<Report, _>(|e| eyre!(e)) {
+                match res
+                    .expect("panic in spawned extend tips request")
+                    .map_err::<Report, _>(|e| eyre!(e))
+                {
                     Ok(zn::Response::BlockHashes(hashes)) => {
                         tracing::debug!(first = ?hashes.first(), len = ?hashes.len());
                         tracing::trace!(?hashes);
@@ -654,6 +693,9 @@ where
                             );
                         }
 
+                        // security: the first response determines our download order
+                        //
+                        // TODO: can we make the download order independent of response order?
                         let prev_download_len = download_set.len();
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
@@ -673,7 +715,7 @@ where
         metrics::gauge!("sync.extend.queued.hash.count", new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
-        // so a single trailing peer can't toggle our mempool
+        // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         self.request_blocks(download_set).await?;
@@ -710,7 +752,7 @@ where
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node
-    async fn request_blocks(&mut self, hashes: HashSet<block::Hash>) -> Result<(), Report> {
+    async fn request_blocks(&mut self, hashes: IndexSet<block::Hash>) -> Result<(), Report> {
         tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
@@ -740,7 +782,7 @@ where
         }
     }
 
-    fn update_metrics(&self) {
+    fn update_metrics(&mut self) {
         metrics::gauge!(
             "sync.prospective_tips.len",
             self.prospective_tips.len() as f64
@@ -775,6 +817,14 @@ where
                 tracing::debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
+            BlockDownloadVerifyError::BehindTipHeightLimit => {
+                tracing::debug!(
+                    error = ?e,
+                    "block height is behind the current state tip, \
+                     assuming the syncer will eventually catch up to the state, continuing"
+                );
+                false
+            }
 
             // String matches
             BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
@@ -806,6 +856,7 @@ where
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
                     || err_str.contains("Cancelled")
+                    || err_str.contains("BehindTipHeight")
                     || err_str.contains("block is already committed to the state")
                     || err_str.contains("NotFound")
                 {
