@@ -31,7 +31,7 @@ use color_eyre::{
     eyre::{Result, WrapErr},
     Help,
 };
-use tempdir::TempDir;
+use tempfile::TempDir;
 
 use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
 
@@ -107,10 +107,13 @@ fn persistent_test_config() -> Result<ZebradConfig> {
 }
 
 fn testdir() -> Result<TempDir> {
-    TempDir::new("zebrad_tests").map_err(Into::into)
+    tempfile::Builder::new()
+        .prefix("zebrad_tests")
+        .tempdir()
+        .map_err(Into::into)
 }
 
-/// Extension trait for methods on `tempdir::TempDir` for using it as a test
+/// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
 trait ZebradTestDirExt
 where
