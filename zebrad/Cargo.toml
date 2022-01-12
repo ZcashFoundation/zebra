@@ -18,6 +18,7 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 chrono = "0.4"
 gumdrop = "0.7"
+indexmap = "1.7.0"
 lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"

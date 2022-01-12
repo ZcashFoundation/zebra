@@ -306,12 +306,13 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// #     let mut service = mock_service.clone();
     /// #
     /// let call = tokio::spawn(mock_service.clone().oneshot("request"));
-    ///  
+    ///
     /// mock_service.expect_request("request").await.respond("response");
     ///
     /// assert!(matches!(call.await, Ok(Ok("response"))));
     /// # });
     /// ```
+    #[track_caller]
     pub async fn expect_request(
         &mut self,
         expected: Request,
@@ -321,7 +322,13 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     {
         let response_sender = self.next_request().await;
 
-        assert_eq!(response_sender.request, expected);
+        assert_eq!(
+            response_sender.request,
+            expected,
+            "received an unexpected request\n \
+             in {}",
+            std::any::type_name::<Self>(),
+        );
 
         response_sender
     }
@@ -362,13 +369,23 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// assert!(matches!(call.await, Ok(Ok("response"))));
     /// # });
     /// ```
+    #[track_caller]
     pub async fn expect_request_that(
         &mut self,
         condition: impl FnOnce(&Request) -> bool,
-    ) -> ResponseSender<Request, Response, Error> {
+    ) -> ResponseSender<Request, Response, Error>
+    where
+        Request: Debug,
+    {
         let response_sender = self.next_request().await;
 
-        assert!(condition(&response_sender.request));
+        assert!(
+            condition(&response_sender.request),
+            "condition was false for request: {:?},\n \
+             in {}",
+            response_sender.request,
+            std::any::type_name::<Self>(),
+        );
 
         response_sender
     }
@@ -400,14 +417,17 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// mock_service.expect_no_requests().await;
     /// # });
     /// ```
+    #[track_caller]
     pub async fn expect_no_requests(&mut self)
     where
         Request: Debug,
     {
         if let Some(response_sender) = self.try_next_request().await {
             panic!(
-                "Received an unexpected request: {:?}",
-                response_sender.request
+                "received an unexpected request: {:?},\n \
+                 in {}",
+                response_sender.request,
+                std::any::type_name::<Self>(),
             );
         }
     }
@@ -422,10 +442,15 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     ///
     /// If the queue is empty and a request is not received before the max request delay timeout
     /// expires.
+    #[track_caller]
     async fn next_request(&mut self) -> ResponseSender<Request, Response, Error> {
         match self.try_next_request().await {
             Some(request) => request,
-            None => panic!("Timeout while waiting for a request"),
+            None => panic!(
+                "timeout while waiting for a request\n \
+                 in {}",
+                std::any::type_name::<Self>(),
+            ),
         }
     }
 }
@@ -478,6 +503,7 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// #     test_code().await
     /// # }).unwrap();
     /// ```
+    #[track_caller]
     pub async fn expect_request(
         &mut self,
         expected: Request,
@@ -487,7 +513,13 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     {
         let response_sender = self.next_request().await?;
 
-        prop_assert_eq!(&response_sender.request, &expected);
+        prop_assert_eq!(
+            &response_sender.request,
+            &expected,
+            "received an unexpected request\n \
+             in {}",
+            std::any::type_name::<Self>(),
+        );
 
         Ok(response_sender)
     }
@@ -538,13 +570,23 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// #     test_code().await
     /// # }).unwrap();
     /// ```
+    #[track_caller]
     pub async fn expect_request_that(
         &mut self,
         condition: impl FnOnce(&Request) -> bool,
-    ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError> {
+    ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError>
+    where
+        Request: Debug,
+    {
         let response_sender = self.next_request().await?;
 
-        prop_assert!(condition(&response_sender.request));
+        prop_assert!(
+            condition(&response_sender.request),
+            "condition was false for request: {:?},\n \
+             in {}",
+            &response_sender.request,
+            std::any::type_name::<Self>(),
+        );
 
         Ok(response_sender)
     }
@@ -583,6 +625,7 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// #     test_code().await
     /// # }).unwrap();
     /// ```
+    #[track_caller]
     pub async fn expect_no_requests(&mut self) -> Result<(), TestCaseError>
     where
         Request: Debug,
@@ -591,8 +634,10 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
             Some(response_sender) => {
                 prop_assert!(
                     false,
-                    "Received an unexpected request: {:?}",
-                    response_sender.request
+                    "received an unexpected request: {:?},\n \
+                     in {}",
+                    response_sender.request,
+                    std::any::type_name::<Self>(),
                 );
                 unreachable!("prop_assert!(false) returns an early error");
             }
@@ -608,13 +653,19 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     ///
     /// If the queue is empty and a request is not received before the max request delay timeout
     /// expires, an error generated by a [`proptest`] assertion is returned.
+    #[track_caller]
     async fn next_request(
         &mut self,
     ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError> {
         match self.try_next_request().await {
             Some(request) => Ok(request),
             None => {
-                prop_assert!(false, "Timeout while waiting for a request");
+                prop_assert!(
+                    false,
+                    "timeout while waiting for a request\n \
+                     in {}",
+                    std::any::type_name::<Self>(),
+                );
                 unreachable!("prop_assert!(false) returns an early error");
             }
         }
@@ -643,7 +694,7 @@ impl<Request, Response, Assertion, Error> MockService<Request, Response, Asserti
                     }
                 }
                 Ok(Err(RecvError::Lagged(_))) => continue,
-                Ok(Err(RecvError::Closed)) => unreachable!("Sender is never closed"),
+                Ok(Err(RecvError::Closed)) => unreachable!("sender is never closed"),
                 Err(_timeout) => return None,
             }
         }
@@ -685,7 +736,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
         &self.request
     }
 
-    /// Respond to the request.
+    /// Respond to the request using a fixed response value.
     ///
     /// The `response` can be of the `Response` type or a [`Result`]. This allows sending an error
     /// representing an error while processing the request.
@@ -693,7 +744,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
     ///
-    /// If this method is not called, the caller will panic.
+    /// If `respond` or `respond_with` are not called, the caller will panic.
     ///
     /// # Example
     ///
@@ -733,6 +784,60 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     pub fn respond(self, response: impl ResponseResult<Response, Error>) {
         let _ = self.response_sender.send(response.into_result());
     }
+
+    /// Respond to the request by calculating a value from the request.
+    ///
+    /// The response can be of the `Response` type or a [`Result`]. This allows sending an error
+    /// representing an error while processing the request.
+    ///
+    /// This method takes ownership of the [`ResponseSender`] so that only one response can be
+    /// sent.
+    ///
+    /// If `respond` or `respond_with` are not called, the caller will panic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use zebra_test::mock_service::MockService;
+    /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # let reactor = tokio::runtime::Builder::new_current_thread()
+    /// #     .enable_all()
+    /// #     .build()
+    /// #     .expect("Failed to build Tokio runtime");
+    /// #
+    /// # reactor.block_on(async {
+    /// // Mock a service with a `String` as the service `Error` type.
+    /// let mut mock_service: MockService<_, _, _, String> =
+    ///     MockService::build().for_unit_tests();
+    ///
+    /// # let mut service = mock_service.clone();
+    /// # let task = tokio::spawn(async move {
+    /// #     let first_call_result = (&mut service).oneshot(1).await;
+    /// #     let second_call_result = service.oneshot(1).await;
+    /// #
+    /// #     (first_call_result, second_call_result)
+    /// # });
+    /// #
+    /// mock_service
+    ///     .expect_request(1)
+    ///     .await
+    ///     .respond_with(|req| format!("Received: {}", req));
+    ///
+    /// mock_service
+    ///     .expect_request(1)
+    ///     .await
+    ///     .respond_with(|req| Err(format!("Duplicate request: {}", req)));
+    /// # });
+    /// ```
+    pub fn respond_with<F, R>(self, response_fn: F)
+    where
+        F: FnOnce(&Request) -> R,
+        R: ResponseResult<Response, Error>,
+    {
+        let response_result = response_fn(self.request()).into_result();
+        let _ = self.response_sender.send(response_result);
+    }
 }
 
 /// A representation of an assertion type.
@@ -757,7 +862,7 @@ impl AssertionType for PropTestAssertion {}
 /// A helper trait to improve ergonomics when sending a response.
 ///
 /// This allows the [`ResponseSender::respond`] method to receive either a [`Result`] or just the
-/// response type that is wrapped in an `Ok` variant.
+/// response type, which it automatically wraps in an `Ok` variant.
 pub trait ResponseResult<Response, Error> {
     /// Converts the type into a [`Result`] that can be sent as a response.
     fn into_result(self) -> Result<Response, Error>;
