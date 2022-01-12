@@ -63,7 +63,6 @@ skip-tree = [
     { name = "webpki-roots", version = "=0.18.0" },
 
     # ticket #2980: inferno and orchard/cryptographic dependencies
-    { name = "inferno", version = "=0.10.8" },
     { name = "orchard", version = "=0.0.0" },
 
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
