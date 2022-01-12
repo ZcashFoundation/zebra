@@ -38,6 +38,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
+#![deny(rust_2021_compatibility)]
 #![forbid(unsafe_code)]
 
 mod block;
@@ -54,9 +55,7 @@ pub mod chain;
 pub mod error;
 
 pub use block::VerifyBlockError;
-pub use checkpoint::VerifyCheckpointError;
-pub use checkpoint::MAX_CHECKPOINT_BYTE_COUNT;
-pub use checkpoint::MAX_CHECKPOINT_HEIGHT_GAP;
+pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::groth16;
