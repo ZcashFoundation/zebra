@@ -7,7 +7,7 @@
 use std::{process::Command, time::Duration};
 
 use color_eyre::eyre::Result;
-use tempdir::TempDir;
+use tempfile::tempdir;
 
 use zebra_test::{command::TestDirExt, prelude::Stdio};
 
