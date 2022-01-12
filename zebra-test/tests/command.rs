@@ -59,7 +59,7 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
 
     // Without '-v', hexdump hides duplicate lines. But we want duplicate lines
     // in this test.
-    let mut child = TempDir::new("zebra_test")?
+    let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, &["-v", "/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
@@ -86,7 +86,7 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
         return Ok(());
     }
 
-    let mut child = TempDir::new("zebra_test")?
+    let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, &["zebra_test_output"])?
         .with_timeout(Duration::from_secs(2));
 
@@ -115,7 +115,7 @@ fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
         return Ok(());
     }
 
-    let mut child = TempDir::new("zebra_test")?
+    let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, &["/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
@@ -143,7 +143,7 @@ fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
         return Ok(());
     }
 
-    let mut child = TempDir::new("zebra_test")?
+    let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, &["zebra_test_output"])?
         .with_timeout(Duration::from_secs(2));
 
@@ -171,7 +171,7 @@ fn kill_on_timeout_no_output() -> Result<()> {
         return Ok(());
     }
 
-    let mut child = TempDir::new("zebra_test")?
+    let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, &["120"])?
         .with_timeout(Duration::from_secs(2));
 
