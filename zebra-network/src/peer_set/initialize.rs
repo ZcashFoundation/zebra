@@ -667,9 +667,12 @@ where
     // prevents us from adding items to the stream and checking its length.
     handshakes.push(future::pending().boxed());
 
-    let mut crawl_timer =
-        IntervalStream::new(tokio::time::interval(config.crawl_new_peer_interval))
-            .map(|tick| TimerCrawl { tick });
+    let mut crawl_timer = tokio::time::interval(config.crawl_new_peer_interval);
+    // If the crawl is delayed, also delay all future crawls.
+    // (Shorter intervals just add load, without any benefit.)
+    crawl_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut crawl_timer = IntervalStream::new(crawl_timer).map(|tick| TimerCrawl { tick });
 
     loop {
         metrics::gauge!(
