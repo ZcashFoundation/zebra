@@ -3,25 +3,31 @@ queue_rules:
     speculative_checks: 2
     batch_size: 2
     conditions:
-      - check-success=CI
-      - check-success=Coverage
-      - check-success=pull-request
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
 
   - name: medium
     speculative_checks: 2
     batch_size: 3
     conditions:
-      - check-success=CI
-      - check-success=Coverage
-      - check-success=pull-request
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
 
-  - name: default
+  - name: low
     speculative_checks: 2
     batch_size: 4
     conditions:
-      - check-success=CI
-      - check-success=Coverage
-      - check-success=pull-request
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
 
 pull_request_rules:
   - name: automatic update for PR marked as “Ready-to-Go“
@@ -31,42 +37,42 @@ pull_request_rules:
     actions:
       update:
 
-  - name: move to critical queue when CI passes with 1 review and not WIP targeting main
+  - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
       - -draft
       - base=main
-      - check-success=CI
-      - check-success=Coverage
-      - "label~=^P-Critical"
+      - or:
+          - "label~=^P-Critical"
+          - "label~=^P-High"
       - label!=do-not-merge
     actions:
       queue:
         name: urgent
+        method: squash
 
-  - name: move to high queue when CI passes with 1 review and not WIP targeting main
+  - name: move to medium queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
       - -draft
       - base=main
-      - check-success=CI
-      - check-success=Coverage
-      - "label~=^P-High"
+      - "label~=^P-Medium"
       - label!=do-not-merge
     actions:
       queue:
         name: medium
+        method: squash
 
-  - name: move to default queue when CI passes with 1 review and not WIP targeting main
+  - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
       - -draft
       - base=main
-      - check-success=CI
-      - check-success=Coverage
-      - "-label~=^P-High"
-      - "-label~=^P-Critical"
+      - or:
+          - "-label~=^P-Low"
+          - "-label~=^P-Optional"
       - label!=do-not-merge
     actions:
       queue:
-        name: default
+        name: low
+        method: squash
