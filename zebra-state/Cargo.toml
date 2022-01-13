@@ -39,7 +39,7 @@ zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-color-eyre = "0.5.11"
+color-eyre = "0.6.0"
 once_cell = "1.9"
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
 # Note: if updating this, also update the workspace Cargo.toml to match.
