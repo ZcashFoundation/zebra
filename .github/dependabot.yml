@@ -9,7 +9,7 @@ updates:
   labels:
   - "A-dependencies"
   - "A-rust"
-  - "P-Low"
+  - "P-Low :snowflake:"
   ignore:
   - dependency-name: tokio-util
     versions:
@@ -23,4 +23,4 @@ updates:
   labels:
   - "A-infrastructure"
   - "A-dependencies"
-  - "P-Low"
+  - "P-Low :snowflake:"
