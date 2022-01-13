@@ -76,3 +76,16 @@ pull_request_rules:
       queue:
         name: low
         method: squash
+
+  - name: automatic merge for Dependabot pull requests
+    conditions:
+      - "#approved-reviews-by>=1"
+      - author~=^dependabot(|-preview)\[bot\]$
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
+    actions:
+      merge:
+        method: squash
