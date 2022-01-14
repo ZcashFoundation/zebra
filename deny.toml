@@ -31,9 +31,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # ticket #2953: tracing dependencies
-    { name = "tracing-subscriber", version = "=0.1.6" },
-
     # ticket #2983: criterion dependencies
     { name = "criterion", version = "=0.3.4" },
 
@@ -46,9 +43,8 @@ skip-tree = [
     # ticket #3063: redjubjub dependencies
     { name = "redjubjub", version = "=0.4.0" },
 
-    # ordered-map dependencies that should be dev-dependencies
-    # https://github.com/qwfy/ordered-map/pull/1
-    { name = "env_logger", version = "=0.7.1" },
+    # ticket #3315: ordered-map dependencies that should be dev-dependencies
+    { name = "ordered-map", version = "=0.4.2" },
 
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
@@ -59,12 +55,14 @@ skip-tree = [
     # ticket #2998: hdrhistogram dependencies
     { name = "hdrhistogram", version = "=6.3.4" },
 
+    # ticket #2999: http dependencies
+    { name = "bytes", version = "=0.5.6" },
+
     # ticket #3061: reqwest and minreq dependencies
     { name = "webpki-roots", version = "=0.18.0" },
 
-    # ticket #2980: inferno and orchard/cryptographic dependencies
-    { name = "inferno", version = "=0.10.8" },
-    { name = "orchard", version = "=0.0.0" },
+    # ticket #2980: inferno dependency on outdated arrayvec
+    { name = "inferno", version = "=0.10.9" },
 
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
     # alternative: downgrade Zebra to `bigint`
@@ -77,8 +75,6 @@ skip-tree = [
     { name = "rand", version = "=0.7.3" },
 
     # wait for lots of crates in the tokio ecosystem to upgrade
-    { name = "redox_syscall", version = "=0.1.57" },
-    { name = "rustls", version = "=0.19.1" },
     { name = "socket2", version = "=0.3.16" },
 ]
 

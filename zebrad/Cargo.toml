@@ -3,7 +3,7 @@ name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 version = "1.0.0-beta.3"
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
 # when run in the workspace directory
@@ -18,7 +18,7 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 chrono = "0.4"
 gumdrop = "0.7"
-indexmap = "1.7.0"
+indexmap = "1.8.0"
 lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
