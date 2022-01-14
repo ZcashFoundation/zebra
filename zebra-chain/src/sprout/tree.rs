@@ -209,6 +209,15 @@ pub struct NoteCommitmentTree {
     /// consists of nodes along the rightmost (newer) branch of the tree that
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
+    ///
+    /// # Consensus
+    ///
+    /// > A block MUST NOT add Sprout note commitments that would result in the Sprout note commitment tree
+    /// > exceeding its capacity of 2^(MerkleDepth^Sprout) leaf nodes.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
+    ///
+    /// Note: MerkleDepth^Sprout = MERKLE_DEPTH = 29.
     inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
 
     /// A cached root of the tree.
