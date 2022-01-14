@@ -65,7 +65,7 @@ tokio = { version = "1.15.0", optional = true }
 # ZF deps
 ed25519-zebra = "3.0.0"
 # TODO: Update to 0.5 release when published
-redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", rev = "f772176560b0b7daf25eff2460e08dc127ac8407" }
+redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub.git", rev = "a32ae3fc871bc72558ac2ce7eac933d1ad5f4a9c" }
 
 zebra-test = { path = "../zebra-test/", optional = true }
 
