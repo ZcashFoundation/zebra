@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
+#![deny(rust_2021_compatibility)]
 #![forbid(unsafe_code)]
 
 #[cfg(any(test, feature = "proptest-impl"))]
