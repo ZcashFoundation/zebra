@@ -49,9 +49,6 @@ skip-tree = [
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
 
-    # tickets #2985 and #2391: tempdir & rand dependencies
-    { name = "tempdir", version = "=0.3.7" },
-
     # ticket #2998: hdrhistogram dependencies
     { name = "hdrhistogram", version = "=6.3.4" },
 
@@ -61,8 +58,8 @@ skip-tree = [
     # ticket #3061: reqwest and minreq dependencies
     { name = "webpki-roots", version = "=0.18.0" },
 
-    # ticket #2980: inferno dependency on outdated arrayvec
-    { name = "inferno", version = "=0.10.9" },
+    # ticket #2980: inferno and orchard/cryptographic dependencies
+    { name = "orchard", version = "=0.0.0" },
 
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
     # alternative: downgrade Zebra to `bigint`
