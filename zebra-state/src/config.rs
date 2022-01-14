@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::{convert::TryInto, path::PathBuf};
-use tempdir::TempDir;
 use zebra_chain::parameters::Network;
 
 /// Configuration for the state service.
@@ -46,7 +45,9 @@ pub struct Config {
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
-    TempDir::new(prefix)
+    tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir()
         .expect("temporary directory is created successfully")
         .into_path()
 }
