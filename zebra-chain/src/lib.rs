@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
+#![deny(rust_2021_compatibility)]
 #![forbid(unsafe_code)]
 // Required by bitvec! macro
 #![recursion_limit = "256"]

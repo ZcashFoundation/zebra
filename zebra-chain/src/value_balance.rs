@@ -311,8 +311,6 @@ impl ValueBalance<NonNegative> {
     /// The resulting [`ValueBalance`] will have half of the MAX_MONEY amount on each pool.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn fake_populated_pool() -> ValueBalance<NonNegative> {
-        use std::convert::TryFrom;
-
         let mut fake_value_pool = ValueBalance::zero();
 
         let fake_transparent_value_balance =
