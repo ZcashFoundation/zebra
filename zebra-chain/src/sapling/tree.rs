@@ -184,7 +184,17 @@ pub struct NoteCommitmentTree {
     /// It consists of nodes along the rightmost (newer) branch of the tree that
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
+    ///
+    /// # Consensus
+    ///
+    /// > [Sapling onward] A block MUST NOT add Sapling note commitments that would result in the Sapling note
+    /// > commitment tree exceeding its capacity of 2^(MerkleDepth^Sapling) leaf nodes.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
+    ///
+    /// Note: MerkleDepth^Sapling = MERKLE_DEPTH = 32.
     inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+
     /// A cached root of the tree.
     ///
     /// Every time the root is computed by [`Self::root`] it is cached here,
