@@ -3788,6 +3788,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-subscriber"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77be66445c4eeebb934a7340f227bfe7b338173d3f8c00a60a5a58005c9faecf"
+dependencies = [
+ "ansi_term 0.12.1",
+ "sharded-slab",
+ "smallvec 1.7.0",
+ "thread_local",
+ "tracing-core",
+ "tracing-log",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4366,7 +4380,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.6",
  "zcash_proofs",
  "zebra-chain",
  "zebra-script",
@@ -4477,7 +4491,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-error",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.6",
 ]
 
 [[package]]
@@ -4489,7 +4503,7 @@ dependencies = [
  "serde_json",
  "structopt",
  "tracing-error",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.6",
  "zebra-chain",
  "zebra-consensus",
  "zebra-state",
@@ -4532,7 +4546,7 @@ dependencies = [
  "tracing-flame",
  "tracing-futures",
  "tracing-journald",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.6",
  "vergen",
  "zebra-chain",
  "zebra-consensus",
