@@ -63,6 +63,10 @@ pub struct Chain {
     pub(crate) sprout_anchors: HashMultiSet<sprout::tree::Root>,
     /// The Sprout anchors created by each block in `blocks`.
     pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
+    /// The Sprout note commitment tree for each anchor.
+    /// This is required for interstitial states.
+    pub(crate) sprout_trees_by_anchor:
+        HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
     /// The Sapling anchors created by `blocks`.
     pub(crate) sapling_anchors: HashMultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
@@ -117,6 +121,7 @@ impl Chain {
             spent_utxos: Default::default(),
             sprout_anchors: HashMultiSet::new(),
             sprout_anchors_by_height: Default::default(),
+            sprout_trees_by_anchor: Default::default(),
             sapling_anchors: HashMultiSet::new(),
             sapling_anchors_by_height: Default::default(),
             orchard_anchors: HashMultiSet::new(),
@@ -155,6 +160,7 @@ impl Chain {
 
             // note commitment trees
             self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
+            self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
 
@@ -383,6 +389,7 @@ impl Chain {
             sprout_anchors: self.sprout_anchors.clone(),
             sapling_anchors: self.sapling_anchors.clone(),
             orchard_anchors: self.orchard_anchors.clone(),
+            sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
             sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
             sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
             orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
@@ -393,14 +400,6 @@ impl Chain {
             history_tree,
             chain_value_pools: self.chain_value_pools,
         }
-    }
-
-    /// Returns a clone of the Sprout note commitment tree for this chain.
-    ///
-    /// Useful when calculating interstitial note commitment trees for each JoinSplit in a Sprout
-    /// shielded transaction.
-    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
-        self.sprout_note_commitment_tree.clone()
     }
 }
 
@@ -528,6 +527,8 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         let sprout_root = self.sprout_note_commitment_tree.root();
         self.sprout_anchors.insert(sprout_root);
         self.sprout_anchors_by_height.insert(height, sprout_root);
+        self.sprout_trees_by_anchor
+            .insert(sprout_root, self.sprout_note_commitment_tree.clone());
         let sapling_root = self.sapling_note_commitment_tree.root();
         self.sapling_anchors.insert(sapling_root);
         self.sapling_anchors_by_height.insert(height, sapling_root);
@@ -643,6 +644,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.sprout_anchors.remove(&anchor),
             "Sprout anchor must be present if block was added to chain"
         );
+        if !self.sprout_anchors.contains(&anchor) {
+            self.sprout_trees_by_anchor.remove(&anchor);
+        }
 
         let anchor = self
             .sapling_anchors_by_height
