@@ -131,8 +131,8 @@ impl ChainTipSender {
             active_value: None,
         };
 
-        let current = LatestChainTip::new(receiver.clone());
-        let change = ChainTipChange::new(receiver, network);
+        let current = LatestChainTip::new(receiver);
+        let change = ChainTipChange::new(current.clone(), network);
 
         sender.update(initial_tip);
 
@@ -339,7 +339,7 @@ impl ChainTip for LatestChainTip {
 #[derive(Debug)]
 pub struct ChainTipChange {
     /// The receiver for the current chain tip's data.
-    receiver: watch::Receiver<ChainTipData>,
+    latest_chain_tip: LatestChainTip,
 
     /// The most recent [`block::Hash`] provided by this instance.
     ///
@@ -410,8 +410,6 @@ impl ChainTipChange {
     #[instrument(
         skip(self),
         fields(
-            current_height = ?self.receiver.borrow().as_ref().map(|block| block.height),
-            current_hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
             last_change_hash = ?self.last_change_hash,
             network = ?self.network,
         ))]
@@ -433,25 +431,25 @@ impl ChainTipChange {
     #[instrument(
         skip(self),
         fields(
-            current_height = ?self.receiver.borrow().as_ref().map(|block| block.height),
-            current_hash = ?self.receiver.borrow().as_ref().map(|block| block.hash),
             last_change_hash = ?self.last_change_hash,
             network = ?self.network,
         ))]
     pub fn last_tip_change(&mut self) -> Option<TipAction> {
-        // Obtain the tip block.
-        let block = self.best_tip_block()?;
+        let block = self.latest_chain_tip.with_chain_tip_block(|block| {
+            if Some(block.hash) != self.last_change_hash {
+                Some(block.clone())
+            } else {
+                // Ignore an unchanged tip.
+                None
+            }
+        })??;
 
-        // Ignore an unchanged tip.
-        if Some(block.hash) == self.last_change_hash {
-            return None;
-        }
+        let block_hash = block.hash;
+        let tip_action = self.action(block);
 
-        let action = self.action(block.clone());
+        self.last_change_hash = Some(block_hash);
 
-        self.last_change_hash = Some(block.hash);
-
-        Some(action)
+        Some(tip_action)
     }
 
     /// Return an action based on `block` and the last change we returned.
@@ -499,10 +497,10 @@ impl ChainTipChange {
         }
     }
 
-    /// Create a new [`ChainTipChange`] from a watch channel receiver and [`Network`].
-    fn new(receiver: watch::Receiver<ChainTipData>, network: Network) -> Self {
+    /// Create a new [`ChainTipChange`] from a [`LatestChainTip`] receiver and [`Network`].
+    fn new(latest_chain_tip: LatestChainTip, network: Network) -> Self {
         Self {
-            receiver,
+            latest_chain_tip,
             last_change_hash: None,
             network,
         }
@@ -518,37 +516,38 @@ impl ChainTipChange {
             // after the change notification.
             // Any block update after the change will do,
             // we'll catch up with the tip after the next change.
-            self.receiver.changed().await?;
+            self.latest_chain_tip.receiver.changed().await?;
 
-            // Wait until there is actually Some block,
-            // so we don't have `Option`s inside `TipAction`s.
-            if let Some(block) = self.best_tip_block() {
-                // Wait until we have a new block
-                //
-                // last_tip_change() updates last_change_hash, but it doesn't call receiver.changed().
-                // So code that uses both sync and async methods can have spurious pending changes.
-                //
-                // TODO: use `receiver.borrow_and_update()` in `best_tip_block()`,
-                //       once we upgrade to tokio 1.0 (#2200)
-                //       and remove this extra check
-                if Some(block.hash) != self.last_change_hash {
-                    return Ok(block);
-                }
+            // Wait until we have a new block
+            //
+            // last_tip_change() updates last_change_hash, but it doesn't call receiver.changed().
+            // So code that uses both sync and async methods can have spurious pending changes.
+            //
+            // TODO: use `receiver.borrow_and_update()` in `with_chain_tip_block()`,
+            //       once we upgrade to tokio 1.0 (#2200)
+            //       and remove this extra check
+            let new_block = self
+                .latest_chain_tip
+                .with_chain_tip_block(|block| {
+                    if Some(block.hash) != self.last_change_hash {
+                        Some(block.clone())
+                    } else {
+                        None
+                    }
+                })
+                .flatten();
+
+            if let Some(block) = new_block {
+                return Ok(block);
             }
         }
-    }
-
-    /// Return the current best [`ChainTipBlock`],
-    /// or `None` if no block has been committed yet.
-    fn best_tip_block(&self) -> Option<ChainTipBlock> {
-        self.receiver.borrow().clone()
     }
 }
 
 impl Clone for ChainTipChange {
     fn clone(&self) -> Self {
         Self {
-            receiver: self.receiver.clone(),
+            latest_chain_tip: self.latest_chain_tip.clone(),
 
             // clear the previous change hash, so the first action is a reset
             last_change_hash: None,
