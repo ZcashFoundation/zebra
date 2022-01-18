@@ -16,7 +16,7 @@ use crate::{
 /// which avoids JoinSplits<BCTV14Proof>
 ///
 /// Sprout anchors may refer to some earlier block's final treestate (like
-/// Sapling and Orchard do exclusively) _or_ to the interstisial output
+ /// Sapling and Orchard do exclusively) _or_ to the interstitial output
 /// treestate of any prior `JoinSplit` _within the same transaction_.
 #[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
 pub(crate) fn anchors_refer_to_earlier_treestates(
