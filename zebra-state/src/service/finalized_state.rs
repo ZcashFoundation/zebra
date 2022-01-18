@@ -438,7 +438,7 @@ impl FinalizedState {
 
             // Compute the new anchors and index them
             // Note: if the root hasn't changed, we write the same value again.
-            batch.zs_insert(sprout_anchors, sprout_root, ());
+            batch.zs_insert(sprout_anchors, sprout_root, &sprout_note_commitment_tree);
             batch.zs_insert(sapling_anchors, sapling_root, ());
             batch.zs_insert(orchard_anchors, orchard_root, ());
 
@@ -632,6 +632,7 @@ impl FinalizedState {
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
+    #[allow(unused)]
     pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
         let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         self.db.zs_contains(sprout_anchors, &sprout_anchor)
@@ -682,6 +683,18 @@ impl FinalizedState {
         self.db
             .zs_get(sprout_note_commitment_tree, &height)
             .expect("Sprout note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Sprout note commitment tree matching the given anchor.
+    ///
+    /// This is used for interstitial tree building, which is unique to Sprout.
+    pub fn sprout_note_commitment_tree_by_anchor(
+        &self,
+        sprout_anchor: &sprout::tree::Root,
+    ) -> Option<sprout::tree::NoteCommitmentTree> {
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+
+        self.db.zs_get(sprout_anchors, sprout_anchor)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
@@ -797,7 +810,11 @@ impl FinalizedState {
         for transaction in block.transactions.iter() {
             // Sprout
             for joinsplit in transaction.sprout_groth16_joinsplits() {
-                batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
+                batch.zs_insert(
+                    sprout_anchors,
+                    joinsplit.anchor,
+                    sprout::tree::NoteCommitmentTree::default(),
+                );
             }
 
             // Sapling
