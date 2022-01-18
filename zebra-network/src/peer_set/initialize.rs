@@ -13,7 +13,7 @@ use futures::{
 };
 use rand::seq::SliceRandom;
 use tokio::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::broadcast,
     time::{sleep, Instant},
 };
@@ -482,7 +482,8 @@ async fn accept_inbound_connections<S>(
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
-    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
+    S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
+        + Clone,
     S::Future: Send + 'static,
 {
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
@@ -534,7 +535,7 @@ where
 
             // Construct a handshake future but do not drive it yet....
             let handshake = handshaker.call(HandshakeRequest {
-                tcp_stream,
+                data_stream: tcp_stream,
                 connected_addr,
                 connection_tracker,
             });

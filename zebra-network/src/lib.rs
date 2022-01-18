@@ -37,6 +37,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::try_err)]
 #![deny(clippy::await_holding_lock)]
+#![deny(rust_2021_compatibility)]
 #![forbid(unsafe_code)]
 
 #[macro_use]
@@ -69,7 +70,7 @@ mod protocol;
 pub use crate::{
     address_book::AddressBook,
     config::Config,
-    isolated::connect_isolated,
+    isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,

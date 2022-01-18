@@ -607,6 +607,7 @@ fn different_blocks_different_chains() -> Result<()> {
                 // anchors
                 chain1.sprout_anchors = chain2.sprout_anchors.clone();
                 chain1.sprout_anchors_by_height = chain2.sprout_anchors_by_height.clone();
+                chain1.sprout_trees_by_anchor = chain2.sprout_trees_by_anchor.clone();
                 chain1.sapling_anchors = chain2.sapling_anchors.clone();
                 chain1.sapling_anchors_by_height = chain2.sapling_anchors_by_height.clone();
                 chain1.orchard_anchors = chain2.orchard_anchors.clone();

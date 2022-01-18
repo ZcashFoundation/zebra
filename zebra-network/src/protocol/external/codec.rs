@@ -184,7 +184,7 @@ impl Codec {
     /// for large data structures like lists, blocks, and transactions.
     /// See #1774.
     fn body_length(&self, msg: &Message) -> usize {
-        let mut writer = FakeWriter { 0: 0 };
+        let mut writer = FakeWriter(0);
 
         self.write_body(msg, &mut writer)
             .expect("writer should never fail");

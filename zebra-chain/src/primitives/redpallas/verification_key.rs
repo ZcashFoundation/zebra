@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, marker::PhantomData};
+use std::marker::PhantomData;
 
 use group::{cofactor::CofactorGroup, GroupEncoding};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
@@ -95,7 +95,6 @@ impl<T: SigType> TryFrom<[u8; 32]> for VerificationKey<T> {
     type Error = Error;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        use std::convert::TryInto;
         VerificationKeyBytes::from(bytes).try_into()
     }
 }

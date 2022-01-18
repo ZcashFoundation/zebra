@@ -725,24 +725,25 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
         return;
     }
 
-    let success_disconnect_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
-        let HandshakeRequest {
-            tcp_stream,
-            connected_addr: _,
-            connection_tracker,
-        } = req;
+    let success_disconnect_inbound_handshaker =
+        service_fn(|req: HandshakeRequest<TcpStream>| async move {
+            let HandshakeRequest {
+                data_stream: tcp_stream,
+                connected_addr: _,
+                connection_tracker,
+            } = req;
 
-        let (fake_client, _harness) = ClientTestHarness::build().finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
-        // Actually close the connection.
-        std::mem::drop(connection_tracker);
-        std::mem::drop(tcp_stream);
+            // Actually close the connection.
+            std::mem::drop(connection_tracker);
+            std::mem::drop(tcp_stream);
 
-        // Give the crawler time to get the message.
-        tokio::task::yield_now().await;
+            // Give the crawler time to get the message.
+            tokio::task::yield_now().await;
 
-        Ok(fake_client)
-    });
+            Ok(fake_client)
+        });
 
     let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(1, success_disconnect_inbound_handshaker).await;
@@ -791,25 +792,26 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
 
     let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
 
-    let success_stay_open_inbound_handshaker = service_fn(move |req: HandshakeRequest| {
-        let peer_tracker_tx = peer_tracker_tx.clone();
-        async move {
-            let HandshakeRequest {
-                tcp_stream,
-                connected_addr: _,
-                connection_tracker,
-            } = req;
+    let success_stay_open_inbound_handshaker =
+        service_fn(move |req: HandshakeRequest<TcpStream>| {
+            let peer_tracker_tx = peer_tracker_tx.clone();
+            async move {
+                let HandshakeRequest {
+                    data_stream: tcp_stream,
+                    connected_addr: _,
+                    connection_tracker,
+                } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build().finish();
+                let (fake_client, _harness) = ClientTestHarness::build().finish();
 
-            // Make the connection staying open.
-            peer_tracker_tx
-                .unbounded_send((tcp_stream, connection_tracker))
-                .expect("unexpected error sending to unbounded channel");
+                // Make the connection staying open.
+                peer_tracker_tx
+                    .unbounded_send((tcp_stream, connection_tracker))
+                    .expect("unexpected error sending to unbounded channel");
 
-            Ok(fake_client)
-        }
-    });
+                Ok(fake_client)
+            }
+        });
 
     let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(1, success_stay_open_inbound_handshaker).await;
@@ -913,24 +915,25 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
         return;
     }
 
-    let success_disconnect_inbound_handshaker = service_fn(|req: HandshakeRequest| async move {
-        let HandshakeRequest {
-            tcp_stream,
-            connected_addr: _,
-            connection_tracker,
-        } = req;
+    let success_disconnect_inbound_handshaker =
+        service_fn(|req: HandshakeRequest<TcpStream>| async move {
+            let HandshakeRequest {
+                data_stream: tcp_stream,
+                connected_addr: _,
+                connection_tracker,
+            } = req;
 
-        let (fake_client, _harness) = ClientTestHarness::build().finish();
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
 
-        // Actually close the connection.
-        std::mem::drop(connection_tracker);
-        std::mem::drop(tcp_stream);
+            // Actually close the connection.
+            std::mem::drop(connection_tracker);
+            std::mem::drop(tcp_stream);
 
-        // Give the crawler time to get the message.
-        tokio::task::yield_now().await;
+            // Give the crawler time to get the message.
+            tokio::task::yield_now().await;
 
-        Ok(fake_client)
-    });
+            Ok(fake_client)
+        });
 
     let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(None, success_disconnect_inbound_handshaker).await;
@@ -979,25 +982,26 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
 
     let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
 
-    let success_stay_open_inbound_handshaker = service_fn(move |req: HandshakeRequest| {
-        let peer_tracker_tx = peer_tracker_tx.clone();
-        async move {
-            let HandshakeRequest {
-                tcp_stream,
-                connected_addr: _,
-                connection_tracker,
-            } = req;
+    let success_stay_open_inbound_handshaker =
+        service_fn(move |req: HandshakeRequest<TcpStream>| {
+            let peer_tracker_tx = peer_tracker_tx.clone();
+            async move {
+                let HandshakeRequest {
+                    data_stream: tcp_stream,
+                    connected_addr: _,
+                    connection_tracker,
+                } = req;
 
-            let (fake_client, _harness) = ClientTestHarness::build().finish();
+                let (fake_client, _harness) = ClientTestHarness::build().finish();
 
-            // Make the connection staying open.
-            peer_tracker_tx
-                .unbounded_send((tcp_stream, connection_tracker))
-                .expect("unexpected error sending to unbounded channel");
+                // Make the connection staying open.
+                peer_tracker_tx
+                    .unbounded_send((tcp_stream, connection_tracker))
+                    .expect("unexpected error sending to unbounded channel");
 
-            Ok(fake_client)
-        }
-    });
+                Ok(fake_client)
+            }
+        });
 
     let (config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(None, success_stay_open_inbound_handshaker).await;
@@ -1353,7 +1357,7 @@ async fn spawn_inbound_listener_with_peer_limit<S>(
     listen_handshaker: S,
 ) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
-    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError>
+    S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
         + Clone
         + Send
         + 'static,
