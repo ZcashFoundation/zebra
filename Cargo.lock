@@ -281,34 +281,15 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.57.0"
+version = "0.59.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd4865004a46a0aafb2a0a5eb19d3c9fc46ee5f063a6cfc605c69ac9ecf5263d"
-dependencies = [
- "bitflags",
- "cexpr",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "peeking_take_while",
- "proc-macro2 1.0.34",
- "quote 1.0.10",
- "regex",
- "rustc-hash",
- "shlex 0.1.1",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.58.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f8523b410d7187a43085e7e064416ea32ded16bd0a4e6fc025e21616d01258f"
+checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
 dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
  "clap",
- "env_logger 0.8.3",
+ "env_logger 0.9.0",
  "lazy_static",
  "lazycell",
  "log",
@@ -317,7 +298,7 @@ dependencies = [
  "quote 1.0.10",
  "regex",
  "rustc-hash",
- "shlex 1.0.0",
+ "shlex",
  "which",
 ]
 
@@ -499,11 +480,11 @@ dependencies = [
 
 [[package]]
 name = "cexpr"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4aedb84272dbe89af497cf81375129abda4fc0a9e7c5d317498c15cc30c0d27"
+checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
 dependencies = [
- "nom 5.1.2",
+ "nom 7.1.0",
 ]
 
 [[package]]
@@ -1065,9 +1046,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.8.3"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17392a012ea30ef05a610aa97dfb49496e71c9f676b27879922ea5bdf60d9d3f"
+checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
 dependencies = [
  "atty",
  "humantime",
@@ -1742,11 +1723,11 @@ checksum = "c7d73b3f436185384286bd8098d17ec07c9a7d2388a6599f824d8502b529702a"
 
 [[package]]
 name = "librocksdb-sys"
-version = "6.17.3"
+version = "6.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5da125e1c0f22c7cae785982115523a0738728498547f415c9054cb17c7e89f9"
+checksum = "c309a9d2470844aceb9a4a098cf5286154d20596868b75a6b36357d2bb9ca25d"
 dependencies = [
- "bindgen 0.57.0",
+ "bindgen",
  "cc",
  "glob",
  "libc",
@@ -1934,6 +1915,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 
 [[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2011,11 +1998,12 @@ dependencies = [
 
 [[package]]
 name = "nom"
-version = "5.1.2"
+version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
+checksum = "1b1d11e1ef389c76fe5b81bcaf2ea32cf88b62bc494e19f493d0b30e7a930109"
 dependencies = [
  "memchr",
+ "minimal-lexical",
  "version_check 0.9.2",
 ]
 
@@ -2827,9 +2815,9 @@ dependencies = [
 
 [[package]]
 name = "rocksdb"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c749134fda8bfc90d0de643d59bfc841dcb3ac8a1062e12b6754bd60235c48b3"
+checksum = "7a62eca5cacf2c8261128631bed9f045598d40bfbe4b29f5163f0f802f8f44a7"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -3181,12 +3169,6 @@ dependencies = [
  "lazy_static",
  "loom",
 ]
-
-[[package]]
-name = "shlex"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
 
 [[package]]
 name = "shlex"
@@ -4099,10 +4081,12 @@ dependencies = [
 
 [[package]]
 name = "which"
-version = "3.1.1"
+version = "4.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d011071ae14a2f6671d0b74080ae0cd8ebf3a6f8c9589a2cd45f23126fe29724"
+checksum = "ea187a8ef279bc014ec368c27a920da2024d2a711109bfbe3440585d5cf27ad9"
 dependencies = [
+ "either",
+ "lazy_static",
  "libc",
 ]
 
@@ -4257,9 +4241,9 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.1.6-alpha.0"
-source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=0cb1aa5dd159cb205e5cae9683ca976df60b6b21#0cb1aa5dd159cb205e5cae9683ca976df60b6b21"
+source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=70738fc9b143c2a23df7c138c87c95b398273402#70738fc9b143c2a23df7c138c87c95b398273402"
 dependencies = [
- "bindgen 0.58.1",
+ "bindgen",
  "blake2b_simd",
  "cc",
  "halo2",
