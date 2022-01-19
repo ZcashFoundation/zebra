@@ -4,10 +4,11 @@
 //! - connection tests when awaiting requests (#3232)
 //! - connection tests with closed/dropped peer_outbound_tx (#3233)
 
-use futures::{channel::mpsc, FutureExt};
-use tokio_util::codec::FramedWrite;
+use std::io;
 
-use zebra_chain::parameters::Network;
+use futures::{channel::mpsc, sink::SinkMapErr, FutureExt, SinkExt, StreamExt};
+
+use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
         client::ClientRequestReceiver, connection::State, ClientRequest, Connection, ErrorSlot,
     },
     peer_set::ActiveConnectionCounter,
-    protocol::external::Codec,
+    protocol::external::Message,
     PeerError, Request, Response,
 };
 
@@ -27,10 +28,8 @@ async fn connection_run_loop_ok() {
     // but that doesn't change how the state machine behaves.
     let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (connection, client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
+        new_test_connection();
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -55,7 +54,7 @@ async fn connection_run_loop_ok() {
 
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
@@ -68,10 +67,8 @@ async fn connection_run_loop_future_drop() {
     // but that doesn't change how the state machine behaves.
     let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (connection, client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
+        new_test_connection();
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -85,7 +82,7 @@ async fn connection_run_loop_future_drop() {
     assert!(client_tx.is_closed());
     assert!(peer_inbound_tx.is_closed());
 
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
@@ -98,10 +95,13 @@ async fn connection_run_loop_client_close() {
     // but that doesn't change how the state machine behaves.
     let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (connection, mut client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -122,7 +122,7 @@ async fn connection_run_loop_client_close() {
 
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
@@ -135,10 +135,8 @@ async fn connection_run_loop_client_drop() {
     // but that doesn't change how the state machine behaves.
     let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (connection, client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
+        new_test_connection();
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -158,7 +156,7 @@ async fn connection_run_loop_client_drop() {
 
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
@@ -171,10 +169,8 @@ async fn connection_run_loop_inbound_close() {
     // but that doesn't change how the state machine behaves.
     let (mut peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (connection, client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
+        new_test_connection();
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -195,7 +191,7 @@ async fn connection_run_loop_inbound_close() {
 
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
@@ -208,10 +204,8 @@ async fn connection_run_loop_inbound_drop() {
     // but that doesn't change how the state machine behaves.
     let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (connection, client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
+        new_test_connection();
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -231,7 +225,7 @@ async fn connection_run_loop_inbound_drop() {
 
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
@@ -244,10 +238,13 @@ async fn connection_run_loop_failed() {
     // but that doesn't change how the state machine behaves.
     let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
 
-    let mut peer_outbound_bytes = Vec::<u8>::new();
-
-    let (mut connection, client_tx, mut inbound_service, shared_error_slot) =
-        new_test_connection(&mut peer_outbound_bytes);
+    let (
+        mut connection,
+        client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
 
     // Simulate an internal connection error.
     connection.state = State::Failed;
@@ -273,33 +270,35 @@ async fn connection_run_loop_failed() {
 
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+    assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
 }
 
 /// Creates a new [`Connection`] instance for testing.
-fn new_test_connection(
-    peer_outbound_bytes: &mut Vec<u8>,
-) -> (
-    Connection<MockService<Request, Response, PanicAssertion>, FramedWrite<&mut Vec<u8>, Codec>>,
+fn new_test_connection() -> (
+    Connection<
+        MockService<Request, Response, PanicAssertion>,
+        SinkMapErr<mpsc::UnboundedSender<Message>, fn(mpsc::SendError) -> SerializationError>,
+    >,
     mpsc::Sender<ClientRequest>,
     MockService<Request, Response, PanicAssertion>,
+    mpsc::UnboundedReceiver<Message>,
     ErrorSlot,
 ) {
-    let (client_tx, client_rx) = mpsc::channel(1);
-
-    let peer_outbound_tx = FramedWrite::new(
-        peer_outbound_bytes,
-        Codec::builder()
-            .for_network(Network::Mainnet)
-            .with_metrics_addr_label("test".into())
-            .finish(),
-    );
-
     let mock_inbound_service = MockService::build().for_unit_tests();
-
+    let (client_tx, client_rx) = mpsc::channel(1);
     let shared_error_slot = ErrorSlot::default();
+    let (peer_outbound_tx, peer_outbound_rx) = mpsc::unbounded();
+
+    let error_converter: fn(mpsc::SendError) -> SerializationError = |_| {
+        io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "peer outbound message stream was closed",
+        )
+        .into()
+    };
+    let peer_tx = peer_outbound_tx.sink_map_err(error_converter);
 
     let connection = Connection {
         state: State::AwaitingRequest,
@@ -308,7 +307,7 @@ fn new_test_connection(
         svc: mock_inbound_service.clone(),
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
-        peer_tx: peer_outbound_tx,
+        peer_tx,
         connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
         metrics_label: "test".to_string(),
         last_metrics_state: None,
@@ -318,6 +317,7 @@ fn new_test_connection(
         connection,
         client_tx,
         mock_inbound_service,
+        peer_outbound_rx,
         shared_error_slot,
     )
 }
