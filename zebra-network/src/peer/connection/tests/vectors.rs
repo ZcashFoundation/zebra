@@ -4,18 +4,16 @@
 //! - connection tests when awaiting requests (#3232)
 //! - connection tests with closed/dropped peer_outbound_tx (#3233)
 
-use std::io;
-
-use futures::{channel::mpsc, sink::SinkMapErr, FutureExt, SinkExt, StreamExt};
+use futures::{channel::mpsc, sink::SinkMapErr, FutureExt, StreamExt};
 
 use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     peer::{
-        client::ClientRequestReceiver, connection::State, ClientRequest, Connection, ErrorSlot,
+        connection::{Connection, State},
+        ClientRequest, ErrorSlot,
     },
-    peer_set::ActiveConnectionCounter,
     protocol::external::Message,
     PeerError, Request, Response,
 };
@@ -275,7 +273,7 @@ async fn connection_run_loop_failed() {
     inbound_service.expect_no_requests().await;
 }
 
-/// Creates a new [`Connection`] instance for testing.
+/// Creates a new [`Connection`] instance for unit tests.
 fn new_test_connection() -> (
     Connection<
         MockService<Request, Response, PanicAssertion>,
@@ -286,38 +284,5 @@ fn new_test_connection() -> (
     mpsc::UnboundedReceiver<Message>,
     ErrorSlot,
 ) {
-    let mock_inbound_service = MockService::build().for_unit_tests();
-    let (client_tx, client_rx) = mpsc::channel(1);
-    let shared_error_slot = ErrorSlot::default();
-    let (peer_outbound_tx, peer_outbound_rx) = mpsc::unbounded();
-
-    let error_converter: fn(mpsc::SendError) -> SerializationError = |_| {
-        io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "peer outbound message stream was closed",
-        )
-        .into()
-    };
-    let peer_tx = peer_outbound_tx.sink_map_err(error_converter);
-
-    let connection = Connection {
-        state: State::AwaitingRequest,
-        request_timer: None,
-        cached_addrs: Vec::new(),
-        svc: mock_inbound_service.clone(),
-        client_rx: ClientRequestReceiver::from(client_rx),
-        error_slot: shared_error_slot.clone(),
-        peer_tx,
-        connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
-        metrics_label: "test".to_string(),
-        last_metrics_state: None,
-    };
-
-    (
-        connection,
-        client_tx,
-        mock_inbound_service,
-        peer_outbound_rx,
-        shared_error_slot,
-    )
+    super::new_test_connection()
 }
