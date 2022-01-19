@@ -16,6 +16,7 @@ use crate::{
     Request, Response,
 };
 
+mod prop;
 mod vectors;
 
 /// Creates a new [`Connection`] instance for testing.
