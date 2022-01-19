@@ -29,7 +29,8 @@ async fn connection_run_loop_ok() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (connection, client_tx, shared_error_slot) = new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, shared_error_slot) =
+        new_test_connection(&mut peer_outbound_bytes);
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -55,6 +56,8 @@ async fn connection_run_loop_ok() {
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -67,7 +70,8 @@ async fn connection_run_loop_future_drop() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (connection, client_tx, shared_error_slot) = new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, shared_error_slot) =
+        new_test_connection(&mut peer_outbound_bytes);
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -82,6 +86,8 @@ async fn connection_run_loop_future_drop() {
     assert!(peer_inbound_tx.is_closed());
 
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -94,7 +100,7 @@ async fn connection_run_loop_client_close() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (connection, mut client_tx, shared_error_slot) =
+    let (connection, mut client_tx, mut inbound_service, shared_error_slot) =
         new_test_connection(&mut peer_outbound_bytes);
 
     let connection = connection.run(peer_inbound_rx);
@@ -117,6 +123,8 @@ async fn connection_run_loop_client_close() {
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -129,7 +137,8 @@ async fn connection_run_loop_client_drop() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (connection, client_tx, shared_error_slot) = new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, shared_error_slot) =
+        new_test_connection(&mut peer_outbound_bytes);
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -150,6 +159,8 @@ async fn connection_run_loop_client_drop() {
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -162,7 +173,8 @@ async fn connection_run_loop_inbound_close() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (connection, client_tx, shared_error_slot) = new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, shared_error_slot) =
+        new_test_connection(&mut peer_outbound_bytes);
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -184,6 +196,8 @@ async fn connection_run_loop_inbound_close() {
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -196,7 +210,8 @@ async fn connection_run_loop_inbound_drop() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (connection, client_tx, shared_error_slot) = new_test_connection(&mut peer_outbound_bytes);
+    let (connection, client_tx, mut inbound_service, shared_error_slot) =
+        new_test_connection(&mut peer_outbound_bytes);
 
     let connection = connection.run(peer_inbound_rx);
 
@@ -217,6 +232,8 @@ async fn connection_run_loop_inbound_drop() {
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -229,7 +246,7 @@ async fn connection_run_loop_failed() {
 
     let mut peer_outbound_bytes = Vec::<u8>::new();
 
-    let (mut connection, client_tx, shared_error_slot) =
+    let (mut connection, client_tx, mut inbound_service, shared_error_slot) =
         new_test_connection(&mut peer_outbound_bytes);
 
     // Simulate an internal connection error.
@@ -257,6 +274,8 @@ async fn connection_run_loop_failed() {
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
     assert_eq!(peer_outbound_bytes, Vec::<u8>::new());
+
+    inbound_service.expect_no_requests().await;
 }
 
 /// Creates a new [`Connection`] instance for testing.
@@ -265,6 +284,7 @@ fn new_test_connection(
 ) -> (
     Connection<MockService<Request, Response, PanicAssertion>, FramedWrite<&mut Vec<u8>, Codec>>,
     mpsc::Sender<ClientRequest>,
+    MockService<Request, Response, PanicAssertion>,
     ErrorSlot,
 ) {
     let (client_tx, client_rx) = mpsc::channel(1);
@@ -277,7 +297,7 @@ fn new_test_connection(
             .finish(),
     );
 
-    let unused_inbound_service = MockService::build().for_unit_tests();
+    let mock_inbound_service = MockService::build().for_unit_tests();
 
     let shared_error_slot = ErrorSlot::default();
 
@@ -285,7 +305,7 @@ fn new_test_connection(
         state: State::AwaitingRequest,
         request_timer: None,
         cached_addrs: Vec::new(),
-        svc: unused_inbound_service,
+        svc: mock_inbound_service.clone(),
         client_rx: ClientRequestReceiver::from(client_rx),
         error_slot: shared_error_slot.clone(),
         peer_tx: peer_outbound_tx,
@@ -294,5 +314,10 @@ fn new_test_connection(
         last_metrics_state: None,
     };
 
-    (connection, client_tx, shared_error_slot)
+    (
+        connection,
+        client_tx,
+        mock_inbound_service,
+        shared_error_slot,
+    )
 }
