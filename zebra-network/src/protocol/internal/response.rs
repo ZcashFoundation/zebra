@@ -11,7 +11,7 @@ use std::{fmt, sync::Arc};
 use proptest_derive::Arbitrary;
 
 /// A response to a network request, represented in internal format.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Response {
     /// Do not send any response to this request.
