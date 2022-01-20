@@ -21,11 +21,21 @@ use crate::{
 /// A wrapper around [`peer::Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
-pub struct Connector<S, C = NoChainTip> {
-    handshaker: Handshake<S, C>,
+pub struct Connector<S, C = NoChainTip>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
+    handshaker: Handshake<S, TcpStream, C>,
 }
 
-impl<S: Clone, C: Clone> Clone for Connector<S, C> {
+impl<S, C> Clone for Connector<S, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
     fn clone(&self) -> Self {
         Connector {
             handshaker: self.handshaker.clone(),
@@ -33,8 +43,13 @@ impl<S: Clone, C: Clone> Clone for Connector<S, C> {
     }
 }
 
-impl<S, C> Connector<S, C> {
-    pub fn new(handshaker: Handshake<S, C>) -> Self {
+impl<S, C> Connector<S, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
+    pub fn new(handshaker: Handshake<S, TcpStream, C>) -> Self {
         Connector { handshaker }
     }
 }
@@ -77,11 +92,11 @@ where
         let connector_span = info_span!("connector", peer = ?connected_addr);
 
         async move {
-            let stream = TcpStream::connect(addr).await?;
+            let tcp_stream = TcpStream::connect(addr).await?;
             hs.ready().await?;
             let client = hs
-                .call(HandshakeRequest {
-                    tcp_stream: stream,
+                .call(HandshakeRequest::<TcpStream> {
+                    data_stream: tcp_stream,
                     connected_addr,
                     connection_tracker,
                 })

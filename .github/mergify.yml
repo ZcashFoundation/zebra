@@ -30,13 +30,6 @@ queue_rules:
       - check-success=Coverage (+nightly)
 
 pull_request_rules:
-  - name: automatic update for PR marked as “Ready-to-Go“
-    conditions:
-      - -conflict # skip PRs with conflicts
-      - -draft # filter-out GH draft PRs
-    actions:
-      update:
-
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
