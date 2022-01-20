@@ -47,11 +47,11 @@
 //!
 //! Inbound Zcash Listener Task:
 //!  * accepts inbound connections on the listener port
-//!  * initiates Zcash [`Handshake`]s, which create [`Connection`] tasks for each inbound connection
+//!  * initiates Zcash [`Handshake`]s, which creates [`Connection`] tasks for each inbound connection
 //!
 //! Outbound Zcash Connector Service:
 //!  * initiates outbound connections to peer addresses
-//!  * initiates Zcash [`Handshake`]s, which create [`Connection`] tasks for each outbound connection
+//!  * initiates Zcash [`Handshake`]s, which creates [`Connection`] tasks for each outbound connection
 //!
 //! Zebra uses direct TCP connections to share blocks and mempool transactions with other peers.
 //!
@@ -86,7 +86,7 @@
 //!  * provides an interface for other services and tasks running within this node
 //!    to make requests to remote peers ("the rest of the network")
 //!    * accepts [`Request`]s from the local node
-//!    * sends each request to a [`peer::Client] using randomised load-balancing
+//!    * sends each request to a [`peer::Client`] using randomised load-balancing
 //!    * returns the [`Response`] from the [`peer::Client`]
 //!
 //! Inbound Network Service:
