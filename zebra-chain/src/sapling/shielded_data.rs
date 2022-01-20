@@ -290,14 +290,6 @@ where
     /// descriptions of the transaction, and the balancing value.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
-    ///
-    /// # Consensus
-    ///
-    /// > The Spend transfers and Action transfers of a transaction MUST be
-    /// > consistent with its vbalanceSapling value as specified in § 4.13
-    /// > ‘Balance and Binding Signature (Sapling)’ on p. 49.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
     pub fn binding_verification_key(&self) -> redjubjub::VerificationKeyBytes<Binding> {
         let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv.into()).sum();
         let cv_new: ValueCommitment = self.outputs().map(|output| output.cv.into()).sum();
