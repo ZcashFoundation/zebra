@@ -267,28 +267,31 @@ impl Handler {
                     // We got a block we didn't ask for.
                     //
                     // So either:
-                    // 1. The peer doesn't know any of the blocks we asked for.
+                    // 1. The response is for a previously cancelled block request.
+                    //    We should ignore that block, and wait for the actual response.
+                    // 2. The peer doesn't know any of the blocks we asked for.
                     //    We should cancel the request, so we don't hang waiting for blocks that
                     //    will never arrive.
-                    // 2. The peer sent an unsolicited block.
+                    // 3. The peer sent an unsolicited block.
                     //    We should ignore that block, and wait for the actual response.
                     //
-                    // We end the request, so we don't hang on forked or lagging peers (case 1).
-                    // But we keep the connection open, so the inbound service can process blocks
-                    // from good peers (case 2).
+                    // We ignore the message, so we don't desynchronize with the peer. This happens
+                    // when we cancel a request and send a second different request, but receive a
+                    // response for the first request. If we ended the request then, we could send
+                    // a third request to the peer, and end up having to end that request as well
+                    // when the response for the second request arrives.
+                    //
+                    // Ignoring the message gives us a chance to synchronize back to the correct
+                    // request.
                     ignored_msg = Some(Message::Block(block));
                     if !blocks.is_empty() {
                         // TODO: does the caller need a list of missing blocks? (#1515)
                         Handler::Finished(Ok(Response::Blocks(blocks)))
                     } else {
-                        // TODO: is it really an error if we ask for a block hash, but the peer
-                        // doesn't know it? Should we close the connection on that kind of error?
-                        // Should we fake a NotFound response here? (#1515)
-                        let items = pending_hashes
-                            .iter()
-                            .map(|h| InventoryHash::Block(*h))
-                            .collect();
-                        Handler::Finished(Err(PeerError::NotFound(items)))
+                        Handler::BlocksByHash {
+                            pending_hashes,
+                            blocks,
+                        }
                     }
                 }
             }

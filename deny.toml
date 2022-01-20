@@ -37,9 +37,6 @@ skip-tree = [
     # ticket #3000: tower-fallback dependencies
     { name = "pin-project", version = "=0.4.28" },
 
-    # ticket #2981: bindgen dependencies
-    { name = "rocksdb", version = "=0.16.0" },
-
     # ticket #3063: redjubjub dependencies
     { name = "redjubjub", version = "=0.4.0" },
 
