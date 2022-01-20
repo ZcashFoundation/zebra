@@ -1,9 +1,11 @@
+//! Transaction LockTime.
+
 use std::{convert::TryInto, io};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
-use crate::block;
+use crate::block::{self, Height};
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A Bitcoin-style `locktime`, representing either a block height or an epoch
@@ -11,31 +13,47 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///
 /// # Invariants
 ///
-/// Users should not construct a `LockTime` with:
-///   - a `block::Height` greater than MAX_BLOCK_HEIGHT,
+/// Users should not construct a [`LockTime`] with:
+///   - a [`block::Height`] greater than [`LockTime::MAX_HEIGHT`],
 ///   - a timestamp before 6 November 1985
-///     (Unix timestamp less than MIN_LOCK_TIMESTAMP), or
+///     (Unix timestamp less than [`LockTime::MIN_TIMESTAMP`]), or
 ///   - a timestamp after 5 February 2106
-///     (Unix timestamp greater than MAX_LOCK_TIMESTAMP).
+///     (Unix timestamp greater than [`LockTime::MAX_TIMESTAMP`]).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
-    /// Unlock at a particular block height.
+    /// A block height after which the transaction can be included in the block chain.
     Height(block::Height),
-    /// Unlock at a particular time.
+    /// A timestamp after which the transaction can be included in the block chain.
     Time(DateTime<Utc>),
 }
 
 impl LockTime {
-    /// The minimum LockTime::Time, as a timestamp in seconds.
+    /// The minimum [`LockTime::Time`], as a Unix timestamp in seconds.
     ///
-    /// Users should not construct lock times less than `MIN_TIMESTAMP`.
+    /// Users should not construct [`LockTime`]s with [`LockTime::Time`] lower
+    /// than [`LockTime::MIN_TIMESTAMP`].
+    ///
+    /// If a [`LockTime`] is supposed to be lower than
+    /// [`LockTime::MIN_TIMESTAMP`], then a particular [`LockTime::Height`]
+    /// applies instead, as described in the spec.
     pub const MIN_TIMESTAMP: i64 = 500_000_000;
 
-    /// The maximum LockTime::Time, as a timestamp in seconds.
+    /// The maximum [`LockTime::Time`], as a timestamp in seconds.
     ///
-    /// Users should not construct lock times greater than `MAX_TIMESTAMP`.
-    /// LockTime is u32 in the spec, so times are limited to u32::MAX.
+    /// Users should not construct lock times with timestamps greater than
+    /// [`LockTime::MAX_TIMESTAMP`]. LockTime is [`u32`] in the spec, so times
+    /// are limited to [`u32::MAX`].
     pub const MAX_TIMESTAMP: i64 = u32::MAX as i64;
+
+    /// The maximum [`LockTime::Height`], as a block height.
+    ///
+    /// Users should not construct lock times with a block height greater than
+    /// [`LockTime::MAX_TIMESTAMP`].
+    ///
+    /// If a [`LockTime`] is supposed to be greater than
+    /// [`LockTime::MAX_HEIGHT`], then a particular [`LockTime::Time`] applies
+    /// instead, as described in the spec.
+    pub const MAX_HEIGHT: Height = Height((Self::MIN_TIMESTAMP - 1) as u32);
 
     /// Returns a [`LockTime`] that is always unlocked.
     ///
@@ -44,23 +62,25 @@ impl LockTime {
         LockTime::Height(block::Height(0))
     }
 
-    /// Returns the minimum LockTime::Time, as a LockTime.
+    /// Returns the minimum [`LockTime::Time`], as a [`LockTime`].
     ///
-    /// Users should not construct lock times less than `min_lock_timestamp`.
+    /// Users should not construct lock times with timestamps lower than the
+    /// value returned by this function.
     //
     // When `Utc.timestamp` stabilises as a const function, we can make this a
     // const function.
-    pub fn min_lock_time() -> LockTime {
+    pub fn min_lock_time_timestamp() -> LockTime {
         LockTime::Time(Utc.timestamp(Self::MIN_TIMESTAMP, 0))
     }
 
-    /// Returns the maximum LockTime::Time, as a LockTime.
+    /// Returns the maximum [`LockTime::Time`], as a [`LockTime`].
     ///
-    /// Users should not construct lock times greater than `max_lock_timestamp`.
+    /// Users should not construct lock times with timestamps greater than the
+    /// value returned by this function.
     //
     // When `Utc.timestamp` stabilises as a const function, we can make this a
     // const function.
-    pub fn max_lock_time() -> LockTime {
+    pub fn max_lock_time_timestamp() -> LockTime {
         LockTime::Time(Utc.timestamp(Self::MAX_TIMESTAMP, 0))
     }
 }
@@ -82,10 +102,10 @@ impl ZcashSerialize for LockTime {
 impl ZcashDeserialize for LockTime {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let n = reader.read_u32::<LittleEndian>()?;
-        if n <= block::Height::MAX.0 {
+        if n < Self::MIN_TIMESTAMP as u32 {
             Ok(LockTime::Height(block::Height(n)))
         } else {
-            // This can't panic, because all u32 values are valid `Utc.timestamp`s
+            // This can't panic, because all u32 values are valid `Utc.timestamp`s.
             Ok(LockTime::Time(Utc.timestamp(n.into(), 0)))
         }
     }

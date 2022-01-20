@@ -23,7 +23,7 @@ use super::super::*;
 lazy_static! {
     pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {
         network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::min_lock_time(),
+        lock_time: LockTime::min_lock_time_timestamp(),
         expiry_height: block::Height(0),
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -292,7 +292,7 @@ fn empty_v4_round_trip() {
     let tx = Transaction::V4 {
         inputs: Vec::new(),
         outputs: Vec::new(),
-        lock_time: LockTime::min_lock_time(),
+        lock_time: LockTime::min_lock_time_timestamp(),
         expiry_height: block::Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
