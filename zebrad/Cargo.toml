@@ -3,7 +3,7 @@ name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 version = "1.0.0-beta.3"
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
 # when run in the workspace directory
@@ -18,6 +18,7 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 chrono = "0.4"
 gumdrop = "0.7"
+indexmap = "1.8.0"
 lazy_static = "1.4.0"
 serde = { version = "1", features = ["serde_derive"] }
 toml = "0.5"
@@ -41,7 +42,7 @@ metrics = "0.17.1"
 metrics-exporter-prometheus = "0.7.0"
 
 dirs = "4.0.0"
-inferno = { version = "0.10.9", default-features = false }
+inferno = { version = "0.10.10", default-features = false }
 atty = "0.2.14"
 
 sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
@@ -57,7 +58,7 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 once_cell = "1.9"
 regex = "1.4.6"
 semver = "1.0.3"
-tempdir = "0.3.7"
+tempfile = "3.3.0"
 tokio = { version = "1.15.0", features = ["full", "test-util"] }
 
 proptest = "0.10"

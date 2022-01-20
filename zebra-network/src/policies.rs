@@ -6,7 +6,7 @@ use tower::retry::Policy;
 /// A very basic retry policy with a limited number of retry attempts.
 ///
 /// XXX Remove this when https://github.com/tower-rs/tower/pull/414 lands.
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RetryLimit {
     remaining_tries: usize,
 }
@@ -21,25 +21,23 @@ impl RetryLimit {
 }
 
 impl<Req: Clone + std::fmt::Debug, Res, E: std::fmt::Debug> Policy<Req, Res, E> for RetryLimit {
-    type Future = Pin<Box<dyn Future<Output = Self> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = Self> + Send + Sync + 'static>>;
 
     fn retry(&self, req: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
         if let Err(e) = result {
             if self.remaining_tries > 0 {
                 tracing::debug!(?req, ?e, remaining_tries = self.remaining_tries, "retrying");
+
                 let remaining_tries = self.remaining_tries - 1;
+                let retry_outcome = RetryLimit { remaining_tries };
 
                 Some(
-                    async move {
-                        // Let other tasks run, so we're more likely to choose a different peer,
-                        // and so that any notfound inv entries win the race to the PeerSet.
-                        //
-                        // TODO: move syncer retries into the PeerSet,
-                        //       so we always choose different peers (#3235)
-                        tokio::task::yield_now().await;
-                        RetryLimit { remaining_tries }
-                    }
-                    .boxed(),
+                    // Let other tasks run, so we're more likely to choose a different peer,
+                    // and so that any notfound inv entries win the race to the PeerSet.
+                    //
+                    // TODO: move syncer retries into the PeerSet,
+                    //       so we always choose different peers (#3235)
+                    Box::pin(tokio::task::yield_now().map(move |()| retry_outcome)),
                 )
             } else {
                 None

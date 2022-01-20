@@ -3,7 +3,7 @@ name = "zebra-test"
 version = "1.0.0-beta.3"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,4 +28,4 @@ tracing-subscriber = "0.2.25"
 tracing-error = "0.1.2"
 
 [dev-dependencies]
-tempdir = "0.3.7"
+tempfile = "3.3.0"

@@ -13,7 +13,7 @@ use futures::{
 };
 use rand::seq::SliceRandom;
 use tokio::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::broadcast,
     time::{sleep, Instant},
 };
@@ -482,7 +482,8 @@ async fn accept_inbound_connections<S>(
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
-    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
+    S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
+        + Clone,
     S::Future: Send + 'static,
 {
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
@@ -534,7 +535,7 @@ where
 
             // Construct a handshake future but do not drive it yet....
             let handshake = handshaker.call(HandshakeRequest {
-                tcp_stream,
+                data_stream: tcp_stream,
                 connected_addr,
                 connection_tracker,
             });
@@ -667,9 +668,12 @@ where
     // prevents us from adding items to the stream and checking its length.
     handshakes.push(future::pending().boxed());
 
-    let mut crawl_timer =
-        IntervalStream::new(tokio::time::interval(config.crawl_new_peer_interval))
-            .map(|tick| TimerCrawl { tick });
+    let mut crawl_timer = tokio::time::interval(config.crawl_new_peer_interval);
+    // If the crawl is delayed, also delay all future crawls.
+    // (Shorter intervals just add load, without any benefit.)
+    crawl_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut crawl_timer = IntervalStream::new(crawl_timer).map(|tick| TimerCrawl { tick });
 
     loop {
         metrics::gauge!(
