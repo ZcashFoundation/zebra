@@ -256,7 +256,7 @@ impl MockServiceBuilder {
     /// Note that this is used by both [`Self::for_prop_tests`] and [`Self::for_unit_tests`], the
     /// only difference being the `Assertion` generic type parameter, which Rust infers
     /// automatically.
-    fn finish<Request, Response, Assertion, Error>(
+    pub fn finish<Request, Response, Assertion, Error>(
         self,
     ) -> MockService<Request, Response, Assertion, Error> {
         let proxy_channel_size = self
