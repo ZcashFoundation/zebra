@@ -51,6 +51,7 @@ impl<'a> SigHasher<'a> {
         trans: &'a Transaction,
         hash_type: HashType,
         network_upgrade: NetworkUpgrade,
+        // all_previous_outputs: &[transparent::Output],
         input: Option<(u32, transparent::Output)>,
     ) -> Self {
         let input = if let Some((index, prevout)) = input {

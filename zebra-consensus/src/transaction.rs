@@ -16,7 +16,7 @@ use futures::{
     FutureExt, TryFutureExt,
 };
 use tokio::sync::mpsc;
-use tower::{Service, ServiceExt};
+use tower::{timeout::Timeout, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -40,6 +40,20 @@ pub mod check;
 #[cfg(test)]
 mod tests;
 
+/// A timeout applied to UTXO lookup requests.
+///
+/// The exact value is non-essential, but this should be long enough to allow
+/// out-of-order verification of blocks (UTXOs are not required to be ready
+/// immediately) while being short enough to:
+///   * prune blocks that are too far in the future to be worth keeping in the
+///     queue,
+///   * fail blocks that reference invalid UTXOs, and
+///   * fail blocks that reference UTXOs from blocks that have temporarily failed
+///     to download, because a peer sent Zebra a bad list of block hashes. (The
+///     UTXO verification failure will restart the sync, and re-download the
+///     chain in the correct order.)
+const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -50,6 +64,7 @@ mod tests;
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
     network: Network,
+    state: Timeout<ZS>,
     script_verifier: script::Verifier<ZS>,
 }
 
@@ -59,9 +74,10 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
+    pub fn new(network: Network, state: ZS, script_verifier: script::Verifier<ZS>) -> Self {
         Self {
             network,
+            state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
             script_verifier,
         }
     }
@@ -281,6 +297,7 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let script_verifier = self.script_verifier.clone();
         let network = self.network;
+        let state = self.state.clone();
 
         let tx = req.transaction();
         let tx_id = req.tx_id();
@@ -338,7 +355,37 @@ where
             //
             // https://zips.z.cash/zip-0213#specification
 
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(tx.clone()));
+            let inputs = tx.inputs();
+            let known_utxos = req.known_utxos();
+            let mut spent_outputs = Vec::new();
+            for input in inputs {
+                match input {
+                    transparent::Input::PrevOut {
+                        outpoint,
+                        unlock_script: _,
+                        sequence: _,
+                    } => {
+                        tracing::trace!("awaiting outpoint lookup");
+                        let query = state
+                            .clone()
+                            .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+                        let utxo = if let Some(output) = known_utxos.get(outpoint) {
+                            tracing::trace!("UXTO in known_utxos, discarding query");
+                            output.utxo.clone()
+                        } else if let zebra_state::Response::Utxo(utxo) = query.await? {
+                            utxo
+                        } else {
+                            unreachable!("AwaitUtxo always responds with Utxo")
+                        };
+                        tracing::trace!(?utxo, "got UTXO");
+                        spent_outputs.push(utxo.output);
+                    }
+                    transparent::Input::Coinbase { .. } => continue,
+                }
+            }
+
+            let cached_ffi_transaction =
+                Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
             let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");

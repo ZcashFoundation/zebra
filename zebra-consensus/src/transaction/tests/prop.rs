@@ -442,7 +442,7 @@ fn validate(
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
         let script_verifier = script::Verifier::new(state_service);
-        let verifier = transaction::Verifier::new(network, script_verifier);
+        let verifier = transaction::Verifier::new(network, state_service, script_verifier);
 
         // Test the transaction verifier
         verifier
