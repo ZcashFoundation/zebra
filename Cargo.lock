@@ -534,7 +534,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "serde",
- "time",
+ "time 0.1.44",
  "winapi",
 ]
 
@@ -1689,9 +1689,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.101"
+version = "0.2.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb00336871be5ed2c8ed44b60ae9959dc5b9f08539422ed43f09e34ecaeba21"
+checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
 
 [[package]]
 name = "libgit2-sys"
@@ -2069,6 +2069,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05499f3756671c15885fee9034446956fff3f243d6077b91e5767df161f766b3"
 dependencies = [
  "hermit-abi",
+ "libc",
+]
+
+[[package]]
+name = "num_threads"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71a1eb3a36534514077c1e079ada2fb170ef30c47d203aa6916138cf882ecd52"
+dependencies = [
  "libc",
 ]
 
@@ -3013,7 +3022,7 @@ dependencies = [
  "reqwest",
  "sentry-backtrace",
  "sentry-contexts",
- "sentry-core",
+ "sentry-core 0.23.0",
  "tokio",
 ]
 
@@ -3026,7 +3035,7 @@ dependencies = [
  "backtrace",
  "lazy_static",
  "regex",
- "sentry-core",
+ "sentry-core 0.23.0",
 ]
 
 [[package]]
@@ -3040,7 +3049,7 @@ dependencies = [
  "libc",
  "regex",
  "rustc_version 0.4.0",
- "sentry-core",
+ "sentry-core 0.23.0",
  "uname",
 ]
 
@@ -3053,20 +3062,33 @@ dependencies = [
  "chrono",
  "lazy_static",
  "rand 0.8.4",
- "sentry-types",
+ "sentry-types 0.23.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sentry-core"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f94c25642abfdd1d7c41b9dfe4314e976bd2535ed0ab72cb9444a1310f67a19"
+dependencies = [
+ "lazy_static",
+ "rand 0.8.4",
+ "sentry-types 0.24.1",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "sentry-tracing"
-version = "0.23.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d291df287241b0ef97f5bf9e9a595691ef8dfb49bc6acfd55b9dc2ade681f1c9"
+checksum = "78ab34aec5a85bf7cb25723a8f7724f0d7fc1872f483985b9ae12e9d6375b4b0"
 dependencies = [
- "sentry-core",
+ "sentry-core 0.24.1",
  "tracing-core",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.6",
 ]
 
 [[package]]
@@ -3080,6 +3102,23 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "sentry-types"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d27bfee0f8f05e60d17b740ab56f0e3cda1eca5e68905923245a1840a93b31a8"
+dependencies = [
+ "debugid",
+ "getrandom 0.2.3",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time 0.3.6",
  "url",
  "uuid",
 ]
@@ -3445,6 +3484,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "time"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8d54b9298e05179c335de2b9645d061255bcd5155f843b3e328d2cfe0a5b413"
+dependencies = [
+ "itoa 1.0.1",
+ "libc",
+ "num_threads",
+]
+
+[[package]]
 name = "tinytemplate"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3767,6 +3817,15 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77be66445c4eeebb934a7340f227bfe7b338173d3f8c00a60a5a58005c9faecf"
+dependencies = [
+ "tracing-core",
 ]
 
 [[package]]
@@ -4241,7 +4300,7 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.1.6-alpha.0"
-source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=70738fc9b143c2a23df7c138c87c95b398273402#70738fc9b143c2a23df7c138c87c95b398273402"
+source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=270d32d192c5880f911acf21ef100caa128e6179#270d32d192c5880f911acf21ef100caa128e6179"
 dependencies = [
  "bindgen",
  "blake2b_simd",
