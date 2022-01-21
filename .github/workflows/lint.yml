@@ -7,6 +7,9 @@ on:
       - "!main"
     path:
       - '**/*.rs'
+      - 'clippy.toml'
+      - '.github/workflows/lint.yml'
+
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full

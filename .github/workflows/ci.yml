@@ -3,12 +3,18 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
-  push:
     branches:
       - main
+    path:
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
+      - 'Dockerfile'
+      - '.github/workflows/ci.yml'
 
 jobs:
-
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
     # The large timeout is to accommodate:

@@ -5,9 +5,12 @@ on:
   push:
     branches:
       - main
+    path:
+      - 'book/**'
+      - '**/firebase.json'
+      - '.github/workflows/docs.yml'
 
 jobs:
-
   build:
     name: Build and Deploy Docs (+beta)
     timeout-minutes: 30

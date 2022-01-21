@@ -5,12 +5,15 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - main
+    path:
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
+      - '.github/workflows/coverage.yml'
 
 jobs:
-
   coverage:
     name: Coverage (+nightly)
     # The large timeout is to accommodate:
