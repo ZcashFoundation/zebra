@@ -40,11 +40,11 @@ async fn shutdown() {
 /// Extension trait to centralize entry point for runnable subcommands that
 /// depend on tokio
 pub(crate) trait RuntimeRun {
-    fn run(&mut self, fut: impl Future<Output = Result<(), Report>>);
+    fn run(self, fut: impl Future<Output = Result<(), Report>>);
 }
 
 impl RuntimeRun for Runtime {
-    fn run(&mut self, fut: impl Future<Output = Result<(), Report>>) {
+    fn run(self, fut: impl Future<Output = Result<(), Report>>) {
         let result = self.block_on(async move {
             // Always poll the shutdown future first.
             //
@@ -57,12 +57,12 @@ impl RuntimeRun for Runtime {
             }
         });
 
+        // Enforce shutdown by avoiding long blocking tasks
+        self.shutdown_timeout(std::time::Duration::from_secs(5));
+
         match result {
             Ok(()) => {
                 info!("shutting down Zebra");
-
-                // Don't wait for the runtime to shut down all the tasks.
-                app_writer().shutdown(Shutdown::Graceful);
             }
             Err(error) => {
                 warn!(?error, "shutting down Zebra due to an error");
