@@ -2,14 +2,10 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
-// Standard lints
-#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![deny(rust_2021_compatibility)]
-// we allow unsafe code, so we can call zcash_script
+// We allow unsafe code, so we can call zcash_script
+#![allow(unsafe_code)]
 
-use std::{convert::TryInto, sync::Arc};
+use std::sync::Arc;
 
 use displaydoc::Display;
 use thiserror::Error;

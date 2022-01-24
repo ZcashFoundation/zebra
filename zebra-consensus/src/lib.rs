@@ -33,13 +33,6 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_consensus")]
-// Standard lints
-// Warn on missing docs for all modules after cleaning the API surface
-#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![deny(rust_2021_compatibility)]
-#![forbid(unsafe_code)]
 
 mod block;
 mod checkpoint;
