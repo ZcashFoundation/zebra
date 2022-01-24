@@ -252,6 +252,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v1
 
+      # This check makes sure the crate dependency check is accurate
+      - name: Check Cargo.lock is up to date
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: check
+          args: --locked --all-features --all-targets
+
       - name: cargo fetch
         uses: actions-rs/cargo@v1.0.3
         with:
@@ -270,3 +277,25 @@ jobs:
         with:
           command: build
           args: --verbose --release
+
+  cargo-deny:
+    name: Check deny.toml crate dependencies and validate licenses
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+
+    # Prevent sudden announcement of a new advisory from failing ci:
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+
+    steps:
+    - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+    - uses: EmbarkStudios/cargo-deny-action@v1
+      with:
+        command: check ${{ matrix.checks }}
+        args: --all-features --workspace
