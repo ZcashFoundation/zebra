@@ -7,6 +7,13 @@ rustflags = [
     "-Dclippy::await_holding_lock",
 
     "-Wmissing_docs",
+    "-Wnonstandard_style",
+    "-Wfuture_incompatible",
 
     "-Aclippy::try_err",
+
+    # TODOs:
+
+    # fix hidden lifetime parameters
+    #"-Wrust_2018_idioms",
 ]
