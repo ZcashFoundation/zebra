@@ -798,13 +798,13 @@ where
 
             let bvk = orchard_shielded_data.binding_verification_key();
 
-            /// # Consensus
-            ///
-            /// > The Spend transfers and Action transfers of a transaction MUST be
-            /// > consistent with its vbalanceSapling value as specified in § 4.13
-            /// > ‘Balance and Binding Signature (Sapling)’ on p. 49.
-            ///
-            /// <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+            // # Consensus
+            //
+            // > The Spend transfers and Action transfers of a transaction MUST be
+            // > consistent with its vbalanceSapling value as specified in § 4.13
+            // > ‘Balance and Binding Signature (Sapling)’ on p. 49.
+            //
+            // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
             async_checks.push(
                 primitives::redpallas::VERIFIER
                     .clone()
