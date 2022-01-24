@@ -564,6 +564,13 @@ For example, [`tokio::sync::watch::Receiver::borrow`](https://docs.rs/tokio/1.15
 holds a read lock, so the borrowed data should always be cloned.
 Use `Arc` for efficient clones if needed.
 
+Never have two active watch borrow guards in the same scope, because that can cause a deadlock. The
+`watch::Sender` may start acquiring a write lock while the first borrow guard is active but the
+second one isn't. That means that the first read lock was acquired, but the second never will be
+because starting to acquire the write lock blocks any other read locks from being acquired. At the
+same time, the write lock will also never finish acquiring, because it waits for all read locks to
+be released, and the first read lock won't be released before the second read lock is acquired.
+
 In all of these cases:
 - make critical sections as short as possible, and
 - do not depend on other tasks or locks inside the critical section.
