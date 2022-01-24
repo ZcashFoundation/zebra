@@ -8,12 +8,15 @@ use tower::{Service, ServiceExt};
 /// An extension trait to check if a [`Service`] is immediately ready to be called.
 pub trait IsReady<Request>: Service<Request> {
     /// Poll the [`Service`] once, and return true if it is immediately ready to be called.
+    #[allow(clippy::wrong_self_convention)]
     fn is_ready(&mut self) -> BoxFuture<bool>;
 
     /// Poll the [`Service`] once, and return true if it is pending.
+    #[allow(clippy::wrong_self_convention)]
     fn is_pending(&mut self) -> BoxFuture<bool>;
 
     /// Poll the [`Service`] once, and return true if it has failed.
+    #[allow(clippy::wrong_self_convention)]
     fn is_failed(&mut self) -> BoxFuture<bool>;
 }
 
