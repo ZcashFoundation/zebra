@@ -10,7 +10,7 @@ on:
       - '**/*.txt'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
-      - '**/deny.toml'
+      - 'codecov.yml'
       - '.github/workflows/coverage.yml'
 
 jobs:

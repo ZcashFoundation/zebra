@@ -7,6 +7,8 @@ on:
       - "!main"
     path:
       - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
       - 'clippy.toml'
       - '.github/workflows/lint.yml'
 

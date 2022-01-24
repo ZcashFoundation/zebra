@@ -11,7 +11,7 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
-      - 'Dockerfile'
+      - 'docker/**'
       - '.github/workflows/ci.yml'
 
 jobs:

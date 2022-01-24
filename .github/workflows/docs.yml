@@ -8,6 +8,7 @@ on:
     path:
       - 'book/**'
       - '**/firebase.json'
+      - 'katex-header.html'
       - '.github/workflows/docs.yml'
 
 jobs:
