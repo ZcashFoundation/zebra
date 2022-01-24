@@ -292,8 +292,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-        with:
-          persist-credentials: false
+      with:
+        persist-credentials: false
 
     - uses: EmbarkStudios/cargo-deny-action@v1
       with:
