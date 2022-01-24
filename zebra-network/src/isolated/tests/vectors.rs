@@ -125,7 +125,7 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
 /// when sent in-memory.
 ///
 /// This test also:
-/// - checks `AsyncReadWrite` support, and
+/// - checks `PeerTransport` support, and
 /// - runs even if network tests are disabled.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_mem() {
