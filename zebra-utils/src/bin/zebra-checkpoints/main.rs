@@ -8,12 +8,6 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
-// Standard lints
-#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![forbid(unsafe_code)]
-
 use color_eyre::eyre::{ensure, Result};
 use serde_json::Value;
 use std::process::Stdio;
