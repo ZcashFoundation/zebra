@@ -1,0 +1,19 @@
+
+[target.'cfg(all())']
+rustflags = [
+    # Zebra standard lints for Rust 1.58+
+    "-Dunsafe_code",
+    "-Drust_2021_compatibility",
+    "-Dclippy::await_holding_lock",
+
+    "-Wmissing_docs",
+    "-Wnonstandard_style",
+    "-Wfuture_incompatible",
+
+    "-Aclippy::try_err",
+
+    # TODOs:
+
+    # fix hidden lifetime parameters
+    #"-Wrust_2018_idioms",
+]
