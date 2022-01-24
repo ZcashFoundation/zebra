@@ -46,9 +46,10 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
 
     let (inbound_conn, _) = listener.accept().await.unwrap();
 
-    let inbound_stream = Framed::new(inbound_conn, Codec::builder().for_network(network).finish());
+    let mut inbound_stream =
+        Framed::new(inbound_conn, Codec::builder().for_network(network).finish());
 
-    check_version_message(network, inbound_stream).await;
+    check_version_message(network, &mut inbound_stream).await;
 
     // Let the spawned task run for a short time.
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -90,12 +91,12 @@ async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Netw
     let mut outbound_join_handle =
         tokio::spawn(connect_isolated(network, outbound_stream, "".to_string()));
 
-    let inbound_stream = Framed::new(
+    let mut inbound_stream = Framed::new(
         inbound_stream,
         Codec::builder().for_network(network).finish(),
     );
 
-    check_version_message(network, inbound_stream).await;
+    check_version_message(network, &mut inbound_stream).await;
 
     // Let the spawned task run for a short time.
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -121,7 +122,7 @@ async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Netw
 #[track_caller]
 async fn check_version_message<PeerTransport>(
     network: Network,
-    mut inbound_stream: Framed<PeerTransport, Codec>,
+    inbound_stream: &mut Framed<PeerTransport, Codec>,
 ) where
     PeerTransport: AsyncRead + Unpin,
 {
