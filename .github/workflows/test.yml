@@ -14,10 +14,10 @@ on:
       - '.github/workflows/test.yml'
 
 env:
-  PROJECT_ID: zealous-zebra
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   ZONE: europe-west1-b
   MACHINE_TYPE: n2-standard-8
-  DEPLOY_SA: cos-vm@zealous-zebra.iam.gserviceaccount.com
+  DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
 jobs:
 

@@ -7,11 +7,11 @@ on:
       - main
 
 env:
-  PROJECT_ID: zealous-zebra
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-east1
   ZONE: us-east1-b
   MACHINE_TYPE: n2d-standard-4
-  DEPLOY_SA: cos-vm@zealous-zebra.iam.gserviceaccount.com
+  DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
 jobs:
   build:
