@@ -7,7 +7,7 @@ use std::{
     ops::{Add, Sub},
 };
 
-/// The height of a block is the length of the chain back to the genesis block.
+/// The length of the chain back to the genesis block.
 ///
 /// Block heights can't be added, but they can be *subtracted*,
 /// to get a difference of block heights, represented as an `i32`,
@@ -44,8 +44,8 @@ impl Height {
     ///
     /// Users should not construct block heights greater than [`Height::MAX`].
     ///
-    /// The spec says: "Implementations MUST support block heights up to and
-    /// including 2^31 − 1."
+    /// The spec says *"Implementations MUST support block heights up to and
+    /// including 2^31 − 1"*.
     ///
     /// Note that `u32::MAX / 2 == 2^31 - 1 == i32::MAX`.
     pub const MAX: Height = Height(u32::MAX / 2);
