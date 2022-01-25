@@ -64,7 +64,7 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 pub struct Verifier<ZS> {
     network: Network,
     state: Timeout<ZS>,
-    script_verifier: script::Verifier<ZS>,
+    script_verifier: script::Verifier,
 }
 
 impl<ZS> Verifier<ZS>
@@ -73,7 +73,7 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: Network, state: ZS, script_verifier: script::Verifier<ZS>) -> Self {
+    pub fn new(network: Network, state: ZS, script_verifier: script::Verifier) -> Self {
         Self {
             network,
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
@@ -483,7 +483,7 @@ where
     fn verify_v4_transaction(
         request: &Request,
         network: Network,
-        script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
@@ -563,7 +563,7 @@ where
     fn verify_v5_transaction(
         request: &Request,
         network: Network,
-        script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
@@ -630,7 +630,7 @@ where
     fn verify_transparent_inputs_and_outputs(
         request: &Request,
         network: Network,
-        script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();

@@ -226,7 +226,7 @@ where
 
     // transaction verification
 
-    let script = script::Verifier::new(state_service.clone());
+    let script = script::Verifier::new();
     let transaction = transaction::Verifier::new(network, state_service.clone(), script);
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 

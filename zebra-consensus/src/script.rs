@@ -1,26 +1,11 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use tower::timeout::Timeout;
 use tracing::Instrument;
 
 use zebra_chain::{parameters::NetworkUpgrade, transparent};
 use zebra_script::CachedFfiTransaction;
 
 use crate::BoxError;
-
-/// A timeout applied to UTXO lookup requests.
-///
-/// The exact value is non-essential, but this should be long enough to allow
-/// out-of-order verification of blocks (UTXOs are not required to be ready
-/// immediately) while being short enough to:
-///   * prune blocks that are too far in the future to be worth keeping in the
-///     queue,
-///   * fail blocks that reference invalid UTXOs, and
-///   * fail blocks that reference UTXOs from blocks that have temporarily failed
-///     to download, because a peer sent Zebra a bad list of block hashes. (The
-///     UTXO verification failure will restart the sync, and re-download the
-///     chain in the correct order.)
-const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3 * 60);
 
 /// Asynchronous script verification.
 ///
@@ -33,16 +18,12 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// The asynchronous script verification design is documented in [RFC4].
 ///
 /// [RFC4]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
-#[derive(Debug, Clone)]
-pub struct Verifier<ZS> {
-    state: Timeout<ZS>,
-}
+#[derive(Debug, Clone, Default)]
+pub struct Verifier {}
 
-impl<ZS> Verifier<ZS> {
-    pub fn new(state: ZS) -> Self {
-        Self {
-            state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
-        }
+impl Verifier {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -62,11 +43,7 @@ pub struct Request {
     pub upgrade: NetworkUpgrade,
 }
 
-impl<ZS> tower::Service<Request> for Verifier<ZS>
-where
-    ZS: tower::Service<zebra_state::Request, Response = zebra_state::Response, Error = BoxError>,
-    ZS::Future: Send + 'static,
-{
+impl tower::Service<Request> for Verifier {
     type Response = ();
     type Error = BoxError;
     type Future =
@@ -74,9 +51,9 @@ where
 
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.state.poll_ready(cx)
+        std::task::Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
