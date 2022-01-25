@@ -37,7 +37,7 @@ tracing-futures = "0.2"
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
 
 # tor dependencies
-arti-client = { version = "0.0.2", optional = true }
+arti-client = { version = "0.0.3", optional = true }
 tor-rtcompat  = { version = "0.0.2", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
