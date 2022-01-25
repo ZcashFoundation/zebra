@@ -5,6 +5,13 @@ on:
   push:
     branches:
       - main
+    path:
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'docker/**'
+      - '.github/workflows/test.yml'
 
 env:
   PROJECT_ID: zealous-zebra
