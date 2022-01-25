@@ -285,8 +285,8 @@ pub fn coinbase_outputs_are_decryptable(
 /// Returns `Ok(())` if the expiry height for the coinbase transaction is valid
 /// according to specifications [7.1] and [ZIP-203].
 ///
-/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-/// [ZIP-203]: https://zips.z.cash/zip-0203
+/// [7.1]: <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
+/// [ZIP-203]: <https://zips.z.cash/zip-0203>
 pub fn coinbase_expiry_height(
     block_height: &Height,
     coinbase: &Transaction,
@@ -295,11 +295,23 @@ pub fn coinbase_expiry_height(
     let expiry_height = coinbase.expiry_height();
 
     match NetworkUpgrade::Nu5.activation_height(network) {
-        // If Nu5 does not have a height, apply the pre-Nu5 rule.
+        // # Consensus
+        //
+        // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be less than
+        // > or equal to 499999999.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        //
+        // We check this rule here when no activation height is set.
         None => validate_expiry_height_max(expiry_height, true, block_height, coinbase),
+
+        // # Consensus
+        //
+        // > [NU5 onward] The nExpiryHeight field of a coinbase transaction
+        // > MUST be equal to its block height.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         Some(activation_height) => {
-            // Consensus rule: from NU5 activation, the nExpiryHeight field of a
-            // coinbase transaction MUST be set equal to the block height.
             if *block_height >= activation_height {
                 match expiry_height {
                     None => Err(TransactionError::CoinbaseExpiryBlockHeight {
@@ -317,20 +329,29 @@ pub fn coinbase_expiry_height(
                         }
                     }
                 }
+
                 return Ok(());
             }
-            // Consensus rule: [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight
-            // MUST be less than or equal to 499999999.
+
+            // # Consensus
+            //
+            // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be less than
+            // > or equal to 499999999.
+            //
+            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            //
+            // We check this rule here when the NU5 activation height is set,
+            // but we haven't reached it yet.
             validate_expiry_height_max(expiry_height, true, block_height, coinbase)
         }
     }
 }
 
-/// Returns `Ok(())` if the expiry height for a non coinbase transaction is valid
-/// according to specifications [7.1] and [ZIP-203].
+/// Returns `Ok(())` if the expiry height for a non coinbase transaction is
+/// valid according to specifications [7.1] and [ZIP-203].
 ///
-/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-/// [ZIP-203]: https://zips.z.cash/zip-0203
+/// [7.1]: <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
+/// [ZIP-203]: <https://zips.z.cash/zip-0203>
 pub fn non_coinbase_expiry_height(
     block_height: &Height,
     transaction: &Transaction,
@@ -338,16 +359,35 @@ pub fn non_coinbase_expiry_height(
     if transaction.is_overwintered() {
         let expiry_height = transaction.expiry_height();
 
+        // # Consensus
+        //
+        // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be
+        // > less than or equal to 499999999.
+        //
+        // > [NU5 onward] nExpiryHeight MUST be less than or equal to 499999999
+        // > for non-coinbase transactions.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         validate_expiry_height_max(expiry_height, false, block_height, transaction)?;
+
+        // # Consensus
+        //
+        // > [Overwinter onward] If a transaction is not a coinbase transaction and its
+        // > nExpiryHeight field is nonzero, then it MUST NOT be mined at a block
+        // > height greater than its nExpiryHeight.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         validate_expiry_height_mined(expiry_height, block_height, transaction)?;
     }
     Ok(())
 }
 
-/// Validate the consensus rule: nExpiryHeight MUST be less than or equal to 499999999.
+/// Checks that the expiry height of a transaction does not exceed the maximal
+/// value.
 ///
-/// The remaining arguments are not used for validation,
-/// they are only used to create errors.
+/// Only the `expiry_height` parameter is used for the check. The
+/// remaining parameters are used to give details about the error when the check
+/// fails.
 fn validate_expiry_height_max(
     expiry_height: Option<Height>,
     is_coinbase: bool,
@@ -368,11 +408,10 @@ fn validate_expiry_height_max(
     Ok(())
 }
 
-/// Validate the consensus rule: If a transaction is not a coinbase transaction
-/// and its nExpiryHeight field is nonzero, then it MUST NOT be mined at a block
-/// height greater than its nExpiryHeight.
+/// Checks that a transaction does not exceed its expiry height.
 ///
-/// The `transaction` is only used to create errors.
+/// The `transaction` parameter is only used to give details about the error
+/// when the check fails.
 fn validate_expiry_height_mined(
     expiry_height: Option<Height>,
     block_height: &Height,
