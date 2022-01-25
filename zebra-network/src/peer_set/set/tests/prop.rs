@@ -166,6 +166,91 @@ proptest! {
             Ok::<_, TestCaseError>(())
         })?;
     }
+
+    /// Test the peerset will always broadcast iff there is at least one
+    /// peer in the set.
+    /// Peerset will panic a if a rquest is sent and no more peers are available.
+    #[test]
+    #[should_panic(expected = "requests must be routed to at least one peer")]
+    fn peerset_always_broadcast(
+        total_number_of_peers in (2..10usize)
+    ) {
+        // Get a dummy block hash to help us construct a valid request to be broadcasted
+        let block: block::Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let block_hash = block::Hash::from(&block);
+
+        // Start the runtime
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        // All peers will have the current version
+        let peer_versions = vec![CURRENT_NETWORK_PROTOCOL_VERSION; total_number_of_peers];
+        let peer_versions = PeerVersions {
+            peer_versions,
+        };
+
+        // Get peers and handles
+        let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
+        let (minimum_peer_version, _best_tip_height) =
+            MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+
+        // Build a peerset
+        runtime.block_on(async move {
+            let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+                .with_discover(discovered_peers)
+                .with_minimum_peer_version(minimum_peer_version.clone())
+                .build();
+
+            // Remove peers, test broadcast until there is only 1 peer left in the peerset
+            let mut new_number_of_peers = total_number_of_peers;
+            for port in 1u16..total_number_of_peers as u16 {
+                peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port));
+                handles.remove(0);
+
+                // poll the peers
+                check_if_only_up_to_date_peers_are_live(
+                    &mut peer_set,
+                    &mut handles,
+                    CURRENT_NETWORK_PROTOCOL_VERSION,
+                )?;
+
+                // Get the new number of active peers after removal
+                let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
+
+                // Send a request to all peers we have now
+                let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+
+                // Check how many peers received the request
+                let mut received = 0;
+                for h in &mut handles {
+                    if let ReceiveRequestAttempt::Request(client_request) = h.try_to_receive_outbound_client_request() {
+                        prop_assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash));
+                        received += 1;
+                    };
+                }
+
+                // Make sure the message was broadcasted to the right number of peers
+                prop_assert_eq!(received, number_of_peers_to_broadcast);
+
+                // Exit the loop when we have only 1 peer left
+                new_number_of_peers -= 1;
+                if new_number_of_peers == 1 {
+                    break;
+                }
+            }
+
+            // Remove the last peer we have left in the peerset
+            peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), total_number_of_peers as u16));
+            handles.remove(0);
+
+            // this will panic as expected
+            let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
 }
 
 /// Check if only peers with up-to-date protocol versions are live.
