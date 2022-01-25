@@ -1,9 +1,3 @@
-// Standard lints
-#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![forbid(unsafe_code)]
-
 use tower::{Service, ServiceExt};
 use zebra_test::transcript::ExpectedTranscriptError;
 use zebra_test::transcript::Transcript;

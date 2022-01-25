@@ -608,7 +608,7 @@ We use the following rocksdb column families:
 | `tx_by_location`               | `TransactionLocation`  | `Transaction`                       | Never   |
 | `hash_by_tx`                   | `TransactionLocation`  | `transaction::Hash`                 | Never   |
 | `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`               | Never   |
-| `utxo_by_outpoint`             | `OutLocation`          | `transparent::Utxo`                 | Delete  |
+| `utxo_by_outpoint`             | `OutLocation`          | `transparent::Output`               | Delete  |
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| FirstOutLocation`      | Update  |
 | `utxo_by_transparent_addr_loc` | `FirstOutLocation`     | `AtLeastOne<OutLocation>`           | Up/Del  |
 | `tx_by_transparent_addr_loc`   | `FirstOutLocation`     | `AtLeastOne<TransactionLocation>`   | Append  |
