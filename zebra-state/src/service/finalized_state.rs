@@ -838,7 +838,8 @@ impl FinalizedState {
 // up automatically eventually.
 impl Drop for FinalizedState {
     fn drop(&mut self) {
-        self.db.cancel_all_background_work(false);
+        tracing::info!("stopping background database tasks");
+        self.db.cancel_all_background_work(true);
         self.delete_ephemeral();
     }
 }

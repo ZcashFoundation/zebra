@@ -57,7 +57,8 @@ impl RuntimeRun for Runtime {
             }
         });
 
-        // Enforce shutdown by avoiding long blocking tasks
+        // Don't wait for long blocking tasks before shutting down
+        tracing::info!("waiting for async tokio tasks to shut down");
         self.shutdown_timeout(std::time::Duration::from_secs(5));
 
         match result {
