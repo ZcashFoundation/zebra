@@ -27,7 +27,7 @@ use zebra_chain::{
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
-    transparent,
+    transparent::{self, OrderedUtxo},
 };
 
 use zebra_script::CachedFfiTransaction;
@@ -350,36 +350,9 @@ where
             //
             // https://zips.z.cash/zip-0213#specification
 
-            let inputs = tx.inputs();
-            let known_utxos = req.known_utxos();
-            let mut spent_utxos = HashMap::new();
-            let mut spent_outputs = Vec::new();
-            for input in inputs {
-                match input {
-                    transparent::Input::PrevOut {
-                        outpoint,
-                        unlock_script: _,
-                        sequence: _,
-                    } => {
-                        tracing::trace!("awaiting outpoint lookup");
-                        let query = state
-                            .clone()
-                            .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
-                        let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                            tracing::trace!("UXTO in known_utxos, discarding query");
-                            output.utxo.clone()
-                        } else if let zebra_state::Response::Utxo(utxo) = query.await? {
-                            utxo
-                        } else {
-                            unreachable!("AwaitUtxo always responds with Utxo")
-                        };
-                        tracing::trace!(?utxo, "got UTXO");
-                        spent_outputs.push(utxo.output.clone());
-                        spent_utxos.insert(*outpoint, utxo);
-                    }
-                    transparent::Input::Coinbase { .. } => continue,
-                }
-            }
+            // Load spent UTXOs from state.
+            let (spent_utxos, spent_outputs) =
+                Self::spent_utxos(tx.clone(), req.known_utxos(), state).await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
@@ -462,6 +435,56 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
+    /// Get the UTXOs that are being spent by the given transaction.
+    ///
+    /// `known_utxos` are additional UTXOs known at the time of validation (i.e.
+    /// from previous transactions in the block).
+    ///
+    /// Returns a tuple with a OutPoint -> Utxo map, and a vector of Outputs
+    /// in the same order as the matching inputs in the transaction.
+    async fn spent_utxos(
+        tx: Arc<Transaction>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
+        state: Timeout<ZS>,
+    ) -> Result<
+        (
+            HashMap<transparent::OutPoint, transparent::Utxo>,
+            Vec<transparent::Output>,
+        ),
+        TransactionError,
+    > {
+        let inputs = tx.inputs();
+        let mut spent_utxos = HashMap::new();
+        let mut spent_outputs = Vec::new();
+        for input in inputs {
+            match input {
+                transparent::Input::PrevOut {
+                    outpoint,
+                    unlock_script: _,
+                    sequence: _,
+                } => {
+                    tracing::trace!("awaiting outpoint lookup");
+                    let query = state
+                        .clone()
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+                    let utxo = if let Some(output) = known_utxos.get(outpoint) {
+                        tracing::trace!("UXTO in known_utxos, discarding query");
+                        output.utxo.clone()
+                    } else if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        utxo
+                    } else {
+                        unreachable!("AwaitUtxo always responds with Utxo")
+                    };
+                    tracing::trace!(?utxo, "got UTXO");
+                    spent_outputs.push(utxo.output.clone());
+                    spent_utxos.insert(*outpoint, utxo);
+                }
+                transparent::Input::Coinbase { .. } => continue,
+            }
+        }
+        Ok((spent_utxos, spent_outputs))
+    }
+
     /// Verify a V4 transaction.
     ///
     /// Returns a set of asynchronous checks that must all succeed for the transaction to be
