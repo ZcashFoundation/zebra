@@ -16,6 +16,8 @@ SHUTDOWN_DELAY_INCREMENT=1
 # the test stops after a successful run with a delay this long
 SHUTDOWN_DELAY_LIMIT=30
 
+echo "Building Zebra"
+echo
 
 cargo build --bin zebrad || exit $?
 
