@@ -22,4 +22,4 @@ options:
     machineType: 'N1_HIGHCPU_32'
     substitution_option: 'ALLOW_LOOSE'
 
-timeout: 1800s # 30 mins
+timeout: 3600s # 60 mins
