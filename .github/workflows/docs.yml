@@ -5,9 +5,13 @@ on:
   push:
     branches:
       - main
+    path:
+      - 'book/**'
+      - '**/firebase.json'
+      - 'katex-header.html'
+      - '.github/workflows/docs.yml'
 
 jobs:
-
   build:
     name: Build and Deploy Docs (+beta)
     timeout-minutes: 30

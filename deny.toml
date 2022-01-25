@@ -68,6 +68,9 @@ skip-tree = [
 
     # wait for lots of crates in the tokio ecosystem to upgrade
     { name = "socket2", version = "=0.3.16" },
+
+    # wait for arti to stabilise
+    { name = "arti-client" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
