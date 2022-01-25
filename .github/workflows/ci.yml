@@ -284,8 +284,8 @@ jobs:
     strategy:
       matrix:
         checks:
-          - advisories
-          - bans sources
+          - bans 
+          - sources
 
     # Prevent sudden announcement of a new advisory from failing ci:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
