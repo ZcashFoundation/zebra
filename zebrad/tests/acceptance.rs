@@ -21,12 +21,6 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
-// Standard lints
-#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![forbid(unsafe_code)]
-
 use color_eyre::{
     eyre::{Result, WrapErr},
     Help,

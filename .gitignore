@@ -10,6 +10,5 @@
 # Vscode detrius
 .vscode/
 .zebra-state/
-.cargo/
 # Nix configs
 shell.nix
