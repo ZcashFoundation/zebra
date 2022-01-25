@@ -17,6 +17,9 @@ use crate::{
     BoxError, Config, Request, Response,
 };
 
+#[cfg(feature = "tor")]
+pub(crate) mod tor;
+
 #[cfg(test)]
 mod tests;
 
@@ -44,13 +47,13 @@ mod tests;
 ///                  or a Tor client [`DataStream`].
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
-pub fn connect_isolated<AsyncReadWrite>(
+pub fn connect_isolated<PeerTransport>(
     network: Network,
-    data_stream: AsyncReadWrite,
+    data_stream: PeerTransport,
     user_agent: String,
 ) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
 where
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let config = Config {
         network,
@@ -91,6 +94,8 @@ where
 ///
 /// Transactions sent over this connection can be linked to the sending and receiving IP address
 /// by passive internet observers.
+///
+/// Prefer [`connect_isolated_run_tor`](tor::connect_isolated_run_tor) if available.
 pub fn connect_isolated_tcp_direct(
     network: Network,
     addr: SocketAddr,

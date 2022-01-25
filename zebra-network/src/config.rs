@@ -101,12 +101,17 @@ impl Config {
         self.peerset_outbound_connection_limit() + self.peerset_inbound_connection_limit()
     }
 
-    /// Get the initial seed peers based on the configured network.
-    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
+    /// Returns the initial seed peer hostnames for the configured network.
+    pub fn initial_peer_hostnames(&self) -> &HashSet<String> {
         match self.network {
-            Network::Mainnet => Config::resolve_peers(&self.initial_mainnet_peers).await,
-            Network::Testnet => Config::resolve_peers(&self.initial_testnet_peers).await,
+            Network::Mainnet => &self.initial_mainnet_peers,
+            Network::Testnet => &self.initial_testnet_peers,
         }
+    }
+
+    /// Resolve initial seed peer IP addresses, based on the configured network.
+    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
+        Config::resolve_peers(self.initial_peer_hostnames()).await
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a

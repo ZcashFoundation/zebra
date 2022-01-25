@@ -147,6 +147,9 @@ mod peer_set;
 mod policies;
 mod protocol;
 
+#[cfg(feature = "tor")]
+pub use crate::isolated::tor::connect_isolated_tor;
+
 pub use crate::{
     address_book::AddressBook,
     config::Config,
