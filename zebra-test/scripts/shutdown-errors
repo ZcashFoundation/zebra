@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# test that Zebra can shut down without errors
+
+# print every command run by this script
+#set -x
+
+# initial shutdown delay
+# interesting delays are between 1-30 seconds on most machines
+SHUTDOWN_DELAY=0
+
+# each test increases the shutdown delay by this much
+SHUTDOWN_DELAY_INCREMENT=1
+
+# final shutdown delay
+# the test stops after a successful run with a delay this long
+SHUTDOWN_DELAY_LIMIT=30
+
+
+cargo build --bin zebrad || exit $?
+
+EXIT_STATUS=0
+while [ $EXIT_STATUS -eq 0 ] && [ $SHUTDOWN_DELAY -le $SHUTDOWN_DELAY_LIMIT ]; do
+    # remove previously downloaded Zcash parameter files
+    #
+    # if you don't have these downloaded already, the killed downloads will be incomplete,
+    # which causes an error in Zebra
+    # rm -r ~/.zcash-params
+
+    echo
+    echo "Running Zebra for $SHUTDOWN_DELAY seconds"
+    echo
+
+    # shut down Zebra if this script exits while it's running,
+    # but ignore "no such job" errors if Zebra has already exited
+    trap "kill %?zebrad 2> /dev/null" EXIT
+
+    target/debug/zebrad start &
+    sleep $SHUTDOWN_DELAY
+
+    echo
+    echo "Killing Zebra after $SHUTDOWN_DELAY seconds"
+    echo
+
+    kill %?zebrad
+    wait %?zebrad
+    EXIT_STATUS=$?
+
+    # fix up the exit status caused by 'kill'
+    if [ $EXIT_STATUS -eq 143 ]; then
+        EXIT_STATUS=0
+    fi
+
+    echo
+    echo "Killing Zebra after $SHUTDOWN_DELAY seconds exited with $EXIT_STATUS"
+    echo
+
+    SHUTDOWN_DELAY=$[SHUTDOWN_DELAY + SHUTDOWN_DELAY_INCREMENT]
+done
+
+exit $EXIT_STATUS
