@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use tower::timeout::Timeout;
 use tracing::Instrument;
@@ -55,10 +55,6 @@ pub struct Request {
     ///
     /// Coinbase inputs are rejected by the script verifier, because they do not spend a UTXO.
     pub input_index: usize,
-    /// A set of additional UTXOs known in the context of this verification request.
-    ///
-    /// This allows specifying additional UTXOs that are not already known to the chain state.
-    pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     /// The network upgrade active in the context of this verification request.
     ///
     /// Because the consensus branch ID changes with each network upgrade,
@@ -66,27 +62,12 @@ pub struct Request {
     pub upgrade: NetworkUpgrade,
 }
 
-/// A script verification response.
-///
-/// A successful response returns the known or looked-up UTXO for the transaction input.
-/// This allows the transaction verifier to calculate the value of the transparent input.
-#[derive(Debug)]
-pub struct Response {
-    /// The `OutPoint` for the UTXO spent by the verified transparent input.
-    pub spent_outpoint: transparent::OutPoint,
-
-    /// The UTXO spent by the verified transparent input.
-    ///
-    /// The value of this UTXO is the value of the input.
-    pub spent_utxo: transparent::Utxo,
-}
-
 impl<ZS> tower::Service<Request> for Verifier<ZS>
 where
     ZS: tower::Service<zebra_state::Request, Response = zebra_state::Response, Error = BoxError>,
     ZS::Future: Send + 'static,
 {
-    type Response = Response;
+    type Response = ();
     type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -104,7 +85,6 @@ where
         let Request {
             cached_ffi_transaction,
             input_index,
-            known_utxos,
             upgrade,
         } = req;
         let input = &cached_ffi_transaction.inputs()[input_index];
@@ -118,29 +98,13 @@ where
 
                 // Avoid calling the state service if the utxo is already known
                 let span = tracing::trace_span!("script", ?outpoint);
-                let query =
-                    span.in_scope(|| self.state.call(zebra_state::Request::AwaitUtxo(outpoint)));
 
                 async move {
-                    tracing::trace!("awaiting outpoint lookup");
-                    let utxo = if let Some(output) = known_utxos.get(&outpoint) {
-                        tracing::trace!("UXTO in known_utxos, discarding query");
-                        output.utxo.clone()
-                    } else if let zebra_state::Response::Utxo(utxo) = query.await? {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
-                    };
-                    tracing::trace!(?utxo, "got UTXO");
-
-                    cached_ffi_transaction
-                        .is_valid(branch_id, (input_index as u32, utxo.clone().output))?;
+                    let output = cached_ffi_transaction.all_previous_outputs()[input_index].clone();
+                    cached_ffi_transaction.is_valid(branch_id, (input_index as u32, output))?;
                     tracing::trace!("script verification succeeded");
 
-                    Ok(Response {
-                        spent_outpoint: outpoint,
-                        spent_utxo: utxo,
-                    })
+                    Ok(())
                 }
                 .instrument(span)
                 .boxed()

@@ -15,7 +15,6 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt, TryFutureExt,
 };
-use tokio::sync::mpsc;
 use tower::{timeout::Timeout, Service, ServiceExt};
 use tracing::Instrument;
 
@@ -306,10 +305,6 @@ where
         async move {
             tracing::trace!(?req);
 
-            // the size of this channel is bounded by the maximum number of inputs in a transaction
-            // (approximately 50,000 for a 2 MB transaction)
-            let (utxo_sender, mut utxo_receiver) = mpsc::unbounded_channel();
-
             // Do basic checks first
             if let Some(block_time) = req.block_time() {
                 check::lock_time_has_passed(&tx, req.height(), block_time)?;
@@ -357,6 +352,7 @@ where
 
             let inputs = tx.inputs();
             let known_utxos = req.known_utxos();
+            let mut spent_utxos = HashMap::new();
             let mut spent_outputs = Vec::new();
             for input in inputs {
                 match input {
@@ -378,7 +374,8 @@ where
                             unreachable!("AwaitUtxo always responds with Utxo")
                         };
                         tracing::trace!(?utxo, "got UTXO");
-                        spent_outputs.push(utxo.output);
+                        spent_outputs.push(utxo.output.clone());
+                        spent_utxos.insert(*outpoint, utxo);
                     }
                     transparent::Input::Coinbase { .. } => continue,
                 }
@@ -400,7 +397,6 @@ where
                     network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    utxo_sender,
                     joinsplit_data,
                     sapling_shielded_data,
                 )?,
@@ -413,7 +409,6 @@ where
                     network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    utxo_sender,
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
@@ -422,11 +417,6 @@ where
             // If the Groth16 parameter download hangs,
             // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
-
-            let mut spent_utxos = HashMap::new();
-            while let Some(script_rsp) = utxo_receiver.recv().await {
-                spent_utxos.insert(script_rsp.spent_outpoint, script_rsp.spent_utxo);
-            }
 
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
@@ -495,7 +485,6 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        utxo_sender: mpsc::UnboundedSender<script::Response>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -511,7 +500,6 @@ where
             network,
             script_verifier,
             cached_ffi_transaction,
-            utxo_sender,
         )?
         .and(Self::verify_sprout_shielded_data(
             joinsplit_data,
@@ -577,7 +565,6 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        utxo_sender: mpsc::UnboundedSender<script::Response>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -593,7 +580,6 @@ where
             network,
             script_verifier,
             cached_ffi_transaction,
-            utxo_sender,
         )?
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
@@ -646,7 +632,6 @@ where
         network: Network,
         script_verifier: script::Verifier<ZS>,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        utxo_sender: mpsc::UnboundedSender<script::Response>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
@@ -658,24 +643,18 @@ where
             // feed all of the inputs to the script verifier
             // the script_verifier also checks transparent sighashes, using its own implementation
             let inputs = transaction.inputs();
-            let known_utxos = request.known_utxos();
             let upgrade = request.upgrade(network);
 
             let script_checks = (0..inputs.len())
                 .into_iter()
                 .map(move |input_index| {
-                    let utxo_sender = utxo_sender.clone();
-
                     let request = script::Request {
                         upgrade,
-                        known_utxos: known_utxos.clone(),
                         cached_ffi_transaction: cached_ffi_transaction.clone(),
                         input_index,
                     };
 
-                    script_verifier.clone().oneshot(request).map_ok(move |rsp| {
-                        utxo_sender.send(rsp).expect("receiver is not dropped");
-                    })
+                    script_verifier.clone().oneshot(request).map_ok(|_r| {})
                 })
                 .collect();
 

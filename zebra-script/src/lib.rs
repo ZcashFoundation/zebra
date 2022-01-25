@@ -65,6 +65,10 @@ pub struct CachedFfiTransaction {
     /// This field is private so that `transaction` and `precomputed` always match.
     transaction: Arc<Transaction>,
 
+    /// The outputs from previous transactions that match each input in the transaction
+    /// being verified.
+    all_previous_outputs: Vec<transparent::Output>,
+
     /// The deserialized `zcash_script` transaction, as a C++ object.
     ///
     /// SAFETY: this field must be private,
@@ -74,7 +78,9 @@ pub struct CachedFfiTransaction {
 }
 
 impl CachedFfiTransaction {
-    /// Construct a `PrecomputedTransaction` from a `Transaction`.
+    /// Construct a `PrecomputedTransaction` from a `Transaction` and the outputs
+    /// from previous transactions that match each input in the transaction
+    /// being verified.
     pub fn new(
         transaction: Arc<Transaction>,
         all_previous_outputs: Vec<transparent::Output>,
@@ -118,6 +124,7 @@ impl CachedFfiTransaction {
 
         Self {
             transaction,
+            all_previous_outputs,
             // SAFETY: `precomputed` must not be modified after initialisation,
             //          so that it is `Send` and `Sync`.
             precomputed,
@@ -127,6 +134,12 @@ impl CachedFfiTransaction {
     /// Returns the transparent inputs for this transaction.
     pub fn inputs(&self) -> &[transparent::Input] {
         self.transaction.inputs()
+    }
+
+    /// Returns the outputs from previous transactions that match each input in the transaction
+    /// being verified.
+    pub fn all_previous_outputs(&self) -> &Vec<transparent::Output> {
+        &self.all_previous_outputs
     }
 
     /// Verify a script within a transaction given the corresponding
