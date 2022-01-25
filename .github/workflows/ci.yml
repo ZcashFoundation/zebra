@@ -284,11 +284,12 @@ jobs:
     strategy:
       matrix:
         checks:
-          - bans 
-          - sources
+          - bans sources
+          - advisories
+          - licenses
 
     # Prevent sudden announcement of a new advisory from failing ci:
-    continue-on-error: ${{ matrix.checks == 'advisories' }}
+    continue-on-error: ${{ matrix.checks == 'advisories' || 'licenses'}}
 
     steps:
     - uses: actions/checkout@v2

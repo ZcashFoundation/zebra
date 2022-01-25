@@ -4,6 +4,37 @@
 # * allow - No warning or error will be produced, though in some cases a note
 # will be
 
+# This section is considered when running `cargo deny check advisories`
+# More documentation for the advisories section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+# A list of advisory IDs to ignore. Note that ignored advisories will still
+# output a note when they are encountered.
+ignore = [
+    "RUSTSEC-2020-0159", # TODO: https://github.com/ZcashFoundation/zebra/issues/2953
+]
+
+# This section is considered when running `cargo deny check licenses`
+# More documentation for the licenses section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+[licenses]
+# The lint level for crates which do not have a detectable license
+unlicensed = "deny"
+# List of explicitly allowed licenses
+# See https://spdx.org/licenses/ for list of possible licenses
+# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
+allow = [
+    "MIT",
+    "Apache-2.0",
+    #"Apache-2.0 WITH LLVM-exception",
+]
+# List of explicitly disallowed licenses
+# See https://spdx.org/licenses/ for list of possible licenses
+# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
+deny = [
+    #"Nokia",
+]
+
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
