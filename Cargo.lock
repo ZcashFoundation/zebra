@@ -169,7 +169,7 @@ dependencies = [
  "tor-dirmgr",
  "tor-persist",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4442,7 +4442,7 @@ dependencies = [
  "tor-linkspec",
  "tor-llcrypto",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4483,7 +4483,7 @@ dependencies = [
  "tor-netdoc",
  "tor-persist",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
  "weak-table",
 ]
@@ -4533,7 +4533,7 @@ dependencies = [
  "tor-llcrypto",
  "tor-netdoc",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4569,7 +4569,7 @@ dependencies = [
  "tor-llcrypto",
  "tor-netdir",
  "tor-netdoc",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4594,7 +4594,7 @@ dependencies = [
  "tor-netdir",
  "tor-persist",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tor-units",
  "tracing",
 ]
@@ -4757,6 +4757,19 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
+]
+
+[[package]]
+name = "tor-rtcompat"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "131fd22dff254591655284b71bfffec2bfa6b300a8d63bd6c93c4d555ac38a99"
+dependencies = [
+ "async-trait",
+ "async_executors",
+ "futures",
+ "native-tls",
+ "pin-project 1.0.7",
 ]
 
 [[package]]
@@ -5614,7 +5627,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.3",
  "tower",
  "tracing",
  "tracing-error",
