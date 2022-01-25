@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v2
         with:
           persist-credentials: false
         
@@ -32,7 +32,7 @@ jobs:
 
       # Setup gcloud CLI
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@master
+        uses: google-github-actions/setup-gcloud@v0
         with:
           version: '295.0.0'
           project_id: ${{ env.PROJECT_ID }}

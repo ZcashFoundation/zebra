@@ -23,7 +23,7 @@ jobs:
     name: Run all tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v2
         with:
           persist-credentials: false
 
@@ -37,7 +37,7 @@ jobs:
           echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@master
+        uses: google-github-actions/setup-gcloud@v0
         with:
           version: '295.0.0'
           project_id: ${{ env.PROJECT_ID }}
