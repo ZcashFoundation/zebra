@@ -67,8 +67,7 @@ impl LockTime {
     /// Users should not construct lock times with timestamps lower than the
     /// value returned by this function.
     //
-    // When `Utc.timestamp` stabilises as a const function, we can make this a
-    // const function.
+    // TODO: replace Utc.timestamp with DateTime32 (#2211)
     pub fn min_lock_time_timestamp() -> LockTime {
         LockTime::Time(Utc.timestamp(Self::MIN_TIMESTAMP, 0))
     }
@@ -78,8 +77,7 @@ impl LockTime {
     /// Users should not construct lock times with timestamps greater than the
     /// value returned by this function.
     //
-    // When `Utc.timestamp` stabilises as a const function, we can make this a
-    // const function.
+    // TODO: replace Utc.timestamp with DateTime32 (#2211)
     pub fn max_lock_time_timestamp() -> LockTime {
         LockTime::Time(Utc.timestamp(Self::MAX_TIMESTAMP, 0))
     }

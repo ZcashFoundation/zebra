@@ -294,57 +294,34 @@ pub fn coinbase_expiry_height(
 ) -> Result<(), TransactionError> {
     let expiry_height = coinbase.expiry_height();
 
-    match NetworkUpgrade::Nu5.activation_height(network) {
-        // # Consensus
-        //
-        // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be less than
-        // > or equal to 499999999.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        //
-        // We check this rule here when no activation height is set.
-        None => validate_expiry_height_max(expiry_height, true, block_height, coinbase),
-
+    // TODO: replace `if let` with `expect` after NU5 mainnet activation
+    if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
         // # Consensus
         //
         // > [NU5 onward] The nExpiryHeight field of a coinbase transaction
         // > MUST be equal to its block height.
         //
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        Some(activation_height) => {
-            if *block_height >= activation_height {
-                match expiry_height {
-                    None => Err(TransactionError::CoinbaseExpiryBlockHeight {
-                        expiry_height,
-                        block_height: *block_height,
-                        transaction_hash: coinbase.hash(),
-                    })?,
-                    Some(expiry) => {
-                        if expiry != *block_height {
-                            return Err(TransactionError::CoinbaseExpiryBlockHeight {
-                                expiry_height,
-                                block_height: *block_height,
-                                transaction_hash: coinbase.hash(),
-                            })?;
-                        }
-                    }
-                }
-
+        if *block_height >= nu5_activation_height {
+            if expiry_height != Some(*block_height) {
+                return Err(TransactionError::CoinbaseExpiryBlockHeight {
+                    expiry_height,
+                    block_height: *block_height,
+                    transaction_hash: coinbase.hash(),
+                });
+            } else {
                 return Ok(());
             }
-
-            // # Consensus
-            //
-            // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be less than
-            // > or equal to 499999999.
-            //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-            //
-            // We check this rule here when the NU5 activation height is set,
-            // but we haven't reached it yet.
-            validate_expiry_height_max(expiry_height, true, block_height, coinbase)
         }
     }
+
+    // # Consensus
+    //
+    // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be less than
+    // > or equal to 499999999.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    validate_expiry_height_max(expiry_height, true, block_height, coinbase)
 }
 
 /// Returns `Ok(())` if the expiry height for a non coinbase transaction is
