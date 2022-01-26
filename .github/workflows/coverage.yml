@@ -25,11 +25,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2.4.0
         with:
           persist-credentials: false
 
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rs/toolchain@v1.0.7
         with:
           # Pinned to workaround issue making cargo-llvm-cov fail, see
           # https://github.com/taiki-e/cargo-llvm-cov/issues/128
@@ -82,4 +82,4 @@ jobs:
         run: cargo llvm-cov --lcov --no-run --output-path lcov.info
 
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v2.1.0
