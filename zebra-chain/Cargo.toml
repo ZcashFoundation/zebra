@@ -81,11 +81,14 @@ proptest-derive = "0.3"
 rand = "0.8"
 rand_chacha = "0.3"
 
+tokio = "1.15.0"
+
 zebra-test = { path = "../zebra-test/" }
 
 [[bench]]
 name = "block"
 harness = false
+required-features = ["bench"]
 
 [[bench]]
 name = "redpallas"
