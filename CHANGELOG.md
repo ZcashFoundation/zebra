@@ -30,7 +30,7 @@ All Rust crates have now been updated to use Rust 2021 Edition.
 
 #### Documentation
 
-- Document the consensus rules for Section 3.6 (#3338)
+- Document the consensus rules for Spend Transfers, Output Transfers, and their Descriptions (Section 3.6 of the Zcash protocol specification) (#3338)
 - Document the structure of the zebra-network crate (#3317)
 - Document the consensus rules for Sec. 3.8 Note Commitment Trees (#3319)
 - Document chain value balances consensus rules with new format (#3286)
