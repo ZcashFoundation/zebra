@@ -1,6 +1,6 @@
 # Cargo files
 /coverage-target/
-# Zebra state
+# Legacy Zebra state (alpha versions only)
 .zebra-state/
 # Nix configs
 shell.nix
