@@ -21,9 +21,9 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///     (Unix timestamp greater than [`LockTime::MAX_TIMESTAMP`]).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
-    /// A block height after which the transaction can be included in the block chain.
+    /// The transaction can only be included in a block if the block height is strictly greater than this height
     Height(block::Height),
-    /// A timestamp after which the transaction can be included in the block chain.
+        /// The transaction can only be included in a block if the block time is strictly greater than this timestamp
     Time(DateTime<Utc>),
 }
 
@@ -100,7 +100,7 @@ impl ZcashSerialize for LockTime {
 impl ZcashDeserialize for LockTime {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let n = reader.read_u32::<LittleEndian>()?;
-        if n < Self::MIN_TIMESTAMP as u32 {
+        if n < Self::MIN_TIMESTAMP.try_into().expect(msg: "fits in u32") {
             Ok(LockTime::Height(block::Height(n)))
         } else {
             // This can't panic, because all u32 values are valid `Utc.timestamp`s.
