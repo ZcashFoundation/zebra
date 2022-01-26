@@ -201,8 +201,9 @@ impl CompactDifficulty {
 
         // The exponent for the multiplier in the floating-point number
         // 256^(floor(x/(2^24)) - 3)
+        //
         // The i32 conversion is safe, because we've just divided self by 2^24.
-        let exponent = ((self.0 >> PRECISION) as i32) - OFFSET;
+        let exponent = i32::try_from(self.0 >> PRECISION).expect("fits in i32") - OFFSET;
 
         // Normalise the mantissa and exponent before multiplying.
         //
