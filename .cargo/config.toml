@@ -5,17 +5,26 @@ rustflags = [
 
     # High-risk code
     "-Dunsafe_code",
-    "-Drust_2021_compatibility",
-
-    "-Dclippy::await_holding_lock",
-    "-Dclippy::await_holding_refcell_ref",
-    "-Dclippy::cast_ptr_alignment",
-    "-Dclippy::fn_to_numeric_cast_any",
 
     # Potential bugs
+    #
+    # If we deny these lints, we could be excluded from Crater builds:
+    # https://www.reddit.com/r/rust/comments/f5xpib/psa_denywarnings_is_actively_harmful/
+
+    # Compatibility
+    "-Wrust_2021_compatibility",
     "-Wnonstandard_style",
     "-Wfuture_incompatible",
 
+    # Async code
+    "-Wclippy::await_holding_lock",
+    "-Wclippy::await_holding_refcell_ref",
+
+    # Pointers
+    "-Wclippy::cast_ptr_alignment",
+    "-Wclippy::fn_to_numeric_cast_any",
+
+    # Integers
     "-Wclippy::checked_conversions",
     "-Wclippy::implicit_saturating_sub",
     "-Wclippy::invalid_upcast_comparisons",
@@ -32,6 +41,7 @@ rustflags = [
     "-Aclippy::try_err",
 
     # TODOs:
+    # `cargo fix` might help do these fixes
 
     # fix code that triggers these lints,
     # or disable the lint for that code (particularly test code)
