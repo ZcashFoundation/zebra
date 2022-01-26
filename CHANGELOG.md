@@ -4,6 +4,64 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.4) - 2022-01-26
+
+Zebra's latest beta improves the networking code and fixes some bugs. A couple of fixed bugs had
+caused Zebra to hang in some situations. Some improvements to the documentation were also included.
+
+### Added
+
+- Add a copy-state zebrad command, which copies blocks between two state services (#3175)
+
+#### Networking
+
+- Add isolated Tor connection API, but don't enable it by default (#3303)
+- Add a test for message broadcast to the right number of peers (#3284)
+
+### Changed
+
+- Update to use Rust edition 2021 (#3332)
+
+#### Networking
+
+- Cache incoming unsolicited address messages, and use them as responses (#3294)
+- Cleanup internal network request handler, fix unused request logging (#3295)
+
+#### Documentation
+
+- Document the consensus rules for Section 3.6 (#3338)
+- Make the Zebra state RFC match the lightwalletd draft design (#3385)
+- Document the structure of the zebra-network crate (#3317)
+- Document the consensus rules for Sec. 3.8 Note Commitment Trees (#3319)
+- Document chain value balances consensus rules with new format (#3286)
+- Document part of the block header consensus rules (#3296)
+
+### Fixed
+
+#### Consensus
+
+- Fix interstitial sprout anchors check (#3283)
+- Check jubjub key correctness independent of redjubjub / jubjub (#3154)
+
+#### Networking
+
+- Fix some bugs related to isolated connections (#3302)
+- Ignore unexpected block responses to fix error cascade when synchronizing blocks, improving synchronization speed (#3374)
+- Cancel heartbeats that are waiting for a peer, rather than hanging Zebra (#3325)
+- Stop ignoring some peers when updating the address book (#3292)
+- Fix some address crawler timing issues (#3293)
+- Retry Zcash sprout and sapling parameters download (#3306)
+- Keep track of background peer tasks (#3253)
+
+#### Chain Synchronization
+
+- Fix deadlock in chain tip watch channel, that sometimes caused chain synchronization to hang (#3378)
+- Fix syncer download order and add sync tests (#3168)
+
+#### Tests
+
+- Fix a type resolution error in the tests (#3304)
+
 ## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-21
 
 Zebra's latest beta works towards enforcing all consensus rules by validating JoinSplit Groth16 proofs
