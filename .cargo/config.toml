@@ -41,17 +41,23 @@ rustflags = [
     "-Aclippy::try_err",
 
     # TODOs:
-    # `cargo fix` might help do these fixes
+    # `cargo fix` might help do these fixes,
+    # or add a config.toml to sub-directories which should allow these lints
+    #
+    # lint configs that don't work:
+    # - allowing these lints in lib.rs (command-line warn overrides allow)
+    # - adding a [target.'cfg(not(test))'] rustflags config (it runs on test code anyway)
 
     # fix code that triggers these lints,
-    # or disable the lint for that code (particularly test code)
-    #"-Wclippy::cast_lossless",
-    #"-Wclippy::cast_possible_truncation",
-    #"-Wclippy::cast_possible_wrap",
-    #"-Wclippy::cast_sign_loss",
-    #"-Wclippy::cast_precision_loss",
+    # or disable the lint for that code (or for all test code)
+    #
+    #"-Wclippy::cast_lossless", # 30 non-test warnings, a few test warnings
+    #"-Wclippy::cast_possible_truncation", # 40 non-test warnings, 20 test warnings
+    #"-Wclippy::cast_possible_wrap", # 13 test warnings (fixed outside tests)
+    #"-Wclippy::cast_precision_loss", # 25 non-test warnings, 10 test warnings
+    #"-Wclippy::cast_sign_loss", # 6 non-test warnings, 15 test warnings
 
-    # apply these lints everywhere except test code
+    # disable these lints using a zebra-test config.toml, but warn for other crates
     #"-Wclippy::print_stdout",
     #"-Wclippy::print_stderr",
 
