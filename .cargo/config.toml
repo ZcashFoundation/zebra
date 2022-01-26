@@ -42,10 +42,11 @@ rustflags = [
 
     # TODOs:
     # `cargo fix` might help do these fixes,
-    # or add a config.toml to sub-directories which should allow these lints
+    # or add a config.toml to sub-directories which should allow these lints,
+    # or try allowing the lint in the specific module (lib.rs doesn't seem to work in some cases)
     #
     # lint configs that don't work:
-    # - allowing these lints in lib.rs (command-line warn overrides allow)
+    # - allowing these lints in lib.rs (command-line warn overrides allow in lib.rs?)
     # - adding a [target.'cfg(not(test))'] rustflags config (it runs on test code anyway)
 
     # fix code that triggers these lints,
