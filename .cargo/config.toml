@@ -2,17 +2,48 @@
 [target.'cfg(all())']
 rustflags = [
     # Zebra standard lints for Rust 1.58+
+
+    # High-risk code
     "-Dunsafe_code",
     "-Drust_2021_compatibility",
-    "-Dclippy::await_holding_lock",
 
-    "-Wmissing_docs",
+    "-Dclippy::await_holding_lock",
+    "-Dclippy::await_holding_refcell_ref",
+    "-Dclippy::cast_ptr_alignment",
+    "-Dclippy::fn_to_numeric_cast_any",
+
+    # Potential bugs
     "-Wnonstandard_style",
     "-Wfuture_incompatible",
 
+    "-Wclippy::checked_conversions",
+    "-Wclippy::implicit_saturating_sub",
+    "-Wclippy::invalid_upcast_comparisons",
+    "-Wclippy::range_minus_one",
+    "-Wclippy::range_plus_one",
+    "-Wclippy::unnecessary_cast",
+
+    # Incomplete code
+    "-Wmissing_docs",
+    "-Wclippy::dbg_macro",
+    "-Wclippy::todo",
+
+    # Code styles we want to accept
     "-Aclippy::try_err",
 
     # TODOs:
+
+    # fix code that triggers these lints,
+    # or disable the lint for that code (particularly test code)
+    #"-Wclippy::cast_lossless",
+    #"-Wclippy::cast_possible_truncation",
+    #"-Wclippy::cast_possible_wrap",
+    #"-Wclippy::cast_sign_loss",
+    #"-Wclippy::cast_precision_loss",
+
+    # apply these lints everywhere except test code
+    #"-Wclippy::print_stdout",
+    #"-Wclippy::print_stderr",
 
     # fix hidden lifetime parameters
     #"-Wrust_2018_idioms",
