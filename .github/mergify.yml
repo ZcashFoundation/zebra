@@ -62,8 +62,8 @@ pull_request_rules:
       - -draft
       - base=main
       - or:
-          - "-label~=^P-Low"
-          - "-label~=^P-Optional"
+          - "label~=^P-Low"
+          - "label~=^P-Optional"
       - label!=do-not-merge
     actions:
       queue:
