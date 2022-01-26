@@ -62,6 +62,10 @@ All Rust crates have now been updated to use Rust 2021 Edition.
 
 - Fix a type resolution error in the tests (#3304)
 
+### Security
+
+- Stop RocksDB and Tokio from calling unexpected code when zebrad exits (#3392)
+
 ## [Zebra 1.0.0-beta.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.3) - 2021-12-21
 
 Zebra's latest beta works towards enforcing all consensus rules by validating JoinSplit Groth16 proofs
