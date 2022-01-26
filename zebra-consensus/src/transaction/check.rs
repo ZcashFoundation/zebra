@@ -321,9 +321,6 @@ pub fn coinbase_expiry_height(
     // > or equal to 499999999.
     //
     // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-    //
-    // We check this rule here when the NU5 activation height is set,
-    // but we haven't reached it yet; or when no activation height is set.
     validate_expiry_height_max(expiry_height, true, block_height, coinbase)
 }
 
