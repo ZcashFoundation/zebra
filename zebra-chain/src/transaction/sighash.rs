@@ -43,7 +43,8 @@ pub(super) struct SigHasher<'a> {
     trans: &'a Transaction,
     hash_type: HashType,
     network_upgrade: NetworkUpgrade,
-    input: Option<(transparent::Output, &'a transparent::Input, usize)>,
+    all_previous_outputs: Vec<transparent::Output>,
+    input_index: Option<usize>,
 }
 
 impl<'a> SigHasher<'a> {
@@ -51,23 +52,15 @@ impl<'a> SigHasher<'a> {
         trans: &'a Transaction,
         hash_type: HashType,
         network_upgrade: NetworkUpgrade,
-        // all_previous_outputs: &[transparent::Output],
-        input: Option<(u32, transparent::Output)>,
+        all_previous_outputs: Vec<transparent::Output>,
+        input_index: Option<usize>,
     ) -> Self {
-        let input = if let Some((index, prevout)) = input {
-            let index = index as usize;
-            let inputs = trans.inputs();
-
-            Some((prevout, &inputs[index], index))
-        } else {
-            None
-        };
-
         SigHasher {
             trans,
             hash_type,
             network_upgrade,
-            input,
+            all_previous_outputs,
+            input_index,
         }
     }
 
@@ -84,10 +77,12 @@ impl<'a> SigHasher<'a> {
 
     /// Compute a signature hash using librustzcash.
     fn hash_sighash_librustzcash(&self) -> SigHash {
-        let input = self
-            .input
-            .as_ref()
-            .map(|(output, input, idx)| (output, *input, *idx));
-        sighash(self.trans, self.hash_type, self.network_upgrade, input)
+        sighash(
+            self.trans,
+            self.hash_type,
+            self.network_upgrade,
+            &self.all_previous_outputs,
+            self.input_index,
+        )
     }
 }

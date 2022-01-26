@@ -516,7 +516,12 @@ where
 
         Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
 
-        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
+        let shielded_sighash = tx.sighash(
+            upgrade,
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs().clone(),
+            None,
+        );
 
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,
@@ -596,7 +601,8 @@ where
 
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
 
-        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
+        let shielded_sighash =
+            transaction.sighash(upgrade, HashType::ALL, Default::default(), None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,

@@ -191,14 +191,14 @@ impl Transaction {
         &self,
         network_upgrade: NetworkUpgrade,
         hash_type: sighash::HashType,
-        // all_previous_outputs: &[transparent::Output],
-        input: Option<(u32, transparent::Output)>,
+        all_previous_outputs: Vec<transparent::Output>,
+        input: Option<usize>,
     ) -> SigHash {
         sighash::SigHasher::new(
             self,
             hash_type,
             network_upgrade,
-            // all_previous_outputs,
+            all_previous_outputs,
             input,
         )
         .sighash()
