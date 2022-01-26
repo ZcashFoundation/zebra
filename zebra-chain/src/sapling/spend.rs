@@ -171,6 +171,20 @@ impl ZcashSerialize for Spend<PerSpendAnchor> {
 }
 
 impl ZcashDeserialize for Spend<PerSpendAnchor> {
+    /// # Consensus
+    ///
+    /// > The anchor of each Spend description MUST refer to some earlier
+    /// > block’s final Sapling treestate. The anchor is encoded separately in
+    /// > each Spend description for v4 transactions, or encoded once and shared
+    /// > between all Spend descriptions in a v5 transaction.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+    ///
+    /// This rule is also implemented in
+    /// [`zebra_state::service::check::anchor`] and
+    /// [`zebra_chain::transaction::serialize`].
+    ///
+    /// The "anchor encoding for v4 transactions" is implemented here.
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(Spend {
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,

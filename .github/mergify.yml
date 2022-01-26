@@ -1,0 +1,84 @@
+queue_rules:
+  - name: urgent
+    speculative_checks: 2
+    batch_size: 2
+    conditions:
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
+
+  - name: medium
+    speculative_checks: 2
+    batch_size: 3
+    conditions:
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
+
+  - name: low
+    speculative_checks: 2
+    batch_size: 4
+    conditions:
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
+
+pull_request_rules:
+  - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - -draft
+      - base=main
+      - or:
+          - "label~=^P-Critical"
+          - "label~=^P-High"
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: urgent
+        method: squash
+
+  - name: move to medium queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - -draft
+      - base=main
+      - "label~=^P-Medium"
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: medium
+        method: squash
+
+  - name: move to low queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - -draft
+      - base=main
+      - or:
+          - "label~=^P-Low"
+          - "label~=^P-Optional"
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: low
+        method: squash
+
+  - name: automatic merge for Dependabot pull requests
+    conditions:
+      - "#approved-reviews-by>=1"
+      - author~=^dependabot(|-preview)\[bot\]$
+      - check-success=Test (+stable) on ubuntu-latest
+      - check-success=Test (+stable) on macOS-latest
+      - check-success=Test (+stable) on windows-latest
+      - check-success=pull-request (zealous-zebra)
+      - check-success=Coverage (+nightly)
+    actions:
+      merge:
+        method: squash

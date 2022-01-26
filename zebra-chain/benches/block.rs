@@ -1,9 +1,5 @@
-// Standard lints
 // Disabled due to warnings in criterion macros
-//#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![forbid(unsafe_code)]
+#![allow(missing_docs)]
 
 use std::io::Cursor;
 

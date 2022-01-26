@@ -2,11 +2,6 @@
 #![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_test")]
-// Standard lints
-#![warn(missing_docs)]
-#![allow(clippy::try_err)]
-#![deny(clippy::await_holding_lock)]
-#![forbid(unsafe_code)]
 // Each lazy_static variable uses additional recursion
 #![recursion_limit = "512"]
 
@@ -70,6 +65,7 @@ pub fn init() {
                 .add_directive("zebra_network=error".parse().unwrap())
                 .add_directive("zebra_state=error".parse().unwrap())
                 .add_directive("zebrad=error".parse().unwrap())
+                .add_directive("tor_circmgr=error".parse().unwrap())
         });
 
         tracing_subscriber::registry()

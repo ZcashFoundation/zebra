@@ -5,13 +5,13 @@
 //! A zebra node consists of the following services and tasks:
 //!
 //! Peers:
-//!  * Network Service
-//!    * primary external interface to the node
-//!    * handles all external network requests for the Zcash protocol
-//!      * via zebra_network::Message and zebra_network::Response
-//!    * provides an interface to the rest of the network for other services and
-//!      tasks running within this node
-//!      * via zebra_network::Request
+//!  * Peer Connection Pool Service
+//!    * primary external interface for outbound requests from this node to remote peers
+//!    * accepts requests from services and tasks in this node, and sends them to remote peers
+//!  * Peer Discovery Service
+//!    * maintains a list of peer addresses, and connection priority metadata
+//!    * discovers new peer addresses from existing peer connections
+//!    * initiates new outbound peer connections in response to demand from tasks within this node
 //!
 //! Blocks & Mempool Transactions:
 //!  * Consensus Service
@@ -23,6 +23,7 @@
 //!    * downloads the Sprout and Sapling Groth16 circuit parameter files
 //!    * finishes when the download is complete and the download file hashes have been checked
 //!  * Inbound Service
+//!    * primary external interface for inbound peer requests to this node
 //!    * handles requests from peers for network data, chain data, and mempool transactions
 //!    * spawns download and verify tasks for each gossiped block
 //!    * sends gossiped transactions to the mempool service
@@ -144,9 +145,9 @@ impl StartCmd {
             .send(setup_data)
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
-        let syncer_error_future = syncer.sync();
+        let syncer_task_handle = tokio::spawn(syncer.sync());
 
-        let mut sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
+        let mut block_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
             sync_status.clone(),
             chain_tip_change.clone(),
             peer_set.clone(),
@@ -169,11 +170,10 @@ impl StartCmd {
 
         info!("spawned initial Zebra tasks");
 
-        // TODO: spawn the syncer task, after making the PeerSet marker::Sync and marker::Send
-        //       turn these tasks into a FuturesUnordered?
+        // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
 
-        // ongoing futures & tasks
-        pin!(syncer_error_future);
+        // ongoing tasks
+        pin!(syncer_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
@@ -187,12 +187,11 @@ impl StartCmd {
             let mut exit_when_task_finishes = true;
 
             let result = select! {
-                // We don't spawn the syncer future into a separate task yet.
-                // So syncer panics automatically propagate to the main zebrad task.
-                sync_result = &mut syncer_error_future => sync_result
+                sync_result = &mut syncer_task_handle => sync_result
+                    .expect("unexpected panic in the syncer task")
                     .map(|_| info!("syncer task exited")),
 
-                sync_gossip_result = &mut sync_gossip_task_handle => sync_gossip_result
+                block_gossip_result = &mut block_gossip_task_handle => block_gossip_result
                     .expect("unexpected panic in the chain tip block gossip task")
                     .map(|_| info!("chain tip block gossip task exited"))
                     .map_err(|e| eyre!(e)),
@@ -238,11 +237,9 @@ impl StartCmd {
 
         info!("exiting Zebra because an ongoing task exited: stopping other tasks");
 
-        // futures
-        std::mem::drop(syncer_error_future);
-
         // ongoing tasks
-        sync_gossip_task_handle.abort();
+        syncer_task_handle.abort();
+        block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();

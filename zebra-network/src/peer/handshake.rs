@@ -1,3 +1,5 @@
+//! Initial [`Handshake`s] with Zebra peers over a `PeerTransport`.
+
 use std::{
     cmp::min,
     collections::HashSet,
@@ -10,8 +12,13 @@ use std::{
 };
 
 use chrono::{TimeZone, Utc};
-use futures::{channel::oneshot, future, FutureExt, SinkExt, StreamExt};
-use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use futures::{channel::oneshot, future, pin_mut, FutureExt, SinkExt, StreamExt};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::broadcast,
+    task::JoinError,
+    time::{timeout, Instant},
+};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
 use tower::Service;
@@ -48,18 +55,46 @@ use crate::{
 /// To avoid hangs, each handshake (or its connector) should be:
 /// - launched in a separate task, and
 /// - wrapped in a timeout.
-#[derive(Clone)]
-pub struct Handshake<S, C = NoChainTip> {
+pub struct Handshake<S, C = NoChainTip>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
     config: Config,
-    inbound_service: S,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-    inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
-    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
-    parent_span: Span,
+
+    inbound_service: S,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
     minimum_peer_version: MinimumPeerVersion<C>,
+    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
+
+    parent_span: Span,
+}
+
+impl<S, C> Clone for Handshake<S, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            user_agent: self.user_agent.clone(),
+            our_services: self.our_services,
+            relay: self.relay,
+            inbound_service: self.inbound_service.clone(),
+            address_book_updater: self.address_book_updater.clone(),
+            inv_collector: self.inv_collector.clone(),
+            minimum_peer_version: self.minimum_peer_version.clone(),
+            nonces: self.nonces.clone(),
+            parent_span: self.parent_span.clone(),
+        }
+    }
 }
 
 /// The peer address that we are handshaking with.
@@ -301,13 +336,19 @@ impl fmt::Debug for ConnectedAddr {
 }
 
 /// A builder for `Handshake`.
-pub struct Builder<S, C = NoChainTip> {
+pub struct Builder<S, C = NoChainTip>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
     config: Option<Config>,
-    inbound_service: Option<S>,
-    address_book_updater: Option<tokio::sync::mpsc::Sender<MetaAddrChange>>,
     our_services: Option<PeerServices>,
     user_agent: Option<String>,
     relay: Option<bool>,
+
+    inbound_service: Option<S>,
+    address_book_updater: Option<tokio::sync::mpsc::Sender<MetaAddrChange>>,
     inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
     latest_chain_tip: C,
 }
@@ -316,7 +357,7 @@ impl<S, C> Builder<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
-    C: ChainTip,
+    C: ChainTip + Clone + Send + 'static,
 {
     /// Provide a config.  Mandatory.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -376,9 +417,13 @@ where
     /// constant over network upgrade activations.
     ///
     /// Use [`NoChainTip`] to explicitly provide no chain tip.
-    pub fn with_latest_chain_tip<NewC>(self, latest_chain_tip: NewC) -> Builder<S, NewC> {
+    pub fn with_latest_chain_tip<NewC>(self, latest_chain_tip: NewC) -> Builder<S, NewC>
+    where
+        NewC: ChainTip + Clone + Send + 'static,
+    {
         Builder {
             latest_chain_tip,
+
             // TODO: Until Rust RFC 2528 reaches stable, we can't do `..self`
             config: self.config,
             inbound_service: self.inbound_service,
@@ -425,15 +470,15 @@ where
 
         Ok(Handshake {
             config,
-            inbound_service,
-            inv_collector,
-            address_book_updater,
-            nonces,
             user_agent,
             our_services,
             relay,
-            parent_span: Span::current(),
+            inbound_service,
+            address_book_updater,
+            inv_collector,
             minimum_peer_version,
+            nonces,
+            parent_span: Span::current(),
         })
     }
 }
@@ -450,11 +495,11 @@ where
         // `S` does not.
         Builder {
             config: None,
+            our_services: None,
+            user_agent: None,
+            relay: None,
             inbound_service: None,
             address_book_updater: None,
-            user_agent: None,
-            our_services: None,
-            relay: None,
             inv_collector: None,
             latest_chain_tip: NoChainTip,
         }
@@ -467,8 +512,8 @@ where
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 #[allow(clippy::too_many_arguments)]
-pub async fn negotiate_version(
-    peer_conn: &mut Framed<TcpStream, Codec>,
+pub async fn negotiate_version<PeerTransport>(
+    peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
     config: Config,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
@@ -476,7 +521,10 @@ pub async fn negotiate_version(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<(Version, PeerServices, SocketAddr), HandshakeError> {
+) -> Result<(Version, PeerServices, SocketAddr), HandshakeError>
+where
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
     // # Correctness
@@ -666,9 +714,12 @@ pub async fn negotiate_version(
 
 /// A handshake request.
 /// Contains the information needed to handshake with the peer.
-pub struct HandshakeRequest {
-    /// The TCP connection to the peer.
-    pub tcp_stream: TcpStream,
+pub struct HandshakeRequest<PeerTransport>
+where
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    /// The tokio [`TcpStream`] or Tor [`DataStream`] to the peer.
+    pub data_stream: PeerTransport,
 
     /// The address of the peer, and other related information.
     pub connected_addr: ConnectedAddr,
@@ -679,11 +730,12 @@ pub struct HandshakeRequest {
     pub connection_tracker: ConnectionTracker,
 }
 
-impl<S, C> Service<HandshakeRequest> for Handshake<S, C>
+impl<S, PeerTransport, C> Service<HandshakeRequest<PeerTransport>> for Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     type Response = Client;
     type Error = BoxError;
@@ -694,9 +746,9 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: HandshakeRequest) -> Self::Future {
+    fn call(&mut self, req: HandshakeRequest<PeerTransport>) -> Self::Future {
         let HandshakeRequest {
-            tcp_stream,
+            data_stream,
             connected_addr,
             connection_tracker,
         } = req;
@@ -727,10 +779,10 @@ where
 
             // CORRECTNESS
             //
-            // As a defence-in-depth against hangs, every send or next on stream
+            // As a defence-in-depth against hangs, every send() or next() on peer_conn
             // should be wrapped in a timeout.
             let mut peer_conn = Framed::new(
-                tcp_stream,
+                data_stream,
                 Codec::builder()
                     .for_network(config.network)
                     .with_metrics_addr_label(connected_addr.get_transient_addr_label())
@@ -910,6 +962,7 @@ where
             let server = Connection {
                 state: connection::State::AwaitingRequest,
                 request_timer: None,
+                cached_addrs: Vec::new(),
                 svc: inbound_service,
                 client_rx: server_rx.into(),
                 error_slot: error_slot.clone(),
@@ -927,7 +980,7 @@ where
             );
 
             let heartbeat_task = tokio::spawn(
-                send_periodic_heartbeats(
+                send_periodic_heartbeats_with_shutdown_handle(
                     connected_addr,
                     remote_services,
                     shutdown_rx,
@@ -969,61 +1022,99 @@ where
 /// heartbeat_ts_collector.
 ///
 /// Returning from this function terminates the connection's heartbeat task.
-async fn send_periodic_heartbeats(
+async fn send_periodic_heartbeats_with_shutdown_handle(
     connected_addr: ConnectedAddr,
     remote_services: PeerServices,
-    mut shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
-    mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
+    shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
+    server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) {
     use futures::future::Either;
 
-    let mut interval_stream =
-        IntervalStream::new(tokio::time::interval(constants::HEARTBEAT_INTERVAL));
+    let heartbeat_run_loop = send_periodic_heartbeats_run_loop(
+        connected_addr,
+        remote_services,
+        server_tx,
+        heartbeat_ts_collector.clone(),
+    );
 
-    loop {
-        let shutdown_rx_ref = Pin::new(&mut shutdown_rx);
+    pin_mut!(shutdown_rx);
+    pin_mut!(heartbeat_run_loop);
 
-        // CORRECTNESS
-        //
-        // Currently, select prefers the first future if multiple
-        // futures are ready.
-        //
-        // Starvation is impossible here, because interval has a
-        // slow rate, and shutdown is a oneshot. If both futures
-        // are ready, we want the shutdown to take priority over
-        // sending a useless heartbeat.
-        if matches!(
-            future::select(shutdown_rx_ref, interval_stream.next()).await,
-            Either::Left(_)
-        ) {
-            tracing::trace!("shutting down due to Client shut down");
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                // awaiting a local task won't hang
-                let _ = heartbeat_ts_collector
-                    .send(MetaAddr::new_shutdown(&book_addr, remote_services))
-                    .await;
-            }
-            return;
+    // CORRECTNESS
+    //
+    // Currently, select prefers the first future if multiple
+    // futures are ready.
+    //
+    // Starvation is impossible here, because interval has a
+    // slow rate, and shutdown is a oneshot. If both futures
+    // are ready, we want the shutdown to take priority over
+    // sending a useless heartbeat.
+    let _result = match future::select(shutdown_rx, heartbeat_run_loop).await {
+        Either::Left((Ok(CancelHeartbeatTask), _unused_run_loop)) => {
+            tracing::trace!("shutting down because Client requested shut down");
+            handle_heartbeat_shutdown(
+                PeerError::ClientCancelledHeartbeatTask,
+                &mut heartbeat_ts_collector,
+                &connected_addr,
+                &remote_services,
+            )
+            .await
         }
+        Either::Left((Err(oneshot::Canceled), _unused_run_loop)) => {
+            tracing::trace!("shutting down because Client was dropped");
+            handle_heartbeat_shutdown(
+                PeerError::ClientDropped,
+                &mut heartbeat_ts_collector,
+                &connected_addr,
+                &remote_services,
+            )
+            .await
+        }
+        Either::Right((result, _unused_shutdown)) => {
+            tracing::trace!("shutting down due to heartbeat failure");
+            // heartbeat_timeout() already send an error on the timestamp collector channel
 
+            result
+        }
+    };
+}
+
+/// Send periodical heartbeats to `server_tx`, and update the peer status through
+/// `heartbeat_ts_collector`.
+///
+/// See `send_periodic_heartbeats_with_shutdown_handle` for details.
+async fn send_periodic_heartbeats_run_loop(
+    connected_addr: ConnectedAddr,
+    remote_services: PeerServices,
+    mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
+    mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+) -> Result<(), BoxError> {
+    // Don't send the first heartbeat immediately - we've just completed the handshake!
+    let mut interval = tokio::time::interval_at(
+        Instant::now() + constants::HEARTBEAT_INTERVAL,
+        constants::HEARTBEAT_INTERVAL,
+    );
+    // If the heartbeat is delayed, also delay all future heartbeats.
+    // (Shorter heartbeat intervals just add load, without any benefit.)
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut interval_stream = IntervalStream::new(interval);
+
+    while let Some(_instant) = interval_stream.next().await {
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
-        //
-        // TODO: await heartbeat and shutdown (#3254)
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        if heartbeat_timeout(
+        heartbeat_timeout(
             heartbeat,
             &mut heartbeat_ts_collector,
             &connected_addr,
             &remote_services,
         )
-        .await
-        .is_err()
-        {
-            return;
-        }
+        .await?;
     }
+
+    unreachable!("unexpected IntervalStream termination")
 }
 
 /// Send one heartbeat using `server_tx`.
@@ -1130,4 +1221,22 @@ where
             Err(err)
         }
     }
+}
+
+/// Mark `connected_addr` as shut down using `address_book_updater`.
+async fn handle_heartbeat_shutdown(
+    peer_error: PeerError,
+    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    connected_addr: &ConnectedAddr,
+    remote_services: &PeerServices,
+) -> Result<(), BoxError> {
+    tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");
+
+    if let Some(book_addr) = connected_addr.get_address_book_addr() {
+        let _ = address_book_updater
+            .send(MetaAddr::new_shutdown(&book_addr, *remote_services))
+            .await;
+    }
+
+    Err(peer_error.into())
 }

@@ -438,7 +438,7 @@ impl FinalizedState {
 
             // Compute the new anchors and index them
             // Note: if the root hasn't changed, we write the same value again.
-            batch.zs_insert(sprout_anchors, sprout_root, ());
+            batch.zs_insert(sprout_anchors, sprout_root, &sprout_note_commitment_tree);
             batch.zs_insert(sapling_anchors, sapling_root, ());
             batch.zs_insert(orchard_anchors, orchard_root, ());
 
@@ -500,16 +500,9 @@ impl FinalizedState {
                 "stopping at configured height, flushing database to disk"
             );
 
-            // We'd like to drop the database here, because that closes the
-            // column families and the database. But Rust's ownership rules
-            // make that difficult, so we just flush and delete ephemeral data instead.
+            self.shutdown();
 
-            // TODO: remove these extra logs once bugs like #2905 are fixed
-            self.db.flush().expect("flush is successful");
-            tracing::info!("flushed database to disk");
-
-            self.delete_ephemeral();
-
+            // TODO: replace with a graceful shutdown (#1678)
             Self::exit_process();
         }
 
@@ -519,6 +512,7 @@ impl FinalizedState {
     /// Exit the host process.
     ///
     /// Designed for debugging and tests.
+    /// TODO: replace with a graceful shutdown (#1678)
     fn exit_process() -> ! {
         tracing::info!("exiting Zebra");
 
@@ -632,6 +626,7 @@ impl FinalizedState {
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
+    #[allow(unused)]
     pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
         let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         self.db.zs_contains(sprout_anchors, &sprout_anchor)
@@ -682,6 +677,18 @@ impl FinalizedState {
         self.db
             .zs_get(sprout_note_commitment_tree, &height)
             .expect("Sprout note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Sprout note commitment tree matching the given anchor.
+    ///
+    /// This is used for interstitial tree building, which is unique to Sprout.
+    pub fn sprout_note_commitment_tree_by_anchor(
+        &self,
+        sprout_anchor: &sprout::tree::Root,
+    ) -> Option<sprout::tree::NoteCommitmentTree> {
+        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+
+        self.db.zs_get(sprout_anchors, sprout_anchor)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
@@ -797,7 +804,11 @@ impl FinalizedState {
         for transaction in block.transactions.iter() {
             // Sprout
             for joinsplit in transaction.sprout_groth16_joinsplits() {
-                batch.zs_insert(sprout_anchors, joinsplit.anchor, ());
+                batch.zs_insert(
+                    sprout_anchors,
+                    joinsplit.anchor,
+                    sprout::tree::NoteCommitmentTree::default(),
+                );
             }
 
             // Sapling
@@ -813,15 +824,59 @@ impl FinalizedState {
 
         self.db.write(batch).unwrap();
     }
+
+    /// Shut down the database, cleaning up background tasks and ephemeral data.
+    fn shutdown(&mut self) {
+        // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
+        //
+        // Zebra's data should be fine if we don't clean up, because:
+        // - the database flushes regularly anyway
+        // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
+        // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
+        tracing::info!("flushing database to disk");
+        self.db.flush().expect("flush is successful");
+
+        // But we should call `cancel_all_background_work` before Zebra exits.
+        // If we don't, we see these kinds of errors:
+        // ```
+        // pthread lock: Invalid argument
+        // pure virtual method called
+        // terminate called without an active exception
+        // pthread destroy mutex: Device or resource busy
+        // Aborted (core dumped)
+        // ```
+        //
+        // The RocksDB wiki says:
+        // > Q: Is it safe to close RocksDB while another thread is issuing read, write or manual compaction requests?
+        // >
+        // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
+        // > You can speed up the waiting by calling CancelAllBackgroundWork().
+        //
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        tracing::info!("stopping background database tasks");
+        self.db.cancel_all_background_work(true);
+
+        // We'd like to drop the database before deleting its files,
+        // because that closes the column families and the database correctly.
+        // But Rust's ownership rules make that difficult,
+        // so we just flush and delete ephemeral data instead.
+        //
+        // The RocksDB wiki says:
+        // > rocksdb::DB instances need to be destroyed before your main function exits.
+        // > RocksDB instances usually depend on some internal static variables.
+        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
+        //
+        // https://github.com/facebook/rocksdb/wiki/Known-Issues
+        //
+        // But our current code doesn't seem to cause any issues.
+        // We might want to explicitly drop the database as part of graceful shutdown (#1678).
+        self.delete_ephemeral();
+    }
 }
 
-// Drop isn't guaranteed to run, such as when we panic, or if someone stored
-// their FinalizedState in a static, but it should be fine if we don't clean
-// this up since the files are placed in the os temp dir and should be cleaned
-// up automatically eventually.
 impl Drop for FinalizedState {
     fn drop(&mut self) {
-        self.delete_ephemeral()
+        self.shutdown();
     }
 }
 

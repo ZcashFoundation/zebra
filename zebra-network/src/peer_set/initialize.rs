@@ -13,7 +13,7 @@ use futures::{
 };
 use rand::seq::SliceRandom;
 use tokio::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::broadcast,
     time::{sleep, Instant},
 };
@@ -237,7 +237,7 @@ where
 /// Use the provided `outbound_connector` to connect to the configured initial peers,
 /// then send the resulting peer connections over `peerset_tx`.
 ///
-/// Sends any unused initial peers to the `address_book_updater`.
+/// Also sends every initial peer address to the `address_book_updater`.
 #[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
 async fn add_initial_peers<S>(
     config: Config,
@@ -375,9 +375,10 @@ where
 /// Limit the number of `initial_peers` addresses entries to the configured
 /// `peerset_initial_target_size`.
 ///
-/// Returns randomly chosen entries from the provided set of addresses.
+/// Returns randomly chosen entries from the provided set of addresses,
+/// in a random order.
 ///
-/// Sends any unused entries to the `address_book_updater`.
+/// Also sends every initial peer to the `address_book_updater`.
 async fn limit_initial_peers(
     config: &Config,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
@@ -385,27 +386,29 @@ async fn limit_initial_peers(
     let all_peers = config.initial_peers().await;
     let peers_count = all_peers.len();
 
-    if peers_count <= config.peerset_initial_target_size {
-        return all_peers;
+    // # Correctness
+    //
+    // We can't exit early if we only have a few peers,
+    // because we still need to shuffle the connection order.
+
+    if all_peers.len() > config.peerset_initial_target_size {
+        info!(
+            "limiting the initial peers list from {} to {}",
+            peers_count, config.peerset_initial_target_size
+        );
     }
 
-    // Limit the number of initial peers to `config.peerset_initial_target_size`
-    info!(
-        "Limiting the initial peers list from {} to {}",
-        peers_count, config.peerset_initial_target_size
-    );
+    // Split out the `initial_peers` that will be shuffled and returned.
+    let mut initial_peers: Vec<SocketAddr> = all_peers.iter().cloned().collect();
+    let (initial_peers, _unused_peers) =
+        initial_peers.partial_shuffle(&mut rand::thread_rng(), config.peerset_initial_target_size);
 
-    // Split all the peers into the `initial_peers` that will be returned and
-    // `unused_peers` that will be sent to the address book.
-    let mut all_peers: Vec<SocketAddr> = all_peers.into_iter().collect();
-    let (initial_peers, unused_peers) =
-        all_peers.partial_shuffle(&mut rand::thread_rng(), config.peerset_initial_target_size);
-
-    // Send the unused peers to the address book.
-    for peer in unused_peers {
-        let peer_addr = MetaAddr::new_initial_peer(*peer);
+    // Send every initial peer to the address book.
+    // (This treats initial peers the same way we treat gossiped peers.)
+    for peer in all_peers {
+        let peer_addr = MetaAddr::new_initial_peer(peer);
         // `send` only waits when the channel is full.
-        // The address book updater is a separate task, so we will only wait for a short time.
+        // The address book updater runs in its own thread, so we will only wait for a short time.
         let _ = address_book_updater.send(peer_addr).await;
     }
 
@@ -479,7 +482,8 @@ async fn accept_inbound_connections<S>(
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
-    S: Service<peer::HandshakeRequest, Response = peer::Client, Error = BoxError> + Clone,
+    S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
+        + Clone,
     S::Future: Send + 'static,
 {
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
@@ -531,7 +535,7 @@ where
 
             // Construct a handshake future but do not drive it yet....
             let handshake = handshaker.call(HandshakeRequest {
-                tcp_stream,
+                data_stream: tcp_stream,
                 connected_addr,
                 connection_tracker,
             });
@@ -650,6 +654,12 @@ where
     // - use the `select!` macro for all actions, because the `select` function
     //   is biased towards the first ready future
 
+    info!(
+        crawl_new_peer_interval = ?config.crawl_new_peer_interval,
+        outbound_connections = ?active_outbound_connections.update_count(),
+        "starting the peer address crawler",
+    );
+
     let mut handshakes = FuturesUnordered::new();
     // <FuturesUnordered as Stream> returns None when empty.
     // Keeping an unresolved future in the pool means the stream
@@ -658,9 +668,12 @@ where
     // prevents us from adding items to the stream and checking its length.
     handshakes.push(future::pending().boxed());
 
-    let mut crawl_timer =
-        IntervalStream::new(tokio::time::interval(config.crawl_new_peer_interval))
-            .map(|tick| TimerCrawl { tick });
+    let mut crawl_timer = tokio::time::interval(config.crawl_new_peer_interval);
+    // If the crawl is delayed, also delay all future crawls.
+    // (Shorter intervals just add load, without any benefit.)
+    crawl_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut crawl_timer = IntervalStream::new(crawl_timer).map(|tick| TimerCrawl { tick });
 
     loop {
         metrics::gauge!(

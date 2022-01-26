@@ -737,11 +737,16 @@ where
 
     /// Broadcasts the same request to lots of ready peers, ignoring return values.
     fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        // Round up, so that if we have one ready peer, it gets the request
-        let half_ready_peers = (self.ready_services.len() + 1) / 2;
-
         // Broadcasts ignore the response
-        self.route_multiple(req, half_ready_peers)
+        self.route_multiple(req, self.number_of_peers_to_broadcast())
+    }
+
+    /// Given a number of ready peers calculate to how many of them Zebra will
+    /// actually send the request to. Return this number.
+    pub(crate) fn number_of_peers_to_broadcast(&self) -> usize {
+        // We are currently sending broadcast messages to half of the total peers.
+        // Round up, so that if we have one ready peer, it gets the request.
+        (self.ready_services.len() + 1) / 2
     }
 
     /// Logs the peer set size.
@@ -772,7 +777,7 @@ where
 
         self.last_peer_log = Some(Instant::now());
 
-        let address_metrics = self.address_metrics.borrow();
+        let address_metrics = *self.address_metrics.borrow();
         if unready_services_len == 0 {
             warn!(
                 ?address_metrics,
@@ -799,7 +804,7 @@ where
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {
-            let address_metrics = self.address_metrics.borrow();
+            let address_metrics = *self.address_metrics.borrow();
             panic!(
                 "unexpectedly exceeded configured peer set connection limit: \n\
                  peers: {:?}, ready: {:?}, unready: {:?}, \n\

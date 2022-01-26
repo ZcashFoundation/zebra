@@ -1,6 +1,7 @@
 //! Benchmarks for batch verifiication of RedPallas signatures.
 
-use std::convert::TryFrom;
+// Disabled due to warnings in criterion macros
+#![allow(missing_docs)]
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{thread_rng, Rng};

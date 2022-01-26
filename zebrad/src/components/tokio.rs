@@ -3,8 +3,11 @@
 use crate::prelude::*;
 use abscissa_core::{Application, Component, FrameworkError, Shutdown};
 use color_eyre::Report;
-use std::future::Future;
+use std::{future::Future, time::Duration};
 use tokio::runtime::Runtime;
+
+/// When Zebra is shutting down, wait this long for tokio tasks to finish.
+const TOKIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// An Abscissa component which owns a Tokio runtime.
 ///
@@ -40,11 +43,11 @@ async fn shutdown() {
 /// Extension trait to centralize entry point for runnable subcommands that
 /// depend on tokio
 pub(crate) trait RuntimeRun {
-    fn run(&mut self, fut: impl Future<Output = Result<(), Report>>);
+    fn run(self, fut: impl Future<Output = Result<(), Report>>);
 }
 
 impl RuntimeRun for Runtime {
-    fn run(&mut self, fut: impl Future<Output = Result<(), Report>>) {
+    fn run(self, fut: impl Future<Output = Result<(), Report>>) {
         let result = self.block_on(async move {
             // Always poll the shutdown future first.
             //
@@ -57,12 +60,16 @@ impl RuntimeRun for Runtime {
             }
         });
 
+        // Don't wait for long blocking tasks before shutting down
+        tracing::info!(
+            ?TOKIO_SHUTDOWN_TIMEOUT,
+            "waiting for async tokio tasks to shut down"
+        );
+        self.shutdown_timeout(TOKIO_SHUTDOWN_TIMEOUT);
+
         match result {
             Ok(()) => {
                 info!("shutting down Zebra");
-
-                // Don't wait for the runtime to shut down all the tasks.
-                app_writer().shutdown(Shutdown::Graceful);
             }
             Err(error) => {
                 warn!(?error, "shutting down Zebra due to an error");
