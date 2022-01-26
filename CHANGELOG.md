@@ -30,7 +30,6 @@ caused Zebra to hang in some situations. Some improvements to the documentation 
 #### Documentation
 
 - Document the consensus rules for Section 3.6 (#3338)
-- Make the Zebra state RFC match the lightwalletd draft design (#3385)
 - Document the structure of the zebra-network crate (#3317)
 - Document the consensus rules for Sec. 3.8 Note Commitment Trees (#3319)
 - Document chain value balances consensus rules with new format (#3286)
