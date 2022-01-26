@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Zebra's latest beta improves the networking code and fixes some bugs. A couple of fixed bugs had
 caused Zebra to hang in some situations. Some improvements to the documentation were also included.
+All Rust crates have now been updated to use Rust 2021 Edition.
 
 ### Added
 
