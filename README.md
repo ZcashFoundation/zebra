@@ -81,10 +81,7 @@ and Zebra implements all the features required to reach Zcash network consensus.
 The goals of the beta release series are for Zebra to act as a fully validating Zcash node,
 for all active consensus rules as of NU5 activation.
 
-Currently, Zebra does not validate the following Zcash consensus rules:
-
-#### Sprout
-- Validation of Sprout anchors (root of the Sprout note commitment tree)
+Currently, Zebra validates all of the documented Zcash consensus rules, but it may not validate any:
 
 #### Other
 - Undocumented rules derived from Bitcoin
