@@ -1,9 +1,12 @@
 //! Block height.
 
-use crate::serialization::SerializationError;
+use crate::serialization::{SerializationError, ZcashDeserialize};
+
+use byteorder::{LittleEndian, ReadBytesExt};
 
 use std::{
     convert::TryFrom,
+    io,
     ops::{Add, Sub},
 };
 
@@ -126,6 +129,18 @@ impl Sub<i32> for Height {
             h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
             _ => None,
         }
+    }
+}
+
+impl ZcashDeserialize for Height {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let height = reader.read_u32::<LittleEndian>()?;
+
+        if height > Self::MAX.0 {
+            return Err(SerializationError::Parse("Height exceeds maximum height"));
+        }
+
+        Ok(Self(height))
     }
 }
 

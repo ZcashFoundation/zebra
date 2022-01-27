@@ -583,7 +583,7 @@ impl ZcashDeserialize for Transaction {
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
-                    expiry_height: block::Height(limited_reader.read_u32::<LittleEndian>()?),
+                    expiry_height: block::Height::zcash_deserialize(&mut limited_reader)?,
                     joinsplit_data: OptV3Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
@@ -615,7 +615,7 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
+                let expiry_height = block::Height::zcash_deserialize(&mut limited_reader)?;
 
                 let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
                 let shielded_spends = Vec::zcash_deserialize(&mut limited_reader)?;
@@ -684,9 +684,9 @@ impl ZcashDeserialize for Transaction {
                             "expected a valid network upgrade from the consensus branch id",
                         ))?;
 
-                // transaction validity time and height limits
+                // Transaction lock time and expiry height.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
+                let expiry_height = block::Height::zcash_deserialize(&mut limited_reader)?;
 
                 // transparent
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;

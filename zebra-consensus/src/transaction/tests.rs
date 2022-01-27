@@ -1,3 +1,5 @@
+//! Tests for Zcash transaction consensus checks.
+
 use std::{
     cmp::max,
     collections::HashMap,

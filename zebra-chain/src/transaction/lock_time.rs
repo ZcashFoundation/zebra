@@ -21,9 +21,11 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///     (Unix timestamp greater than [`LockTime::MAX_TIMESTAMP`]).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LockTime {
-    /// The transaction can only be included in a block if the block height is strictly greater than this height
+    /// The transaction can only be included in a block if the block height is
+    /// strictly greater than this height
     Height(block::Height),
-    /// The transaction can only be included in a block if the block time is strictly greater than this timestamp
+    /// The transaction can only be included in a block if the block time is
+    /// strictly greater than this timestamp
     Time(DateTime<Utc>),
 }
 
