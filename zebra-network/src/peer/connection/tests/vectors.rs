@@ -4,12 +4,20 @@
 //! - connection tests when awaiting requests (#3232)
 //! - connection tests with closed/dropped peer_outbound_tx (#3233)
 
-use futures::{channel::mpsc, sink::SinkMapErr, FutureExt, StreamExt};
+use std::{task::Poll, time::Duration};
 
+use futures::{
+    channel::{mpsc, oneshot},
+    sink::SinkMapErr,
+    FutureExt, StreamExt,
+};
+
+use tracing::Span;
 use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
+    constants::REQUEST_TIMEOUT,
     peer::{
         connection::{Connection, State},
         ClientRequest, ErrorSlot,
@@ -55,6 +63,116 @@ async fn connection_run_loop_ok() {
     assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
+}
+
+#[tokio::test]
+async fn connection_run_loop_spawn_ok() {
+    zebra_test::init();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+
+    let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
+        new_test_connection();
+
+    // Spawn the connection run loop
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none());
+
+    assert!(!client_tx.is_closed());
+    assert!(!peer_inbound_tx.is_closed());
+
+    inbound_service.expect_no_requests().await;
+
+    // Make sure that the connection did not:
+    // - panic, or
+    // - return.
+    //
+    // This test doesn't cause any fatal errors,
+    // so returning would be incorrect behaviour.
+    let connection_result = futures::poll!(&mut connection_join_handle);
+    assert!(matches!(connection_result, Poll::Pending));
+
+    // We need to abort the connection, because it holds a lock on the outbound channel.
+    connection_join_handle.abort();
+
+    assert!(peer_outbound_messages.next().await.is_none());
+}
+
+#[tokio::test]
+async fn connection_run_loop_message_ok() {
+    zebra_test::init();
+
+    tokio::time::pause();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (mut peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+
+    // Spawn the connection run loop
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+
+    // Simulate a message send and receive
+    let (request_tx, mut request_rx) = oneshot::channel();
+    let request = ClientRequest {
+        request: Request::Peers,
+        tx: request_tx,
+        span: Span::current(),
+    };
+
+    client_tx
+        .try_send(request)
+        .expect("internal request channel is valid");
+    let outbound_message = peer_outbound_messages.next().await;
+    assert!(matches!(outbound_message, Some(Message::GetAddr)));
+
+    peer_inbound_tx
+        .try_send(Ok(Message::Addr(Vec::new())))
+        .expect("peer inbound response channel is valid");
+
+    // give the event loop time to run
+    tokio::task::yield_now().await;
+    let peer_response = request_rx.try_recv();
+    assert_eq!(
+        peer_response
+            .expect("peer internal response channel is valid")
+            .expect("response is present")
+            .expect("response is a message (not an error)"),
+        Response::Peers(Vec::new()),
+    );
+
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none());
+
+    assert!(!client_tx.is_closed());
+    assert!(!peer_inbound_tx.is_closed());
+
+    inbound_service.expect_no_requests().await;
+
+    // Make sure that the connection did not:
+    // - panic, or
+    // - return.
+    //
+    // This test doesn't cause any fatal errors,
+    // so returning would be incorrect behaviour.
+    let connection_result = futures::poll!(&mut connection_join_handle);
+    assert!(matches!(connection_result, Poll::Pending));
+
+    // We need to abort the connection, because it holds a lock on the outbound channel.
+    connection_join_handle.abort();
+
+    assert!(peer_outbound_messages.next().await.is_none());
 }
 
 #[tokio::test]
@@ -271,6 +389,135 @@ async fn connection_run_loop_failed() {
     assert!(peer_outbound_messages.next().await.is_none());
 
     inbound_service.expect_no_requests().await;
+}
+
+#[tokio::test]
+async fn connection_run_loop_send_timeout() {
+    zebra_test::init();
+
+    tokio::time::pause();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+
+    // Spawn the connection run loop
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+
+    // Simulate a message send timeout
+    let (request_tx, mut request_rx) = oneshot::channel();
+    let request = ClientRequest {
+        request: Request::Peers,
+        tx: request_tx,
+        span: Span::current(),
+    };
+
+    client_tx.try_send(request).expect("channel is valid");
+
+    // Make the send timeout
+    tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
+
+    // Timeouts don't close the connection
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none());
+
+    assert!(!client_tx.is_closed());
+    assert!(!peer_inbound_tx.is_closed());
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert!(matches!(outbound_message, Some(Message::GetAddr)));
+
+    // TODO: check for PeerError::ClientSendTimeout
+    let peer_response = request_rx.try_recv();
+    assert!(matches!(peer_response, Ok(Some(Err(_)))));
+
+    inbound_service.expect_no_requests().await;
+
+    // Make sure that the connection did not:
+    // - panic, or
+    // - return.
+    //
+    // This test doesn't cause any fatal errors,
+    // so returning would be incorrect behaviour.
+    let connection_result = futures::poll!(&mut connection_join_handle);
+    assert!(matches!(connection_result, Poll::Pending));
+
+    // We need to abort the connection, because it holds a lock on the outbound channel.
+    connection_join_handle.abort();
+
+    assert!(peer_outbound_messages.next().await.is_none());
+}
+
+#[tokio::test]
+async fn connection_run_loop_receive_timeout() {
+    zebra_test::init();
+
+    tokio::time::pause();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+
+    // Spawn the connection run loop
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+
+    // Simulate a message receive timeout
+    let (request_tx, mut request_rx) = oneshot::channel();
+    let request = ClientRequest {
+        request: Request::Peers,
+        tx: request_tx,
+        span: Span::current(),
+    };
+
+    client_tx.try_send(request).expect("channel is valid");
+    let outbound_message = peer_outbound_messages.next().await;
+    assert!(matches!(outbound_message, Some(Message::GetAddr)));
+
+    // Make the receive timeout
+    tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
+
+    // Timeouts don't close the connection
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none());
+
+    assert!(!client_tx.is_closed());
+    assert!(!peer_inbound_tx.is_closed());
+
+    // TODO: check for PeerError::ClientReceiveTimeout
+    let peer_response = request_rx.try_recv();
+    assert!(matches!(peer_response, Ok(Some(Err(_)))));
+
+    inbound_service.expect_no_requests().await;
+
+    // Make sure that the connection did not:
+    // - panic, or
+    // - return.
+    //
+    // This test doesn't cause any fatal errors,
+    // so returning would be incorrect behaviour.
+    let connection_result = futures::poll!(&mut connection_join_handle);
+    assert!(matches!(connection_result, Poll::Pending));
+
+    // We need to abort the connection, because it holds a lock on the outbound channel.
+    connection_join_handle.abort();
+
+    assert!(peer_outbound_messages.next().await.is_none());
 }
 
 /// Creates a new [`Connection`] instance for unit tests.
