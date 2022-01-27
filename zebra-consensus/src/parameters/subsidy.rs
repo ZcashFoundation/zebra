@@ -1,4 +1,4 @@
-//! Constants for Block Subsidy, Funding Streams, and Founders' Reward
+//! Constants for Block Subsidy and Funding Streams
 
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -37,13 +37,6 @@ pub const PRE_BLOSSOM_HALVING_INTERVAL: Height = Height(840_000);
 /// After Blossom the block time is reduced to 75 seconds but halving period should remain around 4 years.
 pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
     Height((PRE_BLOSSOM_HALVING_INTERVAL.0 as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO) as u32);
-
-/// The divisor used to calculate the FoundersFraction.
-///
-/// Derivation: FOUNDERS_FRACTION_DIVISOR = 1/FoundersFraction
-///
-/// Usage: founders_reward = block_subsidy / FOUNDERS_FRACTION_DIVISOR
-pub const FOUNDERS_FRACTION_DIVISOR: u64 = 5;
 
 /// The first halving height in the testnet is at block height `1_116_000`
 /// as specified in [protocol specification §7.10.1][7.10.1]
