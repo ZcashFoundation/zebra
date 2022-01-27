@@ -602,7 +602,7 @@ where
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
 
         let shielded_sighash =
-            transaction.sighash(upgrade, HashType::ALL, Default::default(), None);
+            transaction.sighash(upgrade, HashType::ALL, cached_ffi_transaction.all_previous_outputs().clone(), None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,

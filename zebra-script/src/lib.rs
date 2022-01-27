@@ -62,7 +62,7 @@ impl From<zcash_script_error_t> for Error {
 pub struct CachedFfiTransaction {
     /// The deserialized Zebra transaction.
     ///
-    /// This field is private so that `transaction` and `precomputed` always match.
+    /// This field is private so that `transaction`, `all_previous_outputs`, and `precomputed` always match.
     transaction: Arc<Transaction>,
 
     /// The outputs from previous transactions that match each input in the transaction
@@ -106,7 +106,9 @@ impl CachedFfiTransaction {
             .try_into()
             .expect("serialized transaction lengths are much less than u32::MAX");
 
-        // SAFETY: the `tx_to_*` fields are created from a valid Rust `Vec`.
+        // SAFETY:
+        // the `tx_to_*` fields are created from a valid Rust `Vec`
+        // the `all_previous_outputs_*` fields are created from a valid Rust `Vec`
         let precomputed = unsafe {
             zcash_script::zcash_script_new_precomputed_tx(
                 tx_to_ptr, tx_to_len,
