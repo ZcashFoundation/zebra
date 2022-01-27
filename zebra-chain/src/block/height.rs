@@ -144,19 +144,6 @@ impl ZcashDeserialize for Height {
     }
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest::prelude::*;
-#[cfg(any(test, feature = "proptest-impl"))]
-impl Arbitrary for Height {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (Height::MIN.0..=Height::MAX.0).prop_map(Height).boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 #[test]
 fn operator_tests() {
     zebra_test::init();
