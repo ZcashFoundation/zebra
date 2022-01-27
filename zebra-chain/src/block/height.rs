@@ -161,8 +161,19 @@ impl Arbitrary for Height {
 fn operator_tests() {
     zebra_test::init();
 
+    // Elementary checks.
     assert_eq!(Some(Height(2)), Height(1) + Height(1));
     assert_eq!(None, Height::MAX + Height(1));
+
+    let height = Height(u32::pow(2, 31) - 2);
+    assert!(height < Height::MAX);
+
+    let max_height = (height + Height(1)).expect("this addition should produce the max height");
+    assert!(height < max_height);
+    assert!(max_height <= Height::MAX);
+    assert_eq!(Height::MAX, max_height);
+    assert_eq!(None, max_height + Height(1));
+
     // Bad heights aren't caught at compile-time or runtime, until we add or subtract
     assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + Height(0));
     assert_eq!(None, Height(i32::MAX as u32) + Height(1));
@@ -170,16 +181,19 @@ fn operator_tests() {
 
     assert_eq!(Some(Height(2)), Height(1) + 1);
     assert_eq!(None, Height::MAX + 1);
+
     // Adding negative numbers
     assert_eq!(Some(Height(1)), Height(2) + -1);
     assert_eq!(Some(Height(0)), Height(1) + -1);
     assert_eq!(None, Height(0) + -1);
     assert_eq!(Some(Height(Height::MAX_AS_U32 - 1)), Height::MAX + -1);
+
     // Bad heights aren't caught at compile-time or runtime, until we add or subtract
     // `+ 0` would also cause an error here, but it triggers a spurious clippy lint
     assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + 1);
     assert_eq!(None, Height(i32::MAX as u32) + 1);
     assert_eq!(None, Height(u32::MAX) + 1);
+
     // Adding negative numbers
     assert_eq!(None, Height(i32::MAX as u32 + 1) + -1);
     assert_eq!(None, Height(u32::MAX) + -1);
@@ -188,13 +202,16 @@ fn operator_tests() {
     assert_eq!(Some(Height(0)), Height(1) - 1);
     assert_eq!(None, Height(0) - 1);
     assert_eq!(Some(Height(Height::MAX_AS_U32 - 1)), Height::MAX - 1);
+
     // Subtracting negative numbers
     assert_eq!(Some(Height(2)), Height(1) - -1);
     assert_eq!(Some(Height::MAX), Height(Height::MAX_AS_U32 - 1) - -1);
     assert_eq!(None, Height::MAX - -1);
+
     // Bad heights aren't caught at compile-time or runtime, until we add or subtract
     assert_eq!(None, Height(i32::MAX as u32 + 1) - 1);
     assert_eq!(None, Height(u32::MAX) - 1);
+
     // Subtracting negative numbers
     assert_eq!(None, Height(Height::MAX_AS_U32 + 1) - -1);
     assert_eq!(None, Height(i32::MAX as u32) - -1);
