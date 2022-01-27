@@ -247,7 +247,7 @@ async fn connection_run_loop_failed() {
     // Simulate an internal connection error.
     connection.state = State::Failed;
     shared_error_slot
-        .try_update_error(PeerError::ClientRequestTimeout.into())
+        .try_update_error(PeerError::ClientReceiveTimeout.into())
         .expect("unexpected previous error in tests");
 
     let connection = connection.run(peer_inbound_rx);

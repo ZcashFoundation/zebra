@@ -28,8 +28,9 @@ use crate::{
     constants,
     meta_addr::MetaAddr,
     peer::{
-        error::AlreadyErrored, ClientRequestReceiver, ErrorSlot, InProgressClientRequest,
-        MustUseOneshotSender, PeerError, SharedPeerError,
+        connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
+        ConnectedAddr, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
+        SharedPeerError,
     },
     peer_set::ConnectionTracker,
     protocol::{
@@ -38,6 +39,8 @@ use crate::{
     },
     BoxError,
 };
+
+mod peer_tx;
 
 #[cfg(test)]
 mod tests;
@@ -437,7 +440,7 @@ impl From<Request> for InboundMessage {
     }
 }
 
-/// The state associated with a peer connection.
+/// The channels, services, and associated state for a peer connection.
 pub struct Connection<S, Tx> {
     /// The state of this connection's current request or response.
     pub(super) state: State,
@@ -474,9 +477,7 @@ pub struct Connection<S, Tx> {
     /// This channel accepts [`Message`]s.
     ///
     /// The corresponding peer message receiver is passed to [`Connection::run`].
-    ///
-    /// TODO: add a timeout when sending messages to the remote peer (#3234)
-    pub(super) peer_tx: Tx,
+    pub(super) peer_tx: PeerTx<Tx>,
 
     /// A connection tracker that reduces the open connection count when dropped.
     /// Used to limit the number of open connections in Zebra.
@@ -496,6 +497,31 @@ pub struct Connection<S, Tx> {
 
     /// The state for this peer, when the metrics were last updated.
     pub(super) last_metrics_state: Option<Cow<'static, str>>,
+}
+
+impl<S, Tx> Connection<S, Tx> {
+    /// Return a new connection from its channels, services, and shared state.
+    pub(crate) fn new(
+        inbound_service: S,
+        client_rx: futures::channel::mpsc::Receiver<ClientRequest>,
+        error_slot: ErrorSlot,
+        peer_tx: Tx,
+        connection_tracker: ConnectionTracker,
+        connected_addr: ConnectedAddr,
+    ) -> Self {
+        Connection {
+            state: State::AwaitingRequest,
+            request_timer: None,
+            cached_addrs: Vec::new(),
+            svc: inbound_service,
+            client_rx: client_rx.into(),
+            error_slot,
+            peer_tx: peer_tx.into(),
+            connection_tracker,
+            metrics_label: connected_addr.get_transient_addr_label(),
+            last_metrics_state: None,
+        }
+    }
 }
 
 impl<S, Tx> Connection<S, Tx>
@@ -702,7 +728,7 @@ where
                         }
                         Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
-                            let e = PeerError::ClientRequestTimeout;
+                            let e = PeerError::ClientReceiveTimeout;
 
                             // Replace the state with a temporary value,
                             // so we can take ownership of the response sender.

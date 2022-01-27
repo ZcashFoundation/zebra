@@ -43,7 +43,8 @@ pub const OUTBOUND_PEER_BIAS_DENOMINATOR: usize = 2;
 /// buffer adds up to 6 seconds worth of blocks to the queue.
 pub const PEERSET_BUFFER_SIZE: usize = 3;
 
-/// The timeout for requests made to a remote peer.
+/// The timeout for sending a message to a remote peer,
+/// and receiving a response from a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The timeout for handshakes when connecting to new peers.
