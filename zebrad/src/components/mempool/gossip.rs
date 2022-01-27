@@ -41,7 +41,7 @@ where
         let txs_len = txs.len();
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
-        debug!(?request, "sending mempool transaction broadcast");
+        info!(?request, "sending mempool transaction broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready().await?.call(request).await;

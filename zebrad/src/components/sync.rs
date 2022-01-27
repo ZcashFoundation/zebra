@@ -387,6 +387,17 @@ where
                 self.update_metrics();
 
                 // If we have too many pending tasks, wait for some to finish.
+                //
+                // Starting to wait is interesting, but logging each wait can be
+                // very verbose.
+                if self.downloads.in_flight() > self.lookahead_limit {
+                    tracing::info!(
+                        tips.len = self.prospective_tips.len(),
+                        in_flight = self.downloads.in_flight(),
+                        lookahead_limit = self.lookahead_limit,
+                        "waiting for pending blocks",
+                    );
+                }
                 while self.downloads.in_flight() > self.lookahead_limit {
                     trace!(
                         tips.len = self.prospective_tips.len(),
@@ -410,7 +421,7 @@ where
                 }
 
                 // Once we're below the lookahead limit, we can keep extending the tips.
-                debug!(
+                info!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
                     lookahead_limit = self.lookahead_limit,

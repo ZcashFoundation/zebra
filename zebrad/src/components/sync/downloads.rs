@@ -309,13 +309,15 @@ where
 
                 if let Some(block_height) = block.coinbase_height() {
                     if block_height > max_lookahead_height {
-                        debug!(
+                        info!(
                             ?hash,
                             ?block_height,
                             ?tip_height,
                             ?max_lookahead_height,
                             lookahead_limit = ?lookahead_limit,
-                            "synced block height too far ahead of the tip: dropped downloaded block"
+                            "synced block height too far ahead of the tip: dropped downloaded block. \
+                            Hint: Try increasing the value of the lookahead_limit field \
+                            in the sync section of the configuration file."
                         );
                         metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 

@@ -97,7 +97,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {
         if let Some(ref grapher) = self.flamegrapher {
-            debug!("writing flamegraph");
+            info!("writing flamegraph");
             grapher
                 .write_flamegraph()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
