@@ -464,16 +464,18 @@ where
                     sequence: _,
                 } => {
                     tracing::trace!("awaiting outpoint lookup");
-                    let query = state
-                        .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
                     let utxo = if let Some(output) = known_utxos.get(outpoint) {
                         tracing::trace!("UXTO in known_utxos, discarding query");
                         output.utxo.clone()
-                    } else if let zebra_state::Response::Utxo(utxo) = query.await? {
-                        utxo
                     } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
+                        let query = state
+                            .clone()
+                            .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+                        if let zebra_state::Response::Utxo(utxo) = query.await? {
+                            utxo
+                        } else {
+                            unreachable!("AwaitUtxo always responds with Utxo")
+                        }
                     };
                     tracing::trace!(?utxo, "got UTXO");
                     spent_outputs.push(utxo.output.clone());
@@ -601,8 +603,12 @@ where
 
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
 
-        let shielded_sighash =
-            transaction.sighash(upgrade, HashType::ALL, cached_ffi_transaction.all_previous_outputs().clone(), None);
+        let shielded_sighash = transaction.sighash(
+            upgrade,
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs().clone(),
+            None,
+        );
 
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,
