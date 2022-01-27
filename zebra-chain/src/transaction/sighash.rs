@@ -43,7 +43,7 @@ pub(super) struct SigHasher<'a> {
     trans: &'a Transaction,
     hash_type: HashType,
     network_upgrade: NetworkUpgrade,
-    all_previous_outputs: Vec<transparent::Output>,
+    all_previous_outputs: &'a [transparent::Output],
     input_index: Option<usize>,
 }
 
@@ -52,7 +52,7 @@ impl<'a> SigHasher<'a> {
         trans: &'a Transaction,
         hash_type: HashType,
         network_upgrade: NetworkUpgrade,
-        all_previous_outputs: Vec<transparent::Output>,
+        all_previous_outputs: &'a [transparent::Output],
         input_index: Option<usize>,
     ) -> Self {
         SigHasher {
@@ -81,7 +81,7 @@ impl<'a> SigHasher<'a> {
             self.trans,
             self.hash_type,
             self.network_upgrade,
-            &self.all_previous_outputs,
+            self.all_previous_outputs,
             self.input_index,
         )
     }

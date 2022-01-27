@@ -641,13 +641,14 @@ fn test_vec143_2() -> Result<()> {
     let lock_script = Script::new(&hex::decode("53")?);
     let input_ind = 1;
     let output = transparent::Output { value, lock_script };
+    let all_previous_outputs = vec![output.clone(), output];
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::SINGLE,
         NetworkUpgrade::Overwinter,
         // Pre-V5, only the matching output matters, so just use clones for the rest
-        vec![output.clone(), output],
+        &all_previous_outputs,
         Some(input_ind),
     );
 
@@ -716,13 +717,14 @@ fn test_vec243_2() -> Result<()> {
     let lock_script = Script::new(&[]);
     let input_ind = 1;
     let output = transparent::Output { value, lock_script };
+    let all_previous_outputs = vec![output.clone(), output];
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::NONE,
         NetworkUpgrade::Sapling,
         // Pre-V5, only the matching output matters, so just use clones for the rest
-        vec![output.clone(), output],
+        &all_previous_outputs,
         Some(input_ind),
     );
 
@@ -767,12 +769,13 @@ fn test_vec243_3() -> Result<()> {
         "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
     )?);
     let input_ind = 0;
+    let all_previous_outputs = vec![transparent::Output { value, lock_script }];
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::ALL,
         NetworkUpgrade::Sapling,
-        vec![transparent::Output { value, lock_script }],
+        &all_previous_outputs,
         Some(input_ind),
     );
 
@@ -824,7 +827,7 @@ fn zip143_sighash() -> Result<()> {
             None => (None, None),
         };
         // Pre-V5, only the matching output matters, so just use clones for the rest
-        let all_previous_outputs = match output {
+        let all_previous_outputs: Vec<_> = match output {
             Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
             None => vec![],
         };
@@ -833,7 +836,7 @@ fn zip143_sighash() -> Result<()> {
                 NetworkUpgrade::from_branch_id(test.consensus_branch_id)
                     .expect("must be a valid branch ID"),
                 HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-                all_previous_outputs,
+                &all_previous_outputs,
                 input_index,
             ),
         );
@@ -861,7 +864,7 @@ fn zip243_sighash() -> Result<()> {
             None => (None, None),
         };
         // Pre-V5, only the matching output matters, so just use clones for the rest
-        let all_previous_outputs = match output {
+        let all_previous_outputs: Vec<_> = match output {
             Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
             None => vec![],
         };
@@ -870,7 +873,7 @@ fn zip243_sighash() -> Result<()> {
                 NetworkUpgrade::from_branch_id(test.consensus_branch_id)
                     .expect("must be a valid branch ID"),
                 HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-                all_previous_outputs,
+                &all_previous_outputs,
                 input_index,
             ),
         );
@@ -906,14 +909,14 @@ fn zip244_sighash() -> Result<()> {
             None => (None, None),
         };
         // Pre-V5, only the matching output matters, so just use clones for the rest
-        let all_previous_outputs = match output {
+        let all_previous_outputs: Vec<_> = match output {
             Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
             None => vec![],
         };
         let result = hex::encode(transaction.sighash(
             NetworkUpgrade::Nu5,
             HashType::ALL,
-            all_previous_outputs,
+            &all_previous_outputs,
             input_index,
         ));
         let expected = hex::encode(test.sighash_all);

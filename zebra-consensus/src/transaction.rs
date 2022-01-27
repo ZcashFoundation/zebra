@@ -521,7 +521,7 @@ where
         let shielded_sighash = tx.sighash(
             upgrade,
             HashType::ALL,
-            cached_ffi_transaction.all_previous_outputs().clone(),
+            cached_ffi_transaction.all_previous_outputs(),
             None,
         );
 
@@ -606,7 +606,7 @@ where
         let shielded_sighash = transaction.sighash(
             upgrade,
             HashType::ALL,
-            cached_ffi_transaction.all_previous_outputs().clone(),
+            cached_ffi_transaction.all_previous_outputs(),
             None,
         );
 
