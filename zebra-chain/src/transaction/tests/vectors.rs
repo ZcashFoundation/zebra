@@ -646,6 +646,7 @@ fn test_vec143_2() -> Result<()> {
         &transaction,
         HashType::SINGLE,
         NetworkUpgrade::Overwinter,
+        // Pre-V5, only the matching output matters, so just use clones for the rest
         vec![output.clone(), output],
         Some(input_ind),
     );
@@ -720,6 +721,7 @@ fn test_vec243_2() -> Result<()> {
         &transaction,
         HashType::NONE,
         NetworkUpgrade::Sapling,
+        // Pre-V5, only the matching output matters, so just use clones for the rest
         vec![output.clone(), output],
         Some(input_ind),
     );
@@ -744,6 +746,7 @@ fn test_vec243_2() -> Result<()> {
         &transaction,
         HashType::NONE,
         NetworkUpgrade::Sapling,
+        // Pre-V5, only the matching output matters, so just use clones for the rest
         &[prevout.clone(), prevout],
         Some(index),
     );
@@ -820,9 +823,10 @@ fn zip143_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
+        // Pre-V5, only the matching output matters, so just use clones for the rest
         let all_previous_outputs = match output {
             Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
-            None => todo!(),
+            None => vec![],
         };
         let result = hex::encode(
             transaction.sighash(
@@ -856,9 +860,10 @@ fn zip243_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
+        // Pre-V5, only the matching output matters, so just use clones for the rest
         let all_previous_outputs = match output {
             Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
-            None => todo!(),
+            None => vec![],
         };
         let result = hex::encode(
             transaction.sighash(
@@ -900,9 +905,10 @@ fn zip244_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
+        // Pre-V5, only the matching output matters, so just use clones for the rest
         let all_previous_outputs = match output {
             Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
-            None => todo!(),
+            None => vec![],
         };
         let result = hex::encode(transaction.sighash(
             NetworkUpgrade::Nu5,
