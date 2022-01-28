@@ -24,7 +24,6 @@ jobs:
     name: Build images
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     steps:
     - uses: actions/checkout@v2.4.0
@@ -71,11 +70,11 @@ jobs:
         file: ./docker/Dockerfile.build
         tags: ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
         build-args: |
-          NETWORK=${{ env.NETWORK }}
+          NETWORK=${{ github.event.inputs.network || env.NETWORK }}
           SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
           RUST_BACKTRACE=full
-          ZEBRA_SKIP_NETWORK_TESTS="-1"
-          CHECKPOINT_SYNC=true
+          ZEBRA_SKIP_NETWORK_TESTS="1"
+          CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
           RUST_LOG=debug
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
