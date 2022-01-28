@@ -52,6 +52,7 @@ use std::{collections::HashSet, time::Duration};
 use futures::{future, pin_mut, stream::FuturesUnordered, StreamExt};
 use tokio::{sync::watch, task::JoinHandle, time::sleep};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use zebra_chain::{block::Height, transaction::UnminedTxId};
 use zebra_network as zn;
@@ -129,7 +130,7 @@ where
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
         };
 
-        tokio::spawn(crawler.run())
+        tokio::spawn(crawler.run().in_current_span())
     }
 
     /// Waits until the mempool crawler is enabled by a debug config option.
