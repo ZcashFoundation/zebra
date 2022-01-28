@@ -5,9 +5,6 @@ RUN apt-get update && \
     make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
     rm -Rf /var/lib/apt/lists/* /tmp/*
 
-RUN mkdir /zebra
-WORKDIR /zebra
-
 ARG SHORT_SHA
 ENV SHORT_SHA $SHORT_SHA
 
@@ -27,6 +24,8 @@ ENV CARGO_HOME /zebra/.cargo/
 RUN rustc -V; cargo -V; rustup -V
 
 COPY . .
+
+WORKDIR /zebrad
 
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
