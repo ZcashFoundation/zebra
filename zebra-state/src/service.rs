@@ -682,7 +682,7 @@ impl Service<Request> for StateService {
                 .checked_sub(new_len)
                 .expect("prune does not add any utxo requests");
             if prune_count > 0 {
-                tracing::info!(
+                tracing::debug!(
                     ?old_len,
                     ?new_len,
                     ?prune_count,

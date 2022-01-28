@@ -57,6 +57,7 @@ use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
+use tracing_futures::Instrument;
 
 use crate::{
     components::{
@@ -145,13 +146,16 @@ impl StartCmd {
             .send(setup_data)
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
 
-        let syncer_task_handle = tokio::spawn(syncer.sync());
+        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        let mut block_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
-            sync_status.clone(),
-            chain_tip_change.clone(),
-            peer_set.clone(),
-        ));
+        let mut block_gossip_task_handle = tokio::spawn(
+            sync::gossip_best_tip_block_hashes(
+                sync_status.clone(),
+                chain_tip_change.clone(),
+                peer_set.clone(),
+            )
+            .in_current_span(),
+        );
 
         let mempool_crawler_task_handle = mempool::Crawler::spawn(
             &config.mempool,
@@ -163,10 +167,10 @@ impl StartCmd {
 
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool);
 
-        let tx_gossip_task_handle = tokio::spawn(mempool::gossip_mempool_transaction_id(
-            mempool_transaction_receiver,
-            peer_set,
-        ));
+        let tx_gossip_task_handle = tokio::spawn(
+            mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set)
+                .in_current_span(),
+        );
 
         info!("spawned initial Zebra tasks");
 

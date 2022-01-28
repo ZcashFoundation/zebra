@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use tokio::{task::JoinHandle, time::sleep};
 use tower::{BoxError, Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use crate::components::mempool;
 
@@ -45,7 +46,7 @@ where
     pub fn spawn(mempool: Mempool) -> JoinHandle<Result<(), BoxError>> {
         let queue_checker = QueueChecker { mempool };
 
-        tokio::spawn(queue_checker.run())
+        tokio::spawn(queue_checker.run().in_current_span())
     }
 
     /// Periodically check if the mempool has newly verified transactions.

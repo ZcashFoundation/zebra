@@ -236,6 +236,9 @@ where
     /// The cached block chain state.
     state: ZS,
 
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: ZSTip,
+
     // Internal sync state
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
@@ -331,10 +334,11 @@ where
             downloads: Box::pin(Downloads::new(
                 block_network,
                 verifier,
-                latest_chain_tip,
+                latest_chain_tip.clone(),
                 config.sync.lookahead_limit,
             )),
             state,
+            latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
         };
@@ -354,7 +358,11 @@ where
 
         'sync: loop {
             if started_once {
-                info!(timeout = ?SYNC_RESTART_DELAY, "waiting to restart sync");
+                info!(
+                    timeout = ?SYNC_RESTART_DELAY,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "waiting to restart sync"
+                );
                 self.prospective_tips = HashSet::new();
                 self.downloads.cancel_all();
                 self.update_metrics();
@@ -363,7 +371,10 @@ where
                 started_once = true;
             }
 
-            info!("starting sync, obtaining new tips");
+            info!(
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "starting sync, obtaining new tips"
+            );
             if let Err(e) = self.obtain_tips().await {
                 warn!(?e, "error obtaining tips");
                 continue 'sync;
@@ -403,6 +414,7 @@ where
                         tips.len = self.prospective_tips.len(),
                         in_flight = self.downloads.in_flight(),
                         lookahead_limit = self.lookahead_limit,
+                        state_tip = ?self.latest_chain_tip.best_tip_height(),
                         "waiting for pending blocks",
                     );
 
@@ -425,6 +437,7 @@ where
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
                     lookahead_limit = self.lookahead_limit,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
                     "extending tips",
                 );
 
