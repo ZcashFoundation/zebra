@@ -38,7 +38,7 @@ jobs:
       id: auth
       uses: google-github-actions/auth@v0.5.0
       with:
-        credentials_json: ${{ secrets.GCLOUD_AUTH }}
+        credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
     # Setup Docker Buildx to allow use of docker cache layers from GH
     - name: Set up Docker Buildx
@@ -58,7 +58,7 @@ jobs:
       with:
         registry: us-docker.pkg.dev
         username: _json_key
-        password: ${{ secrets.GCLOUD_AUTH }}
+        password: ${{ secrets.GOOGLE_CREDENTIALS }}
 
     # Build and push image to Google Artifact Registry
     - name: Build & push
@@ -101,7 +101,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.5.0
         with:
-          credentials_json: ${{ secrets.GCLOUD_AUTH }}
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
         uses: google-github-actions/setup-gcloud@v0.4.0
@@ -165,7 +165,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.5.0
         with:
-          credentials_json: ${{ secrets.GCLOUD_AUTH }}
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
         uses: google-github-actions/setup-gcloud@v0.4.0
