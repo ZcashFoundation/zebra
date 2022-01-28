@@ -458,8 +458,11 @@ where
             })
             .map_err(|e| eyre!(e))?;
 
-        debug!(tip = ?block_locator.first().unwrap(), "trying to obtain new chain tips");
-        debug!(?block_locator, "got block locator");
+        debug!(
+            tip = ?block_locator.first().expect("we have at least one block locator object"),
+            ?block_locator,
+            "got block locator and trying to obtain new chain tips"
+        );
 
         let mut requests = FuturesUnordered::new();
         for attempt in 0..FANOUT {
