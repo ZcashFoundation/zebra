@@ -56,7 +56,7 @@ impl From<zcash_script_error_t> for Error {
     }
 }
 
-/// A preprocessed Transction which can be used to verify scripts within said
+/// A preprocessed Transaction which can be used to verify scripts within said
 /// Transaction.
 #[derive(Debug)]
 pub struct CachedFfiTransaction {
@@ -67,6 +67,10 @@ pub struct CachedFfiTransaction {
 
     /// The outputs from previous transactions that match each input in the transaction
     /// being verified.
+    ///
+    /// SAFETY: this field must be private,
+    ///         and `CachedFfiTransaction::new` must be the only method that modifies it,
+    ///         so that it is [`Send`], [`Sync`], consistent with `transaction` and `precomputed`.
     all_previous_outputs: Vec<transparent::Output>,
 
     /// The deserialized `zcash_script` transaction, as a C++ object.
@@ -252,6 +256,12 @@ impl CachedFfiTransaction {
 // The function `zcash_script:zcash_script_legacy_sigop_count_precomputed` only reads
 // from the precomputed context. Currently, these reads happen after all the concurrent
 // async checks have finished.
+//
+// Since we're manually marking it as `Send` and `Sync`, we must ensure that
+// other fields in the struct are also `Send` and `Sync`. This applies to
+// `all_previous_outputs`, which are both.
+//
+// TODO: create a wrapper for `precomputed` and only make it implement Send/Sync (#3436)
 unsafe impl Send for CachedFfiTransaction {}
 unsafe impl Sync for CachedFfiTransaction {}
 
