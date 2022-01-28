@@ -146,7 +146,7 @@ jobs:
           --region "${{ env.REGION }}"
 
   deploy-instance:
-    name: Deploy mainnet nodes
+    name: Deploy single instance
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
