@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 edition = "2021"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
@@ -51,7 +51,7 @@ sentry-tracing = "0.23.0"
 rand = "0.8.4"
 
 [build-dependencies]
-vergen = { version = "6.0.1", default-features = false, features = ["cargo", "git"] }
+vergen = { version = "6.0.2", default-features = false, features = ["cargo", "git"] }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }

@@ -12,6 +12,10 @@ on:
       - 'docker/**'
       - '.github/workflows/ci.yml'
 
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: full
+
 jobs:
   test:
     name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
@@ -25,9 +29,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         rust: [stable]
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -99,19 +100,6 @@ jobs:
         working-directory: ./zebra-consensus
         run: cargo run --example download-params
 
-      - name: Show env vars
-        run: |
-            echo "Test env vars:"
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
-            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
-            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-
       - name: Run tests
         uses: actions-rs/cargo@v1.0.3
         with:
@@ -136,9 +124,6 @@ jobs:
     strategy:
       matrix:
         rust: [stable]
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -157,19 +142,6 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fetch
-
-      - name: Show env vars
-        run: |
-            echo "Test env vars:"
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
-            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
-            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
 
       # This test changes zebra-chain's activation heights,
       # which can recompile all the Zebra crates,
@@ -193,10 +165,6 @@ jobs:
     strategy:
       matrix:
         rust: [stable, beta]
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
-
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -216,14 +184,6 @@ jobs:
         with:
           command: fetch
 
-      - name: Show env vars
-        run: |
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-
       - name: Run build without features enabled
         working-directory: ./zebra-chain
         run: cargo build --verbose --no-default-features
@@ -232,10 +192,6 @@ jobs:
     name: Build (+stable) on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
-
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -261,14 +217,6 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fetch
-
-      - name: Show env vars
-        run: |
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
 
       - name: Build
         uses: actions-rs/cargo@v1.0.3

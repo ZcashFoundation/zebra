@@ -76,8 +76,7 @@ impl RecentSyncLengths {
 
         self.recent_lengths.truncate(Self::MAX_RECENT_LENGTHS);
 
-        // TODO: remove or downgrade this log to debug
-        tracing::info!(
+        debug!(
             recent_lengths = ?self.recent_lengths,
             "sending recent sync lengths"
         );

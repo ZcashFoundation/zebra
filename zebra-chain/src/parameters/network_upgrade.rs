@@ -312,7 +312,7 @@ impl NetworkUpgrade {
     ///
     /// `AveragingWindowTimespan` from the Zcash specification.
     pub fn averaging_window_timespan(&self) -> Duration {
-        self.target_spacing() * (POW_AVERAGING_WINDOW as _)
+        self.target_spacing() * POW_AVERAGING_WINDOW.try_into().expect("fits in i32")
     }
 
     /// Returns the averaging window timespan for `network` and `height`.

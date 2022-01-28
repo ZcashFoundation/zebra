@@ -219,8 +219,7 @@ where
             // log individual response errors
             match result {
                 Ok(response) => self.handle_response(response).await?,
-                // TODO: Reduce the log level of the errors (#2655).
-                Err(error) => info!("Failed to crawl peer for mempool transactions: {}", error),
+                Err(error) => debug!("Failed to crawl peer for mempool transactions: {}", error),
             }
         }
 

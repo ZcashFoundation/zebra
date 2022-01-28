@@ -177,7 +177,7 @@ where
     #[instrument(skip(self, hash), fields(hash = %hash))]
     pub fn download_and_verify(&mut self, hash: block::Hash) -> DownloadAction {
         if self.cancel_handles.contains_key(&hash) {
-            tracing::debug!(
+            debug!(
                 ?hash,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -191,7 +191,7 @@ where
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
-            tracing::debug!(
+            debug!(
                 ?hash,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -277,7 +277,7 @@ where
 
             if let Some(block_height) = block.coinbase_height() {
                 if block_height > max_lookahead_height {
-                    tracing::info!(
+                    debug!(
                         ?hash,
                         ?block_height,
                         ?tip_height,
@@ -289,7 +289,7 @@ where
 
                     Err("gossiped block height too far ahead")?;
                 } else if block_height < min_accepted_height {
-                    tracing::debug!(
+                    debug!(
                         ?hash,
                         ?block_height,
                         ?tip_height,
@@ -302,7 +302,7 @@ where
                     Err("gossiped block height behind the finalized tip")?;
                 }
             } else {
-                tracing::info!(
+                debug!(
                     ?hash,
                     "gossiped block with no height: dropped downloaded block"
                 );
@@ -327,7 +327,7 @@ where
             tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
-                    tracing::trace!("task cancelled prior to completion");
+                    trace!("task cancelled prior to completion");
                     metrics::counter!("gossip.cancelled.count", 1);
                     Err(("canceled".into(), hash))
                 }
@@ -341,7 +341,7 @@ where
             "blocks are only queued once"
         );
 
-        tracing::debug!(
+        debug!(
             ?hash,
             queue_len = self.pending.len(),
             ?MAX_INBOUND_CONCURRENCY,
