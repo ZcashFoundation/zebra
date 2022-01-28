@@ -293,7 +293,7 @@ where
             // (approximately 50,000 for a 2 MB transaction)
             let (utxo_sender, mut utxo_receiver) = mpsc::unbounded_channel();
 
-            // Check the `lock_time` field of the transaction.
+            // Do basic checks first
             if let Some(block_time) = req.block_time() {
                 check::lock_time_has_passed(&tx, req.height(), block_time)?;
             }
@@ -308,7 +308,7 @@ where
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
             }
 
-            // Check the `nExpiryHeight` field of the transaction.
+            // Validate `nExpiryHeight` consensus rules
             if tx.has_any_coinbase_inputs() {
                 check::coinbase_expiry_height(&req.height(), &tx, network)?;
             } else {

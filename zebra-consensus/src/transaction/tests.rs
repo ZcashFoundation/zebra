@@ -385,6 +385,58 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
     );
 }
 
+/// Test if various transactions with too high expiry heights are rejected.
+#[tokio::test]
+async fn transactions_with_high_expiry_heights_are_rejected() {
+    let network = Network::Testnet;
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let script_verifier = script::Verifier::new(state_service);
+    let verifier = Verifier::new(network, script_verifier);
+
+    let block_height = NetworkUpgrade::Nu5
+        .activation_height(network)
+        .expect("Nu5 activation height is specified");
+
+    let lock_time = LockTime::Height(block::Height(90));
+    let expiry_height = (block_height - 1).expect("original block height is too small");
+
+    let fake_source_fund_height =
+        (block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer that should succeed
+    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
+
+    // Create a V4 transaction
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time,
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::ExpiredTransaction {
+            expiry_height,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
 /// Test if V4 coinbase transaction is accepted.
 #[tokio::test]
 async fn v4_coinbase_transaction_is_accepted() {
