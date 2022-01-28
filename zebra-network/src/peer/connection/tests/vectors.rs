@@ -421,7 +421,7 @@ async fn connection_run_loop_failed() {
 }
 
 #[tokio::test]
-async fn connection_run_loop_send_timeout_nil_response_ok() {
+async fn connection_run_loop_send_timeout_nil_response() {
     zebra_test::init();
 
     tokio::time::pause();
@@ -454,12 +454,12 @@ async fn connection_run_loop_send_timeout_nil_response_ok() {
     // Make the send timeout
     tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
 
-    // Timeouts don't close the connection
+    // Send timeouts close the connection
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none(), "unexpected error: {:?}", error);
-
-    assert!(!client_tx.is_closed());
-    assert!(!peer_inbound_tx.is_closed());
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ClientSendTimeout",
+    );
 
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, Some(Message::Inv(Vec::new())));
@@ -469,35 +469,30 @@ async fn connection_run_loop_send_timeout_nil_response_ok() {
         peer_response
             .expect("peer internal response channel is valid")
             .expect("response is present")
-            .expect("response is a message (not an error)"),
-        // Even though we triggered a send timeout, there was no response expected,
-        // and the channel had capacity
-        Response::Nil,
+            .expect_err("response is an error (not a message)")
+            .inner_debug(),
+        "ClientSendTimeout",
     );
+
+    assert!(client_tx.is_closed());
+    assert!(peer_inbound_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
-    // Make sure that the connection did not:
-    // - panic, or
-    // - return.
-    //
-    // This test doesn't cause any fatal errors,
-    // so returning would be incorrect behaviour.
+    // Make sure that the connection finished, but did not panic.
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
-        matches!(connection_result, Poll::Pending),
-        "unexpected run loop termination: {:?}",
+        matches!(connection_result, Poll::Ready(Ok(()))),
+        "expected run loop termination, but run loop continued: {:?}",
         connection_result,
     );
 
-    // We need to abort the connection, because it holds a lock on the outbound channel.
-    connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
-async fn connection_run_loop_send_timeout_receive_error() {
+async fn connection_run_loop_send_timeout_expect_response() {
     zebra_test::init();
 
     tokio::time::pause();
@@ -530,12 +525,12 @@ async fn connection_run_loop_send_timeout_receive_error() {
     // Make the send timeout
     tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
 
-    // Timeouts don't close the connection
+    // Send timeouts close the connection
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none(), "unexpected error: {:?}", error);
-
-    assert!(!client_tx.is_closed());
-    assert!(!peer_inbound_tx.is_closed());
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ClientSendTimeout",
+    );
 
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, Some(Message::GetAddr));
@@ -547,27 +542,22 @@ async fn connection_run_loop_send_timeout_receive_error() {
             .expect("response is present")
             .expect_err("response is an error (not a message)")
             .inner_debug(),
-        // Even though we triggered a send timeout, the response receive timeout finishes first
-        "ClientReceiveTimeout",
+        "ClientSendTimeout",
     );
+
+    assert!(client_tx.is_closed());
+    assert!(peer_inbound_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
-    // Make sure that the connection did not:
-    // - panic, or
-    // - return.
-    //
-    // This test doesn't cause any fatal errors,
-    // so returning would be incorrect behaviour.
+    // Make sure that the connection finished, but did not panic.
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
-        matches!(connection_result, Poll::Pending),
-        "unexpected run loop termination: {:?}",
+        matches!(connection_result, Poll::Ready(Ok(()))),
+        "expected run loop termination, but run loop continued: {:?}",
         connection_result,
     );
 
-    // We need to abort the connection, because it holds a lock on the outbound channel.
-    connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
 }
@@ -608,7 +598,7 @@ async fn connection_run_loop_receive_timeout() {
     // Make the receive timeout
     tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
 
-    // Timeouts don't close the connection
+    // Receive timeouts don't close the connection
     let error = shared_error_slot.try_get_error();
     assert!(error.is_none(), "unexpected error: {:?}", error);
 
@@ -650,11 +640,11 @@ async fn connection_run_loop_receive_timeout() {
 fn new_test_connection() -> (
     Connection<
         MockService<Request, Response, PanicAssertion>,
-        SinkMapErr<mpsc::UnboundedSender<Message>, fn(mpsc::SendError) -> SerializationError>,
+        SinkMapErr<mpsc::Sender<Message>, fn(mpsc::SendError) -> SerializationError>,
     >,
     mpsc::Sender<ClientRequest>,
     MockService<Request, Response, PanicAssertion>,
-    mpsc::UnboundedReceiver<Message>,
+    mpsc::Receiver<Message>,
     ErrorSlot,
 ) {
     super::new_test_connection()

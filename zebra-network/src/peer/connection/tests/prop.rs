@@ -114,11 +114,11 @@ proptest! {
 fn new_test_connection() -> (
     Connection<
         MockService<Request, Response, PropTestAssertion>,
-        SinkMapErr<mpsc::UnboundedSender<Message>, fn(mpsc::SendError) -> SerializationError>,
+        SinkMapErr<mpsc::Sender<Message>, fn(mpsc::SendError) -> SerializationError>,
     >,
     mpsc::Sender<ClientRequest>,
     MockService<Request, Response, PropTestAssertion>,
-    mpsc::UnboundedReceiver<Message>,
+    mpsc::Receiver<Message>,
     ErrorSlot,
 ) {
     super::new_test_connection()
@@ -127,7 +127,7 @@ fn new_test_connection() -> (
 async fn send_block_request(
     block: block::Hash,
     client_requests: &mut mpsc::Sender<ClientRequest>,
-    outbound_messages: &mut mpsc::UnboundedReceiver<Message>,
+    outbound_messages: &mut mpsc::Receiver<Message>,
 ) -> oneshot::Receiver<Result<Response, SharedPeerError>> {
     let (response_sender, response_receiver) = oneshot::channel();
 
