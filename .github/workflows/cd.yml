@@ -2,22 +2,30 @@ name: CD
 
 on:
   workflow_dispatch:
+    inputs:
+      network:
+        default: 'Mainnet'
+      checkpoint_sync:
+        default: true
   push:
     branches:
       - main
 
 env:
+  NETWORK: Mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  REGION: us-east1
-  ZONE: us-east1-b
-  MACHINE_TYPE: n2d-standard-4
-  DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+  GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
+  REGION: us-central1
+  ZONE: us-central1-a
+  MACHINE_TYPE: c2d-standard-4
 
 jobs:
   build:
     name: Build images
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
     steps:
     - uses: actions/checkout@v2.4.0
       with:
@@ -33,19 +41,54 @@ jobs:
         project_id: ${{ env.PROJECT_ID }}
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
-    # Build and push image to Google Container Registry
-    - name: Build
-      # Tagging w/ the commit SHA blocks the :latest tag on GCR
-      run: |
-        gcloud builds submit \
-          --config cloudbuild.yaml \
-          --substitutions SHORT_SHA="${{ env.GITHUB_SHA_SHORT }}",BRANCH_NAME="${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}"
+      # Setup Docker Buildx to allow use of docker cache layers from GH
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          driver-opts: network=host
 
-  deploy:
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: |
+            /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}
+
+    - name: Login to GAR
+      uses: docker/login-action@v1.12.0
+      with:
+        registry: us-docker.pkg.dev
+        username: _json_key
+        password: ${{ secrets.GCLOUD_AUTH }}
+
+    # Build and push image to Google Artifact Registry
+    - name: Build & push
+      id: docker_build
+      uses: docker/build-push-action@v2.8.0
+      with:
+        target: zebrad-release
+        context: .
+        file: ./docker/Dockerfile.build
+        tags: ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
+        build-args: |
+          NETWORK=${{ env.NETWORK }}
+          SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+          RUST_BACKTRACE=full
+          ZEBRA_SKIP_NETWORK_TESTS="-1"
+          CHECKPOINT_SYNC=true
+          RUST_LOG=debug
+          SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
+        push: true
+        cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}
+        cache-to: type=inline
+
+  deploy-nodes:
     name: Deploy mainnet nodes
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name == 'push'
+
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -61,17 +104,14 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
-      # Create instance template from container image
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --container-image "gcr.io/${{ env.PROJECT_ID}}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}" \
-          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-balanced \
+          gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }} \
+          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
-          --service-account ${{ env.DEPLOY_SA }} \
-          --scopes cloud-platform \
-          --tags zebrad \
+          --tags zebrad
 
       # Check if our destination instance group exists already
       - name: Check if instance group exists
@@ -100,3 +140,36 @@ jobs:
           "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}" \
           --version template="zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
+
+  deploy-instance:
+    name: Deploy mainnet nodes
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+
+      # Setup gcloud CLI
+      - name: Set up gcloud SDK environment
+        uses: google-github-actions/setup-gcloud@v0.4.0
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+
+      # Create instance template from container image
+      - name: Manual deploy of a single instance running zebrad
+        run: |
+          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }} \
+          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
+          --machine-type ${{ env.MACHINE_TYPE }} \
+          --zone ${{ env.ZONE }} \
+          --tags zebrad
