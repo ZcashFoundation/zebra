@@ -123,7 +123,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     } else if height < canopy_activation_height {
         // Founders rewards are paid up to Canopy activation, on both mainnet and testnet.
         // But we checkpoint in Canopy so founders reward does not apply for Zebra.
-        Ok(())
+        unreachable!("we cannot verify consensus rules before Canopy activation");
     } else if halving_div < 4 {
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet

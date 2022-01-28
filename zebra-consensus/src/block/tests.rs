@@ -22,10 +22,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{
-    parameters::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
-    script, transaction,
-};
+use crate::{parameters::SLOW_START_SHIFT, script, transaction};
 
 use super::*;
 
@@ -294,8 +291,12 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(network)
+            .expect("Canopy activation height is known");
+
         // TODO: first halving, second halving, third halving, and very large halvings
-        if block::Height(height) > SLOW_START_INTERVAL {
+        if block::Height(height) >= canopy_activation_height {
             check::subsidy_is_valid(&block, network).expect("subsidies should pass for this block");
         }
     }
@@ -390,8 +391,12 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is known");
+
     for (&height, block) in block_iter {
-        if Height(height) > SLOW_START_SHIFT {
+        if Height(height) >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
 
             // Validate
