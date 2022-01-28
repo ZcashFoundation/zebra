@@ -1,9 +1,12 @@
-FROM rust:1.57-buster as builder
+FROM rust:buster as builder
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
     rm -Rf /var/lib/apt/lists/* /tmp/*
+
+RUN mkdir /zebra
+WORKDIR /zebra
 
 ARG SHORT_SHA
 ENV SHORT_SHA $SHORT_SHA
@@ -25,11 +28,9 @@ RUN rustc -V; cargo -V; rustup -V
 
 COPY . .
 
-WORKDIR /zebrad
-
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
-RUN cargo build --release --features enable-sentry
+RUN cd zebrad/; cargo build --release --features enable-sentry
 RUN cargo test --workspace --no-run
 
 # Runner image
