@@ -728,7 +728,7 @@ where
                         }
                         Either::Left((Either::Right(_), _peer_fut)) => {
                             trace!(parent: &span, "client request timed out");
-                            let e = PeerError::ClientReceiveTimeout;
+                            let e = PeerError::ConnectionReceiveTimeout;
 
                             // Replace the state with a temporary value,
                             // so we can take ownership of the response sender.

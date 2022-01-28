@@ -25,7 +25,7 @@ where
     pub async fn send(&mut self, msg: Message) -> Result<(), PeerError> {
         tokio::time::timeout(REQUEST_TIMEOUT, self.inner.send(msg))
             .await
-            .map_err(|_| PeerError::ClientSendTimeout)?
+            .map_err(|_| PeerError::ConnectionSendTimeout)?
             .map_err(Into::into)
     }
 }

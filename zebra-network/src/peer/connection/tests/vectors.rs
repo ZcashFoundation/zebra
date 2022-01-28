@@ -32,12 +32,12 @@ async fn connection_run_loop_ok() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
         new_test_connection();
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // The run loop will wait forever for a request from Zebra or the peer,
     // without any errors, channel closes, or bytes written.
@@ -52,7 +52,7 @@ async fn connection_run_loop_ok() {
     assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
-    assert!(!peer_inbound_tx.is_closed());
+    assert!(!peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -68,19 +68,19 @@ async fn connection_run_loop_spawn_ok() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
         new_test_connection();
 
     // Spawn the connection run loop
-    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_rx));
 
     let error = shared_error_slot.try_get_error();
     assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
-    assert!(!peer_inbound_tx.is_closed());
+    assert!(!peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -111,7 +111,7 @@ async fn connection_run_loop_message_ok() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (mut peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
 
     let (
         connection,
@@ -122,7 +122,7 @@ async fn connection_run_loop_message_ok() {
     ) = new_test_connection();
 
     // Spawn the connection run loop
-    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_rx));
 
     // Simulate a message send and receive
     let (request_tx, mut request_rx) = oneshot::channel();
@@ -138,7 +138,7 @@ async fn connection_run_loop_message_ok() {
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, Some(Message::GetAddr));
 
-    peer_inbound_tx
+    peer_tx
         .try_send(Ok(Message::Addr(Vec::new())))
         .expect("peer inbound response channel is valid");
 
@@ -157,7 +157,7 @@ async fn connection_run_loop_message_ok() {
     assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
-    assert!(!peer_inbound_tx.is_closed());
+    assert!(!peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -186,12 +186,12 @@ async fn connection_run_loop_future_drop() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
         new_test_connection();
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // now_or_never implicitly drops the connection future.
     let result = connection.now_or_never();
@@ -204,7 +204,7 @@ async fn connection_run_loop_future_drop() {
     );
 
     assert!(client_tx.is_closed());
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -218,7 +218,7 @@ async fn connection_run_loop_client_close() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (
         connection,
@@ -228,7 +228,7 @@ async fn connection_run_loop_client_close() {
         shared_error_slot,
     ) = new_test_connection();
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // Explicitly close the client channel.
     client_tx.close_channel();
@@ -246,7 +246,7 @@ async fn connection_run_loop_client_close() {
     );
 
     assert!(client_tx.is_closed());
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -262,12 +262,12 @@ async fn connection_run_loop_client_drop() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
         new_test_connection();
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // Drop the client channel.
     std::mem::drop(client_tx);
@@ -284,7 +284,7 @@ async fn connection_run_loop_client_drop() {
         "ClientDropped",
     );
 
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -300,15 +300,15 @@ async fn connection_run_loop_inbound_close() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (mut peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
 
     let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
         new_test_connection();
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // Explicitly close the inbound peer channel.
-    peer_inbound_tx.close_channel();
+    peer_tx.close_channel();
 
     // If we drop the future, the connection will close anyway, so we avoid the drop by cloning it.
     let connection = connection.shared();
@@ -323,7 +323,7 @@ async fn connection_run_loop_inbound_close() {
     );
 
     assert!(client_tx.is_closed());
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -339,15 +339,15 @@ async fn connection_run_loop_inbound_drop() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (connection, client_tx, mut inbound_service, mut peer_outbound_messages, shared_error_slot) =
         new_test_connection();
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // Drop the inbound peer channel.
-    std::mem::drop(peer_inbound_tx);
+    std::mem::drop(peer_tx);
 
     // If we drop the future, the connection will close anyway, so we avoid the drop by cloning it.
     let connection = connection.shared();
@@ -377,7 +377,7 @@ async fn connection_run_loop_failed() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (
         mut connection,
@@ -393,7 +393,7 @@ async fn connection_run_loop_failed() {
         .try_update_error(PeerError::Overloaded.into())
         .expect("unexpected previous error in tests");
 
-    let connection = connection.run(peer_inbound_rx);
+    let connection = connection.run(peer_rx);
 
     // If we drop the future, the connection will close anyway, so we avoid the drop by cloning it.
     let connection = connection.shared();
@@ -410,7 +410,7 @@ async fn connection_run_loop_failed() {
     );
 
     assert!(client_tx.is_closed());
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -428,7 +428,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (
         connection,
@@ -439,7 +439,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
     ) = new_test_connection();
 
     // Spawn the connection run loop
-    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_rx));
 
     // Simulate a message send timeout
     let (request_tx, mut request_rx) = oneshot::channel();
@@ -458,7 +458,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
     let error = shared_error_slot.try_get_error();
     assert_eq!(
         error.expect("missing expected error").inner_debug(),
-        "ClientSendTimeout",
+        "ConnectionSendTimeout",
     );
 
     let outbound_message = peer_outbound_messages.next().await;
@@ -471,11 +471,11 @@ async fn connection_run_loop_send_timeout_nil_response() {
             .expect("response is present")
             .expect_err("response is an error (not a message)")
             .inner_debug(),
-        "ClientSendTimeout",
+        "ConnectionSendTimeout",
     );
 
     assert!(client_tx.is_closed());
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -499,7 +499,7 @@ async fn connection_run_loop_send_timeout_expect_response() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (
         connection,
@@ -510,7 +510,7 @@ async fn connection_run_loop_send_timeout_expect_response() {
     ) = new_test_connection();
 
     // Spawn the connection run loop
-    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_rx));
 
     // Simulate a message send timeout
     let (request_tx, mut request_rx) = oneshot::channel();
@@ -529,7 +529,7 @@ async fn connection_run_loop_send_timeout_expect_response() {
     let error = shared_error_slot.try_get_error();
     assert_eq!(
         error.expect("missing expected error").inner_debug(),
-        "ClientSendTimeout",
+        "ConnectionSendTimeout",
     );
 
     let outbound_message = peer_outbound_messages.next().await;
@@ -542,11 +542,11 @@ async fn connection_run_loop_send_timeout_expect_response() {
             .expect("response is present")
             .expect_err("response is an error (not a message)")
             .inner_debug(),
-        "ClientSendTimeout",
+        "ConnectionSendTimeout",
     );
 
     assert!(client_tx.is_closed());
-    assert!(peer_inbound_tx.is_closed());
+    assert!(peer_tx.is_closed());
 
     inbound_service.expect_no_requests().await;
 
@@ -570,7 +570,7 @@ async fn connection_run_loop_receive_timeout() {
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
-    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+    let (peer_tx, peer_rx) = mpsc::channel(1);
 
     let (
         connection,
@@ -581,7 +581,7 @@ async fn connection_run_loop_receive_timeout() {
     ) = new_test_connection();
 
     // Spawn the connection run loop
-    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_rx));
 
     // Simulate a message receive timeout
     let (request_tx, mut request_rx) = oneshot::channel();
@@ -603,7 +603,7 @@ async fn connection_run_loop_receive_timeout() {
     assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
-    assert!(!peer_inbound_tx.is_closed());
+    assert!(!peer_tx.is_closed());
 
     let peer_response = request_rx.try_recv();
     assert_eq!(
@@ -612,7 +612,7 @@ async fn connection_run_loop_receive_timeout() {
             .expect("response is present")
             .expect_err("response is an error (not a message)")
             .inner_debug(),
-        "ClientReceiveTimeout",
+        "ConnectionReceiveTimeout",
     );
 
     inbound_service.expect_no_requests().await;
