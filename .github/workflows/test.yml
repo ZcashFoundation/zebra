@@ -32,11 +32,17 @@ jobs:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
 
-      - name: Set up gcloud
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.5.0
+        with:
+          credentials_json: ${{ secrets.GCLOUD_AUTH }}
+
+      - name: Set up gcloud SDK environment
         uses: google-github-actions/setup-gcloud@v0.4.0
         with:
           project_id: ${{ env.PROJECT_ID }}
-          service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create instance
