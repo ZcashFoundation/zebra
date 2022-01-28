@@ -1,10 +1,10 @@
 //! Fixed test vectors for peer connections.
 //!
-//! TODO:
-//! - connection tests when awaiting requests (#3232)
-//! - connection tests with closed/dropped peer_outbound_tx (#3233)
+//! TODO: add tests for:
+//!   - inbound message as request
+//!   - inbound message, but not a request (or a response)
 
-use std::{task::Poll, time::Duration};
+use std::{collections::HashSet, task::Poll, time::Duration};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -49,20 +49,17 @@ async fn connection_run_loop_ok() {
     assert_eq!(result, None);
 
     let error = shared_error_slot.try_get_error();
-    assert!(
-        matches!(error, None),
-        "unexpected connection error: {:?}",
-        error
-    );
+    assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
     assert!(!peer_inbound_tx.is_closed());
 
+    inbound_service.expect_no_requests().await;
+
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert!(peer_outbound_messages.next().await.is_none());
-
-    inbound_service.expect_no_requests().await;
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -80,7 +77,7 @@ async fn connection_run_loop_spawn_ok() {
     let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
 
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none());
+    assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
     assert!(!peer_inbound_tx.is_closed());
@@ -94,12 +91,16 @@ async fn connection_run_loop_spawn_ok() {
     // This test doesn't cause any fatal errors,
     // so returning would be incorrect behaviour.
     let connection_result = futures::poll!(&mut connection_join_handle);
-    assert!(matches!(connection_result, Poll::Pending));
+    assert!(
+        matches!(connection_result, Poll::Pending),
+        "unexpected run loop termination: {:?}",
+        connection_result,
+    );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.
     connection_join_handle.abort();
-
-    assert!(peer_outbound_messages.next().await.is_none());
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -135,7 +136,7 @@ async fn connection_run_loop_message_ok() {
         .try_send(request)
         .expect("internal request channel is valid");
     let outbound_message = peer_outbound_messages.next().await;
-    assert!(matches!(outbound_message, Some(Message::GetAddr)));
+    assert_eq!(outbound_message, Some(Message::GetAddr));
 
     peer_inbound_tx
         .try_send(Ok(Message::Addr(Vec::new())))
@@ -153,7 +154,7 @@ async fn connection_run_loop_message_ok() {
     );
 
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none());
+    assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
     assert!(!peer_inbound_tx.is_closed());
@@ -167,12 +168,16 @@ async fn connection_run_loop_message_ok() {
     // This test doesn't cause any fatal errors,
     // so returning would be incorrect behaviour.
     let connection_result = futures::poll!(&mut connection_join_handle);
-    assert!(matches!(connection_result, Poll::Pending));
+    assert!(
+        matches!(connection_result, Poll::Pending),
+        "unexpected run loop termination: {:?}",
+        connection_result,
+    );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.
     connection_join_handle.abort();
-
-    assert!(peer_outbound_messages.next().await.is_none());
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -193,14 +198,18 @@ async fn connection_run_loop_future_drop() {
     assert_eq!(result, None);
 
     let error = shared_error_slot.try_get_error();
-    assert!(matches!(error, Some(_)));
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ConnectionDropped",
+    );
 
     assert!(client_tx.is_closed());
     assert!(peer_inbound_tx.is_closed());
 
-    assert!(peer_outbound_messages.next().await.is_none());
-
     inbound_service.expect_no_requests().await;
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -231,16 +240,20 @@ async fn connection_run_loop_client_close() {
     assert_eq!(result, Some(()));
 
     let error = shared_error_slot.try_get_error();
-    assert!(matches!(error, Some(_)));
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ClientDropped",
+    );
 
     assert!(client_tx.is_closed());
     assert!(peer_inbound_tx.is_closed());
 
+    inbound_service.expect_no_requests().await;
+
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert!(peer_outbound_messages.next().await.is_none());
-
-    inbound_service.expect_no_requests().await;
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -266,15 +279,19 @@ async fn connection_run_loop_client_drop() {
     assert_eq!(result, Some(()));
 
     let error = shared_error_slot.try_get_error();
-    assert!(matches!(error, Some(_)));
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ClientDropped",
+    );
 
     assert!(peer_inbound_tx.is_closed());
 
+    inbound_service.expect_no_requests().await;
+
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert!(peer_outbound_messages.next().await.is_none());
-
-    inbound_service.expect_no_requests().await;
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -300,16 +317,20 @@ async fn connection_run_loop_inbound_close() {
     assert_eq!(result, Some(()));
 
     let error = shared_error_slot.try_get_error();
-    assert!(matches!(error, Some(_)));
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ConnectionClosed",
+    );
 
     assert!(client_tx.is_closed());
     assert!(peer_inbound_tx.is_closed());
 
+    inbound_service.expect_no_requests().await;
+
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert!(peer_outbound_messages.next().await.is_none());
-
-    inbound_service.expect_no_requests().await;
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -335,15 +356,19 @@ async fn connection_run_loop_inbound_drop() {
     assert_eq!(result, Some(()));
 
     let error = shared_error_slot.try_get_error();
-    assert!(matches!(error, Some(_)));
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "ConnectionClosed",
+    );
 
     assert!(client_tx.is_closed());
 
+    inbound_service.expect_no_requests().await;
+
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert!(peer_outbound_messages.next().await.is_none());
-
-    inbound_service.expect_no_requests().await;
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -365,7 +390,7 @@ async fn connection_run_loop_failed() {
     // Simulate an internal connection error.
     connection.state = State::Failed;
     shared_error_slot
-        .try_update_error(PeerError::ClientReceiveTimeout.into())
+        .try_update_error(PeerError::Overloaded.into())
         .expect("unexpected previous error in tests");
 
     let connection = connection.run(peer_inbound_rx);
@@ -379,20 +404,100 @@ async fn connection_run_loop_failed() {
     assert_eq!(result, Some(()));
 
     let error = shared_error_slot.try_get_error();
-    assert!(matches!(error, Some(_)));
+    assert_eq!(
+        error.expect("missing expected error").inner_debug(),
+        "Overloaded",
+    );
 
     assert!(client_tx.is_closed());
     assert!(peer_inbound_tx.is_closed());
 
+    inbound_service.expect_no_requests().await;
+
     // We need to drop the future, because it holds a mutable reference to the bytes.
     std::mem::drop(connection_guard);
-    assert!(peer_outbound_messages.next().await.is_none());
-
-    inbound_service.expect_no_requests().await;
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
-async fn connection_run_loop_send_timeout() {
+async fn connection_run_loop_send_timeout_nil_response_ok() {
+    zebra_test::init();
+
+    tokio::time::pause();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+
+    // Spawn the connection run loop
+    let mut connection_join_handle = tokio::spawn(connection.run(peer_inbound_rx));
+
+    // Simulate a message send timeout
+    let (request_tx, mut request_rx) = oneshot::channel();
+    let request = ClientRequest {
+        request: Request::AdvertiseTransactionIds(HashSet::new()),
+        tx: request_tx,
+        span: Span::current(),
+    };
+
+    client_tx.try_send(request).expect("channel is valid");
+
+    // Make the send timeout
+    tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
+
+    // Timeouts don't close the connection
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none(), "unexpected error: {:?}", error);
+
+    assert!(!client_tx.is_closed());
+    assert!(!peer_inbound_tx.is_closed());
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, Some(Message::Inv(Vec::new())));
+
+    let peer_response = request_rx.try_recv();
+    assert_eq!(
+        peer_response
+            .expect("peer internal response channel is valid")
+            .expect("response is present")
+            .expect("response is a message (not an error)"),
+        // Even though we triggered a send timeout, there was no response expected,
+        // and the channel had capacity
+        Response::Nil,
+    );
+
+    inbound_service.expect_no_requests().await;
+
+    // Make sure that the connection did not:
+    // - panic, or
+    // - return.
+    //
+    // This test doesn't cause any fatal errors,
+    // so returning would be incorrect behaviour.
+    let connection_result = futures::poll!(&mut connection_join_handle);
+    assert!(
+        matches!(connection_result, Poll::Pending),
+        "unexpected run loop termination: {:?}",
+        connection_result,
+    );
+
+    // We need to abort the connection, because it holds a lock on the outbound channel.
+    connection_join_handle.abort();
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
+}
+
+#[tokio::test]
+async fn connection_run_loop_send_timeout_receive_error() {
     zebra_test::init();
 
     tokio::time::pause();
@@ -427,17 +532,24 @@ async fn connection_run_loop_send_timeout() {
 
     // Timeouts don't close the connection
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none());
+    assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
     assert!(!peer_inbound_tx.is_closed());
 
     let outbound_message = peer_outbound_messages.next().await;
-    assert!(matches!(outbound_message, Some(Message::GetAddr)));
+    assert_eq!(outbound_message, Some(Message::GetAddr));
 
-    // TODO: check for PeerError::ClientSendTimeout
     let peer_response = request_rx.try_recv();
-    assert!(matches!(peer_response, Ok(Some(Err(_)))));
+    assert_eq!(
+        peer_response
+            .expect("peer internal response channel is valid")
+            .expect("response is present")
+            .expect_err("response is an error (not a message)")
+            .inner_debug(),
+        // Even though we triggered a send timeout, the response receive timeout finishes first
+        "ClientReceiveTimeout",
+    );
 
     inbound_service.expect_no_requests().await;
 
@@ -448,12 +560,16 @@ async fn connection_run_loop_send_timeout() {
     // This test doesn't cause any fatal errors,
     // so returning would be incorrect behaviour.
     let connection_result = futures::poll!(&mut connection_join_handle);
-    assert!(matches!(connection_result, Poll::Pending));
+    assert!(
+        matches!(connection_result, Poll::Pending),
+        "unexpected run loop termination: {:?}",
+        connection_result,
+    );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.
     connection_join_handle.abort();
-
-    assert!(peer_outbound_messages.next().await.is_none());
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 #[tokio::test]
@@ -487,21 +603,27 @@ async fn connection_run_loop_receive_timeout() {
 
     client_tx.try_send(request).expect("channel is valid");
     let outbound_message = peer_outbound_messages.next().await;
-    assert!(matches!(outbound_message, Some(Message::GetAddr)));
+    assert_eq!(outbound_message, Some(Message::GetAddr));
 
     // Make the receive timeout
     tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_secs(1)).await;
 
     // Timeouts don't close the connection
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none());
+    assert!(error.is_none(), "unexpected error: {:?}", error);
 
     assert!(!client_tx.is_closed());
     assert!(!peer_inbound_tx.is_closed());
 
-    // TODO: check for PeerError::ClientReceiveTimeout
     let peer_response = request_rx.try_recv();
-    assert!(matches!(peer_response, Ok(Some(Err(_)))));
+    assert_eq!(
+        peer_response
+            .expect("peer internal response channel is valid")
+            .expect("response is present")
+            .expect_err("response is an error (not a message)")
+            .inner_debug(),
+        "ClientReceiveTimeout",
+    );
 
     inbound_service.expect_no_requests().await;
 
@@ -512,12 +634,16 @@ async fn connection_run_loop_receive_timeout() {
     // This test doesn't cause any fatal errors,
     // so returning would be incorrect behaviour.
     let connection_result = futures::poll!(&mut connection_join_handle);
-    assert!(matches!(connection_result, Poll::Pending));
+    assert!(
+        matches!(connection_result, Poll::Pending),
+        "unexpected run loop termination: {:?}",
+        connection_result,
+    );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.
     connection_join_handle.abort();
-
-    assert!(peer_outbound_messages.next().await.is_none());
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
 }
 
 /// Creates a new [`Connection`] instance for unit tests.

@@ -21,6 +21,15 @@ where
     }
 }
 
+impl SharedPeerError {
+    /// Returns a debug-formatted string describing the inner [`PeerError`].
+    ///
+    /// Unfortunately, [`TracedError`] makes it impossible to get a reference to the original error.
+    pub fn inner_debug(&self) -> String {
+        format!("{:?}", self.0.as_ref())
+    }
+}
+
 /// An error related to peer connection handling.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
