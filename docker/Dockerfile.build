@@ -14,6 +14,10 @@ RUN cargo chef prepare  --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
+    rm -Rf /var/lib/apt/lists/* /tmp/*
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --recipe-path recipe.json
 
@@ -29,11 +33,6 @@ ENV ZEBRA_SKIP_NETWORK_TESTS ${ZEBRA_SKIP_NETWORK_TESTS:-1}
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
 ENV RUSTFLAGS -O
 ENV CARGO_HOME /app/.cargo/
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
-    rm -Rf /var/lib/apt/lists/* /tmp/*
 
 RUN rustc -V; cargo -V; rustup -V
 
