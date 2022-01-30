@@ -4,7 +4,7 @@
 # - planner: computes the recipe file
 # - builder: caches our dependencies and builds the binary
 # - runtime: is our runtime environment
-FROM rust:1.58.1-buster as chef
+FROM rust:1.58.1-bullseye as chef
 RUN cargo install cargo-chef
 WORKDIR /app
 
@@ -43,7 +43,7 @@ RUN cd zebrad/; cargo build --release --features enable-sentry
 RUN cargo test --workspace --no-run
 
 # Runner image
-FROM debian:buster-slim AS runtime
+FROM debian:bullseye-slim AS runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
