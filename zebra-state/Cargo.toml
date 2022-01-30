@@ -31,7 +31,7 @@ rocksdb = "0.17.0"
 serde = { version = "1", features = ["serde_derive"] }
 tempfile = "3.3.0"
 thiserror = "1.0.30"
-tokio = { version = "1.15.0", features = ["sync"] }
+tokio = { version = "1.16.1", features = ["sync"] }
 tower = { version = "0.4.11", features = ["buffer", "util"] }
 tracing = "0.1"
 
@@ -49,7 +49,7 @@ jubjub = "0.8.0"
 proptest = "0.10.1"
 proptest-derive = "0.3"
 spandoc = "0.2"
-tokio = { version = "1.15.0", features = ["full"] }
+tokio = { version = "1.16.1", features = ["full"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
