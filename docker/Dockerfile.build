@@ -1,38 +1,50 @@
-FROM rust:buster as builder
+# This steps implement cargo-chef for docker layer caching
+# We are using four stages:
+# - chef: installs cargo-chef
+# - planner: computes the recipe file
+# - builder: caches our dependencies and builds the binary
+# - runtime: is our runtime environment
+FROM rust:1.58.1-buster as chef
+RUN cargo install cargo-chef
 WORKDIR /app
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare  --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Build zebra
+ARG SHORT_SHA
+ENV SHORT_SHA $SHORT_SHA
+ARG RUST_BACKTRACE
+ENV RUST_BACKTRACE ${RUST_BACKTRACE:-full}
+# Skip test on debian based OS by default as compilation fails
+ARG ZEBRA_SKIP_NETWORK_TESTS
+ENV ZEBRA_SKIP_NETWORK_TESTS ${ZEBRA_SKIP_NETWORK_TESTS:-1}
+# Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
+# GitHub Actions time limit (6 hours), so we needed to make it faster.
+ENV RUSTFLAGS -O
+ENV CARGO_HOME /app/.cargo/
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
     rm -Rf /var/lib/apt/lists/* /tmp/*
 
-ARG SHORT_SHA
-ENV SHORT_SHA $SHORT_SHA
-
-ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE ${RUST_BACKTRACE:-full}
-
-# Skip test on debian based OS by default as compilation fails
-ARG ZEBRA_SKIP_NETWORK_TESTS
-ENV ZEBRA_SKIP_NETWORK_TESTS ${ZEBRA_SKIP_NETWORK_TESTS:-1}
-
-# Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
-# GitHub Actions time limit (6 hours), so we needed to make it faster.
-ENV RUSTFLAGS -O
-
-ENV CARGO_HOME /app/.cargo/
-
 RUN rustc -V; cargo -V; rustup -V
 
 COPY . .
-
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
 RUN cd zebrad/; cargo build --release --features enable-sentry
 RUN cargo test --workspace --no-run
 
 # Runner image
-FROM debian:buster-slim AS zebrad-release
+FROM debian:buster-slim AS runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
