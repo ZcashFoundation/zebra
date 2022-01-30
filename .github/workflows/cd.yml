@@ -68,7 +68,9 @@ jobs:
         target: zebrad-release
         context: .
         file: ./docker/Dockerfile.build
-        tags: ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
+        tags: |
+          ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:latest
+          ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
         build-args: |
           NETWORK=${{ github.event.inputs.network || env.NETWORK }}
           SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
