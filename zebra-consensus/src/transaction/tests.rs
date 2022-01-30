@@ -385,34 +385,112 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
     );
 }
 
-/// Test if various transactions with too high expiry heights are rejected.
+/// Tests if an non-coinbase V4 transaction with the last valid expiry height is
+/// accepted.
 #[tokio::test]
-async fn transactions_with_high_expiry_heights_are_rejected() {
-    let network = Network::Testnet;
-
+async fn v4_transaction_with_last_valid_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(Network::Mainnet, script::Verifier::new(state_service));
 
-    let block_height = NetworkUpgrade::Nu5
-        .activation_height(network)
-        .expect("Nu5 activation height is specified");
+    let block_height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
 
-    let lock_time = LockTime::Height(block::Height(90));
-    let expiry_height = (block_height - 1).expect("original block height is too small");
-
-    let fake_source_fund_height =
-        (block_height - 1).expect("fake source fund block height is too small");
-
-    // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
-
-    // Create a V4 transaction
+    // Create a non-coinbase V4 tx with the last valid expiry height.
     let transaction = Transaction::V4 {
         inputs: vec![input],
         outputs: vec![output],
-        lock_time,
+        lock_time: LockTime::unlocked(),
+        expiry_height: block_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+}
+
+/// Tests if an coinbase V4 transaction with an expiry height lower that the
+/// block height is accepted.
+///
+/// Note that an expiry height lower than the block height is considered
+/// *expired* for *non-coinbase* transactions.
+#[tokio::test]
+async fn v4_coinbase_transaction_with_correct_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, script::Verifier::new(state_service));
+
+    let block_height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // This is a correct expiry height for coinbase V4 transactions.
+    let expiry_height = (block_height - 1).expect("original block height is too small");
+
+    // Create a coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+}
+
+/// Tests if an expired non-coinbase V4 transaction is rejected.
+#[tokio::test]
+async fn v4_transaction_with_too_low_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, script::Verifier::new(state_service));
+
+    let block_height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // This expiry height is too low so that the tx should seem expired to the verifier.
+    let expiry_height = (block_height - 1).expect("original block height is too small");
+
+    // Create a non-coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
         expiry_height,
         joinsplit_data: None,
         sapling_shielded_data: None,
@@ -431,6 +509,97 @@ async fn transactions_with_high_expiry_heights_are_rejected() {
         result,
         Err(TransactionError::ExpiredTransaction {
             expiry_height,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
+/// Tests if a non-coinbase V4 transaction with an expiry height exceeding the
+/// maximum is rejected.
+#[tokio::test]
+async fn v4_transaction_with_exceeding_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, script::Verifier::new(state_service));
+
+    let block_height = block::Height::MAX;
+
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // This expiry height exceeds the maximum defined by the specification.
+    let expiry_height = block::Height(500_000_000);
+
+    // Create a non-coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::MaximumExpiryHeight {
+            expiry_height,
+            is_coinbase: false,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
+/// Tests if a coinbase V4 transaction with an expiry height exceeding the
+/// maximum is rejected.
+#[tokio::test]
+async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, script::Verifier::new(state_service));
+
+    let block_height = block::Height::MAX;
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // This expiry height exceeds the maximum defined by the specification.
+    let expiry_height = block::Height(500_000_000);
+
+    // Create a coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::MaximumExpiryHeight {
+            expiry_height,
+            is_coinbase: true,
             block_height,
             transaction_hash: transaction.hash(),
         })
