@@ -80,8 +80,8 @@ jobs:
           RUST_LOG=debug
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
-        cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}
-        cache-to: type=inline
+        cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:buildcache
+        cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:buildcache,mode=max
 
   deploy-nodes:
     name: Deploy mainnet nodes
