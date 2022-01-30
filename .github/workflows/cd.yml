@@ -46,14 +46,7 @@ jobs:
       with:
         driver-opts: network=host
 
-    - name: Cache Docker layers
-      uses: actions/cache@v2
-      with:
-        path: |
-          /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}
-
-    - name: Login to GAR
+    - name: Login to Google Artifact Registry
       uses: docker/login-action@v1.12.0
       with:
         registry: us-docker.pkg.dev
