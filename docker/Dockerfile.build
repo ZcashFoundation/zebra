@@ -1,12 +1,10 @@
 FROM rust:buster as builder
+WORKDIR /app
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
     rm -Rf /var/lib/apt/lists/* /tmp/*
-
-RUN mkdir /zebra
-WORKDIR /zebra
 
 ARG SHORT_SHA
 ENV SHORT_SHA $SHORT_SHA
@@ -22,7 +20,7 @@ ENV ZEBRA_SKIP_NETWORK_TESTS ${ZEBRA_SKIP_NETWORK_TESTS:-1}
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
 ENV RUSTFLAGS -O
 
-ENV CARGO_HOME /zebra/.cargo/
+ENV CARGO_HOME /app/.cargo/
 
 RUN rustc -V; cargo -V; rustup -V
 
@@ -40,7 +38,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
 
-COPY --from=builder /zebra/target/release/zebrad /
+COPY --from=builder /app/target/release/zebrad /usr/local/bin
 
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
@@ -57,12 +55,12 @@ RUN set -ex; \
     echo "cache_dir = '/zebrad-cache'"; \
     echo "[tracing]"; \
     echo "endpoint_addr = '0.0.0.0:3000'"; \
-  } > "/zebrad.toml"
+  } > "zebrad.toml"
 
-RUN cat /zebrad.toml
+RUN cat zebrad.toml
 
 # Pre-download Zcash Sprout and Sapling parameters
-RUN /zebrad download
+RUN /usr/local/bin/zebrad download
 
 EXPOSE 3000 8233 18233
 
@@ -73,4 +71,4 @@ ENV RUST_BACKTRACE ${RUST_BACKTRACE:-full}
 ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
-CMD [ "/zebrad", "-c", "/zebrad.toml", "start" ]
+CMD [ "/usr/local/bin/zebrad", "-c", "zebrad.toml", "start" ]
