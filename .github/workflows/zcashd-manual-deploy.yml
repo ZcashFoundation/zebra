@@ -46,6 +46,7 @@ jobs:
         run: |
           gcloud compute instance-templates create-with-container "zcashd-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
+          --boot-disk-type=pd-ssd \
           --container-image "electriccoinco/zcashd" \
           --container-env ZCASHD_NETWORK="${{ github.event.inputs.network }}" \
           --machine-type ${{ env.MACHINE_TYPE }} \
