@@ -172,7 +172,7 @@ proptest! {
     /// Peerset will panic a if a rquest is sent and no more peers are available.
     #[test]
     #[should_panic(expected = "requests must be routed to at least one peer")]
-    fn peerset_always_broadcast(
+    fn peerset_always_broadcasts(
         total_number_of_peers in (2..10usize)
     ) {
         // Get a dummy block hash to help us construct a valid request to be broadcasted
@@ -196,15 +196,14 @@ proptest! {
         let (minimum_peer_version, _best_tip_height) =
             MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
 
-        // Build a peerset
         runtime.block_on(async move {
+            // Build a peerset
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version.clone())
                 .build();
 
             // Remove peers, test broadcast until there is only 1 peer left in the peerset
-            let mut new_number_of_peers = total_number_of_peers;
             for port in 1u16..total_number_of_peers as u16 {
                 peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port));
                 handles.remove(0);
@@ -233,12 +232,6 @@ proptest! {
 
                 // Make sure the message was broadcasted to the right number of peers
                 prop_assert_eq!(received, number_of_peers_to_broadcast);
-
-                // Exit the loop when we have only 1 peer left
-                new_number_of_peers -= 1;
-                if new_number_of_peers == 1 {
-                    break;
-                }
             }
 
             // Remove the last peer we have left in the peerset
