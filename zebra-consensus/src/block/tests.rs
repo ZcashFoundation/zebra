@@ -125,8 +125,8 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init_test(network);
 
-    let script = script::Verifier::new(state_service.clone());
-    let transaction = transaction::Verifier::new(network, script);
+    let script = script::Verifier::new();
+    let transaction = transaction::Verifier::new(network, state_service.clone(), script);
     let transaction = Buffer::new(BoxService::new(transaction), 1);
     let block_verifier = Buffer::new(
         BlockVerifier::new(network, state_service.clone(), transaction),
@@ -635,7 +635,8 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_single_transaction_block();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction.clone()));
+        let cached_ffi_transaction =
+            Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
         let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
         assert_eq!(tx_sigop_count, Ok(0));
         legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
@@ -646,7 +647,8 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_multi_transaction_block();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction.clone()));
+        let cached_ffi_transaction =
+            Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
         let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
         assert_eq!(tx_sigop_count, Ok(1));
         legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
@@ -668,7 +670,8 @@ fn legacy_sigops_count_for_historic_blocks() {
             .zcash_deserialize_into()
             .expect("block test vector is valid");
         for transaction in block.transactions {
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(transaction.clone()));
+            let cached_ffi_transaction =
+                Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
             legacy_sigop_count += cached_ffi_transaction
                 .legacy_sigop_count()
                 .expect("unexpected invalid sigop count");
