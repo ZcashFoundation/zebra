@@ -24,7 +24,8 @@ env:
 jobs:
 
   build:
-    name: Build
+    name: Build images
+    timeout-minutes: 180
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2.4.0
