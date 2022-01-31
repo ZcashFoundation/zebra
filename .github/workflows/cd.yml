@@ -110,6 +110,8 @@ jobs:
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
+          --service-account ${{ env.DEPLOY_SA }} \
+          --scopes cloud-platform \
           --tags zebrad
 
       # Check if our destination instance group exists already

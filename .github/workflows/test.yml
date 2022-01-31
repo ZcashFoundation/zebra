@@ -15,8 +15,9 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  ZONE: europe-west1-b
-  MACHINE_TYPE: n2-standard-8
+  REGION: us-central1
+  ZONE: us-central1-a
+  MACHINE_TYPE: c2d-standard-8
   DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
 jobs:
