@@ -51,6 +51,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
+          --container-stdin \
+          --container-tty \
           --container-image rust:buster \
           --container-mount-disk mount-path='/mainnet',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet-canopy" \
           --container-restart-policy never \
