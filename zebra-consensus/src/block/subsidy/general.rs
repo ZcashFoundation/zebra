@@ -9,7 +9,6 @@ use zebra_chain::{
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
     transaction::Transaction,
-    transparent,
 };
 
 use crate::parameters::subsidy::*;
@@ -69,41 +68,7 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
     }
 }
 
-/// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
-///
-/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-///
-/// `non_miner_reward` is the founders reward or funding stream value.
-/// If all the rewards for a block go to the miner, use `None`.
-#[allow(dead_code)]
-pub fn miner_subsidy(
-    height: Height,
-    network: Network,
-    non_miner_reward: Option<Amount<NonNegative>>,
-) -> Result<Amount<NonNegative>, Error> {
-    if let Some(non_miner_reward) = non_miner_reward {
-        block_subsidy(height, network)? - non_miner_reward
-    } else {
-        block_subsidy(height, network)
-    }
-}
-
-/// Returns a list of outputs in `Transaction`, which have a value equal to `Amount`.
-pub fn find_output_with_amount(
-    transaction: &Transaction,
-    amount: Amount<NonNegative>,
-) -> Vec<transparent::Output> {
-    // TODO: shielded coinbase - Heartwood
-    transaction
-        .outputs()
-        .iter()
-        .filter(|o| o.value == amount)
-        .cloned()
-        .collect()
-}
-
 /// Returns all output amounts in `Transaction`.
-#[allow(dead_code)]
 pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>> {
     transaction
         .outputs()
@@ -117,11 +82,6 @@ pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>>
 mod test {
     use super::*;
     use color_eyre::Report;
-
-    use crate::block::subsidy::{
-        founders_reward::founders_reward,
-        funding_streams::{funding_stream_values, height_for_first_halving},
-    };
 
     #[test]
     fn halving_test() -> Result<(), Report> {
@@ -297,60 +257,6 @@ mod test {
                 network
             )
         );
-
-        Ok(())
-    }
-
-    #[test]
-    fn miner_subsidy_test() -> Result<(), Report> {
-        zebra_test::init();
-
-        miner_subsidy_for_network(Network::Mainnet)?;
-        miner_subsidy_for_network(Network::Testnet)?;
-
-        Ok(())
-    }
-
-    fn miner_subsidy_for_network(network: Network) -> Result<(), Report> {
-        let blossom_height = Blossom.activation_height(network).unwrap();
-        let first_halving_height = height_for_first_halving(network);
-
-        // Miner reward before Blossom is 80% of the total block reward
-        // 80*12.5/100 = 10 ZEC
-        let founders_amount = founders_reward((blossom_height - 1).unwrap(), network)?;
-        assert_eq!(
-            Amount::try_from(1_000_000_000),
-            miner_subsidy(
-                (blossom_height - 1).unwrap(),
-                network,
-                Some(founders_amount)
-            )
-        );
-
-        // After blossom the total block reward is "halved", miner still get 80%
-        // 80*6.25/100 = 5 ZEC
-        let founders_amount = founders_reward(blossom_height, network)?;
-        assert_eq!(
-            Amount::try_from(500_000_000),
-            miner_subsidy(blossom_height, network, Some(founders_amount))
-        );
-
-        // After first halving, miner will get 2.5 ZEC per mined block (not counting fees)
-        let funding_stream_values = funding_stream_values(first_halving_height, network)?
-            .iter()
-            .map(|row| row.1)
-            .sum::<Result<Amount<NonNegative>, Error>>()
-            .unwrap();
-
-        assert_eq!(
-            Amount::try_from(250_000_000),
-            miner_subsidy(first_halving_height, network, Some(funding_stream_values))
-        );
-
-        // TODO: After second halving, there will be no funding streams, and
-        // miners will get all the block reward
-
-        // TODO: also add some very large halvings
 
         Ok(())
     }
