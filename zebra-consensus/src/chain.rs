@@ -24,7 +24,7 @@ use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::task::{spawn_blocking, JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
-use tracing::instrument;
+use tracing::{instrument, Span};
 
 use zebra_chain::{
     block::{self, Block},
@@ -215,19 +215,22 @@ where
 
     // The parameter download thread must be launched before initializing any verifiers.
     // Otherwise, the download might happen on the startup thread.
+    let span = Span::current();
     let groth16_download_handle = spawn_blocking(move || {
-        if !debug_skip_parameter_preload {
-            // The lazy static initializer does the download, if needed,
-            // and the file hash checks.
-            lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
-            tracing::info!("Groth16 pre-download and check task finished");
-        }
+        span.in_scope(|| {
+            if !debug_skip_parameter_preload {
+                // The lazy static initializer does the download, if needed,
+                // and the file hash checks.
+                lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
+                tracing::info!("Groth16 pre-download and check task finished");
+            }
+        })
     });
 
     // transaction verification
 
-    let script = script::Verifier::new(state_service.clone());
-    let transaction = transaction::Verifier::new(network, script);
+    let script = script::Verifier::new();
+    let transaction = transaction::Verifier::new(network, state_service.clone(), script);
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification

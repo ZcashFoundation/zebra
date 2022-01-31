@@ -23,9 +23,6 @@ pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
     NoCoinbase,
 
-    #[error("founders reward output not found")]
-    FoundersRewardNotFound,
-
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
 
