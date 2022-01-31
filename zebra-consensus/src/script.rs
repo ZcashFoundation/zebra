@@ -18,14 +18,8 @@ use crate::BoxError;
 /// The asynchronous script verification design is documented in [RFC4].
 ///
 /// [RFC4]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
-#[derive(Debug, Clone, Default)]
-pub struct Verifier {}
-
-impl Verifier {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq)]
+pub struct Verifier;
 
 /// A script verification request.
 #[derive(Debug)]

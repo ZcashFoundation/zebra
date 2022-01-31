@@ -89,23 +89,23 @@ impl CachedFfiTransaction {
         transaction: Arc<Transaction>,
         all_previous_outputs: Vec<transparent::Output>,
     ) -> Self {
-        let tx_to = transaction
+        let tx_to_serialized = transaction
             .zcash_serialize_to_vec()
             .expect("serialization into a vec is infallible");
 
-        let tx_to_ptr = tx_to.as_ptr();
-        let tx_to_len = tx_to
+        let tx_to_serialized_ptr = tx_to_serialized.as_ptr();
+        let tx_to_serialized_len = tx_to_serialized
             .len()
             .try_into()
             .expect("serialized transaction lengths are much less than u32::MAX");
         let mut err = 0;
 
-        let serialized_all_previous_outputs = all_previous_outputs
+        let all_previous_outputs_serialized = all_previous_outputs
             .zcash_serialize_to_vec()
             .expect("serialization into a vec is infallible");
         // TODO: pass to zcash_script after API update
-        let _all_previous_outputs_ptr = serialized_all_previous_outputs.as_ptr();
-        let _all_previous_outputs_len: u32 = serialized_all_previous_outputs
+        let _all_previous_outputs_serialized_ptr = all_previous_outputs_serialized.as_ptr();
+        let _all_previous_outputs_serialized_len: u32 = all_previous_outputs_serialized
             .len()
             .try_into()
             .expect("serialized transaction lengths are much less than u32::MAX");
@@ -115,7 +115,8 @@ impl CachedFfiTransaction {
         // the `all_previous_outputs_*` fields are created from a valid Rust `Vec`
         let precomputed = unsafe {
             zcash_script::zcash_script_new_precomputed_tx(
-                tx_to_ptr, tx_to_len,
+                tx_to_serialized_ptr,
+                tx_to_serialized_len,
                 // all_previous_outputs_ptr,
                 // all_previous_outputs_len,
                 &mut err,
@@ -150,7 +151,7 @@ impl CachedFfiTransaction {
     }
 
     /// Verify if the script in the input at `input_index` of a transaction correctly
-    /// spends the matching `transparent::Output` it refers to, with the `ConsensusBranchId`
+    /// spends the matching [`transparent::Output`] it refers to, with the [`ConsensusBranchId`]
     /// of the block containing the transaction.
     pub fn is_valid(&self, branch_id: ConsensusBranchId, input_index: usize) -> Result<(), Error> {
         let previous_output = self

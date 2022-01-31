@@ -22,7 +22,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{parameters::SLOW_START_SHIFT, script, transaction};
+use crate::{parameters::SLOW_START_SHIFT, transaction};
 
 use super::*;
 
@@ -125,8 +125,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init_test(network);
 
-    let script = script::Verifier::new();
-    let transaction = transaction::Verifier::new(network, state_service.clone(), script);
+    let transaction = transaction::Verifier::new(network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), 1);
     let block_verifier = Buffer::new(
         BlockVerifier::new(network, state_service.clone(), transaction),

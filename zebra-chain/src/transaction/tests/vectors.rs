@@ -32,6 +32,16 @@ lazy_static! {
     };
 }
 
+/// Build a mock output list for pre-V5 transactions, with (index+1)
+/// copies of `output`, which is used to computed the sighash.
+///
+/// Pre-V5, the entire output list is not used; only the output for the
+/// given index is read. Therefore, we just need a list where `array[index]`
+/// is the given `output`.
+fn mock_pre_v5_output_list(output: transparent::Output, index: usize) -> Vec<transparent::Output> {
+    iter::repeat(output).take(index + 1).collect()
+}
+
 #[test]
 fn transactionhash_struct_from_str_roundtrip() {
     zebra_test::init();
@@ -612,7 +622,7 @@ fn test_vec143_1() -> Result<()> {
         &transaction,
         HashType::ALL,
         NetworkUpgrade::Overwinter,
-        Default::default(),
+        &[],
         None,
     );
 
@@ -641,13 +651,12 @@ fn test_vec143_2() -> Result<()> {
     let lock_script = Script::new(&hex::decode("53")?);
     let input_ind = 1;
     let output = transparent::Output { value, lock_script };
-    let all_previous_outputs = vec![output.clone(), output];
+    let all_previous_outputs = mock_pre_v5_output_list(output, input_ind);
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::SINGLE,
         NetworkUpgrade::Overwinter,
-        // Pre-V5, only the matching output matters, so just use clones for the rest
         &all_previous_outputs,
         Some(input_ind),
     );
@@ -678,7 +687,7 @@ fn test_vec243_1() -> Result<()> {
         &transaction,
         HashType::ALL,
         NetworkUpgrade::Sapling,
-        Default::default(),
+        &[],
         None,
     );
 
@@ -717,13 +726,12 @@ fn test_vec243_2() -> Result<()> {
     let lock_script = Script::new(&[]);
     let input_ind = 1;
     let output = transparent::Output { value, lock_script };
-    let all_previous_outputs = vec![output.clone(), output];
+    let all_previous_outputs = mock_pre_v5_output_list(output, input_ind);
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::NONE,
         NetworkUpgrade::Sapling,
-        // Pre-V5, only the matching output matters, so just use clones for the rest
         &all_previous_outputs,
         Some(input_ind),
     );
@@ -743,13 +751,13 @@ fn test_vec243_2() -> Result<()> {
     let lock_script = Script::new(&[]);
     let prevout = transparent::Output { value, lock_script };
     let index = input_ind as usize;
+    let all_previous_outputs = mock_pre_v5_output_list(prevout, input_ind);
 
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &transaction,
         HashType::NONE,
         NetworkUpgrade::Sapling,
-        // Pre-V5, only the matching output matters, so just use clones for the rest
-        &[prevout.clone(), prevout],
+        &all_previous_outputs,
         Some(index),
     );
     let result = hex::encode(alt_sighash);
@@ -826,9 +834,8 @@ fn zip143_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
-        // Pre-V5, only the matching output matters, so just use clones for the rest
         let all_previous_outputs: Vec<_> = match output {
-            Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
+            Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
         let result = hex::encode(
@@ -863,9 +870,8 @@ fn zip243_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
-        // Pre-V5, only the matching output matters, so just use clones for the rest
         let all_previous_outputs: Vec<_> = match output {
-            Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
+            Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
         let result = hex::encode(
@@ -908,9 +914,8 @@ fn zip244_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
-        // Pre-V5, only the matching output matters, so just use clones for the rest
         let all_previous_outputs: Vec<_> = match output {
-            Some(output) => (0..=input_index.unwrap()).map(|_| output.clone()).collect(),
+            Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
         let result = hex::encode(transaction.sighash(
@@ -955,8 +960,7 @@ fn binding_signatures_for_network(network: Network) {
                     ..
                 } => {
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        let shielded_sighash =
-                            tx.sighash(upgrade, HashType::ALL, Default::default(), None);
+                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, &[], None);
 
                         let bvk = redjubjub::VerificationKey::try_from(
                             sapling_shielded_data.binding_verification_key(),
@@ -975,8 +979,7 @@ fn binding_signatures_for_network(network: Network) {
                     ..
                 } => {
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        let shielded_sighash =
-                            tx.sighash(upgrade, HashType::ALL, Default::default(), None);
+                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, &[], None);
 
                         let bvk = redjubjub::VerificationKey::try_from(
                             sapling_shielded_data.binding_verification_key(),
