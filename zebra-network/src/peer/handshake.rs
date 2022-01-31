@@ -958,19 +958,14 @@ where
                 })
                 .boxed();
 
-            use super::connection;
-            let server = Connection {
-                state: connection::State::AwaitingRequest,
-                request_timer: None,
-                cached_addrs: Vec::new(),
-                svc: inbound_service,
-                client_rx: server_rx.into(),
-                error_slot: error_slot.clone(),
+            let server = Connection::new(
+                inbound_service,
+                server_rx,
+                error_slot.clone(),
                 peer_tx,
                 connection_tracker,
-                metrics_label: connected_addr.get_transient_addr_label(),
-                last_metrics_state: None,
-            };
+                connected_addr,
+            );
 
             let connection_task = tokio::spawn(
                 server

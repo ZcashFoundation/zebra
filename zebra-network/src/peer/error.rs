@@ -21,6 +21,15 @@ where
     }
 }
 
+impl SharedPeerError {
+    /// Returns a debug-formatted string describing the inner [`PeerError`].
+    ///
+    /// Unfortunately, [`TracedError`] makes it impossible to get a reference to the original error.
+    pub fn inner_debug(&self) -> String {
+        format!("{:?}", self.0.as_ref())
+    }
+}
+
 /// An error related to peer connection handling.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
@@ -49,9 +58,13 @@ pub enum PeerError {
     #[error("Internal heartbeat task exited")]
     HeartbeatTaskExited,
 
-    /// The remote peer did not respond to a [`peer::Client`] request in time.
-    #[error("Client request timed out")]
-    ClientRequestTimeout,
+    /// Sending a message to a remote peer took too long.
+    #[error("Sending Client request timed out")]
+    ConnectionSendTimeout,
+
+    /// Receiving a response to a [`peer::Client`] request took too long.
+    #[error("Receiving client response timed out")]
+    ConnectionReceiveTimeout,
 
     /// A serialization error occurred while reading or writing a message.
     #[error("Serialization error: {0}")]
@@ -82,7 +95,8 @@ impl PeerError {
             PeerError::ClientCancelledHeartbeatTask => "ClientCancelledHeartbeatTask".into(),
             PeerError::HeartbeatTaskExited => "HeartbeatTaskExited".into(),
             PeerError::ConnectionTaskExited => "ConnectionTaskExited".into(),
-            PeerError::ClientRequestTimeout => "ClientRequestTimeout".into(),
+            PeerError::ConnectionSendTimeout => "ConnectionSendTimeout".into(),
+            PeerError::ConnectionReceiveTimeout => "ConnectionReceiveTimeout".into(),
             // TODO: add error kinds or summaries to `SerializationError`
             PeerError::Serialization(inner) => format!("Serialization({})", inner).into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
