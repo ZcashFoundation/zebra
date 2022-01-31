@@ -19,11 +19,12 @@ env:
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-8
   DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+  IMAGE_NAME: zebrad-test
 
 jobs:
 
-  test:
-    name: Run all tests
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2.4.0
@@ -40,39 +41,91 @@ jobs:
         with:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
-      - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.4.0
+      # Setup Docker Buildx to allow use of docker cache layers from GH
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
         with:
-          project_id: ${{ env.PROJECT_ID }}
+          driver-opts: network=host
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v1.12.0
+        with:
+          registry: us-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      # Build and push image to Google Artifact Registry
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@v2.8.0
+        with:
+          target: builder
+          context: .
+          file: ./docker/Dockerfile.build
+          tags: |
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+          build-args: |
+            NETWORK=${{ github.event.inputs.network || env.NETWORK }}
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_BACKTRACE=full
+            ZEBRA_SKIP_NETWORK_TESTS="1"
+            CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
+            RUST_LOG=debug
+            SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
+          push: true
+          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+
+    name: Run all tests
+    runs-on: ubuntu-latest
+    steps:
+    needs: build
+      - uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v1.12.0
+        with:
+          registry: us-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      - name: Run workspace tests with Zunstable-options
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} cargo test --workspace -- -Zunstable-options --include-ignored
+        env:
+          ZEBRA_SKIP_IPV6_TESTS: "1"
 
       # Creates Compute Engine virtual machine instance w/ disks
-      - name: Create instance
+      # TODO: Remove hardcoded value zebrad-cache-1558f3378-mainnet-canopy
+      - name: Sync past mandatory checkpoint
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --container-stdin \
           --container-tty \
-          --container-image rust:buster \
+          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-command "/bin/bash" \
+          --container-arg="-c" \
+          --container-arg="cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet" \
           --container-mount-disk mount-path='/mainnet',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet-canopy" \
           --container-restart-policy never \
-          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet-canopy",image=zebrad-cache-1558f3378-mainnet-canopy \
+          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet-canopy,auto-delete=yes,size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-1558f3378-mainnet-canopy \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      # Build and run test container
-      - name: Run all tests
-        run: |
-          gcloud compute ssh "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" --command \
-          "git clone -b ${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }} https://github.com/ZcashFoundation/zebra.git &&
-          cd zebra/ &&
-          docker build --build-arg SHORT_SHA=${{ env.GITHUB_SHA_SHORT }} -f docker/Dockerfile.test -t zebrad-test . &&
-          docker run -t -e ZEBRA_SKIP_IPV6_TESTS=1 zebrad-test:latest cargo test --workspace --no-fail-fast -- -Zunstable-options --include-ignored &&
-          docker run -t -e ZEBRA_SKIP_IPV6_TESTS=1 --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet-canopy,target=/zebrad-cache zebrad-test:latest cargo test --verbose --features test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet
-          "
       # Clean up
       - name: Delete test instance
         # Always run even if the earlier step fails
