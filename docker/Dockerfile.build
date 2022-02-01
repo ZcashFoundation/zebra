@@ -42,7 +42,7 @@ RUN rustc -V; cargo -V; rustup -V
 COPY . .
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
-RUN cd zebrad/; cargo build --release --features enable-sentry --bin zebrad
+RUN cargo build --release --features enable-sentry --bin zebrad
 RUN cargo test --release --features enable-sentry --workspace --no-run
 
 # Runner image
