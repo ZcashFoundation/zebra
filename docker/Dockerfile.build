@@ -41,9 +41,10 @@ ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
 RUN cargo test --locked --jobs 2 --release --features enable-sentry --workspace --no-run
-RUN cargo run --bin zebrad download
+# Pre-download Zcash Sprout and Sapling parameters
+RUN cargo run --locked --jobs 2 --release --features enable-sentry --bin zebrad download
 
-CMD ["cargo" "test" "--workspace"]
+CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
