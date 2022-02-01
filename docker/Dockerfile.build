@@ -19,7 +19,7 @@ RUN apt-get update && \
     make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
     rm -Rf /var/lib/apt/lists/* /tmp/*
 # Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
 # Build zebra
 ARG SHORT_SHA
@@ -40,7 +40,7 @@ COPY . .
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
 RUN cd zebrad/; cargo build --release --features enable-sentry
-RUN cargo test --workspace --no-run
+RUN cargo test --release --features enable-sentry --workspace --no-run
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
