@@ -41,7 +41,7 @@ proptest! {
         runtime.block_on(async move {
             // The real stream and sink are from a split TCP connection,
             // but that doesn't change how the state machine behaves.
-            let (mut peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+            let (mut peer_tx, peer_rx) = mpsc::channel(1);
 
             let (
                 connection,
@@ -51,7 +51,7 @@ proptest! {
                 shared_error_slot,
             ) = new_test_connection();
 
-            let connection_task = tokio::spawn(connection.run(peer_inbound_rx));
+            let connection_task = tokio::spawn(connection.run(peer_rx));
 
             let response_to_first_request = send_block_request(
                 first_block.hash(),
@@ -71,13 +71,13 @@ proptest! {
             .await;
 
             // Reply to first request
-            peer_inbound_tx
+            peer_tx
                 .send(Ok(Message::Block(first_block)))
                 .await
                 .expect("Failed to send response to first block request");
 
             // Reply to second request
-            peer_inbound_tx
+            peer_tx
                 .send(Ok(Message::Block(second_block.clone())))
                 .await
                 .expect("Failed to send response to second block request");
@@ -100,7 +100,7 @@ proptest! {
             inbound_service.expect_no_requests().await?;
 
             // Stop the connection thread
-            mem::drop(peer_inbound_tx);
+            mem::drop(peer_tx);
 
             let connection_task_result = connection_task.await;
             prop_assert!(connection_task_result.is_ok());
@@ -114,11 +114,11 @@ proptest! {
 fn new_test_connection() -> (
     Connection<
         MockService<Request, Response, PropTestAssertion>,
-        SinkMapErr<mpsc::UnboundedSender<Message>, fn(mpsc::SendError) -> SerializationError>,
+        SinkMapErr<mpsc::Sender<Message>, fn(mpsc::SendError) -> SerializationError>,
     >,
     mpsc::Sender<ClientRequest>,
     MockService<Request, Response, PropTestAssertion>,
-    mpsc::UnboundedReceiver<Message>,
+    mpsc::Receiver<Message>,
     ErrorSlot,
 ) {
     super::new_test_connection()
@@ -127,7 +127,7 @@ fn new_test_connection() -> (
 async fn send_block_request(
     block: block::Hash,
     client_requests: &mut mpsc::Sender<ClientRequest>,
-    outbound_messages: &mut mpsc::UnboundedReceiver<Message>,
+    outbound_messages: &mut mpsc::Receiver<Message>,
 ) -> oneshot::Receiver<Result<Response, SharedPeerError>> {
     let (response_sender, response_receiver) = oneshot::channel();
 
