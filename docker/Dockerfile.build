@@ -10,7 +10,7 @@ WORKDIR /app
 
 FROM chef AS planner
 COPY . .
-RUN cargo chef prepare  --recipe-path recipe.json
+RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
@@ -18,7 +18,7 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     llvm libclang-dev clang ca-certificates && \
-    rm -Rf /var/lib/apt/lists/* /tmp/*
+    rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
@@ -30,17 +30,17 @@ RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 ARG SHORT_SHA
 ENV SHORT_SHA $SHORT_SHA
 ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE ${RUST_BACKTRACE:-full}
-# Skip test on debian based OS by default as compilation fails
-ARG ZEBRA_SKIP_NETWORK_TESTS
-ENV ZEBRA_SKIP_NETWORK_TESTS ${ZEBRA_SKIP_NETWORK_TESTS:-1}
+ENV RUST_BACKTRACE ${RUST_BACKTRACE:-1}
+# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS
+ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
 
 ENV CARGO_HOME /app/.cargo/
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
 COPY . .
-RUN cargo build --release --features enable-sentry --bin zebrad
-RUN cargo test --release --features enable-sentry --workspace --no-run
+RUN cargo build --jobs 2 --release --features enable-sentry --bin zebrad
+RUN cargo test --jobs 2 --release --features enable-sentry --workspace --no-run
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
