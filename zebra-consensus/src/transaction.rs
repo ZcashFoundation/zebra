@@ -457,12 +457,7 @@ where
         let mut spent_utxos = HashMap::new();
         let mut spent_outputs = Vec::new();
         for input in inputs {
-            if let transparent::Input::PrevOut {
-                outpoint,
-                unlock_script: _,
-                sequence: _,
-            } = input
-            {
+            if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UXTO in known_utxos, discarding query");
