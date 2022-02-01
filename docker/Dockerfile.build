@@ -17,7 +17,7 @@ COPY --from=planner /app/recipe.json recipe.json
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    make cmake g++ gcc llvm libclang-dev clang ca-certificates && \
+    llvm libclang-dev clang ca-certificates && \
     rm -Rf /var/lib/apt/lists/* /tmp/*
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
@@ -36,12 +36,9 @@ ARG ZEBRA_SKIP_NETWORK_TESTS
 ENV ZEBRA_SKIP_NETWORK_TESTS ${ZEBRA_SKIP_NETWORK_TESTS:-1}
 
 ENV CARGO_HOME /app/.cargo/
-
-RUN rustc -V; cargo -V; rustup -V
-
-COPY . .
 # Build and then compile tests
 # Compile, but don't run tests (--no-run). Add verbosity and colors
+COPY . .
 RUN cargo build --release --features enable-sentry --bin zebrad
 RUN cargo test --release --features enable-sentry --workspace --no-run
 
@@ -79,9 +76,9 @@ RUN /usr/local/bin/zebrad download
 EXPOSE 3000 8233 18233
 
 ARG RUST_LOG
-ENV RUST_LOG ${RUST_LOG:-debug}
+ENV RUST_LOG ${RUST_LOG:-info}
 ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE ${RUST_BACKTRACE:-full}
+ENV RUST_BACKTRACE ${RUST_BACKTRACE:-1}
 ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
