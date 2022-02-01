@@ -271,14 +271,10 @@ proptest! {
                 .build();
 
             // Remove peers
-            for port in 1u16..total_number_of_peers as u16 {
+            for port in 1u16..=total_number_of_peers as u16 {
                 peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port));
                 handles.remove(0);
             }
-
-            // Remove the last peer we have left in the peerset
-            peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), total_number_of_peers as u16));
-            handles.remove(0);
 
             // this will panic as expected
             let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
