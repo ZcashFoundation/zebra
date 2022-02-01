@@ -3,6 +3,7 @@
 # - chef: installs cargo-chef
 # - planner: computes the recipe file
 # - builder: caches our dependencies and builds the binary
+# - tester: builds and run tests
 # - runtime: is our runtime environment
 FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
@@ -30,15 +31,19 @@ RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 # Build zebra
 ARG RUST_BACKTRACE=1
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
+
+COPY . .
+RUN cargo build --locked --jobs 2 --release --features enable-sentry --bin zebrad
+
+FROM builder AS tester
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
-# Build and then compile tests
-# Compile, but don't run tests (--no-run). Add verbosity and colors
-COPY . .
-RUN cargo build --locked --jobs 2 --release --features enable-sentry --bin zebrad
 RUN cargo test --locked --jobs 2 --release --features enable-sentry --workspace --no-run
+RUN cargo run --bin zebrad download
+
+CMD ["cargo" "test" "--workspace"]
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
