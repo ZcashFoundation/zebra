@@ -701,16 +701,18 @@ where
 
         if let Some(joinsplit_data) = joinsplit_data {
             for joinsplit in joinsplit_data.joinsplits() {
-                // Consensus rule: The proof π_ZKSpend MUST be valid given a
-                // primary input formed from the relevant other fields and h_{Sig}
+                // # Consensus
+                //
+                // > The proof π_ZKJoinSplit MUST be valid given a
+                // > primary input formed from the relevant other fields and h_{Sig}
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each JoinSplit description while adding the
                 // resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
                     DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
                 ));

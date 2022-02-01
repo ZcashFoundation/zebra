@@ -138,7 +138,10 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
         .output_values_to_sprout()
         .zip(tx.input_values_from_sprout());
     for (vpub_old, vpub_new) in vpub_pairs {
+        // # Consensus
+        //
         // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+        //
         // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
         if *vpub_old != zero && *vpub_new != zero {
             return Err(TransactionError::BothVPubsNonZero);
@@ -162,7 +165,10 @@ pub fn disabled_add_to_sprout_pool(
         .activation_height(network)
         .expect("Canopy activation height must be present for both networks");
 
-    // [Canopy onward]: `vpub_old` MUST be zero.
+    // # Consensus
+    //
+    // > [Canopy onward]: `vpub_old` MUST be zero.
+    //
     // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
         let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
