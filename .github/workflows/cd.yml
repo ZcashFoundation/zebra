@@ -66,7 +66,6 @@ jobs:
           RUST_BACKTRACE=1
           ZEBRA_SKIP_IPV6_TESTS="1"
           CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
-          RUST_LOG=info
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
         cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:buildcache
