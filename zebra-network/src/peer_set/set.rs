@@ -659,7 +659,7 @@ where
     ) -> <Self as tower::Service<Request>>::Future {
         let inventory_peer_list = self
             .inventory_registry
-            .advertising_peers(&hash)
+            .advertising_peers(hash)
             .filter(|&key| self.ready_services.contains_key(key))
             .copied()
             .collect();

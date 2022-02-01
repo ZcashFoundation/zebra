@@ -156,26 +156,50 @@ impl InventoryRegistry {
         }
     }
 
-    /// Returns an iterator over addrs of peers that have recently advertised
-    /// having `hash` in their inventory.
-    pub fn advertising_peers(&self, hash: &InventoryHash) -> impl Iterator<Item = &SocketAddr> {
-        let prev = self.prev.get(hash).into_iter();
-        let current = self.current.get(hash).into_iter();
-
-        prev.chain(current)
-            .flatten()
-            .filter_map(|(addr, status)| status.advertised().map(|()| addr))
+    /// Returns an iterator over addrs of peers that have recently advertised `hash` in their inventory.
+    pub fn advertising_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &SocketAddr> {
+        self.status_peers(hash)
+            .filter_map(|addr_status| addr_status.advertised())
     }
 
-    /// Returns an iterator over addrs of peers that are recently missing `hash` in their inventory.
+    /// Returns an iterator over addrs of peers that have recently missed `hash` in their inventory.
     #[allow(dead_code)]
-    pub fn missing_peers(&self, hash: &InventoryHash) -> impl Iterator<Item = &SocketAddr> {
-        let prev = self.prev.get(hash).into_iter();
-        let current = self.current.get(hash).into_iter();
+    pub fn missing_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &SocketAddr> {
+        self.status_peers(hash)
+            .filter_map(|addr_status| addr_status.missing())
+    }
 
-        prev.chain(current)
+    /// Returns an iterator over peer inventory statuses for `hash`.
+    ///
+    /// Prefers current statuses to previously rotated statuses for the same peer.
+    pub fn status_peers(
+        &self,
+        hash: InventoryHash,
+    ) -> impl Iterator<Item = InventoryStatus<&SocketAddr>> {
+        let prev = self.prev.get(&hash);
+        let current = self.current.get(&hash);
+
+        // # Security
+        //
+        // Prefer `current` statuses for the same peer over previously rotated statuses.
+        // This makes sure Zebra is using the most up-to-date network information.
+        let prev = prev
+            .into_iter()
             .flatten()
-            .filter_map(|(addr, status)| status.missing().map(|()| addr))
+            .filter(move |(addr, _status)| !self.has_current_status(hash, **addr));
+        let current = current.into_iter().flatten();
+
+        current
+            .chain(prev)
+            .map(|(addr, status)| status.map(|()| addr))
+    }
+
+    /// Returns true if there is a current status entry for `hash` and `addr`.
+    pub fn has_current_status(&self, hash: InventoryHash, addr: SocketAddr) -> bool {
+        self.current
+            .get(&hash)
+            .and_then(|current| current.get(&addr))
+            .is_some()
     }
 
     /// Drive periodic inventory tasks
@@ -223,12 +247,26 @@ impl InventoryRegistry {
     }
 
     /// Record the given inventory `change` for the peer `addr`.
+    ///
+    /// `Missing` markers are not updated until the registry rotates, for security reasons.
     fn register(&mut self, change: InventoryChange) {
-        let marker = change.marker();
+        let new_status = change.marker();
         let (invs, addr) = change.inner();
 
         for inv in invs {
-            self.current.entry(inv).or_default().insert(addr, marker);
+            let current = self.current.entry(inv).or_default();
+
+            // # Security
+            //
+            // Prefer `missing` over `advertised`, so malicious peers can't reset their own entries,
+            // and funnel multiple failing requests to themselves.
+            if let Some(old_status) = current.get(&addr) {
+                if old_status.is_missing() && new_status.is_advertised() {
+                    continue;
+                }
+            }
+
+            current.insert(addr, new_status);
         }
     }
 
