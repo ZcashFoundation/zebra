@@ -78,11 +78,12 @@ jobs:
           cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
-
+  test:
     name: Run all tests
     runs-on: ubuntu-latest
-    steps:
     needs: build
+
+    steps:
       - uses: actions/checkout@v2.4.0
         with:
           persist-credentials: false
