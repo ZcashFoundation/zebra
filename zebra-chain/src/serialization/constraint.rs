@@ -171,7 +171,7 @@ impl<T> From<AtLeastOne<T>> for Vec<T> {
     }
 }
 
-// `IntoIterator<Item = T>`, but not `Item = &mut T`, because that could break the constraint
+// `IntoIterator` for `T` and `&mut T`, because iterators can't remove items
 
 impl<T> IntoIterator for AtLeastOne<T> {
     type Item = T;
@@ -180,6 +180,13 @@ impl<T> IntoIterator for AtLeastOne<T> {
 
     fn into_iter(self) -> std::vec::IntoIter<T> {
         self.inner.into_iter()
+    }
+}
+
+impl<T> AtLeastOne<T> {
+    /// Returns an iterator that allows modifying each value.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.inner.iter_mut()
     }
 }
 
