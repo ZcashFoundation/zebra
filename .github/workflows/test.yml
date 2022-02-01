@@ -14,11 +14,13 @@ on:
       - '.github/workflows/test.yml'
 
 env:
+  CARGO_INCREMENTAL: '1'
+  NETWORK: Testnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2-standard-4
-  DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
   IMAGE_NAME: zebrad-test
 
 jobs:
