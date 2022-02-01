@@ -169,9 +169,7 @@ proptest! {
 
     /// Test the peerset will always broadcast iff there is at least one
     /// peer in the set.
-    /// Peerset will panic a if a rquest is sent and no more peers are available.
     #[test]
-    #[should_panic(expected = "requests must be routed to at least one peer")]
     fn peerset_always_broadcasts(
         total_number_of_peers in (2..10usize)
     ) {
@@ -230,8 +228,52 @@ proptest! {
                     };
                 }
 
-                // Make sure the message was broadcasted to the right number of peers
+                // Make sure the message is always broadcasted to the right number of peers
                 prop_assert_eq!(received, number_of_peers_to_broadcast);
+            }
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test the peerset panics if a request is sent and no more peers are available.
+    #[test]
+    #[should_panic(expected = "requests must be routed to at least one peer")]
+    fn panics_when_broadcasting_to_no_peers(
+        total_number_of_peers in (2..10usize)
+    ) {
+        // Get a dummy block hash to help us construct a valid request to be broadcasted
+        let block: block::Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let block_hash = block::Hash::from(&block);
+
+        // Start the runtime
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        // All peers will have the current version
+        let peer_versions = vec![CURRENT_NETWORK_PROTOCOL_VERSION; total_number_of_peers];
+        let peer_versions = PeerVersions {
+            peer_versions,
+        };
+
+        // Get peers and handles
+        let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
+        let (minimum_peer_version, _best_tip_height) =
+            MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+
+        runtime.block_on(async move {
+            // Build a peerset
+            let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+                .with_discover(discovered_peers)
+                .with_minimum_peer_version(minimum_peer_version.clone())
+                .build();
+
+            // Remove peers
+            for port in 1u16..total_number_of_peers as u16 {
+                peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port));
+                handles.remove(0);
             }
 
             // Remove the last peer we have left in the peerset
