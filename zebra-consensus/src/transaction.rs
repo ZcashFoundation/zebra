@@ -13,7 +13,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
-    FutureExt, TryFutureExt,
+    FutureExt,
 };
 use tower::{timeout::Timeout, Service, ServiceExt};
 use tracing::Instrument;
@@ -73,11 +73,11 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: Network, state: ZS, script_verifier: script::Verifier) -> Self {
+    pub fn new(network: Network, state: ZS) -> Self {
         Self {
             network,
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
-            script_verifier,
+            script_verifier: script::Verifier::default(),
         }
     }
 }
@@ -294,7 +294,7 @@ where
 
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
-        let script_verifier = self.script_verifier.clone();
+        let script_verifier = self.script_verifier;
         let network = self.network;
         let state = self.state.clone();
 
@@ -457,31 +457,26 @@ where
         let mut spent_utxos = HashMap::new();
         let mut spent_outputs = Vec::new();
         for input in inputs {
-            match input {
-                transparent::Input::PrevOut {
-                    outpoint,
-                    unlock_script: _,
-                    sequence: _,
-                } => {
-                    tracing::trace!("awaiting outpoint lookup");
-                    let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                        tracing::trace!("UXTO in known_utxos, discarding query");
-                        output.utxo.clone()
+            if let transparent::Input::PrevOut { outpoint, .. } = input {
+                tracing::trace!("awaiting outpoint lookup");
+                let utxo = if let Some(output) = known_utxos.get(outpoint) {
+                    tracing::trace!("UXTO in known_utxos, discarding query");
+                    output.utxo.clone()
+                } else {
+                    let query = state
+                        .clone()
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+                    if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        utxo
                     } else {
-                        let query = state
-                            .clone()
-                            .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
-                        if let zebra_state::Response::Utxo(utxo) = query.await? {
-                            utxo
-                        } else {
-                            unreachable!("AwaitUtxo always responds with Utxo")
-                        }
-                    };
-                    tracing::trace!(?utxo, "got UTXO");
-                    spent_outputs.push(utxo.output.clone());
-                    spent_utxos.insert(*outpoint, utxo);
-                }
-                transparent::Input::Coinbase { .. } => continue,
+                        unreachable!("AwaitUtxo always responds with Utxo")
+                    }
+                };
+                tracing::trace!(?utxo, "got UTXO");
+                spent_outputs.push(utxo.output.clone());
+                spent_utxos.insert(*outpoint, utxo);
+            } else {
+                continue;
             }
         }
         Ok((spent_utxos, spent_outputs))
@@ -689,7 +684,7 @@ where
                         input_index,
                     };
 
-                    script_verifier.clone().oneshot(request).map_ok(|_r| {})
+                    script_verifier.oneshot(request)
                 })
                 .collect();
 

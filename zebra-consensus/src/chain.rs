@@ -38,7 +38,7 @@ use crate::{
     block::VerifyBlockError,
     checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
-    script, transaction, BoxError, Config,
+    transaction, BoxError, Config,
 };
 
 #[cfg(test)]
@@ -229,8 +229,7 @@ where
 
     // transaction verification
 
-    let script = script::Verifier::new();
-    let transaction = transaction::Verifier::new(network, state_service.clone(), script);
+    let transaction = transaction::Verifier::new(network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
