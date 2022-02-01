@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: 'mainnet'
+        default: 'Mainnet'
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}

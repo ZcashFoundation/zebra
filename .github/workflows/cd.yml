@@ -8,10 +8,11 @@ on:
       checkpoint_sync:
         default: true
   push:
-    branches:
-      - main
+    # branches:
+    #   - main
 
 env:
+  CARGO_INCREMENTAL: '1'
   NETWORK: Mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
@@ -67,27 +68,22 @@ jobs:
         build-args: |
           NETWORK=${{ github.event.inputs.network || env.NETWORK }}
           SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-          RUST_BACKTRACE=full
-          ZEBRA_SKIP_NETWORK_TESTS="1"
+          RUST_BACKTRACE=1
+          ZEBRA_SKIP_IPV6_TESTS="1"
           CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
-          RUST_LOG=debug
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
         cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:buildcache
         cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:buildcache,mode=max
 
   deploy-nodes:
-    name: Deploy mainnet nodes
+    name: Deploy Mainnet nodes
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'push'
 
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
 
@@ -151,10 +147,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
 
