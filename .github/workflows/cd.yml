@@ -8,8 +8,8 @@ on:
       checkpoint_sync:
         default: true
   push:
-    # branches:
-    #   - main
+    branches:
+      - main
 
 env:
   CARGO_INCREMENTAL: '1'
