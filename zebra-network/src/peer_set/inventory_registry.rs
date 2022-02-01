@@ -35,13 +35,15 @@ type InventoryMarker = InventoryStatus<()>;
 pub enum InventoryStatus<T: Clone> {
     /// An advertised inventory hash.
     ///
-    /// For performance reasons, advertisements should only be sent for hashes that are rare on the network.
+    /// For performance reasons, advertisements should only be tracked
+    /// for hashes that are rare on the network.
+    /// So Zebra only tracks single-block inventory messages.
     Advertised(T),
 
     /// An inventory hash rejected by a peer.
     ///
     /// For security reasons, all `notfound` rejections should be tracked.
-    /// This also helps with performance, if the hash is rare.
+    /// This also helps with performance, if the hash is rare on the network.
     #[allow(dead_code)]
     Missing(T),
 }
@@ -114,6 +116,11 @@ impl<T: Clone> InventoryStatus<T> {
         match self {
             Advertised(item) | Missing(item) => item.clone(),
         }
+    }
+
+    /// Get a marker for the status, without any associated data.
+    pub fn marker(&self) -> InventoryMarker {
+        self.as_ref().map(|_inner| ())
     }
 
     /// Maps an `InventoryStatus<T>` to `InventoryStatus<U>` by applying a function to a contained value.
@@ -217,11 +224,11 @@ impl InventoryRegistry {
 
     /// Record the given inventory `change` for the peer `addr`.
     fn register(&mut self, change: InventoryChange) {
-        let status = change.as_ref().map(|_| ());
+        let marker = change.marker();
         let (invs, addr) = change.inner();
 
         for inv in invs {
-            self.current.entry(inv).or_default().insert(addr, status);
+            self.current.entry(inv).or_default().insert(addr, marker);
         }
     }
 
