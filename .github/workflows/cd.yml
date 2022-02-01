@@ -12,6 +12,7 @@ on:
       - main
 
 env:
+  CARGO_INCREMENTAL: '1'
   NETWORK: Mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
@@ -79,10 +80,6 @@ jobs:
     if: github.event_name == 'push'
 
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
 
@@ -146,10 +143,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
 
