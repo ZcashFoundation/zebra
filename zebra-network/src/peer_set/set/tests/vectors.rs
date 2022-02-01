@@ -37,10 +37,9 @@ fn peer_set_ready_single_connection() {
         .expect("we always have at least one client");
 
     // Client did not received anything yet
-    assert_eq!(
-        std::mem::discriminant(&client_handle.try_to_receive_outbound_client_request()),
-        std::mem::discriminant(&ReceiveRequestAttempt::Empty)
-    );
+    assert!(client_handle
+        .try_to_receive_outbound_client_request()
+        .is_empty());
 
     // Build a peerset
     runtime.block_on(async move {
@@ -62,10 +61,9 @@ fn peer_set_ready_single_connection() {
             .expect("peer set service is always ready");
 
         // Make sure the client did not received anything yet
-        assert_eq!(
-            std::mem::discriminant(&client_handle.try_to_receive_outbound_client_request()),
-            std::mem::discriminant(&ReceiveRequestAttempt::Empty)
-        );
+        assert!(client_handle
+            .try_to_receive_outbound_client_request()
+            .is_empty());
 
         // Make a call to the peer set that returns a future
         let fut = peer_ready1.call(Request::Peers);
