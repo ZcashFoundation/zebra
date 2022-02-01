@@ -77,7 +77,7 @@ jobs:
         cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:buildcache,mode=max
 
   deploy-nodes:
-    name: Deploy mainnet nodes
+    name: Deploy Mainnet nodes
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
