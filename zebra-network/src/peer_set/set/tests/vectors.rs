@@ -116,6 +116,12 @@ fn peer_set_ready_multiple_connections() {
     let runtime = zebra_test::init_async();
     let _guard = runtime.enter();
 
+    // Pause the runtime's timer so that it advances automatically.
+    //
+    // CORRECTNESS: This test does not depend on external resources that could really timeout, like
+    // real network connections.
+    tokio::time::pause();
+
     // Get peers and client handles of them
     let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
     let (minimum_peer_version, _best_tip_height) =
@@ -161,8 +167,6 @@ fn peer_set_ready_multiple_connections() {
 
         // Peer set hangs when no more connections are present
         let peer_ready = peer_set.ready();
-        assert!(timeout(Duration::from_millis(10), peer_ready)
-            .await
-            .is_err());
+        assert!(timeout(Duration::from_secs(10), peer_ready).await.is_err());
     });
 }
