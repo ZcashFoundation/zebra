@@ -21,6 +21,7 @@ env:
   NETWORK: Testnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
+  GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2-standard-4
@@ -53,6 +54,13 @@ jobs:
           username: _json_key
           password: ${{ secrets.GOOGLE_CREDENTIALS }}
 
+      - name: Login to Google Container Registry
+        uses: docker/login-action@v1.12.0
+        with:
+          registry: gcr.io
+          username: _json_key
+          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+
       # Build and push image to Google Artifact Registry
       - name: Build & push
         id: docker_build
@@ -64,6 +72,8 @@ jobs:
           tags: |
             ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+            ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
           build-args: |
             NETWORK=${{ github.event.inputs.network || env.NETWORK }}
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
@@ -73,14 +83,13 @@ jobs:
             RUST_LOG=debug
             SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
           push: true
-          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   test:
     name: Run all tests
     runs-on: ubuntu-latest
     needs: build
-
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -124,14 +133,15 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      - name: Wait regeneration for 2 hours
-        run: sleep 7200s
-        shell: bash
+      - name: Wait for sync process to end
+        run: |
+          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" --command \
+          docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})
 
       # Create image from disk that will be used to sync past mandatory checkpoint test
       - name: Create image from state disk
         # Only run if the earlier step succeeds
-        if: steps.regenerate-state.outcome == 'success'
+        if: github.event_name == 'workflow_dispatch' && steps.regenerate-state.outcome == 'success'
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
@@ -146,7 +156,6 @@ jobs:
       # TODO: Remove hardcoded value zebrad-cache-1558f3378-mainnet-canopy
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
-        if: github.event_name == 'push'
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 10GB \
@@ -165,9 +174,10 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      - name: Wait sync for 2 hours
-        run: sleep 7200s
-        shell: bash
+      - name: Wait for sync process to end
+        run: |
+          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" --command \
+          docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})
 
       - name: Delete test instance
         # Always run even if the earlier step fails
