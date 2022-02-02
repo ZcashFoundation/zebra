@@ -29,7 +29,6 @@ use zebra_chain::{
     block,
     chain_tip::{ChainTip, NoChainTip},
     parameters::Network,
-    serialization::AtLeastOne,
 };
 
 use crate::{
@@ -940,20 +939,28 @@ where
                             match hashes.as_slice() {
                                 [hash @ InventoryHash::Block(_)] => {
                                     debug!(?hash, "registering gossiped block inventory for peer");
-                                    let change = (AtLeastOne::from_one(*hash), transient_addr);
-                                    let _ = inv_collector.send(InventoryChange::Advertised(change));
+
+                                    // The peer set and inv collector use the peer's remote
+                                    // address as an identifier
+                                    let _ = inv_collector.send(InventoryChange::new_advertised(
+                                        *hash,
+                                        transient_addr,
+                                    ));
                                 }
                                 [hashes @ ..] => {
-                                    for hash in hashes {
-                                        if let Some(unmined_tx_id) = hash.unmined_tx_id() {
-                                            debug!(?unmined_tx_id, "registering unmined transaction inventory for peer");
-                                            // The peer set and inv collector use the peer's remote
-                                            // address as an identifier
-                                            let change = (AtLeastOne::from_one(*hash), transient_addr);
-                                            let _ = inv_collector.send(InventoryChange::Advertised(change));
-                                        } else {
-                                            trace!(?hash, "ignoring non-transaction inventory hash in multi-hash list")
-                                        }
+                                    let hashes =
+                                        hashes.iter().filter(|hash| hash.unmined_tx_id().is_some());
+
+                                    debug!(
+                                        ?hashes,
+                                        "registering unmined transaction inventory for peer"
+                                    );
+
+                                    if let Some(change) = InventoryChange::new_advertised_multi(
+                                        hashes,
+                                        transient_addr,
+                                    ) {
+                                        let _ = inv_collector.send(change);
                                     }
                                 }
                             }

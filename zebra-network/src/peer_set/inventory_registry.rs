@@ -89,6 +89,42 @@ impl std::fmt::Debug for InventoryRegistry {
     }
 }
 
+impl InventoryChange {
+    /// Returns a new advertised inventory change from a single hash.
+    pub fn new_advertised(hash: InventoryHash, peer: SocketAddr) -> Self {
+        InventoryStatus::Advertised((AtLeastOne::from_one(hash), peer))
+    }
+
+    /// Returns a new missing inventory change from a single hash.
+    #[allow(dead_code)]
+    pub fn new_missing(hash: InventoryHash, peer: SocketAddr) -> Self {
+        InventoryStatus::Missing((AtLeastOne::from_one(hash), peer))
+    }
+
+    /// Returns a new advertised multiple inventory change, if `hashes` contains at least one change.
+    pub fn new_advertised_multi<'a>(
+        hashes: impl Iterator<Item = &'a InventoryHash>,
+        peer: SocketAddr,
+    ) -> Option<Self> {
+        let hashes: Vec<InventoryHash> = hashes.copied().collect();
+        let hashes = hashes.try_into().ok();
+
+        hashes.map(|hashes| InventoryStatus::Advertised((hashes, peer)))
+    }
+
+    /// Returns a new missing multiple inventory change, if `hashes` contains at least one change.
+    #[allow(dead_code)]
+    pub fn new_missing_multi<'a>(
+        hashes: impl Iterator<Item = &'a InventoryHash>,
+        peer: SocketAddr,
+    ) -> Option<Self> {
+        let hashes: Vec<InventoryHash> = hashes.copied().collect();
+        let hashes = hashes.try_into().ok();
+
+        hashes.map(|hashes| InventoryStatus::Missing((hashes, peer)))
+    }
+}
+
 impl<T: Clone> InventoryStatus<T> {
     /// Returns true if the inventory item was advertised.
     #[allow(dead_code)]
