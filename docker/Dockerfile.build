@@ -33,16 +33,16 @@ ARG RUST_BACKTRACE=1
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
 
 COPY . .
-RUN cargo build --locked --jobs 2 --release --features enable-sentry --bin zebrad
+RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
 FROM builder AS tester
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
-RUN cargo test --locked --jobs 2 --release --features enable-sentry --workspace --no-run
+RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 # Pre-download Zcash Sprout and Sapling parameters
-RUN cargo run --locked --jobs 2 --release --features enable-sentry --bin zebrad download
+RUN cargo run --locked --release --features enable-sentry --bin zebrad download
 
 CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
 
