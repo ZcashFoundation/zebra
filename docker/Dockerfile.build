@@ -46,6 +46,7 @@ RUN cargo run --locked --jobs 2 --release --features enable-sentry --bin zebrad 
 
 CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
 
+
 # Runner image
 FROM debian:bullseye-slim AS runtime
 
