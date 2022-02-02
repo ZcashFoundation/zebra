@@ -301,22 +301,16 @@ impl LatestChainTip {
 }
 
 impl ChainTip for LatestChainTip {
-    /// Return the height of the best chain tip.
     #[instrument(skip(self))]
     fn best_tip_height(&self) -> Option<block::Height> {
         self.with_chain_tip_block(|block| block.height)
     }
 
-    /// Return the block hash of the best chain tip.
     #[instrument(skip(self))]
     fn best_tip_hash(&self) -> Option<block::Hash> {
         self.with_chain_tip_block(|block| block.hash)
     }
 
-    /// Return the mined transaction IDs of the transactions in the best chain tip block.
-    ///
-    /// All transactions with these mined IDs should be rejected from the mempool,
-    /// even if their authorizing data is different.
     #[instrument(skip(self))]
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.with_chain_tip_block(|block| block.transaction_hashes.clone())
