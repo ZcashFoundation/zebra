@@ -33,6 +33,7 @@ pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - -draft
       - base=main
       - or:
@@ -47,6 +48,7 @@ pull_request_rules:
   - name: move to medium queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - -draft
       - base=main
       - "label~=^P-Medium"
@@ -59,6 +61,7 @@ pull_request_rules:
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - -draft
       - base=main
       - or:
@@ -73,6 +76,7 @@ pull_request_rules:
   - name: automatic merge for Dependabot pull requests
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - author~=^dependabot(|-preview)\[bot\]$
       - check-success=Test (+stable) on ubuntu-latest
       - check-success=Test (+stable) on macOS-latest
