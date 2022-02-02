@@ -6,7 +6,7 @@ use zebra_chain::parameters::{Network, NetworkUpgrade};
 
 use super::{PeerSetBuilder, PeerVersions};
 use crate::{
-    peer::{MinimumPeerVersion, ReceiveRequestAttempt},
+    peer::{ClientRequest, MinimumPeerVersion},
     protocol::external::types::Version,
     Request,
 };
@@ -69,12 +69,15 @@ fn peer_set_ready_single_connection() {
         let fut = peer_ready1.call(Request::Peers);
 
         // Client received the request
-        match client_handle.try_to_receive_outbound_client_request() {
-            ReceiveRequestAttempt::Request(client_request) => {
-                assert_eq!(client_request.request, Request::Peers)
-            }
-            _ => unreachable!(),
-        };
+        assert!(matches!(
+            client_handle
+                .try_to_receive_outbound_client_request()
+                .request(),
+            Some(ClientRequest {
+                request: Request::Peers,
+                ..
+            })
+        ));
 
         // Drop the future
         std::mem::drop(fut);
@@ -89,12 +92,15 @@ fn peer_set_ready_single_connection() {
         let _fut = peer_ready2.call(Request::MempoolTransactionIds);
 
         // Client received the request
-        match client_handle.try_to_receive_outbound_client_request() {
-            ReceiveRequestAttempt::Request(client_request) => {
-                assert_eq!(client_request.request, Request::MempoolTransactionIds)
-            }
-            _ => unreachable!(),
-        };
+        assert!(matches!(
+            client_handle
+                .try_to_receive_outbound_client_request()
+                .request(),
+            Some(ClientRequest {
+                request: Request::MempoolTransactionIds,
+                ..
+            })
+        ));
     });
 }
 
