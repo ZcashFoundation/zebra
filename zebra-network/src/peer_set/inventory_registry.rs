@@ -144,15 +144,21 @@ impl<T: Clone> InventoryStatus<T> {
 impl InventoryRegistry {
     /// Returns a new Inventory Registry for `inv_stream`.
     pub fn new(inv_stream: broadcast::Receiver<InventoryChange>) -> Self {
+        let interval = Duration::from_secs(
+            POST_BLOSSOM_POW_TARGET_SPACING
+                .try_into()
+                .expect("non-negative"),
+        );
+
+        // SECURITY: if the rotation time is late, delay future rotations by the same amount
+        let mut interval = time::interval(interval);
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+
         Self {
             current: Default::default(),
             prev: Default::default(),
             inv_stream: BroadcastStream::new(inv_stream).boxed(),
-            interval: IntervalStream::new(time::interval(Duration::from_secs(
-                POST_BLOSSOM_POW_TARGET_SPACING
-                    .try_into()
-                    .expect("non-negative"),
-            ))),
+            interval: IntervalStream::new(interval),
         }
     }
 
