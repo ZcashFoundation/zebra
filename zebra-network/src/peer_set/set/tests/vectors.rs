@@ -144,6 +144,9 @@ fn peer_set_ready_multiple_connections() {
         handles[0].stop_connection_task().await;
         handles[1].stop_connection_task().await;
 
+        // Yield so that the tasks are cancelled correctly.
+        tokio::task::yield_now().await;
+
         // We can still make the peer set ready
         let peer_ready = peer_set
             .ready()
