@@ -71,8 +71,8 @@ jobs:
         tags: |
           ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:latest
           ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
-          ${{ env.GCR_BASE }}/$${{ env.GITHUB_REPOSITORY_SLUG_URL }}/{{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:latest
-          ${{ env.GCR_BASE }}/$${{ env.GITHUB_REPOSITORY_SLUG_URL }}/{{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
+          ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/{{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:latest
+          ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/{{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
         build-args: |
           NETWORK=${{ github.event.inputs.network || env.NETWORK }}
           SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
@@ -81,8 +81,8 @@ jobs:
           CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
-        cache-from: type=gha,scope=CD
-        cache-to: type=gha,mode=max,scope=CD
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
   deploy-nodes:
     name: Deploy Mainnet nodes
