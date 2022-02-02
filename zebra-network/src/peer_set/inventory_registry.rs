@@ -22,7 +22,14 @@ use zebra_chain::{parameters::POST_BLOSSOM_POW_TARGET_SPACING, serialization::At
 
 use crate::{protocol::external::InventoryHash, BoxError};
 
+use self::update::Update;
+
 use InventoryStatus::*;
+
+pub mod update;
+
+#[cfg(test)]
+mod tests;
 
 /// A peer inventory status change, used in the inventory status channel.
 pub type InventoryChange = InventoryStatus<(AtLeastOne<InventoryHash>, SocketAddr)>;
@@ -210,6 +217,12 @@ impl InventoryRegistry {
             .get(&hash)
             .and_then(|current| current.get(&addr))
             .is_some()
+    }
+
+    /// Returns a future that polls once for new registry updates.
+    #[allow(dead_code)]
+    pub fn update(&mut self) -> Update {
+        Update::new(self)
     }
 
     /// Drive periodic inventory tasks
