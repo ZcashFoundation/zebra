@@ -41,8 +41,8 @@ fn peer_set_ready_single_connection() {
         .try_to_receive_outbound_client_request()
         .is_empty());
 
-    // Build a peerset
     runtime.block_on(async move {
+        // Build a peerset
         let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
@@ -124,8 +124,8 @@ fn peer_set_ready_multiple_connections() {
     // Make sure we have the right number of peers
     assert_eq!(handles.len(), 3);
 
-    // Build a peerset
     runtime.block_on(async move {
+        // Build a peerset
         let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
