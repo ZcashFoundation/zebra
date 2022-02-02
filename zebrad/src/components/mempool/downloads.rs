@@ -257,7 +257,7 @@ where
         let txid = gossiped_tx.id();
 
         if self.cancel_handles.contains_key(&txid) {
-            tracing::debug!(
+            debug!(
                 ?txid,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -272,7 +272,7 @@ where
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
-            tracing::info!(
+            debug!(
                 ?txid,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -350,7 +350,7 @@ where
                 })
                 .await;
 
-            tracing::debug!(?txid, ?result, "verified transaction for the mempool");
+            debug!(?txid, ?result, "verified transaction for the mempool");
 
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
@@ -372,7 +372,7 @@ where
             tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
-                    tracing::trace!("task cancelled prior to completion");
+                    trace!("task cancelled prior to completion");
                     metrics::counter!("mempool.cancelled.verify.tasks.total", 1);
                     Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
@@ -386,7 +386,7 @@ where
             "transactions are only queued once"
         );
 
-        tracing::debug!(
+        debug!(
             ?txid,
             queue_len = self.pending.len(),
             ?MAX_INBOUND_CONCURRENCY,

@@ -59,6 +59,16 @@ pub const PREVOUTS_CHAIN_HEIGHT: usize = 4;
 pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
     MIN_TRANSPARENT_COINBASE_MATURITY as usize + PREVOUTS_CHAIN_HEIGHT;
 
+impl Arbitrary for Height {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (Height::MIN.0..=Height::MAX.0).prop_map(Height).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 /// The configuration data for proptest when generating arbitrary chains

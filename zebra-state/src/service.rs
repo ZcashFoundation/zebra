@@ -460,17 +460,17 @@ impl StateService {
                 .expect("the intersection hash must be in the best chain")
         });
         let max_len_height = if let Some(intersection_height) = intersection_height {
+            let max_len = i32::try_from(max_len).expect("max_len fits in i32");
+
             // start after the intersection_height, and return max_len hashes
-            (intersection_height + (max_len as i32))
+            (intersection_height + max_len)
                 .expect("the Find response height does not exceed Height::MAX")
         } else {
+            let max_len = u32::try_from(max_len).expect("max_len fits in u32");
+            let max_height = block::Height(max_len);
+
             // start at genesis, and return max_len hashes
-            let max_height = block::Height(
-                max_len
-                    .try_into()
-                    .expect("max_len does not exceed Height::MAX"),
-            );
-            (max_height - 1).expect("max_len is at least 1")
+            (max_height - 1).expect("max_len is at least 1, and does not exceed Height::MAX + 1")
         };
 
         let stop_height = stop.and_then(|hash| self.best_height_by_hash(hash));
@@ -682,7 +682,7 @@ impl Service<Request> for StateService {
                 .checked_sub(new_len)
                 .expect("prune does not add any utxo requests");
             if prune_count > 0 {
-                tracing::info!(
+                tracing::debug!(
                     ?old_len,
                     ?new_len,
                     ?prune_count,

@@ -228,14 +228,14 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        tracing::debug!("waiting to request block");
+        debug!("waiting to request block");
         let block_req = self
             .network
             .ready()
             .await
             .map_err(|e| eyre!(e))?
             .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
-        tracing::debug!("requested block");
+        debug!("requested block");
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -250,7 +250,7 @@ where
                 let rsp = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
-                        tracing::trace!("task cancelled prior to download completion");
+                        trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload)
                     }
@@ -309,13 +309,15 @@ where
 
                 if let Some(block_height) = block.coinbase_height() {
                     if block_height > max_lookahead_height {
-                        tracing::info!(
+                        info!(
                             ?hash,
                             ?block_height,
                             ?tip_height,
                             ?max_lookahead_height,
                             lookahead_limit = ?lookahead_limit,
-                            "synced block height too far ahead of the tip: dropped downloaded block"
+                            "synced block height too far ahead of the tip: dropped downloaded block. \
+                            Hint: Try increasing the value of the lookahead_limit field \
+                            in the sync section of the configuration file."
                         );
                         metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 
@@ -330,7 +332,7 @@ where
                         // (or blocks far ahead of the current state tip).
                         Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit)?;
                     } else if block_height < min_accepted_height {
-                        tracing::debug!(
+                        debug!(
                             ?hash,
                             ?block_height,
                             ?tip_height,
@@ -343,7 +345,7 @@ where
                         Err(BlockDownloadVerifyError::BehindTipHeightLimit)?;
                     }
                 } else {
-                    tracing::info!(
+                    debug!(
                         ?hash,
                         "synced block with no height: dropped downloaded block"
                     );
@@ -361,7 +363,7 @@ where
                 let verification = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
-                        tracing::trace!("task cancelled prior to verification");
+                        trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
                         return Err(BlockDownloadVerifyError::CancelledDuringVerification)
                     }

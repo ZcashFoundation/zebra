@@ -11,6 +11,10 @@ on:
       - 'codecov.yml'
       - '.github/workflows/coverage.yml'
 
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: full
+
 jobs:
   coverage:
     name: Coverage (+nightly)
@@ -19,9 +23,6 @@ jobs:
     # - parameter downloads (40 minutes, but only when the cache expires)
     timeout-minutes: 115
     runs-on: ubuntu-latest
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -30,10 +31,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.7
         with:
-          # Pinned to workaround issue making cargo-llvm-cov fail, see
-          # https://github.com/taiki-e/cargo-llvm-cov/issues/128
-          # TODO: restore to just `nightly` after it's fixed
-          toolchain: nightly-2022-01-14
+          toolchain: nightly
           override: true
           profile: minimal
           components: llvm-tools-preview
@@ -73,19 +71,6 @@ jobs:
         if: steps.cache-params.outputs.cache-hit != 'true'
         working-directory: ./zebra-consensus
         run: cargo llvm-cov --lcov --no-report run --example download-params
-
-      - name: Show env vars
-        run: |
-            echo "Test env vars:"
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
-            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
-            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
 
       - name: Run Zebra tests
         run: cargo llvm-cov --lcov --no-report

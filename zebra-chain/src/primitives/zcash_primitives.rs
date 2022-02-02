@@ -87,18 +87,20 @@ pub(crate) fn sighash(
     trans: &Transaction,
     hash_type: HashType,
     network_upgrade: NetworkUpgrade,
-    input: Option<(&transparent::Output, &transparent::Input, usize)>,
+    all_previous_outputs: &[transparent::Output],
+    input_index: Option<usize>,
 ) -> SigHash {
     let alt_tx = convert_tx_to_librustzcash(trans, network_upgrade)
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
     let script: zcash_primitives::legacy::Script;
-    let signable_input = match input {
-        Some((output, _, idx)) => {
+    let signable_input = match input_index {
+        Some(input_index) => {
+            let output = all_previous_outputs[input_index].clone();
             script = (&output.lock_script).into();
             zcash_primitives::transaction::sighash::SignableInput::Transparent(
                 zcash_primitives::transaction::sighash::TransparentInput::new(
-                    idx,
+                    input_index,
                     &script,
                     output
                         .value

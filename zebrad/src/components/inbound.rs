@@ -328,7 +328,7 @@ impl Service<zn::Request> for Inbound {
                 if !peers.is_empty() {
                     async { Ok(zn::Response::Peers(peers)) }.boxed()
                 } else {
-                    info!("ignoring `Peers` request from remote peer because our address book is empty");
+                    debug!("ignoring `Peers` request from remote peer because our address book is empty");
                     async { Ok(zn::Response::Nil) }.boxed()
                 }
             }

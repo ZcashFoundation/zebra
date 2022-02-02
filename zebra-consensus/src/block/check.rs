@@ -107,7 +107,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
 
-    // Validate founders reward and funding streams
+    // Validate funding streams
     let halving_div = subsidy::general::halving_divisor(height, network);
     let canopy_activation_height = NetworkUpgrade::Canopy
         .activation_height(network)
@@ -121,17 +121,9 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     } else if halving_div.count_ones() != 1 {
         unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
     } else if height < canopy_activation_height {
-        // Founders rewards are paid up to Canopy activation, on both mainnet and testnet
-        let founders_reward = subsidy::founders_reward::founders_reward(height, network)
-            .expect("invalid Amount: founders reward should be valid");
-        let matching_values = subsidy::general::find_output_with_amount(coinbase, founders_reward);
-
-        // TODO: the exact founders reward value must be sent as a single output to the correct address
-        if !matching_values.is_empty() {
-            Ok(())
-        } else {
-            Err(SubsidyError::FoundersRewardNotFound)?
-        }
+        // Founders rewards are paid up to Canopy activation, on both mainnet and testnet.
+        // But we checkpoint in Canopy so founders reward does not apply for Zebra.
+        unreachable!("we cannot verify consensus rules before Canopy activation");
     } else if halving_div < 4 {
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet

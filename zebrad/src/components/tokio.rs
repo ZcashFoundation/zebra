@@ -61,7 +61,7 @@ impl RuntimeRun for Runtime {
         });
 
         // Don't wait for long blocking tasks before shutting down
-        tracing::info!(
+        info!(
             ?TOKIO_SHUTDOWN_TIMEOUT,
             "waiting for async tokio tasks to shut down"
         );
@@ -82,7 +82,6 @@ impl RuntimeRun for Runtime {
 #[cfg(unix)]
 mod imp {
     use tokio::signal::unix::{signal, SignalKind};
-    use tracing::info;
 
     pub(super) async fn shutdown() {
         // If both signals are received, select! chooses one of them at random.
@@ -115,7 +114,6 @@ mod imp {
 
 #[cfg(not(unix))]
 mod imp {
-    use tracing::info;
 
     pub(super) async fn shutdown() {
         //  Wait for Ctrl-C in Windows terminals.
