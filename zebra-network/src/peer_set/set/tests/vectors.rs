@@ -236,15 +236,24 @@ fn peer_set_route_inv_empty_registry() {
 
 /// Check that a peer set routes inventory requests to a peer that has advertised that inventory.
 #[test]
-fn peer_set_route_inv_via_registry() {
+fn peer_set_route_inv_advertised_registry() {
+    peer_set_route_inv_advertised_registry_order(true);
+    peer_set_route_inv_advertised_registry_order(false);
+}
+
+fn peer_set_route_inv_advertised_registry_order(advertised_first: bool) {
     let test_hash = block::Hash([0; 32]);
     let test_inv = InventoryHash::Block(test_hash);
 
     // Hard-code the fixed test address created by mock_peer_discovery
     // TODO: add peer test addresses to ClientTestHarness
-    let test_peer = "127.0.0.1:1"
-        .parse()
-        .expect("unexpected invalid peer address");
+    let test_peer = if advertised_first {
+        "127.0.0.1:1"
+    } else {
+        "127.0.0.1:2"
+    }
+    .parse()
+    .expect("unexpected invalid peer address");
 
     let test_change = InventoryStatus::new_advertised(test_inv, test_peer);
 
@@ -301,7 +310,11 @@ fn peer_set_route_inv_via_registry() {
         let _fut = peer_ready.call(sent_request.clone());
 
         // Check that the client that advertised the inventory received the request
-        let advertised_handle = &mut handles[0];
+        let advertised_handle = if advertised_first {
+            &mut handles[0]
+        } else {
+            &mut handles[1]
+        };
 
         if let Some(ClientRequest { request, .. }) = advertised_handle
             .try_to_receive_outbound_client_request()
@@ -312,7 +325,11 @@ fn peer_set_route_inv_via_registry() {
             panic!("inv request not routed to advertised peer");
         }
 
-        let other_handle = &mut handles[1];
+        let other_handle = if advertised_first {
+            &mut handles[1]
+        } else {
+            &mut handles[0]
+        };
 
         assert!(
             matches!(
