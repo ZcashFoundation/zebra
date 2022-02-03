@@ -4,10 +4,15 @@ use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
+use chrono::Duration;
 use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
-use zebra_chain::{block, parameters::Network, transaction::VerifiedUnminedTx};
+use zebra_chain::{
+    block,
+    parameters::{Network, NetworkUpgrade},
+    transaction::VerifiedUnminedTx,
+};
 use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
@@ -112,7 +117,7 @@ proptest! {
 
             for (fake_chain_tip, transaction) in fake_chain_tips.iter().zip(transactions.iter_mut()) {
                 // Obtain a new chain tip based on the previous one.
-                let chain_tip = fake_chain_tip.to_chain_tip_block(&previous_chain_tip);
+                let chain_tip = fake_chain_tip.to_chain_tip_block(&previous_chain_tip, network);
 
                 // Adjust the transaction expiry height based on the new chain
                 // tip height so that the mempool does not evict the transaction
@@ -269,14 +274,23 @@ impl FakeChainTip {
     /// Returns a new [`ChainTipBlock`] placed on top of the previous block if
     /// the chain is supposed to grow. Otherwise returns a [`ChainTipBlock`]
     /// that does not reference the previous one.
-    fn to_chain_tip_block(&self, previous: &ChainTipBlock) -> ChainTipBlock {
+    fn to_chain_tip_block(&self, previous: &ChainTipBlock, network: Network) -> ChainTipBlock {
         match self {
-            Self::Grow(chain_tip_block) => ChainTipBlock {
-                hash: chain_tip_block.hash,
-                height: block::Height(previous.height.0 + 1),
-                transaction_hashes: chain_tip_block.transaction_hashes.clone(),
-                previous_block_hash: previous.hash,
-            },
+            Self::Grow(chain_tip_block) => {
+                let height = block::Height(previous.height.0 + 1);
+                let target_spacing = NetworkUpgrade::target_spacing_for_height(network, height);
+
+                let mock_block_time_delta = Duration::seconds(
+                    previous.time.timestamp() % (2 * target_spacing.num_seconds()),
+                );
+
+                ChainTipBlock {
+                    hash: chain_tip_block.hash,
+                    height,
+                    transaction_hashes: chain_tip_block.transaction_hashes.clone(),
+                    previous_block_hash: previous.hash,
+                }
+            }
 
             Self::Reset(chain_tip_block) => chain_tip_block.clone(),
         }
