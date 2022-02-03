@@ -24,6 +24,11 @@ pub trait ChainTip {
     /// Return the block time of the best chain tip.
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>>;
 
+    /// Return the height and the block time of the best chain tip.
+    ///
+    /// Returning both values at the same time guarantees that they refer to the same chain tip.
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)>;
+
     /// Return the mined transaction IDs of the transactions in the best chain tip block.
     ///
     /// All transactions with these mined IDs should be rejected from the mempool,
@@ -45,6 +50,10 @@ impl ChainTip for NoChainTip {
     }
 
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
         None
     }
 

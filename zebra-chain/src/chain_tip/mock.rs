@@ -47,6 +47,10 @@ impl ChainTip for MockChainTip {
         unreachable!("Method not used in tests");
     }
 
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
+        unreachable!("Method not used in tests");
+    }
+
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         unreachable!("Method not used in tests");
     }

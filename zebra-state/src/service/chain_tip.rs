@@ -329,6 +329,11 @@ impl ChainTip for LatestChainTip {
     }
 
     #[instrument(skip(self))]
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
+        self.with_chain_tip_block(|block| (block.height, block.time))
+    }
+
+    #[instrument(skip(self))]
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.with_chain_tip_block(|block| block.transaction_hashes.clone())
             .unwrap_or_else(|| Arc::new([]))
