@@ -18,7 +18,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
-  NETWORK: Testnet
+  NETWORK: Mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
@@ -114,7 +114,6 @@ jobs:
 
       - name: Regenerate state test disk
         id: regenerate-state
-        if: github.event_name == 'workflow_dispatch'
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 10GB \
@@ -135,7 +134,7 @@ jobs:
 
       - name: Wait for sync process to end
         id: wait-regenerate
-        if: github.event_name == 'workflow_dispatch' && steps.regenerate-state.outcome == 'success'
+        if: steps.regenerate-state.outcome == 'success'
         run: |
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone ${{ env.ZONE }} 
           --command="docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})"
@@ -143,13 +142,12 @@ jobs:
       # Create image from disk that will be used to sync past mandatory checkpoint test
       - name: Create image from state disk
         # Only run if the earlier step succeeds
-        if: github.event_name == 'workflow_dispatch' && steps.wait-regenerate.outcome == 'success'
+        if: steps.wait-regenerate.outcome == 'success'
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
       - name: Delete test instance
         # Always run even if the earlier step fails
-        if: github.event_name == 'workflow_dispatch'
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
