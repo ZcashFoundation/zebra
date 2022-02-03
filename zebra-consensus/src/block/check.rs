@@ -184,10 +184,12 @@ pub fn miner_fees_are_valid(
     let block_subsidy = subsidy::general::block_subsidy(height, network)
         .expect("a valid block subsidy for this height and network");
 
-    // Consensus rule: The total value in zatoshi of transparent outputs from a
-    // coinbase transaction, minus vbalanceSapling, minus vbalanceOrchard, MUST NOT
-    // be greater than the value in zatoshi of block subsidy plus the transaction fees
-    // paid by transactions in this block.
+    // # Consensus
+    //
+    // > The total value in zatoshi of transparent outputs from a coinbase transaction,
+    // > minus vbalanceSapling, minus vbalanceOrchard, MUST NOT be greater than the value
+    // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
+    //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
