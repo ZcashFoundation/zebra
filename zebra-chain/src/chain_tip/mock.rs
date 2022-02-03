@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
 use crate::{block, chain_tip::ChainTip, transaction};
@@ -39,6 +40,10 @@ impl ChainTip for MockChainTip {
     }
 
     fn best_tip_hash(&self) -> Option<block::Hash> {
+        unreachable!("Method not used in tests");
+    }
+
+    fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
         unreachable!("Method not used in tests");
     }
 

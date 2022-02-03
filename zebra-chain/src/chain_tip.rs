@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use crate::{block, transaction};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -18,6 +20,9 @@ pub trait ChainTip {
 
     /// Return the block hash of the best chain tip.
     fn best_tip_hash(&self) -> Option<block::Hash>;
+
+    /// Return the block time of the best chain tip.
+    fn best_tip_block_time(&self) -> Option<DateTime<Utc>>;
 
     /// Return the mined transaction IDs of the transactions in the best chain tip block.
     ///
@@ -36,6 +41,10 @@ impl ChainTip for NoChainTip {
     }
 
     fn best_tip_hash(&self) -> Option<block::Hash> {
+        None
+    }
+
+    fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
         None
     }
 
