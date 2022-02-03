@@ -191,6 +191,14 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let value_balance = (&mut reader).zcash_deserialize_into()?;
 
         // anchorSapling
+        //
+        // # Consensus
+        //
+        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
         let shared_anchor = if spends_count > 0 {
             Some(reader.read_32_bytes()?.into())
         } else {
@@ -198,8 +206,32 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         };
 
         // vSpendProofsSapling
+        //
+        // # Consensus
+        //
+        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // Type is `ZKSpend.Proof`, described in
+        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+        // It is not enforced here; this just reads 192 bytes.
+        // The type is validated when validating the proof, see
+        // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
         let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
+
         // vSpendAuthSigsSapling
+        //
+        // # Consensus
+        //
+        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // Type is SpendAuthSig^{Sapling}.Signature, i.e.
+        // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
+        // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+        // See [`redjubjub::Signature<SpendAuth>::zcash_deserialize`].
         let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
         // vOutputProofsSapling

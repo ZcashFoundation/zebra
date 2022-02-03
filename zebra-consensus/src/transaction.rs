@@ -750,9 +750,13 @@ where
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for spend in sapling_shielded_data.spends_per_anchor() {
-                // Consensus rule: The proof π_ZKSpend MUST be valid
-                // given a primary input formed from the other
-                // fields except spendAuthSig.
+                // # Consensus
+                //
+                // > The proof π_ZKSpend MUST be valid
+                // > given a primary input formed from the other
+                // > fields except spendAuthSig.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each Spend description while adding the
@@ -765,9 +769,23 @@ where
                         .oneshot(DescriptionWrapper(&spend).try_into()?),
                 );
 
-                // Consensus rule: The spend authorization signature
-                // MUST be a valid SpendAuthSig signature over
-                // SigHash using rk as the validating key.
+                // # Consensus
+                //
+                // > The spend authorization signature
+                // > MUST be a valid SpendAuthSig signature over
+                // > SigHash using rk as the validating key.
+                //
+                // This is validated by the verifier.
+                //
+                // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub,
+                // > and RedPallas’ on p. 88, the validation of the 𝑅
+                // > component of the signature changes to prohibit non-canonical encodings.
+                //
+                // This is validated by the verifier, inside the `redjubjub` crate.
+                // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
+                // that enforces the canonical encoding.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the validation of the RedJubjub spend
                 // authorization signature for each Spend
