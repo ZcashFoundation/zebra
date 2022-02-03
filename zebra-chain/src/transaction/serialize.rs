@@ -235,6 +235,18 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
         // vOutputProofsSapling
+        //
+        // # Consensus
+        //
+        // > Elements of a Output description MUST be valid encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+        //
+        // Type is `ZKOutput.Proof`, described in
+        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+        // It is not enforced here; this just reads 192 bytes.
+        // The type is validated when validating the proof, see
+        // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
         let output_proofs = zcash_deserialize_external_count(outputs_count, &mut reader)?;
 
         // bindingSigSapling
