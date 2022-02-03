@@ -7,12 +7,15 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 use tracing::instrument;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::serialization::arbitrary::datetime_full;
 use zebra_chain::{
     block,
     chain_tip::ChainTip,
@@ -44,6 +47,13 @@ pub struct ChainTipBlock {
     /// The height of the best chain tip block.
     pub height: block::Height,
 
+    /// The network block time of the best chain tip block.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(strategy = "datetime_full()")
+    )]
+    pub time: DateTime<Utc>,
+
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
@@ -71,6 +81,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            time: block.header.time,
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
@@ -89,6 +100,7 @@ impl From<FinalizedBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            time: block.header.time,
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
