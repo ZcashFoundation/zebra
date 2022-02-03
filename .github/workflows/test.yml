@@ -135,8 +135,8 @@ jobs:
 
       - name: Wait for sync process to end
         run: |
-          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" --command \
-          docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})
+          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone ${{ env.ZONE }} 
+          --command="docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})"
 
       # Create image from disk that will be used to sync past mandatory checkpoint test
       - name: Create image from state disk
@@ -176,8 +176,8 @@ jobs:
 
       - name: Wait for sync process to end
         run: |
-          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" --command \
-          docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})
+          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" \
+          --command="docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})"
 
       - name: Delete test instance
         # Always run even if the earlier step fails
