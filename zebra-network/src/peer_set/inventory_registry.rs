@@ -12,7 +12,10 @@ use std::{
 };
 
 use futures::{FutureExt, Stream, StreamExt};
-use tokio::{sync::broadcast, time};
+use tokio::{
+    sync::broadcast,
+    time::{self, Instant},
+};
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, IntervalStream};
 
 use zebra_chain::{parameters::POST_BLOSSOM_POW_TARGET_SPACING, serialization::AtLeastOne};
@@ -150,8 +153,9 @@ impl InventoryRegistry {
                 .expect("non-negative"),
         );
 
+        // Don't do an immediate rotation, current and prev are already empty.
+        let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);
         // SECURITY: if the rotation time is late, delay future rotations by the same amount
-        let mut interval = time::interval(interval);
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         Self {
