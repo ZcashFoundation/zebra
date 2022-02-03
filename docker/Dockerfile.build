@@ -73,7 +73,6 @@ RUN set -ex; \
   } > "zebrad.toml"
 
 RUN cat zebrad.toml
-
 # Pre-download Zcash Sprout and Sapling parameters
 RUN /usr/local/bin/zebrad download
 
