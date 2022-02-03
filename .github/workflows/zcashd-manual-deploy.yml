@@ -11,8 +11,7 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
-  ZONE: us-central1-a
-  MACHINE_TYPE: c2-standard-4
+  MACHINE_TYPE: n2-standard-4
   DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
 jobs:
@@ -30,28 +29,21 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
 
       # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v0.5.0
-        with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
       - name: Set up gcloud SDK environment
         uses: google-github-actions/setup-gcloud@v0.4.0
         with:
           project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
       # Create instance template from container image
       - name: Create instance template
         run: |
           gcloud compute instance-templates create-with-container "zcashd-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
-          --boot-disk-type=pd-ssd \
-          --container-stdin \
-          --container-tty \
           --container-image "electriccoinco/zcashd" \
           --container-env ZCASHD_NETWORK="${{ github.event.inputs.network }}" \
           --machine-type ${{ env.MACHINE_TYPE }} \
+          --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
           --tags zcashd \
 
