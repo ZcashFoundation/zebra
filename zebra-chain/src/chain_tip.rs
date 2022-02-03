@@ -8,6 +8,7 @@ use crate::{block, transaction};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod mock;
+mod network_chain_tip_height_estimator;
 
 /// An interface for querying the chain tip.
 ///
