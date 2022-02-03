@@ -216,6 +216,31 @@ impl PeerSetGuard {
         PeerSetGuard::default()
     }
 
+    /// Return a mutable reference to the background tasks sender, if present.
+    #[allow(dead_code)]
+    pub fn background_tasks_sender(
+        &mut self,
+    ) -> &mut Option<tokio::sync::oneshot::Sender<Vec<JoinHandle<Result<(), BoxError>>>>> {
+        &mut self.background_tasks_sender
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    #[allow(dead_code)]
+    pub fn demand_receiver(&mut self) -> &mut Option<mpsc::Receiver<MorePeers>> {
+        &mut self.demand_receiver
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    pub fn inventory_sender(&mut self) -> &mut Option<broadcast::Sender<InventoryChange>> {
+        &mut self.inventory_sender
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    #[allow(dead_code)]
+    pub fn address_book(&mut self) -> &mut Option<Arc<std::sync::Mutex<AddressBook>>> {
+        &mut self.address_book
+    }
+
     /// Create a dummy channel for the background tasks sent to the [`PeerSet`].
     ///
     /// The sender is stored inside the [`PeerSetGuard`], while the receiver is returned to be
