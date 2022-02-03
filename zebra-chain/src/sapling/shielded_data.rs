@@ -94,8 +94,12 @@ where
     /// [`ShieldedData`] validates this [value balance consensus
     /// rule](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus):
     ///
-    /// "If effectiveVersion = 4 and there are no Spend descriptions or Output
-    /// descriptions, then valueBalanceSapling MUST be 0."
+    /// # Consensus
+    ///
+    /// > [Sapling onward] If effectiveVersion = 4 and there are no Spend
+    /// > descriptions or Output descriptions, then valueBalanceSapling MUST be 0.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     ///
     /// During deserialization, this rule is checked when there are no spends and
     /// no outputs.
