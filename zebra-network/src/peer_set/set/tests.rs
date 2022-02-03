@@ -31,6 +31,9 @@ use crate::{
 #[cfg(test)]
 mod prop;
 
+#[cfg(test)]
+mod vectors;
+
 /// The maximum number of arbitrary peers to generate in [`PeerVersions`].
 ///
 /// This affects the maximum number of peer connections added to the [`PeerSet`] during the tests.
