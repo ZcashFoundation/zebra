@@ -572,6 +572,11 @@ impl ZcashDeserialize for Transaction {
         // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
         // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
         //
+        // Note: Zebra checkpoints until Canopy blocks, this means only transactions versions
+        // 4 and 5 get fully verified. This satisfies "The transaction version number MUST be 4"
+        // and "The transaction version number MUST be 4 or 5" from the last two rules above.
+        // This is done in the zebra-consensus crate, in the transactions checks.
+        //
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         match (version, overwintered) {
             (1, false) => Ok(Transaction::V1 {
