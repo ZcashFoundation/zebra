@@ -134,6 +134,8 @@ jobs:
           --zone "${{ env.ZONE }}"
 
       - name: Wait for sync process to end
+        id: wait-regenerate
+        if: github.event_name == 'workflow_dispatch' && steps.regenerate-state.outcome == 'success'
         run: |
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone ${{ env.ZONE }} 
           --command="docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})"
@@ -141,7 +143,7 @@ jobs:
       # Create image from disk that will be used to sync past mandatory checkpoint test
       - name: Create image from state disk
         # Only run if the earlier step succeeds
-        if: github.event_name == 'workflow_dispatch' && steps.regenerate-state.outcome == 'success'
+        if: github.event_name == 'workflow_dispatch' && steps.wait-regenerate.outcome == 'success'
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
