@@ -103,10 +103,10 @@ impl InventoryChange {
 
     /// Returns a new advertised multiple inventory change, if `hashes` contains at least one change.
     pub fn new_advertised_multi<'a>(
-        hashes: impl Iterator<Item = &'a InventoryHash>,
+        hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
-        let hashes: Vec<InventoryHash> = hashes.copied().collect();
+        let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
         let hashes = hashes.try_into().ok();
 
         hashes.map(|hashes| InventoryStatus::Advertised((hashes, peer)))
@@ -115,10 +115,10 @@ impl InventoryChange {
     /// Returns a new missing multiple inventory change, if `hashes` contains at least one change.
     #[allow(dead_code)]
     pub fn new_missing_multi<'a>(
-        hashes: impl Iterator<Item = &'a InventoryHash>,
+        hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
-        let hashes: Vec<InventoryHash> = hashes.copied().collect();
+        let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
         let hashes = hashes.try_into().ok();
 
         hashes.map(|hashes| InventoryStatus::Missing((hashes, peer)))
