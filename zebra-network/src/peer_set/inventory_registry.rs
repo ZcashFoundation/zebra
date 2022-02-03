@@ -294,7 +294,11 @@ impl InventoryRegistry {
                 Some(Ok(change)) => self.register(change),
                 Some(Err(BroadcastStreamRecvError::Lagged(count))) => {
                     metrics::counter!("pool.inventory.dropped", 1);
-                    tracing::debug!(count, "dropped lagged inventory advertisements");
+                    metrics::counter!("pool.inventory.dropped.messages", count);
+
+                    // If this message happens a lot, we should improve inventory registry performance,
+                    // or poll the registry or peer set in a separate task.
+                    info!(count, "dropped lagged inventory advertisements");
                 }
                 // This indicates all senders, including the one in the handshaker,
                 // have been dropped, which really is a permanent failure.
@@ -329,11 +333,27 @@ impl InventoryRegistry {
             // and funnel multiple failing requests to themselves.
             if let Some(old_status) = current.get(&addr) {
                 if old_status.is_missing() && new_status.is_advertised() {
+                    debug!(?new_status, ?old_status, ?addr, ?inv, "skipping new status");
                     continue;
                 }
+
+                debug!(
+                    ?new_status,
+                    ?old_status,
+                    ?addr,
+                    ?inv,
+                    "keeping both new and old status"
+                );
             }
 
-            current.insert(addr, new_status);
+            let replaced_status = current.insert(addr, new_status);
+            debug!(
+                ?new_status,
+                ?replaced_status,
+                ?addr,
+                ?inv,
+                "inserted new status"
+            );
         }
     }
 
