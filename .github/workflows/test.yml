@@ -155,7 +155,13 @@ jobs:
         run: |
           sleep 30s
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-t" --ssh-flag="-o ServerAliveInterval=5"
-          docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }})
+          echo $CONTAINER_IMAGE
+          echo $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }})
+          docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+          docker ps -aqf ancestor=$CONTAINER_IMAGE | tee output.txt
+          docker wait $(cat output.txt)
+        env:
+          CONTAINER_IMAGE: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
 
       # Create image from disk that will be used to sync past mandatory checkpoint test
       - name: Create image from state disk
