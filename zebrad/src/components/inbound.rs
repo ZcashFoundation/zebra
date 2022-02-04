@@ -36,7 +36,8 @@ use super::{
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
-mod downloads;
+pub(crate) mod downloads;
+
 #[cfg(test)]
 mod tests;
 

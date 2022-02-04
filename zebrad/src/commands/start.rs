@@ -52,6 +52,8 @@
 //!    * runs in the background and gossips newly added mempool transactions
 //!      to peers
 
+use std::cmp::max;
+
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
@@ -61,7 +63,7 @@ use tracing_futures::Instrument;
 
 use crate::{
     components::{
-        inbound::InboundSetupData,
+        inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
         sync,
         tokio::{RuntimeRun, TokioComponent},
@@ -87,7 +89,9 @@ impl StartCmd {
         info!("initializing node state");
         let (state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
-        let state = ServiceBuilder::new().buffer(20).service(state_service);
+        let state = ServiceBuilder::new()
+            .buffer(Self::state_buffer_bound())
+            .service(state_service);
 
         info!("initializing network");
         // The service that our node uses to respond to requests by peers. The
@@ -96,7 +100,7 @@ impl StartCmd {
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
             .load_shed()
-            .buffer(20)
+            .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .service(Inbound::new(setup_rx));
 
         let (peer_set, address_book) =
@@ -132,7 +136,9 @@ impl StartCmd {
             chain_tip_change.clone(),
         );
         let mempool = BoxService::new(mempool);
-        let mempool = ServiceBuilder::new().buffer(20).service(mempool);
+        let mempool = ServiceBuilder::new()
+            .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
+            .service(mempool);
 
         let setup_data = InboundSetupData {
             address_book,
@@ -252,6 +258,22 @@ impl StartCmd {
         groth16_download_handle.abort();
 
         exit_status
+    }
+
+    /// Returns the bound for the state service buffer,
+    /// based on the configurations of the services that use the state concurrently.
+    fn state_buffer_bound() -> usize {
+        let config = app_config().clone();
+
+        // TODO: do we also need to account for concurrent use across services?
+        //       we could multiply the maximum by 3/2, or add a fixed constant
+        max(
+            config.sync.max_concurrent_block_requests,
+            max(
+                inbound::downloads::MAX_INBOUND_CONCURRENCY,
+                mempool::downloads::MAX_INBOUND_CONCURRENCY,
+            ),
+        )
     }
 }
 
