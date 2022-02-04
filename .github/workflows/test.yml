@@ -123,8 +123,7 @@ jobs:
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-command "cargo" \
-          --container-arg="test --verbose --features test_sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
+          --container-command "cargo test --verbose --features test_sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -136,7 +135,7 @@ jobs:
         if: steps.regenerate-state.outcome == 'success'
         run: |
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone ${{ env.ZONE }} 
-          --command="docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})"
+          --command='docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }})'
 
       # Create image from disk that will be used to sync past mandatory checkpoint test
       - name: Create image from state disk
@@ -164,8 +163,7 @@ jobs:
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-command "cargo" \
-          --container-arg="test --locked --release --features enable-sentry,test_sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
+          --container-command "cargo test --locked --release --features enable-sentry,test_sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -175,7 +173,7 @@ jobs:
       - name: Wait for sync process to end
         run: |
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" \
-          --command="docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }})"
+          --command='docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }})'
 
       - name: Delete test instance
         # Always run even if the earlier step fails
