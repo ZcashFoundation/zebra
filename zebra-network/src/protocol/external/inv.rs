@@ -65,6 +65,19 @@ impl InventoryHash {
         InventoryHash::Tx(legacy_tx_id)
     }
 
+    /// Returns the block hash for this inventory hash,
+    /// if this inventory hash is a non-filtered block variant.
+    pub fn block_hash(&self) -> Option<block::Hash> {
+        match self {
+            InventoryHash::Error => None,
+            InventoryHash::Tx(_legacy_tx_id) => None,
+            InventoryHash::Block(hash) => Some(*hash),
+            // Zebra does not support filtered blocks
+            InventoryHash::FilteredBlock(_ignored_hash) => None,
+            InventoryHash::Wtx(_wtx_id) => None,
+        }
+    }
+
     /// Returns the unmined transaction ID for this inventory hash,
     /// if this inventory hash is a transaction variant.
     pub fn unmined_tx_id(&self) -> Option<UnminedTxId> {

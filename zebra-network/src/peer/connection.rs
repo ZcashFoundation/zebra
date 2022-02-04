@@ -1400,11 +1400,5 @@ fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTx
 /// Map a list of inventory hashes to the corresponding block hashes.
 /// Non-block inventory hashes are skipped.
 fn block_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = block::Hash> + '_ {
-    items.iter().filter_map(|item| {
-        if let InventoryHash::Block(hash) = item {
-            Some(*hash)
-        } else {
-            None
-        }
-    })
+    items.iter().filter_map(InventoryHash::block_hash)
 }
