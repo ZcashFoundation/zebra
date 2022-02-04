@@ -16,9 +16,14 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    llvm libclang-dev clang ca-certificates && \
+# Install zebra build deps
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+    llvm \
+    libclang-dev \
+    clang \
+    ca-certificates \
+    ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
@@ -28,11 +33,13 @@ ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
-# Build zebra
 ARG RUST_BACKTRACE=1
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
 
 COPY . .
+# Pre-download Zcash Sprout and Sapling parameters
+RUN cargo run --locked --release --features enable-sentry --bin zebrad download
+# Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
 FROM builder AS tester
@@ -41,19 +48,17 @@ ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
-# Pre-download Zcash Sprout and Sapling parameters
-RUN cargo run --locked --release --features enable-sentry --bin zebrad download
 
 CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
+COPY --from=builder /app/target/release/zebrad /usr/local/bin
+COPY --from=builder $HOME/.zcash-params $HOME/.zcash-params
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
-
-COPY --from=builder /app/target/release/zebrad /usr/local/bin
 
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
@@ -71,11 +76,6 @@ RUN set -ex; \
     echo "[tracing]"; \
     echo "endpoint_addr = '0.0.0.0:3000'"; \
   } > "zebrad.toml"
-
-RUN cat zebrad.toml
-
-# Pre-download Zcash Sprout and Sapling parameters
-RUN /usr/local/bin/zebrad download
 
 EXPOSE 3000 8233 18233
 
