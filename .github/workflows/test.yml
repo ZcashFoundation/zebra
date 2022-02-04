@@ -85,7 +85,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  regenerate-test:
+  test-zunstable:
+    name: Test with Zunstable options
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+
+      - name: Run Zunstable-options tests
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- -Zunstable-options --include-ignored
+        env:
+          ZEBRA_SKIP_IPV6_TESTS: "1"
+
+  regenerate-disks:
     name: Renerate disks and test
     runs-on: ubuntu-latest
     needs: build
@@ -103,13 +122,6 @@ jobs:
         uses: google-github-actions/auth@v0.5.0
         with:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
-      - name: Run workspace tests with Zunstable-options
-        run: |
-          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- -Zunstable-options --include-ignored
-        env:
-          ZEBRA_SKIP_IPV6_TESTS: "1"
 
       - name: Regenerate state test disk
         id: regenerate-state
@@ -137,7 +149,7 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      - name: Wait for sync process to end
+      - name: Wait regeneration process to end
         id: wait-regenerate
         if: steps.regenerate-state.outcome == 'success'
         run: |
@@ -153,9 +165,29 @@ jobs:
 
       - name: Delete test instance
         # Always run even if the earlier step fails
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+
+  test-sync:
+    name: Test blocks sync
+    runs-on: ubuntu-latest
+    needs: [ build, regenerate-disks]
+    steps:
+      - uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.5.0
+        with:
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Sync past mandatory checkpoint
@@ -185,14 +217,14 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      - name: Wait for sync process to end
+      - name: Wait sync process to end
         run: |
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --ssh-flag="-o ServerAliveInterval=5" --zone "${{ env.ZONE }}" \
           --command='docker wait $(docker ps -aqf ancestor=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }})'
 
       - name: Delete test instance
         # Always run even if the earlier step fails
-        if: steps.sync-past-checkpoint.outcome == 'success'
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
