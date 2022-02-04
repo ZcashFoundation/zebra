@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: 'Mainnet'
+        default: 'mainnet'
   push:
     # branches:
     #   - main
@@ -18,7 +18,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
-  NETWORK: Mainnet
+  NETWORK: mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
@@ -28,7 +28,6 @@ env:
   IMAGE_NAME: zebrad-test
 
 jobs:
-
   build:
     name: Build images
     timeout-minutes: 210
@@ -86,8 +85,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  test:
-    name: Run all tests
+  regenerate-test:
+    name: Renerate disks and test
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -116,16 +115,16 @@ jobs:
         id: regenerate-state
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 10GB \
+          --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy",size=100GB,type=pd-ssd \
+          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path='/${{ github.event.inputs.network || env.NETWORK }}',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy" \
           --container-command "cargo" \
-          --container-arg="test --verbose --features test_sync_to_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_mainnet" \
+          --container-arg="test --verbose --features test_sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -144,7 +143,7 @@ jobs:
         # Only run if the earlier step succeeds
         if: steps.wait-regenerate.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
       - name: Delete test instance
         # Always run even if the earlier step fails
@@ -153,21 +152,20 @@ jobs:
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
 
       # Creates Compute Engine virtual machine instance w/ disks
-      # TODO: Remove hardcoded value zebrad-cache-1558f3378-mainnet-canopy
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 10GB \
+          --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --disk=boot=no,mode=rw,name=zebrad-cache-1558f3378-mainnet-canopy \
-          --container-mount-disk=mount-path=/zebrad-cache,name=zebrad-cache-1558f3378-mainnet-canopy \
+          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
+          --container-mount-disk=mount-path=/${{ github.event.inputs.network || env.NETWORK }},name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
           --container-command "cargo" \
-          --container-arg="test --locked --release --features enable-sentry,test_sync_past_mandatory_checkpoint_mainnet --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_mainnet" \
+          --container-arg="test --locked --release --features enable-sentry,test_sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
