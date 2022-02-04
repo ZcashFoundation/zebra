@@ -191,9 +191,17 @@ impl Transaction {
         &self,
         network_upgrade: NetworkUpgrade,
         hash_type: sighash::HashType,
-        input: Option<(u32, transparent::Output)>,
+        all_previous_outputs: &[transparent::Output],
+        input: Option<usize>,
     ) -> SigHash {
-        sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
+        sighash::SigHasher::new(
+            self,
+            hash_type,
+            network_upgrade,
+            all_previous_outputs,
+            input,
+        )
+        .sighash()
     }
 
     /// Compute the authorizing data commitment of this transaction as specified

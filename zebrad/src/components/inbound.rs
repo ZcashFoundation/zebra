@@ -36,7 +36,8 @@ use super::{
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
-mod downloads;
+pub(crate) mod downloads;
+
 #[cfg(test)]
 mod tests;
 
@@ -328,7 +329,7 @@ impl Service<zn::Request> for Inbound {
                 if !peers.is_empty() {
                     async { Ok(zn::Response::Peers(peers)) }.boxed()
                 } else {
-                    info!("ignoring `Peers` request from remote peer because our address book is empty");
+                    debug!("ignoring `Peers` request from remote peer because our address book is empty");
                     async { Ok(zn::Response::Nil) }.boxed()
                 }
             }

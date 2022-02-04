@@ -218,6 +218,7 @@ jobs:
           --container-arg="sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
+          --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
           --tags zebrad \
           --zone "${{ env.ZONE }}"

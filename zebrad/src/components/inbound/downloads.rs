@@ -1,3 +1,5 @@
+//! A download stream that handles gossiped blocks from peers.
+
 use std::{
     collections::HashMap,
     convert::TryFrom,
@@ -47,7 +49,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-const MAX_INBOUND_CONCURRENCY: usize = 20;
+pub const MAX_INBOUND_CONCURRENCY: usize = 20;
 
 /// The action taken in response to a peer's gossiped block hash.
 pub enum DownloadAction {
@@ -177,7 +179,7 @@ where
     #[instrument(skip(self, hash), fields(hash = %hash))]
     pub fn download_and_verify(&mut self, hash: block::Hash) -> DownloadAction {
         if self.cancel_handles.contains_key(&hash) {
-            tracing::debug!(
+            debug!(
                 ?hash,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -191,7 +193,7 @@ where
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
-            tracing::debug!(
+            debug!(
                 ?hash,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -275,45 +277,49 @@ where
                 })
                 .unwrap_or(block::Height(0));
 
-            if let Some(block_height) = block.coinbase_height() {
-                if block_height > max_lookahead_height {
-                    tracing::info!(
-                        ?hash,
-                        ?block_height,
-                        ?tip_height,
-                        ?max_lookahead_height,
-                        lookahead_limit = ?MAX_INBOUND_CONCURRENCY,
-                        "gossiped block height too far ahead of the tip: dropped downloaded block"
-                    );
-                    metrics::counter!("gossip.max.height.limit.dropped.block.count", 1);
-
-                    Err("gossiped block height too far ahead")?;
-                } else if block_height < min_accepted_height {
-                    tracing::debug!(
-                        ?hash,
-                        ?block_height,
-                        ?tip_height,
-                        ?min_accepted_height,
-                        behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
-                        "gossiped block height behind the finalized tip: dropped downloaded block"
-                    );
-                    metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
-
-                    Err("gossiped block height behind the finalized tip")?;
-                }
-            } else {
-                tracing::info!(
+            let block_height = block.coinbase_height().ok_or_else(|| {
+                debug!(
                     ?hash,
                     "gossiped block with no height: dropped downloaded block"
                 );
                 metrics::counter!("gossip.no.height.dropped.block.count", 1);
 
-                Err("gossiped block with no height")?;
+                BoxError::from("gossiped block with no height")
+            })?;
+
+            if block_height > max_lookahead_height {
+                debug!(
+                    ?hash,
+                    ?block_height,
+                    ?tip_height,
+                    ?max_lookahead_height,
+                    lookahead_limit = ?MAX_INBOUND_CONCURRENCY,
+                    "gossiped block height too far ahead of the tip: dropped downloaded block"
+                );
+                metrics::counter!("gossip.max.height.limit.dropped.block.count", 1);
+
+                Err("gossiped block height too far ahead")?;
+            } else if block_height < min_accepted_height {
+                debug!(
+                    ?hash,
+                    ?block_height,
+                    ?tip_height,
+                    ?min_accepted_height,
+                    behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
+                    "gossiped block height behind the finalized tip: dropped downloaded block"
+                );
+                metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
+
+                Err("gossiped block height behind the finalized tip")?;
             }
 
-            verifier.oneshot(block).await
+            verifier
+                .oneshot(block)
+                .await
+                .map(|hash| (hash, block_height))
         }
-        .map_ok(|hash| {
+        .map_ok(|(hash, height)| {
+            info!(?height, "downloaded and verified gossiped block");
             metrics::counter!("gossip.verified.block.count", 1);
             hash
         })
@@ -327,7 +333,7 @@ where
             tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
-                    tracing::trace!("task cancelled prior to completion");
+                    trace!("task cancelled prior to completion");
                     metrics::counter!("gossip.cancelled.count", 1);
                     Err(("canceled".into(), hash))
                 }
@@ -341,7 +347,7 @@ where
             "blocks are only queued once"
         );
 
-        tracing::debug!(
+        debug!(
             ?hash,
             queue_len = self.pending.len(),
             ?MAX_INBOUND_CONCURRENCY,
