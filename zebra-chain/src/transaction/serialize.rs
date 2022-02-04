@@ -535,6 +535,17 @@ impl ZcashSerialize for Transaction {
 
 impl ZcashDeserialize for Transaction {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // # Consensus
+        //
+        // > [Pre-Sapling] The encoded size of the transaction MUST be less than or
+        // > equal to 100000 bytes.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        //
+        // Zebra will not verify this rule because we checkpoint up to Canopy blocks, but:
+        // Since transactions must get mined into a block to be useful,
+        // we reject transactions that are larger than blocks.
+        //
         // If the limit is reached, we'll get an UnexpectedEof error.
         let mut limited_reader = reader.take(MAX_BLOCK_BYTES);
 
