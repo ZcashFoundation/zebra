@@ -98,4 +98,4 @@ ENV SHORT_SHA $SHORT_SHA
 ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
-CMD [ "/usr/local/bin/zebrad", "-c", "zebrad.toml", "start" ]
+CMD [ "zebrad", "-c", "zebrad.toml", "start" ]
