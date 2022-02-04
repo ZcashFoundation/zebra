@@ -45,11 +45,13 @@ ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
-# Build zebra
 ARG RUST_BACKTRACE=1
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
 
 COPY . .
+# Pre-download Zcash Sprout and Sapling parameters
+RUN cargo run --locked --release --features enable-sentry --bin zebrad download
+# Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
 FROM builder AS tester
@@ -58,8 +60,6 @@ ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
-# Pre-download Zcash Sprout and Sapling parameters
-RUN cargo run --locked --release --features enable-sentry --bin zebrad download
 
 CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
 
