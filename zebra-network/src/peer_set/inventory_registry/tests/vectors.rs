@@ -40,7 +40,7 @@ async fn inv_registry_one_advertised_ok() {
     let test_peer = "1.1.1.1:1"
         .parse()
         .expect("unexpected invalid peer address");
-    let test_change = InventoryStatus::new_advertised(test_hash, test_peer);
+    let test_change = InventoryStatus::new_available(test_hash, test_peer);
 
     let (mut inv_registry, inv_stream_tx) = new_inv_registry();
 
@@ -105,7 +105,7 @@ async fn inv_registry_prefer_missing_order(missing_first: bool) {
         .expect("unexpected invalid peer address");
 
     let missing_change = InventoryStatus::new_missing(test_hash, test_peer);
-    let advertised_change = InventoryStatus::new_advertised(test_hash, test_peer);
+    let advertised_change = InventoryStatus::new_available(test_hash, test_peer);
 
     let (mut inv_registry, inv_stream_tx) = new_inv_registry();
 
@@ -150,7 +150,7 @@ async fn inv_registry_prefer_current_order(missing_current: bool) {
         .expect("unexpected invalid peer address");
 
     let missing_change = InventoryStatus::new_missing(test_hash, test_peer);
-    let advertised_change = InventoryStatus::new_advertised(test_hash, test_peer);
+    let advertised_change = InventoryStatus::new_available(test_hash, test_peer);
 
     let (mut inv_registry, inv_stream_tx) = new_inv_registry();
 

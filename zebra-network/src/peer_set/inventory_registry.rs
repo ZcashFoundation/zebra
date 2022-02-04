@@ -39,16 +39,16 @@ type InventoryMarker = InventoryStatus<()>;
 
 /// A generic peer inventory status.
 ///
-/// `Advertised` is used for inventory that peers claim to have,
+/// `Available` is used for inventory that peers claim to have,
 /// and `Missing` is used for inventory they didn't provide when we requested it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InventoryStatus<T: Clone> {
-    /// An advertised inventory hash.
+    /// An available inventory hash.
     ///
     /// For performance reasons, advertisements should only be tracked
     /// for hashes that are rare on the network.
     /// So Zebra only tracks single-block inventory messages.
-    Advertised(T),
+    Available(T),
 
     /// An inventory hash rejected by a peer.
     ///
@@ -90,9 +90,9 @@ impl std::fmt::Debug for InventoryRegistry {
 }
 
 impl InventoryChange {
-    /// Returns a new advertised inventory change from a single hash.
-    pub fn new_advertised(hash: InventoryHash, peer: SocketAddr) -> Self {
-        InventoryStatus::Advertised((AtLeastOne::from_one(hash), peer))
+    /// Returns a new available inventory change from a single hash.
+    pub fn new_available(hash: InventoryHash, peer: SocketAddr) -> Self {
+        InventoryStatus::Available((AtLeastOne::from_one(hash), peer))
     }
 
     /// Returns a new missing inventory change from a single hash.
@@ -101,15 +101,15 @@ impl InventoryChange {
         InventoryStatus::Missing((AtLeastOne::from_one(hash), peer))
     }
 
-    /// Returns a new advertised multiple inventory change, if `hashes` contains at least one change.
-    pub fn new_advertised_multi<'a>(
+    /// Returns a new available multiple inventory change, if `hashes` contains at least one change.
+    pub fn new_available_multi<'a>(
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
         let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
         let hashes = hashes.try_into().ok();
 
-        hashes.map(|hashes| InventoryStatus::Advertised((hashes, peer)))
+        hashes.map(|hashes| InventoryStatus::Available((hashes, peer)))
     }
 
     /// Returns a new missing multiple inventory change, if `hashes` contains at least one change.
@@ -126,10 +126,10 @@ impl InventoryChange {
 }
 
 impl<T: Clone> InventoryStatus<T> {
-    /// Returns true if the inventory item was advertised.
+    /// Returns true if the inventory item was available.
     #[allow(dead_code)]
-    pub fn is_advertised(&self) -> bool {
-        matches!(self, Advertised(_))
+    pub fn is_available(&self) -> bool {
+        matches!(self, Available(_))
     }
 
     /// Returns true if the inventory item was missing.
@@ -138,9 +138,9 @@ impl<T: Clone> InventoryStatus<T> {
         matches!(self, Missing(_))
     }
 
-    /// Get the advertised inventory item, if present.
-    pub fn advertised(&self) -> Option<T> {
-        if let Advertised(item) = self {
+    /// Get the available inventory item, if present.
+    pub fn available(&self) -> Option<T> {
+        if let Available(item) = self {
             Some(item.clone())
         } else {
             None
@@ -160,7 +160,7 @@ impl<T: Clone> InventoryStatus<T> {
     /// Get the inner item, regardless of status.
     pub fn inner(&self) -> T {
         match self {
-            Advertised(item) | Missing(item) => item.clone(),
+            Available(item) | Missing(item) => item.clone(),
         }
     }
 
@@ -173,7 +173,7 @@ impl<T: Clone> InventoryStatus<T> {
     pub fn map<U: Clone, F: FnOnce(T) -> U>(self, f: F) -> InventoryStatus<U> {
         // Based on Option::map from https://doc.rust-lang.org/src/core/option.rs.html#829
         match self {
-            Advertised(item) => Advertised(f(item)),
+            Available(item) => Available(f(item)),
             Missing(item) => Missing(f(item)),
         }
     }
@@ -181,7 +181,7 @@ impl<T: Clone> InventoryStatus<T> {
     /// Converts from `&InventoryStatus<T>` to `InventoryStatus<&T>`.
     pub fn as_ref(&self) -> InventoryStatus<&T> {
         match self {
-            Advertised(item) => Advertised(item),
+            Available(item) => Available(item),
             Missing(item) => Missing(item),
         }
     }
@@ -212,7 +212,7 @@ impl InventoryRegistry {
     /// Returns an iterator over addrs of peers that have recently advertised `hash` in their inventory.
     pub fn advertising_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &SocketAddr> {
         self.status_peers(hash)
-            .filter_map(|addr_status| addr_status.advertised())
+            .filter_map(|addr_status| addr_status.available())
     }
 
     /// Returns an iterator over addrs of peers that have recently missed `hash` in their inventory.
@@ -332,7 +332,7 @@ impl InventoryRegistry {
             // Prefer `missing` over `advertised`, so malicious peers can't reset their own entries,
             // and funnel multiple failing requests to themselves.
             if let Some(old_status) = current.get(&addr) {
-                if old_status.is_missing() && new_status.is_advertised() {
+                if old_status.is_missing() && new_status.is_available() {
                     debug!(?new_status, ?old_status, ?addr, ?inv, "skipping new status");
                     continue;
                 }

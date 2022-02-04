@@ -1022,7 +1022,7 @@ async fn register_inventory_status(
                     // If all receivers have been dropped, `send` returns an error.
                     // When that happens, Zebra is shutting down, so we want to ignore this error.
                     let _ = inv_collector
-                        .send(InventoryChange::new_advertised(*advertised, transient_addr));
+                        .send(InventoryChange::new_available(*advertised, transient_addr));
                 }
                 [advertised @ ..] => {
                     let advertised = advertised
@@ -1035,7 +1035,7 @@ async fn register_inventory_status(
                     );
 
                     if let Some(change) =
-                        InventoryChange::new_advertised_multi(advertised, transient_addr)
+                        InventoryChange::new_available_multi(advertised, transient_addr)
                     {
                         // Ignore channel errors that should only happen during shutdown.
                         let _ = inv_collector.send(change);
