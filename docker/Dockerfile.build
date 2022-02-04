@@ -26,6 +26,18 @@ RUN apt-get -qq update && \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
+# Install google OS Config agent
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+    curl \
+    lsb-release \
+    ; \
+    echo "deb http://packages.cloud.google.com/apt google-compute-engine-$(lsb_release -cs)-stable main" > /etc/apt/sources.list.d/google-compute-engine.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+    apt-get -qq update  && \
+    apt-get -qq install -y --no-install-recommends google-osconfig-agent && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
 ENV RUSTFLAGS -O
