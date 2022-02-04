@@ -20,43 +20,36 @@ use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, 
 
 use zebra_chain::{parameters::POST_BLOSSOM_POW_TARGET_SPACING, serialization::AtLeastOne};
 
-use crate::{protocol::external::InventoryHash, BoxError};
+use crate::{
+    protocol::{external::InventoryHash, internal::ResponseStatus},
+    BoxError,
+};
 
 use self::update::Update;
 
-use InventoryStatus::*;
+/// Underlying type for the alias InventoryStatus::*
+use ResponseStatus::*;
 
 pub mod update;
 
 #[cfg(test)]
 mod tests;
 
+/// A peer inventory status, which tracks a hash for both available and missing inventory.
+pub type InventoryStatus<T> = ResponseStatus<T, T>;
+
 /// A peer inventory status change, used in the inventory status channel.
+///
+/// For performance reasons, advertisements should only be tracked
+/// for hashes that are rare on the network.
+/// So Zebra only tracks single-block inventory messages.
+///
+/// For security reasons, all `notfound` rejections should be tracked.
+/// This also helps with performance, if the hash is rare on the network.
 pub type InventoryChange = InventoryStatus<(AtLeastOne<InventoryHash>, SocketAddr)>;
 
 /// An internal marker used in inventory status hash maps.
 type InventoryMarker = InventoryStatus<()>;
-
-/// A generic peer inventory status.
-///
-/// `Available` is used for inventory that peers claim to have,
-/// and `Missing` is used for inventory they didn't provide when we requested it.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum InventoryStatus<T: Clone> {
-    /// An available inventory hash.
-    ///
-    /// For performance reasons, advertisements should only be tracked
-    /// for hashes that are rare on the network.
-    /// So Zebra only tracks single-block inventory messages.
-    Available(T),
-
-    /// An inventory hash rejected by a peer.
-    ///
-    /// For security reasons, all `notfound` rejections should be tracked.
-    /// This also helps with performance, if the hash is rare on the network.
-    #[allow(dead_code)]
-    Missing(T),
-}
 
 /// An Inventory Registry for tracking recent inventory advertisements and missing inventory.
 ///
@@ -125,64 +118,27 @@ impl InventoryChange {
     }
 }
 
-impl<T: Clone> InventoryStatus<T> {
-    /// Returns true if the inventory item was available.
-    #[allow(dead_code)]
-    pub fn is_available(&self) -> bool {
-        matches!(self, Available(_))
-    }
-
-    /// Returns true if the inventory item was missing.
-    #[allow(dead_code)]
-    pub fn is_missing(&self) -> bool {
-        matches!(self, Missing(_))
-    }
-
-    /// Get the available inventory item, if present.
-    pub fn available(&self) -> Option<T> {
-        if let Available(item) = self {
-            Some(item.clone())
-        } else {
-            None
-        }
-    }
-
-    /// Get the rejected inventory item, if present.
-    #[allow(dead_code)]
-    pub fn missing(&self) -> Option<T> {
-        if let Missing(item) = self {
-            Some(item.clone())
-        } else {
-            None
-        }
-    }
-
-    /// Get the inner item, regardless of status.
-    pub fn inner(&self) -> T {
-        match self {
-            Available(item) | Missing(item) => item.clone(),
-        }
-    }
-
+impl<T> InventoryStatus<T> {
     /// Get a marker for the status, without any associated data.
     pub fn marker(&self) -> InventoryMarker {
         self.as_ref().map(|_inner| ())
     }
 
     /// Maps an `InventoryStatus<T>` to `InventoryStatus<U>` by applying a function to a contained value.
-    pub fn map<U: Clone, F: FnOnce(T) -> U>(self, f: F) -> InventoryStatus<U> {
-        // Based on Option::map from https://doc.rust-lang.org/src/core/option.rs.html#829
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> InventoryStatus<U> {
+        // Based on Option::map from https://doc.rust-lang.org/src/core/option.rs.html#844
         match self {
             Available(item) => Available(f(item)),
             Missing(item) => Missing(f(item)),
         }
     }
+}
 
-    /// Converts from `&InventoryStatus<T>` to `InventoryStatus<&T>`.
-    pub fn as_ref(&self) -> InventoryStatus<&T> {
+impl<T: Clone> InventoryStatus<T> {
+    /// Get the inner item, regardless of status.
+    pub fn inner(&self) -> T {
         match self {
-            Available(item) => Available(item),
-            Missing(item) => Missing(item),
+            Available(item) | Missing(item) => item.clone(),
         }
     }
 }
