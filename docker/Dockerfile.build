@@ -66,7 +66,8 @@ CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--works
 # Runner image
 FROM debian:bullseye-slim AS runtime
 COPY --from=builder /app/target/release/zebrad /usr/local/bin
-COPY --from=builder ~/.zcash-params ~/.zcash-params
+# TODO: do not hardcode the user /root/ even though is a safe assumption
+COPY --from=builder /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
