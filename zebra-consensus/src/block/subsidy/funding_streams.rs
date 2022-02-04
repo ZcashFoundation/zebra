@@ -119,7 +119,7 @@ pub fn funding_stream_address(
     Address::from_str(address).expect("Address should deserialize")
 }
 
-/// Given a founders reward address, create a script and check if it is the same
+/// Given a funding stream address, create a script and check if it is the same
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams.

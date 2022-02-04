@@ -31,10 +31,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.7
         with:
-          # Pinned to workaround issue making cargo-llvm-cov fail, see
-          # https://github.com/taiki-e/cargo-llvm-cov/issues/128
-          # TODO: restore to just `nightly` after it's fixed
-          toolchain: nightly-2022-01-14
+          toolchain: nightly
           override: true
           profile: minimal
           components: llvm-tools-preview

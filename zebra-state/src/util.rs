@@ -18,7 +18,7 @@ pub fn block_locator_heights(tip_height: block::Height) -> Vec<block::Height> {
         .map(block::Height);
 
     let locators = locators.collect();
-    tracing::info!(
+    tracing::debug!(
         ?tip_height,
         ?min_locator_height,
         ?locators,
