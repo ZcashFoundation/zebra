@@ -695,7 +695,7 @@ where
         let maybe_peer_list = self
             .ready_services
             .keys()
-            .filter(|&addr| !missing_peer_list.contains(&addr))
+            .filter(|addr| !missing_peer_list.contains(addr))
             .copied()
             .collect();
 
