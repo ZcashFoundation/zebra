@@ -307,31 +307,33 @@ impl Service<zn::Request> for Inbound {
                 // # Correctness
                 //
                 // Briefly hold the address book threaded mutex while
-                // cloning the address book. Then sanitize after releasing
-                // the lock.
+                // cloning the address book. Then sanitize in the future,
+                // after releasing the lock.
                 let peers = address_book.lock().unwrap().clone();
 
-                // Correctness: get the current time after acquiring the address book lock.
-                let now = Utc::now();
+                async move {
+                    // Correctness: get the current time after acquiring the address book lock.
+                    let now = Utc::now();
 
-                // Send a sanitized response
-                let mut peers = peers.sanitized(now);
+                    // Send a sanitized response
+                    let mut peers = peers.sanitized(now);
 
-                // Truncate the list
-                //
-                // TODO: replace with div_ceil once it stabilises
-                //       https://github.com/rust-lang/rust/issues/88581
-                let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
-                let address_limit = MAX_ADDRS_IN_MESSAGE
-                    .min(address_limit);
-                peers.truncate(address_limit);
+                    // Truncate the list
+                    //
+                    // TODO: replace with div_ceil once it stabilises
+                    //       https://github.com/rust-lang/rust/issues/88581
+                    let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
+                    let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
+                    peers.truncate(address_limit);
 
-                if !peers.is_empty() {
-                    async { Ok(zn::Response::Peers(peers)) }.boxed()
-                } else {
-                    debug!("ignoring `Peers` request from remote peer because our address book is empty");
-                    async { Ok(zn::Response::Nil) }.boxed()
-                }
+                    if peers.is_empty() {
+                        // We don't know if the peer response will be empty until we've sanitized them.
+                        debug!("ignoring `Peers` request from remote peer because our address book is empty");
+                        Ok(zn::Response::Nil)
+                    } else {
+                        Ok(zn::Response::Peers(peers))
+                    }
+                }.boxed()
             }
             zn::Request::BlocksByHash(hashes) => {
                 // Correctness:
