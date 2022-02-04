@@ -236,9 +236,12 @@ where
                 );
 
                 blocks
-                    .into_iter()
-                    .next()
-                    .expect("successful response has the block in it")
+                    .first()
+                    .expect("just checked length")
+                    .available()
+                    .expect(
+                        "unexpected missing block status: single block failures should be errors",
+                    )
             } else {
                 unreachable!("wrong response to block request");
             };

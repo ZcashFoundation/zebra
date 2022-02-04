@@ -20,8 +20,11 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use crate::{
     peer::{connection::Connection, ClientRequest, ErrorSlot},
     protocol::external::Message,
+    protocol::internal::ResponseStatus,
     Request, Response, SharedPeerError,
 };
+
+use ResponseStatus::*;
 
 proptest! {
     // The default value of proptest cases (256) causes this test to take more than ten seconds on
@@ -105,7 +108,7 @@ proptest! {
             );
             let response = response_result.unwrap();
 
-            prop_assert_eq!(response, Response::Blocks(vec![second_block]));
+            prop_assert_eq!(response, Response::Blocks(vec![Available(second_block.0)]));
 
             // Check the state after the response
             let error = shared_error_slot.try_get_error();

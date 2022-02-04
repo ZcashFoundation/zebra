@@ -22,7 +22,7 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
-use zebra_network::{AddressBook, Request, Response};
+use zebra_network::{AddressBook, Request, Response, ResponseStatus};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -34,6 +34,8 @@ use crate::{
     },
     BoxError,
 };
+
+use ResponseStatus::*;
 
 /// Maximum time to wait for a network service request.
 ///
@@ -88,7 +90,15 @@ async fn mempool_requests_for_transactions() {
         .await;
 
     match response {
-        Ok(Response::Transactions(response)) => assert_eq!(response, added_transactions),
+        Ok(Response::Transactions(response)) => {
+            assert_eq!(
+                response,
+                added_transactions
+                    .into_iter()
+                    .map(Available)
+                    .collect::<Vec<_>>(),
+            )
+        }
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
     };
 
@@ -230,7 +240,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             .expect_request(Request::TransactionsById(txs))
             .map(|responder| {
                 let unmined_transaction = UnminedTx::from(test_transaction.clone());
-                responder.respond(Response::Transactions(vec![unmined_transaction]))
+                responder.respond(Response::Transactions(vec![Available(unmined_transaction)]))
             });
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
@@ -598,7 +608,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
         .await
-        .respond(Response::Blocks(vec![block]));
+        .respond(Response::Blocks(vec![Available(block)]));
 
     // TODO: check that the block is queued in the checkpoint verifier
 
@@ -621,7 +631,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
         .await
-        .respond(Response::Blocks(vec![block]));
+        .respond(Response::Blocks(vec![Available(block)]));
 
     let response = state_service
         .clone()

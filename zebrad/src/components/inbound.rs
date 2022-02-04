@@ -6,6 +6,7 @@
 //! It also responds to peer requests for blocks, transactions, and peer addresses.
 
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -23,11 +24,14 @@ use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, Service
 use zebra_network as zn;
 use zebra_state as zs;
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    transaction::UnminedTxId,
+};
 use zebra_consensus::chain::VerifyChainError;
 use zebra_network::{
     constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
-    AddressBook,
+    AddressBook, ResponseStatus,
 };
 
 // Re-use the syncer timeouts for consistency.
@@ -35,6 +39,8 @@ use super::{
     mempool, mempool as mp,
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
+
+use ResponseStatus::*;
 
 pub(crate) mod downloads;
 
@@ -336,6 +342,12 @@ impl Service<zn::Request> for Inbound {
                 }.boxed()
             }
             zn::Request::BlocksByHash(hashes) => {
+                // We return an available or missing response to each inventory request,
+                // unless the request is empty.
+                if hashes.is_empty() {
+                    return async { Ok(zn::Response::Nil) }.boxed();
+                }
+
                 // Correctness:
                 //
                 // We can't use `call_all` here, because it can hold one buffer slot per concurrent
@@ -346,6 +358,7 @@ impl Service<zn::Request> for Inbound {
                 // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
                 use futures::stream::TryStreamExt;
                 hashes
+                    .clone()
                     .into_iter()
                     .map(|hash| zs::Request::Block(hash.into()))
                     .map(|request| state.clone().oneshot(request))
@@ -362,22 +375,36 @@ impl Service<zn::Request> for Inbound {
                     })
                     .try_collect::<Vec<_>>()
                     .map_ok(|blocks| {
-                        if blocks.is_empty() {
-                            zn::Response::Nil
-                        } else {
-                            zn::Response::Blocks(blocks)
-                        }
+                        // Work out which hashes were missing.
+                        let available_hashes: HashSet<block::Hash> = blocks.iter().map(|block| block.hash()).collect();
+                        let available = blocks.into_iter().map(Available);
+                        let missing = hashes.into_iter().filter(|hash| !available_hashes.contains(hash)).map(Missing);
+
+                        zn::Response::Blocks(available.chain(missing).collect())
                     })
                     .boxed()
             }
-            zn::Request::TransactionsById(transactions) => {
-                let request = mempool::Request::TransactionsById(transactions);
-                mempool.clone().oneshot(request).map_ok(|resp| match resp {
-                    mempool::Response::Transactions(transactions) if transactions.is_empty() => zn::Response::Nil,
-                    mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
-                    _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
-                })
-                    .boxed()
+            zn::Request::TransactionsById(req_tx_ids) => {
+                // We return an available or missing response to each inventory request,
+                // unless the request is empty.
+                if req_tx_ids.is_empty() {
+                    return async { Ok(zn::Response::Nil) }.boxed();
+                }
+
+                let request = mempool::Request::TransactionsById(req_tx_ids.clone());
+                mempool.clone().oneshot(request).map_ok(move |resp| {
+                    let transactions = match resp {
+                        mempool::Response::Transactions(transactions) => transactions,
+                        _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
+                    };
+
+                    // Work out which transaction IDs were missing.
+                    let available_tx_ids: HashSet<UnminedTxId> = transactions.iter().map(|tx| tx.id).collect();
+                    let available = transactions.into_iter().map(Available);
+                    let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
+
+                    zn::Response::Transactions(available.chain(missing).collect())
+                }).boxed()
             }
             zn::Request::FindBlocks { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
