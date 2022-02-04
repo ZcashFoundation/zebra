@@ -118,7 +118,7 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path='/zebrad-cache,name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy" \
+          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
