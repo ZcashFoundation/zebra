@@ -144,7 +144,7 @@ impl QueuedBlocks {
             }
         }
 
-        tracing::trace!(num_blocks = %self.blocks.len(), "Finished pruning blocks at or beneath the finalized tip height",);
+        tracing::trace!(num_blocks = %self.blocks.len(), "Finished pruning blocks at or beneath the finalized tip height");
         self.update_metrics();
     }
 

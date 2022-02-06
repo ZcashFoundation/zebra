@@ -1023,7 +1023,7 @@ async fn register_inventory_status(
         }
 
         (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
-            debug!(?missing, "registering missing inventory for peer",);
+            debug!(?missing, "registering missing inventory for peer");
 
             if let Some(change) = InventoryChange::new_missing_multi(missing, transient_addr) {
                 let _ = inv_collector.send(change);
