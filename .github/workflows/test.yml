@@ -18,15 +18,15 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
+  ZEBRA_SKIP_IPV6_TESTS: "1"
   NETWORK: mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   ZONE: us-central1-a
-  MACHINE_TYPE: c2-standard-16
+  MACHINE_TYPE: c2-standard-4
   IMAGE_NAME: zebrad-test
-  ZEBRA_SKIP_IPV6_TESTS: "1"
 
 jobs:
   build:
@@ -118,7 +118,7 @@ jobs:
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --package zebra-state --lib -- with_fake_activation_heights
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
 
   test-large-sync:
     name: Test large sync
