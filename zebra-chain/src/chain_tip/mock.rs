@@ -7,15 +7,23 @@ use tokio::sync::watch;
 
 use crate::{block, chain_tip::ChainTip, transaction};
 
-/// A sender that sets the `best_tip_height` of a [`MockChainTip`].
+/// A sender to sets the values read by a [`MockChainTip`].
 pub struct MockChainTipSender {
+    /// A sender that sets the `best_tip_height` of a [`MockChainTip`].
     best_tip_height: watch::Sender<Option<block::Height>>,
+
+    /// A sender that sets the `best_tip_block_time` of a [`MockChainTip`].
+    best_tip_block_time: watch::Sender<Option<DateTime<Utc>>>,
 }
 
 /// A mock [`ChainTip`] implementation that allows setting the `best_tip_height` externally.
 #[derive(Clone, Debug)]
 pub struct MockChainTip {
+    /// A mocked `best_tip_height` value set by the [`MockChainTipSender`].
     best_tip_height: watch::Receiver<Option<block::Height>>,
+
+    /// A mocked `best_tip_height` value set by the [`MockChainTipSender`].
+    best_tip_block_time: watch::Receiver<Option<DateTime<Utc>>>,
 }
 
 impl MockChainTip {
@@ -26,14 +34,17 @@ impl MockChainTip {
     ///
     /// Initially, the best tip height is [`None`].
     pub fn new() -> (Self, MockChainTipSender) {
-        let (sender, receiver) = watch::channel(None);
+        let (height_sender, height_receiver) = watch::channel(None);
+        let (time_sender, time_receiver) = watch::channel(None);
 
         let mock_chain_tip = MockChainTip {
-            best_tip_height: receiver,
+            best_tip_height: height_receiver,
+            best_tip_block_time: time_receiver,
         };
 
         let mock_chain_tip_sender = MockChainTipSender {
-            best_tip_height: sender,
+            best_tip_height: height_sender,
+            best_tip_block_time: time_sender,
         };
 
         (mock_chain_tip, mock_chain_tip_sender)
@@ -50,11 +61,14 @@ impl ChainTip for MockChainTip {
     }
 
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
-        unreachable!("Method not used in tests");
+        *self.best_tip_block_time.borrow()
     }
 
     fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
-        unreachable!("Method not used in tests");
+        let height = (*self.best_tip_height.borrow())?;
+        let block_time = (*self.best_tip_block_time.borrow())?;
+
+        Some((height, block_time))
     }
 
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
@@ -68,5 +82,12 @@ impl MockChainTipSender {
         self.best_tip_height
             .send(height.into())
             .expect("attempt to send a best tip height to a dropped `MockChainTip`");
+    }
+
+    /// Send a new best tip block time to the [`MockChainTip`].
+    pub fn send_best_tip_block_time(&self, block_time: impl Into<Option<DateTime<Utc>>>) {
+        self.best_tip_block_time
+            .send(block_time.into())
+            .expect("attempt to send a best tip block time to a dropped `MockChainTip`");
     }
 }
