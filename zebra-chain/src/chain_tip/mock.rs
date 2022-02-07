@@ -8,7 +8,9 @@ use tokio::sync::watch;
 use crate::{block, chain_tip::ChainTip, transaction};
 
 /// A sender that sets the `best_tip_height` of a [`MockChainTip`].
-pub type MockChainTipSender = watch::Sender<Option<block::Height>>;
+pub struct MockChainTipSender {
+    best_tip_height: watch::Sender<Option<block::Height>>,
+}
 
 /// A mock [`ChainTip`] implementation that allows setting the `best_tip_height` externally.
 #[derive(Clone, Debug)]
@@ -30,7 +32,11 @@ impl MockChainTip {
             best_tip_height: receiver,
         };
 
-        (mock_chain_tip, sender)
+        let mock_chain_tip_sender = MockChainTipSender {
+            best_tip_height: sender,
+        };
+
+        (mock_chain_tip, mock_chain_tip_sender)
     }
 }
 
@@ -53,5 +59,14 @@ impl ChainTip for MockChainTip {
 
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         unreachable!("Method not used in tests");
+    }
+}
+
+impl MockChainTipSender {
+    /// Send a new best tip height to the [`MockChainTip`].
+    pub fn send_best_tip_height(&self, height: impl Into<Option<block::Height>>) {
+        self.best_tip_height
+            .send(height.into())
+            .expect("attempt to send a best tip height to a dropped `MockChainTip`");
     }
 }
