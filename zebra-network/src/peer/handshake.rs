@@ -1,9 +1,10 @@
+//! Initial [`Handshake`s] with Zebra peers over a `PeerTransport`.
+
 use std::{
     cmp::min,
     collections::HashSet,
     fmt,
     future::Future,
-    marker::PhantomData,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     sync::Arc,
@@ -37,7 +38,7 @@ use crate::{
         CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
         MinimumPeerVersion, PeerError,
     },
-    peer_set::ConnectionTracker,
+    peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
         external::{types::*, AddrInVersion, Codec, InventoryHash, Message},
         internal::{Request, Response},
@@ -54,12 +55,11 @@ use crate::{
 /// To avoid hangs, each handshake (or its connector) should be:
 /// - launched in a separate task, and
 /// - wrapped in a timeout.
-pub struct Handshake<S, AsyncReadWrite, C = NoChainTip>
+pub struct Handshake<S, C = NoChainTip>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     config: Config,
     user_agent: String,
@@ -68,21 +68,18 @@ where
 
     inbound_service: S,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-    inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
+    inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
 
     parent_span: Span,
-
-    _phantom_data: PhantomData<AsyncReadWrite>,
 }
 
-impl<S, AsyncReadWrite, C> Clone for Handshake<S, AsyncReadWrite, C>
+impl<S, C> Clone for Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -96,7 +93,6 @@ where
             minimum_peer_version: self.minimum_peer_version.clone(),
             nonces: self.nonces.clone(),
             parent_span: self.parent_span.clone(),
-            _phantom_data: self._phantom_data,
         }
     }
 }
@@ -340,12 +336,11 @@ impl fmt::Debug for ConnectedAddr {
 }
 
 /// A builder for `Handshake`.
-pub struct Builder<S, AsyncReadWrite, C = NoChainTip>
+pub struct Builder<S, C = NoChainTip>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     config: Option<Config>,
     our_services: Option<PeerServices>,
@@ -354,18 +349,15 @@ where
 
     inbound_service: Option<S>,
     address_book_updater: Option<tokio::sync::mpsc::Sender<MetaAddrChange>>,
-    inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    inv_collector: Option<broadcast::Sender<InventoryChange>>,
     latest_chain_tip: C,
-
-    _phantom_data: PhantomData<AsyncReadWrite>,
 }
 
-impl<S, AsyncReadWrite, C> Builder<S, AsyncReadWrite, C>
+impl<S, C> Builder<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     /// Provide a config.  Mandatory.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -385,7 +377,7 @@ where
     /// to look up peers that have specific inventory.
     pub fn with_inventory_collector(
         mut self,
-        inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
+        inv_collector: broadcast::Sender<InventoryChange>,
     ) -> Self {
         self.inv_collector = Some(inv_collector);
         self
@@ -425,10 +417,7 @@ where
     /// constant over network upgrade activations.
     ///
     /// Use [`NoChainTip`] to explicitly provide no chain tip.
-    pub fn with_latest_chain_tip<NewC>(
-        self,
-        latest_chain_tip: NewC,
-    ) -> Builder<S, AsyncReadWrite, NewC>
+    pub fn with_latest_chain_tip<NewC>(self, latest_chain_tip: NewC) -> Builder<S, NewC>
     where
         NewC: ChainTip + Clone + Send + 'static,
     {
@@ -443,7 +432,6 @@ where
             user_agent: self.user_agent,
             relay: self.relay,
             inv_collector: self.inv_collector,
-            _phantom_data: self._phantom_data,
         }
     }
 
@@ -458,7 +446,7 @@ where
     /// Consume this builder and produce a [`Handshake`].
     ///
     /// Returns an error only if any mandatory field was unset.
-    pub fn finish(self) -> Result<Handshake<S, AsyncReadWrite, C>, &'static str> {
+    pub fn finish(self) -> Result<Handshake<S, C>, &'static str> {
         let config = self.config.ok_or("did not specify config")?;
         let inbound_service = self
             .inbound_service
@@ -491,19 +479,17 @@ where
             minimum_peer_version,
             nonces,
             parent_span: Span::current(),
-            _phantom_data: self._phantom_data,
         })
     }
 }
 
-impl<S, AsyncReadWrite> Handshake<S, AsyncReadWrite, NoChainTip>
+impl<S> Handshake<S, NoChainTip>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     /// Create a builder that configures a [`Handshake`] service.
-    pub fn builder() -> Builder<S, AsyncReadWrite, NoChainTip> {
+    pub fn builder() -> Builder<S, NoChainTip> {
         // We don't derive `Default` because the derive inserts a `where S:
         // Default` bound even though `Option<S>` implements `Default` even if
         // `S` does not.
@@ -516,7 +502,6 @@ where
             address_book_updater: None,
             inv_collector: None,
             latest_chain_tip: NoChainTip,
-            _phantom_data: PhantomData::default(),
         }
     }
 }
@@ -527,8 +512,8 @@ where
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 #[allow(clippy::too_many_arguments)]
-pub async fn negotiate_version<AsyncReadWrite>(
-    peer_conn: &mut Framed<AsyncReadWrite, Codec>,
+pub async fn negotiate_version<PeerTransport>(
+    peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
     config: Config,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
@@ -538,7 +523,7 @@ pub async fn negotiate_version<AsyncReadWrite>(
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
 ) -> Result<(Version, PeerServices, SocketAddr), HandshakeError>
 where
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
@@ -729,12 +714,12 @@ where
 
 /// A handshake request.
 /// Contains the information needed to handshake with the peer.
-pub struct HandshakeRequest<AsyncReadWrite>
+pub struct HandshakeRequest<PeerTransport>
 where
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     /// The tokio [`TcpStream`] or Tor [`DataStream`] to the peer.
-    pub data_stream: AsyncReadWrite,
+    pub data_stream: PeerTransport,
 
     /// The address of the peer, and other related information.
     pub connected_addr: ConnectedAddr,
@@ -745,13 +730,12 @@ where
     pub connection_tracker: ConnectionTracker,
 }
 
-impl<S, AsyncReadWrite, C> Service<HandshakeRequest<AsyncReadWrite>>
-    for Handshake<S, AsyncReadWrite, C>
+impl<S, PeerTransport, C> Service<HandshakeRequest<PeerTransport>> for Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
-    AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     type Response = Client;
     type Error = BoxError;
@@ -762,7 +746,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: HandshakeRequest<AsyncReadWrite>) -> Self::Future {
+    fn call(&mut self, req: HandshakeRequest<PeerTransport>) -> Self::Future {
         let HandshakeRequest {
             data_stream,
             connected_addr,
@@ -946,24 +930,37 @@ where
                             //
                             // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
                             //
-                            // TODO: zcashd has a bug where it merges queued inv messages of
-                            // the same or different types. So Zebra should split small
-                            // merged inv messages into separate inv messages. (#1768)
+                            // Note: zcashd has a bug where it merges queued inv messages of
+                            // the same or different types. Zebra compensates by sending `notfound`
+                            // responses to the inv collector. (#2156, #1768)
+                            //
+                            // (We can't split `inv`s, because that fills the inventory registry
+                            // with useless entries that the whole network has, making it large and slow.)
                             match hashes.as_slice() {
                                 [hash @ InventoryHash::Block(_)] => {
                                     debug!(?hash, "registering gossiped block inventory for peer");
-                                    let _ = inv_collector.send((*hash, transient_addr));
+
+                                    // The peer set and inv collector use the peer's remote
+                                    // address as an identifier
+                                    let _ = inv_collector.send(InventoryChange::new_advertised(
+                                        *hash,
+                                        transient_addr,
+                                    ));
                                 }
                                 [hashes @ ..] => {
-                                    for hash in hashes {
-                                        if let Some(unmined_tx_id) = hash.unmined_tx_id() {
-                                            debug!(?unmined_tx_id, "registering unmined transaction inventory for peer");
-                                            // The peer set and inv collector use the peer's remote
-                                            // address as an identifier
-                                            let _ = inv_collector.send((*hash, transient_addr));
-                                        } else {
-                                            trace!(?hash, "ignoring non-transaction inventory hash in multi-hash list")
-                                        }
+                                    let hashes =
+                                        hashes.iter().filter(|hash| hash.unmined_tx_id().is_some());
+
+                                    debug!(
+                                        ?hashes,
+                                        "registering unmined transaction inventory for peer"
+                                    );
+
+                                    if let Some(change) = InventoryChange::new_advertised_multi(
+                                        hashes,
+                                        transient_addr,
+                                    ) {
+                                        let _ = inv_collector.send(change);
                                     }
                                 }
                             }
@@ -974,19 +971,14 @@ where
                 })
                 .boxed();
 
-            use super::connection;
-            let server = Connection {
-                state: connection::State::AwaitingRequest,
-                request_timer: None,
-                cached_addrs: Vec::new(),
-                svc: inbound_service,
-                client_rx: server_rx.into(),
-                error_slot: error_slot.clone(),
+            let server = Connection::new(
+                inbound_service,
+                server_rx,
+                error_slot.clone(),
                 peer_tx,
                 connection_tracker,
-                metrics_label: connected_addr.get_transient_addr_label(),
-                last_metrics_state: None,
-            };
+                connected_addr,
+            );
 
             let connection_task = tokio::spawn(
                 server

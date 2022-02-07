@@ -224,6 +224,21 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             .collect();
 
         // Create transfers
+        //
+        // # Consensus
+        //
+        // > The anchor of each Spend description MUST refer to some earlier
+        // > block’s final Sapling treestate. The anchor is encoded separately
+        // > in each Spend description for v4 transactions, or encoded once and
+        // > shared between all Spend descriptions in a v5 transaction.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+        //
+        // This rule is also implemented in
+        // [`zebra_state::service::check::anchor`] and
+        // [`zebra_chain::sapling::spend`].
+        //
+        // The "anchor encoding for v5 transactions" is implemented here.
         let transfers = match shared_anchor {
             Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
                 shared_anchor,
@@ -529,10 +544,38 @@ impl ZcashDeserialize for Transaction {
             (header & LOW_31_BITS, header >> 31 != 0)
         };
 
-        // Consensus rules:
+        // # Consensus
+        //
+        // The next rules apply for different transaction versions as follows:
+        //
+        // [Pre-Overwinter]: Transactions version 1 and 2.
+        // [Overwinter onward]: Transactions version 3 and above.
+        // [Overwinter only, pre-Sapling]: Transactions version 3.
+        // [Sapling to Canopy inclusive, pre-NU5]: Transactions version 4.
+        // [NU5 onward]: Transactions version 4 and above.
+        //
         // > The transaction version number MUST be greater than or equal to 1.
-        // >
-        // > The overwintered flag MUST NOT be set for version 1 and 2 transactions.
+        //
+        // > [Pre-Overwinter] The fOverwintered fag MUST NOT be set.
+        //
+        // > [Overwinter onward] The version group ID MUST be recognized.
+        //
+        // > [Overwinter onward] The fOverwintered flag MUST be set.
+        //
+        // > [Overwinter only, pre-Sapling] The transaction version number MUST be 3,
+        // > and the version group ID MUST be 0x03C48270.
+        //
+        // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4,
+        // > and the version group ID MUST be 0x892F2085.
+        //
+        // > [NU5 onward] The transaction version number MUST be 4 or 5.
+        // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+        // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
+        //
+        // Note: Zebra checkpoints until Canopy blocks, this means only transactions versions
+        // 4 and 5 get fully verified. This satisfies "The transaction version number MUST be 4"
+        // and "The transaction version number MUST be 4 or 5" from the last two rules above.
+        // This is done in the zebra-consensus crate, in the transactions checks.
         //
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         match (version, overwintered) {
@@ -553,10 +596,6 @@ impl ZcashDeserialize for Transaction {
             }
             (3, true) => {
                 let id = limited_reader.read_u32::<LittleEndian>()?;
-                // Consensus rule:
-                // > [Overwinter only, pre-Sapling] The transaction version number MUST be 3, and the version group ID MUST be 0x03C48270.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
                 if id != OVERWINTER_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
                         "expected OVERWINTER_VERSION_GROUP_ID",
@@ -574,13 +613,6 @@ impl ZcashDeserialize for Transaction {
             }
             (4, true) => {
                 let id = limited_reader.read_u32::<LittleEndian>()?;
-                // Consensus rules:
-                // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, and the version group ID MUST be 0x892F2085.
-                // >
-                // > [NU5 onward] The transaction version number MUST be 4 or 5.
-                // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
                 if id != SAPLING_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
                         "expected SAPLING_VERSION_GROUP_ID",
@@ -651,13 +683,6 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             (5, true) => {
-                // header
-                //
-                // Consensus rule:
-                // > [NU5 onward] The transaction version number MUST be 4 or 5. ...
-                // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));

@@ -43,7 +43,8 @@ pub const OUTBOUND_PEER_BIAS_DENOMINATOR: usize = 2;
 /// buffer adds up to 6 seconds worth of blocks to the queue.
 pub const PEERSET_BUFFER_SIZE: usize = 3;
 
-/// The timeout for requests made to a remote peer.
+/// The timeout for sending a message to a remote peer,
+/// and receiving a response from a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The timeout for handshakes when connecting to new peers.
@@ -197,7 +198,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 //
 // TODO: generate this from crate metadata (#2375)
-pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.3/";
+pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.4/";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.

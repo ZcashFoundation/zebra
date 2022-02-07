@@ -7,36 +7,29 @@ on:
       - main
 
 env:
-  PROJECT_ID: zealous-zebra
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-east1
   ZONE: us-east1-b
-
+  MACHINE_TYPE: n2d-standard-4
+  DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
 
 jobs:
-
   build:
     name: Build images
-    timeout-minutes: 30
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2.4.0
       with:
         persist-credentials: false
 
-    - name: Set project and image names
-      run: |
-        BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
-        BRANCH_NAME=${BRANCH_NAME,,} && \
-        REPOSITORY=${GITHUB_REPOSITORY,,} && \
-        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
-        echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
-        echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+    - name: Inject slug/short variables
+      uses: rlespinasse/github-slug-action@v4
 
     # Setup gcloud CLI
     - name: Set up gcloud SDK environment
-      uses: google-github-actions/setup-gcloud@master
+      uses: google-github-actions/setup-gcloud@v0.4.0
       with:
-        version: '295.0.0'
         project_id: ${{ env.PROJECT_ID }}
         service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
@@ -46,7 +39,7 @@ jobs:
       run: |
         gcloud builds submit \
           --config cloudbuild.yaml \
-          --substitutions SHORT_SHA="$SHORT_SHA",BRANCH_NAME="$BRANCH_NAME"
+          --substitutions SHORT_SHA="${{ env.GITHUB_SHA_SHORT }}",BRANCH_NAME="${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}"
 
   deploy:
     name: Deploy mainnet nodes
@@ -58,70 +51,45 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set project and image names
-        run: |
-          BRANCH_NAME=$(expr $GITHUB_REF : '.*/\(.*\)') && \
-          BRANCH_NAME=${BRANCH_NAME,,} && \
-          REPOSITORY=${GITHUB_REPOSITORY,,} && \
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV && \
-          echo "SHORT_SHA=$(git rev-parse --short=7 $GITHUB_SHA)" >> $GITHUB_ENV && \
-          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
 
       # Setup gcloud CLI
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@master
+        uses: google-github-actions/setup-gcloud@v0.4.0
         with:
-          version: '295.0.0'
           project_id: ${{ env.PROJECT_ID }}
           service_account_key: ${{ secrets.GCLOUD_AUTH }}
-
-      # Run once: create firewall rule to allow incoming traffic to the nodes
-      # - name: Create Zcash incoming traffic firewall rule
-      #   run: |
-      #     gcloud compute firewall-rules create "allow-zcash" \
-      #     --target-tags zebrad \
-      #     --allow tcp:8233,tcp:18233 \
-      #     --source-ranges 0.0.0.0/0 \
-      #     --description="Allow incoming Zcash traffic from anywhere" \
 
       # Create instance template from container image
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container "zebrad-$BRANCH_NAME-$SHORT_SHA" \
-          --container-image "gcr.io/$PROJECT_ID/$REPOSITORY/$BRANCH_NAME:$SHORT_SHA" \
-          --create-disk name=zebrad-cache-$SHORT_SHA,auto-delete=yes,size=100GB,type=pd-balanced \
-          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-$SHORT_SHA \
-          --machine-type n2d-standard-4 \
-          --service-account cos-vm@zealous-zebra.iam.gserviceaccount.com \
+          gcloud compute instance-templates create-with-container "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --container-image "gcr.io/${{ env.PROJECT_ID}}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-balanced \
+          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
+          --machine-type ${{ env.MACHINE_TYPE }} \
+          --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
           --tags zebrad \
-
-      # Run once: create firewall rule to allow healthchecks
-      # - name: Create healthcheck firewall rule
-      #   run: |
-      #     gcloud compute firewall-rules create "allow-tracing-health-check" \
-      #     --target-tags zebrad \
-      #     --allow tcp:3000 \
-      #     --source-ranges 130.211.0.0/22,35.191.0.0/16 \
-      #     --description="Allow HTTP requests to our tracing endpoint from Google's probes" \
 
       # Check if our destination instance group exists already
       - name: Check if instance group exists
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-$BRANCH_NAME" | grep "$REGION"
+          gcloud compute instance-groups list | grep "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}" | grep "${{ env.REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed create \
-          "zebrad-$BRANCH_NAME" \
-          --template "zebrad-$BRANCH_NAME-$SHORT_SHA" \
+          "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}" \
+          --template "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
-          --region "$REGION" \
+          --region "${{ env.REGION }}" \
           --size 2
 
       # Rolls out update to existing group using the new instance template
@@ -129,6 +97,6 @@ jobs:
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-$BRANCH_NAME" \
-          --version template="zebrad-$BRANCH_NAME-$SHORT_SHA" \
-          --region "$REGION"
+          "zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}" \
+          --version template="zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --region "${{ env.REGION }}"

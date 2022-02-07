@@ -319,8 +319,12 @@ pub fn coinbase_expiry_height(
                 }
                 return Ok(());
             }
-            // Consensus rule: [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight
-            // MUST be less than or equal to 499999999.
+            // # Consensus
+            //
+            // > [Overwinter to Canopy inclusive, pre-NU5] `nExpiryHeight` MUST be less than
+            // > or equal to 499999999.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             validate_expiry_height_max(expiry_height, true, block_height, coinbase)
         }
     }
@@ -338,6 +342,19 @@ pub fn non_coinbase_expiry_height(
     if transaction.is_overwintered() {
         let expiry_height = transaction.expiry_height();
 
+        // # Consensus
+        //
+        // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be
+        // > less than or equal to 499999999.
+        //
+        // > [NU5 onward] nExpiryHeight MUST be less than or equal to 499999999
+        // > for non-coinbase transactions.
+        //
+        // > [Overwinter onward] If a transaction is not a coinbase transaction and its
+        // > nExpiryHeight field is nonzero, then it MUST NOT be mined at a block height
+        // > greater than its nExpiryHeight.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         validate_expiry_height_max(expiry_height, false, block_height, transaction)?;
         validate_expiry_height_mined(expiry_height, block_height, transaction)?;
     }

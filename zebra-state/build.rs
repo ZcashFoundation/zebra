@@ -1,3 +1,8 @@
+//! Build script for zebra-state.
+//!
+//! Turns the environmental variable `$TEST_FAKE_ACTIVATION_HEIGHTS`
+//! into the Rust configuration `cfg(test_fake_activation_heights)`.
+
 use std::env;
 
 fn main() {

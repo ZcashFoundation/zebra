@@ -1,0 +1,60 @@
+name: Lint Rust files
+
+on:
+  push:
+    branches:
+      - "**"
+      - "!main"
+    path:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'clippy.toml'
+      - '.cargo/config.toml'
+      - '.github/workflows/lint.yml'
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: full
+
+jobs:
+  clippy:
+    name: Clippy
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+      - name: Run clippy
+        uses: actions-rs/clippy-check@v1.0.7
+        with:
+          # GitHub displays the clippy job and its results as separate entries
+          name: Clippy (stable) Results
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -D warnings
+
+  fmt:
+    name: Rustfmt
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt
+          override: true
+
+      - uses: Swatinem/rust-cache@v1 # TODO: No cache is being found
+
+      - uses: actions-rs/cargo@v1.0.3
+        with:
+          command: fmt
+          args: --all -- --check

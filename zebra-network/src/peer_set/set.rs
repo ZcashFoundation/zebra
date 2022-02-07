@@ -124,7 +124,7 @@ use crate::{
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
-        InventoryRegistry,
+        InventoryChange, InventoryRegistry,
     },
     protocol::{
         external::InventoryHash,
@@ -256,7 +256,7 @@ where
     /// - `handle_rx`: receives background task handles,
     ///                monitors them to make sure they're still running,
     ///                and shuts down all the tasks as soon as one task exits;
-    /// - `inv_stream`: receives inventory advertisements for peers,
+    /// - `inv_stream`: receives inventory changes from peers,
     ///                 allowing the peer set to direct inventory requests;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
     pub fn new(
@@ -264,7 +264,7 @@ where
         discover: D,
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
-        inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
+        inv_stream: broadcast::Receiver<InventoryChange>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
     ) -> Self {
@@ -659,7 +659,7 @@ where
     ) -> <Self as tower::Service<Request>>::Future {
         let inventory_peer_list = self
             .inventory_registry
-            .peers(&hash)
+            .advertising_peers(hash)
             .filter(|&key| self.ready_services.contains_key(key))
             .copied()
             .collect();
