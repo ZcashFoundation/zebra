@@ -988,7 +988,7 @@ where
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
-async fn register_inventory_status(
+pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,
     inv_collector: broadcast::Sender<InventoryChange>,

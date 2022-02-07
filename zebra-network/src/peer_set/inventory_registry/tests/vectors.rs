@@ -1,21 +1,11 @@
 //! Fixed test vectors for the inventory registry.
 
-use tokio::sync::broadcast;
-
 use zebra_chain::block;
 
 use crate::{
-    peer_set::{
-        inventory_registry::{InventoryRegistry, InventoryStatus},
-        InventoryChange,
-    },
+    peer_set::inventory_registry::{tests::new_inv_registry, InventoryStatus},
     protocol::external::InventoryHash,
 };
-
-/// The number of changes that can be pending in the inventory channel, before it starts lagging.
-///
-/// Lagging drops messages, so tests should avoid filling the channel.
-pub const MAX_PENDING_CHANGES: usize = 32;
 
 /// Check an empty inventory registry works as expected.
 #[tokio::test]
@@ -191,13 +181,4 @@ async fn inv_registry_prefer_current_order(missing_current: bool) {
         assert_eq!(inv_registry.advertising_peers(test_hash).count(), 1);
         assert_eq!(inv_registry.missing_peers(test_hash).count(), 0);
     }
-}
-
-/// Returns a newly initialised inventory registry, and a sender for its inventory channel.
-fn new_inv_registry() -> (InventoryRegistry, broadcast::Sender<InventoryChange>) {
-    let (inv_stream_tx, inv_stream_rx) = broadcast::channel(MAX_PENDING_CHANGES);
-
-    let inv_registry = InventoryRegistry::new(inv_stream_rx);
-
-    (inv_registry, inv_stream_tx)
 }

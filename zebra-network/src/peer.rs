@@ -10,14 +10,15 @@ mod minimum_peer_version;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use client::tests::ClientTestHarness;
-#[cfg(not(test))]
-use client::ClientRequest;
+
 #[cfg(test)]
-pub(crate) use client::{tests::ReceiveRequestAttempt, ClientRequest};
+pub(crate) use client::tests::ReceiveRequestAttempt;
+#[cfg(test)]
+pub(crate) use handshake::register_inventory_status;
 
 use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
 
-pub(crate) use client::CancelHeartbeatTask;
+pub(crate) use client::{CancelHeartbeatTask, ClientRequest};
 
 pub use client::Client;
 pub use connection::Connection;
