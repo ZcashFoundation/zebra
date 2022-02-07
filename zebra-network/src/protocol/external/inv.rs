@@ -1,4 +1,4 @@
-//! Inventory items for the Bitcoin protocol.
+//! Inventory items for the Zcash network protocol.
 
 use std::io::{Read, Write};
 

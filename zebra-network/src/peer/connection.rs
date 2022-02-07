@@ -1,4 +1,4 @@
-//! Zcash peer connection protocol handing for Zebra.
+//! Zebra's per-peer connection state machine.
 //!
 //! Maps the external Zcash/Bitcoin protocol to Zebra's internal request/response
 //! protocol.
