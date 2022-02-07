@@ -58,6 +58,7 @@ async fn inv_registry_one_advertised_ok() {
         inv_registry.advertising_peers(test_hash).next(),
         Some(&test_peer),
     );
+    assert_eq!(inv_registry.advertising_peers(test_hash).count(), 1);
     assert_eq!(inv_registry.missing_peers(test_hash).count(), 0);
 }
 
@@ -87,6 +88,7 @@ async fn inv_registry_one_missing_ok() {
         inv_registry.missing_peers(test_hash).next(),
         Some(&test_peer),
     );
+    assert_eq!(inv_registry.missing_peers(test_hash).count(), 1);
 }
 
 /// Check inventory registration for one hash/peer prefers missing over advertised.
@@ -131,6 +133,7 @@ async fn inv_registry_prefer_missing_order(missing_first: bool) {
         inv_registry.missing_peers(test_hash).next(),
         Some(&test_peer),
     );
+    assert_eq!(inv_registry.missing_peers(test_hash).count(), 1);
 }
 
 /// Check inventory registration for one hash/peer prefers current over previous.
@@ -179,11 +182,13 @@ async fn inv_registry_prefer_current_order(missing_current: bool) {
             inv_registry.missing_peers(test_hash).next(),
             Some(&test_peer),
         );
+        assert_eq!(inv_registry.missing_peers(test_hash).count(), 1);
     } else {
         assert_eq!(
             inv_registry.advertising_peers(test_hash).next(),
             Some(&test_peer),
         );
+        assert_eq!(inv_registry.advertising_peers(test_hash).count(), 1);
         assert_eq!(inv_registry.missing_peers(test_hash).count(), 0);
     }
 }
