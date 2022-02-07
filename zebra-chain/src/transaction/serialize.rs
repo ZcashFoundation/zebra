@@ -542,7 +542,7 @@ impl ZcashDeserialize for Transaction {
         //
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         //
-        // Zebra will not verify this rule because we checkpoint up to Canopy blocks, but:
+        // Zebra does not verify this rule because we checkpoint up to Canopy blocks, but:
         // Since transactions must get mined into a block to be useful,
         // we reject transactions that are larger than blocks.
         //
