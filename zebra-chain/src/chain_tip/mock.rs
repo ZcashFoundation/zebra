@@ -7,7 +7,7 @@ use tokio::sync::watch;
 
 use crate::{block, chain_tip::ChainTip, transaction};
 
-/// A sender that sets the `best_tip_height` of a [`MockChainTip`].]
+/// A sender that sets the `best_tip_height` of a [`MockChainTip`].
 pub type MockChainTipSender = watch::Sender<Option<block::Height>>;
 
 /// A mock [`ChainTip`] implementation that allows setting the `best_tip_height` externally.
