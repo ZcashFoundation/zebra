@@ -1045,6 +1045,11 @@ async fn register_inventory_status(
         }
 
         (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
+            // Ignore Errors and the unsupported FilteredBlock type
+            let missing = missing.iter().filter(|missing| {
+                missing.unmined_tx_id().is_some() || missing.block_hash().is_some()
+            });
+
             debug!(?missing, "registering missing inventory for peer");
 
             if let Some(change) = InventoryChange::new_missing_multi(missing, transient_addr) {
