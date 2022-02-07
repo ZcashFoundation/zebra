@@ -42,7 +42,7 @@ metrics = "0.17.1"
 metrics-exporter-prometheus = "0.7.0"
 
 dirs = "4.0.0"
-inferno = { version = "0.10.10", default-features = false }
+inferno = { version = "0.10.11", default-features = false }
 atty = "0.2.14"
 
 sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
