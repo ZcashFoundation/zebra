@@ -101,7 +101,7 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 ///
 /// # Consensus
 ///
-/// >  A coinbase transaction MUST NOT have any transparent inputs with non-null prevout fields,
+/// > A coinbase transaction MUST NOT have any transparent inputs with non-null prevout fields,
 /// > JoinSplit descriptions, or Spend descriptions.
 ///
 /// > [NU5 onward] In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
@@ -110,7 +110,7 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 ///
 /// > [Pre-Heartwood] A coinbase transaction also MUST NOT have any Output descriptions.
 ///
-/// Zebra will not validate this last rule explicitly because we checkpoint until Canopy blocks.
+/// Zebra does not validate this last rule explicitly because we checkpoint until Canopy activation.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
