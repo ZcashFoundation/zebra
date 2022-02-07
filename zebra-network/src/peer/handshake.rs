@@ -1000,6 +1000,8 @@ async fn register_inventory_status(
 
                     // The peer set and inv collector use the peer's remote
                     // address as an identifier
+                    // If all receivers have been dropped, `send` returns an error.
+                    // When that happens, Zebra is shutting down, so we want to ignore this error.
                     let _ = inv_collector
                         .send(InventoryChange::new_advertised(*advertised, transient_addr));
                 }
