@@ -121,6 +121,12 @@ impl NetworkChainTipHeightEstimator {
         )
         .expect("time difference is too large");
 
-        (self.current_height + block_difference).expect("block difference is too large")
+        if -(block_difference as i64) > self.current_height.0 as i64 {
+            // Gracefully handle attempting to estimate a block before genesis. This can happen if
+            // the local time is set incorrectly to a time too far in the past.
+            block::Height(0)
+        } else {
+            (self.current_height + block_difference).expect("block difference is too large")
+        }
     }
 }
