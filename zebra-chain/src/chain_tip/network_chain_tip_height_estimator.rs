@@ -111,7 +111,13 @@ impl NetworkChainTipHeightEstimator {
         let time_difference = target_time - self.current_block_time;
 
         let block_difference = i32::try_from(
-            time_difference.num_seconds() / self.current_target_spacing.num_seconds(),
+            // Euclidean division is used so that the number is rounded towards negative infinity,
+            // so that fractionary values always round down to the previous height when going back
+            // in time (i.e., when the dividend is negative). This works because the divisor (the
+            // target spacing) is always positive.
+            time_difference
+                .num_seconds()
+                .div_euclid(self.current_target_spacing.num_seconds()),
         )
         .expect("time difference is too large");
 
