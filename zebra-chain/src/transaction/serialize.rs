@@ -448,7 +448,7 @@ impl ZcashSerialize for Transaction {
 
                 // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
-                
+
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
                     None => zcash_serialize_empty_list(writer)?,
@@ -498,6 +498,7 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
 
+                // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // The previous match arms serialize in one go, because the
@@ -569,6 +570,7 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
 
+                // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // transparent
@@ -636,6 +638,7 @@ impl ZcashDeserialize for Transaction {
             (1, false) => Ok(Transaction::V1 {
                 inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                 outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                // Denoted as `lock_time` in the spec.
                 lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
             }),
             (2, false) => {
@@ -644,6 +647,7 @@ impl ZcashDeserialize for Transaction {
                 Ok(Transaction::V2 {
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
                     joinsplit_data: OptV2Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
@@ -661,7 +665,9 @@ impl ZcashDeserialize for Transaction {
                 Ok(Transaction::V3 {
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `nExpiryHeight` in the spec.
                     expiry_height: block::Height(limited_reader.read_u32::<LittleEndian>()?),
                     joinsplit_data: OptV3Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
@@ -694,6 +700,7 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
 
+                // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
@@ -764,6 +771,7 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
 
+                // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 // transparent
