@@ -49,12 +49,14 @@ ARG RUST_BACKTRACE=1
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
 
 COPY . .
-# Pre-download Zcash Sprout and Sapling parameters
-RUN cargo run --locked --release --features enable-sentry --bin zebrad download
 # Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
 FROM builder AS tester
+# Pre-download Zcash Sprout and Sapling parameters
+# TODO: do not hardcode the user /root/ even though is a safe assumption
+COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
+
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
@@ -66,8 +68,7 @@ CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--works
 # Runner image
 FROM debian:bullseye-slim AS runtime
 COPY --from=builder /app/target/release/zebrad /usr/local/bin
-# TODO: do not hardcode the user /root/ even though is a safe assumption
-COPY --from=builder /root/.zcash-params /root/.zcash-params
+COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
