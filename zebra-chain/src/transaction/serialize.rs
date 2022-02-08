@@ -457,7 +457,9 @@ impl ZcashSerialize for Transaction {
                 expiry_height,
                 joinsplit_data,
             } => {
+                // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(OVERWINTER_VERSION_GROUP_ID)?;
+
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
@@ -476,7 +478,12 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data,
                 joinsplit_data,
             } => {
+                // Transaction V4 spec:
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(SAPLING_VERSION_GROUP_ID)?;
+
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
                 lock_time.zcash_serialize(&mut writer)?;
@@ -536,8 +543,9 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
             } => {
                 // Transaction V5 spec:
-                // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
 
+                // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
 
                 // header: Write the nConsensusBranchId
@@ -629,6 +637,7 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             (3, true) => {
+                // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != OVERWINTER_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
@@ -646,6 +655,10 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             (4, true) => {
+                // Transaction V4 spec:
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != SAPLING_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
@@ -717,6 +730,10 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             (5, true) => {
+                // Transaction V5 spec:
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
