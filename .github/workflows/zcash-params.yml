@@ -2,21 +2,12 @@ name: zcash-params
 
 on:
   workflow_dispatch:
-    inputs:
-      network:
-        default: 'Mainnet'
-      checkpoint_sync:
-        default: true
   pull_request:
     path:
       - 'zebra-consensus/src/primitives/groth16/params.rs'
       - 'zebra-consensus/src/chain.rs'
       - 'zebrad/src/commands/start.rs'
       - '.github/workflows/zcash-params.yml'
-  # TODO: remove this before merging
-  push:
-    branches:
-      - '**'
 
 env:
   CARGO_INCREMENTAL: '1'
