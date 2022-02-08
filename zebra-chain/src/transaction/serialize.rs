@@ -418,7 +418,8 @@ impl ZcashSerialize for Transaction {
         // Since we checkpoint on Canopy activation, we won't ever need
         // to check the smaller pre-Sapling transaction size limit.
 
-        // header: Write version and set the fOverwintered bit if necessary
+        // Denoted as `header` in the spec.
+        // Write `version` and set the `fOverwintered` bit if necessary
         let overwintered_flag = if self.is_overwintered() { 1 << 31 } else { 0 };
         let version = overwintered_flag | self.version();
 
@@ -572,6 +573,7 @@ impl ZcashDeserialize for Transaction {
 
         let (version, overwintered) = {
             const LOW_31_BITS: u32 = (1 << 31) - 1;
+            // Denoted as `header` in the spec, contains the `fOverwintered` flag and the `version` field.
             let header = limited_reader.read_u32::<LittleEndian>()?;
             (header & LOW_31_BITS, header >> 31 != 0)
         };
