@@ -544,12 +544,19 @@ where
         match network_upgrade {
             // Supports V4 transactions
             //
-            // Consensus rules:
-            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, ...
-            // >
+            // # Consensus
+            //
+            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4,
+            // > and the version group ID MUST be 0x892F2085.
+            //
             // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above two rules, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Sapling
             | NetworkUpgrade::Blossom
             | NetworkUpgrade::Heartwood
@@ -633,10 +640,16 @@ where
         match network_upgrade {
             // Supports V5 transactions
             //
-            // Consensus rules:
+            // # Consensus
+            //
             // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above rule, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Nu5 => Ok(()),
 
             // Does not support V5 transactions
