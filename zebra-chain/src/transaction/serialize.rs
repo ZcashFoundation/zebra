@@ -418,7 +418,7 @@ impl ZcashSerialize for Transaction {
         // Since we checkpoint on Canopy activation, we won't ever need
         // to check the smaller pre-Sapling transaction size limit.
 
-        // Denoted as `header` in the spec.
+        // Denoted as `header` in the spec, contains the `fOverwintered` flag and the `version` field.
         // Write `version` and set the `fOverwintered` bit if necessary
         let overwintered_flag = if self.is_overwintered() { 1 << 31 } else { 0 };
         let version = overwintered_flag | self.version();
