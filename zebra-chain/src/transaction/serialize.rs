@@ -433,6 +433,8 @@ impl ZcashSerialize for Transaction {
             } => {
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
             }
             Transaction::V2 {
@@ -443,7 +445,10 @@ impl ZcashSerialize for Transaction {
             } => {
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+                
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
                     None => zcash_serialize_empty_list(writer)?,
@@ -462,7 +467,10 @@ impl ZcashSerialize for Transaction {
 
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
@@ -486,7 +494,10 @@ impl ZcashSerialize for Transaction {
 
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // The previous match arms serialize in one go, because the
@@ -555,8 +566,9 @@ impl ZcashSerialize for Transaction {
                         .expect("valid transactions must have a network upgrade with a branch id"),
                 ))?;
 
-                // transaction validity time and height limits
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // transparent
@@ -678,7 +690,10 @@ impl ZcashDeserialize for Transaction {
 
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
+
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
@@ -746,8 +761,9 @@ impl ZcashDeserialize for Transaction {
                             "expected a valid network upgrade from the consensus branch id",
                         ))?;
 
-                // transaction validity time and height limits
+                // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
+
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 // transparent
