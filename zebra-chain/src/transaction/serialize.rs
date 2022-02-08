@@ -548,7 +548,7 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
 
-                // header: Write the nConsensusBranchId
+                // Denoted as `nConsensusBranchId` in the spec.
                 writer.write_u32::<LittleEndian>(u32::from(
                     network_upgrade
                         .branch_id()
@@ -738,7 +738,8 @@ impl ZcashDeserialize for Transaction {
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
-                // convert the nConsensusBranchId to a NetworkUpgrade
+                // Denoted as `nConsensusBranchId` in the spec.
+                // Convert it to a NetworkUpgrade
                 let network_upgrade =
                     NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
                         .ok_or(SerializationError::Parse(
