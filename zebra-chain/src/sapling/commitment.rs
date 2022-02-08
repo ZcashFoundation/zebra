@@ -314,6 +314,8 @@ impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
     ///
     /// Returns an error if the point is of small order.
     ///
+    /// # Consensus
+    ///
     /// > cv and rk [MUST NOT be of small order][1], i.e. [h_J]cv MUST NOT be 𝒪_J
     /// > and [h_J]rk MUST NOT be 𝒪_J.
     ///

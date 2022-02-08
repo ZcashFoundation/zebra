@@ -88,7 +88,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'ref/head/main'
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -106,7 +106,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.4.0
+        uses: google-github-actions/setup-gcloud@v0.5.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 
@@ -114,7 +114,7 @@ jobs:
         run: |
           gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -172,7 +172,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.4.0
+        uses: google-github-actions/setup-gcloud@v0.5.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 
@@ -184,7 +184,7 @@ jobs:
           --boot-disk-type=pd-ssd \
           --container-stdin \
           --container-tty \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \

@@ -344,8 +344,11 @@ impl FinalizedState {
             batch.zs_insert(height_by_hash, hash, height);
             batch.zs_insert(block_by_height, height, &block);
 
-            // "A transaction MUST NOT spend an output of the genesis block coinbase transaction.
-            // (There is one such zero-valued output, on each of Testnet and Mainnet .)"
+            // # Consensus
+            //
+            // > A transaction MUST NOT spend an output of the genesis block coinbase transaction.
+            // > (There is one such zero-valued output, on each of Testnet and Mainnet.)
+            //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
                 // Insert empty note commitment trees. Note that these can't be

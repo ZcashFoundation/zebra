@@ -50,7 +50,6 @@ pub enum InventoryHash {
     /// [auth_digest]: https://zips.z.cash/zip-0244#authorizing-data-commitment
     /// [zip239]: https://zips.z.cash/zip-0239
     /// [bip339]: https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki
-    // TODO: Actually handle this variant once the mempool is implemented (#2449)
     Wtx(transaction::WtxId),
 }
 
