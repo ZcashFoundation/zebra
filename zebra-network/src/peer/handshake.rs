@@ -29,6 +29,7 @@ use zebra_chain::{
     block,
     chain_tip::{ChainTip, NoChainTip},
     parameters::Network,
+    serialization::SerializationError,
 };
 
 use crate::{
@@ -917,57 +918,7 @@ where
                 .then(move |msg| {
                     let inv_collector = inv_collector.clone();
                     let span = debug_span!(parent: inv_inner_conn_span.clone(), "inventory_filter");
-                    async move {
-                        if let (Ok(Message::Inv(hashes)), Some(transient_addr)) =
-                            (&msg, connected_addr.get_transient_addr())
-                        {
-                            // We ignore inventory messages with more than one
-                            // block, because they are most likely replies to a
-                            // query, rather than a newly gossiped block.
-                            //
-                            // (We process inventory messages with any number of
-                            // transactions.)
-                            //
-                            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
-                            //
-                            // Note: zcashd has a bug where it merges queued inv messages of
-                            // the same or different types. Zebra compensates by sending `notfound`
-                            // responses to the inv collector. (#2156, #1768)
-                            //
-                            // (We can't split `inv`s, because that fills the inventory registry
-                            // with useless entries that the whole network has, making it large and slow.)
-                            match hashes.as_slice() {
-                                [hash @ InventoryHash::Block(_)] => {
-                                    debug!(?hash, "registering gossiped block inventory for peer");
-
-                                    // The peer set and inv collector use the peer's remote
-                                    // address as an identifier
-                                    let _ = inv_collector.send(InventoryChange::new_advertised(
-                                        *hash,
-                                        transient_addr,
-                                    ));
-                                }
-                                [hashes @ ..] => {
-                                    let hashes =
-                                        hashes.iter().filter(|hash| hash.unmined_tx_id().is_some());
-
-                                    debug!(
-                                        ?hashes,
-                                        "registering unmined transaction inventory for peer"
-                                    );
-
-                                    if let Some(change) = InventoryChange::new_advertised_multi(
-                                        hashes,
-                                        transient_addr,
-                                    ) {
-                                        let _ = inv_collector.send(change);
-                                    }
-                                }
-                            }
-                        }
-                        msg
-                    }
-                    .instrument(span)
+                    register_inventory_status(msg, connected_addr, inv_collector).instrument(span)
                 })
                 .boxed();
 
@@ -1015,6 +966,76 @@ where
             .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
             .boxed()
     }
+}
+
+/// Register any advertised or missing inventory in `msg` for `connected_addr`.
+async fn register_inventory_status(
+    msg: Result<Message, SerializationError>,
+    connected_addr: ConnectedAddr,
+    inv_collector: broadcast::Sender<InventoryChange>,
+) -> Result<Message, SerializationError> {
+    match (&msg, connected_addr.get_transient_addr()) {
+        (Ok(Message::Inv(advertised)), Some(transient_addr)) => {
+            // We ignore inventory messages with more than one
+            // block, because they are most likely replies to a
+            // query, rather than a newly gossiped block.
+            //
+            // (We process inventory messages with any number of
+            // transactions.)
+            //
+            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
+            //
+            // Note: zcashd has a bug where it merges queued inv messages of
+            // the same or different types. Zebra compensates by sending `notfound`
+            // responses to the inv collector. (#2156, #1768)
+            //
+            // (We can't split `inv`s, because that fills the inventory registry
+            // with useless entries that the whole network has, making it large and slow.)
+            match advertised.as_slice() {
+                [advertised @ InventoryHash::Block(_)] => {
+                    debug!(
+                        ?advertised,
+                        "registering gossiped advertised block inventory for peer"
+                    );
+
+                    // The peer set and inv collector use the peer's remote
+                    // address as an identifier
+                    // If all receivers have been dropped, `send` returns an error.
+                    // When that happens, Zebra is shutting down, so we want to ignore this error.
+                    let _ = inv_collector
+                        .send(InventoryChange::new_advertised(*advertised, transient_addr));
+                }
+                [advertised @ ..] => {
+                    let advertised = advertised
+                        .iter()
+                        .filter(|advertised| advertised.unmined_tx_id().is_some());
+
+                    debug!(
+                        ?advertised,
+                        "registering advertised unmined transaction inventory for peer",
+                    );
+
+                    if let Some(change) =
+                        InventoryChange::new_advertised_multi(advertised, transient_addr)
+                    {
+                        // Ignore channel errors that should only happen during shutdown.
+                        let _ = inv_collector.send(change);
+                    }
+                }
+            }
+        }
+
+        (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
+            debug!(?missing, "registering missing inventory for peer");
+
+            if let Some(change) = InventoryChange::new_missing_multi(missing, transient_addr) {
+                let _ = inv_collector.send(change);
+            }
+        }
+        _ => {}
+    }
+
+    msg
 }
 
 /// Send periodical heartbeats to `server_tx`, and update the peer status through
