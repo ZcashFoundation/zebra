@@ -65,6 +65,21 @@ impl ZcashDeserialize for OutPoint {
 ///
 /// The height may consume `0..=5` bytes at the stat of the coinbase data.
 /// The genesis block does not include an encoded coinbase height.
+///
+/// # Consensus
+///
+/// > A coinbase transaction for a block at block height greater than 0 MUST have
+/// > a script that, as its first item, encodes the block height height as follows.
+/// > For height in the range {1..16}, the encoding is a single byte of value
+/// > 0x50 height. Otherwise, let heightBytes be the signed little-endian
+/// > representation of height, using the minimum nonzero number of bytes such that
+/// > the most significant byte is < 0x80.
+/// > The length of heightBytes MUST be in the range {1..5}.
+/// > Then the encoding is the length of heightBytes encoded as one byte,
+/// > followed by heightBytes itself. This matches the encoding used by Bitcoin in the
+/// > implementation of [BIP-34] (but the description here is to be considered normative).
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub(crate) fn parse_coinbase_height(
     mut data: Vec<u8>,
 ) -> Result<(block::Height, CoinbaseData), SerializationError> {
