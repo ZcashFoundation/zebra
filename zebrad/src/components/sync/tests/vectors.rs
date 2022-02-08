@@ -34,7 +34,7 @@ use ResponseStatus::*;
 /// longer than expected to actually send the request.
 ///
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
-const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(500);
+const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
 ///
