@@ -1018,6 +1018,7 @@ async fn register_inventory_status(
                     if let Some(change) =
                         InventoryChange::new_advertised_multi(advertised, transient_addr)
                     {
+                        // Ignore channel errors that should only happen during shutdown.
                         let _ = inv_collector.send(change);
                     }
                 }
