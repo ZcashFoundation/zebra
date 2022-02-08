@@ -1101,6 +1101,8 @@ impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     ///
     /// Returns an error if the key is malformed or [is of small order][1].
     ///
+    /// # Consensus
+    ///
     /// > Check that a Spend description's cv and rk are not of small order,
     /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
     ///

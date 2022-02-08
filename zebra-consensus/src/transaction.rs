@@ -544,12 +544,19 @@ where
         match network_upgrade {
             // Supports V4 transactions
             //
-            // Consensus rules:
-            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, ...
-            // >
+            // # Consensus
+            //
+            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4,
+            // > and the version group ID MUST be 0x892F2085.
+            //
             // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above two rules, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Sapling
             | NetworkUpgrade::Blossom
             | NetworkUpgrade::Heartwood
@@ -633,10 +640,16 @@ where
         match network_upgrade {
             // Supports V5 transactions
             //
-            // Consensus rules:
+            // # Consensus
+            //
             // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above rule, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Nu5 => Ok(()),
 
             // Does not support V5 transactions
@@ -701,16 +714,18 @@ where
 
         if let Some(joinsplit_data) = joinsplit_data {
             for joinsplit in joinsplit_data.joinsplits() {
-                // Consensus rule: The proof π_ZKSpend MUST be valid given a
-                // primary input formed from the relevant other fields and h_{Sig}
+                // # Consensus
+                //
+                // > The proof π_ZKJoinSplit MUST be valid given a
+                // > primary input formed from the relevant other fields and h_{Sig}
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each JoinSplit description while adding the
                 // resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
                     DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
                 ));
@@ -750,9 +765,13 @@ where
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for spend in sapling_shielded_data.spends_per_anchor() {
-                // Consensus rule: The proof π_ZKSpend MUST be valid
-                // given a primary input formed from the other
-                // fields except spendAuthSig.
+                // # Consensus
+                //
+                // > The proof π_ZKSpend MUST be valid
+                // > given a primary input formed from the other
+                // > fields except spendAuthSig.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each Spend description while adding the
@@ -765,9 +784,23 @@ where
                         .oneshot(DescriptionWrapper(&spend).try_into()?),
                 );
 
-                // Consensus rule: The spend authorization signature
-                // MUST be a valid SpendAuthSig signature over
-                // SigHash using rk as the validating key.
+                // # Consensus
+                //
+                // > The spend authorization signature
+                // > MUST be a valid SpendAuthSig signature over
+                // > SigHash using rk as the validating key.
+                //
+                // This is validated by the verifier.
+                //
+                // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub,
+                // > and RedPallas’ on p. 88, the validation of the 𝑅
+                // > component of the signature changes to prohibit non-canonical encodings.
+                //
+                // This is validated by the verifier, inside the `redjubjub` crate.
+                // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
+                // that enforces the canonical encoding.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the validation of the RedJubjub spend
                 // authorization signature for each Spend

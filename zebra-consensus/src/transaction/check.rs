@@ -109,14 +109,20 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 
 /// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
 ///
-/// A coinbase transaction MUST NOT have any transparent inputs, JoinSplit descriptions,
-/// or Spend descriptions.
+/// # Consensus
 ///
-/// In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
+/// > A coinbase transaction MUST NOT have any transparent inputs with non-null prevout fields,
+/// > JoinSplit descriptions, or Spend descriptions.
+///
+/// > [NU5 onward] In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
 ///
 /// This check only counts `PrevOut` transparent inputs.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// > [Pre-Heartwood] A coinbase transaction also MUST NOT have any Output descriptions.
+///
+/// Zebra does not validate this last rule explicitly because we checkpoint until Canopy activation.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
     if tx.has_valid_coinbase_transaction_inputs() {
         if tx.contains_prevout_input() {
@@ -148,7 +154,10 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
         .output_values_to_sprout()
         .zip(tx.input_values_from_sprout());
     for (vpub_old, vpub_new) in vpub_pairs {
+        // # Consensus
+        //
         // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+        //
         // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
         if *vpub_old != zero && *vpub_new != zero {
             return Err(TransactionError::BothVPubsNonZero);
@@ -172,7 +181,10 @@ pub fn disabled_add_to_sprout_pool(
         .activation_height(network)
         .expect("Canopy activation height must be present for both networks");
 
-    // [Canopy onward]: `vpub_old` MUST be zero.
+    // # Consensus
+    //
+    // > [Canopy onward]: `vpub_old` MUST be zero.
+    //
     // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
         let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
@@ -255,6 +267,8 @@ where
 ///
 /// This is used to validate coinbase transactions:
 ///
+/// # Consensus
+///
 /// > [Heartwood onward] All Sapling and Orchard outputs in coinbase transactions MUST decrypt to a note
 /// > plaintext, i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key ( Sapling and Orchard )’ on p. 67
 /// > does not return ⊥, using a sequence of 32 zero bytes as the outgoing viewing key. (This implies that before
@@ -265,7 +279,8 @@ where
 /// > according to the preceding rule MUST have note plaintext lead byte equal to 0x02. (This applies even during
 /// > the "grace period" specified in [ZIP-212].)
 ///
-/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
 /// [ZIP-212]: https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions
 ///
 /// TODO: Currently, a 0x01 lead byte is allowed in the "grace period" mentioned since we're
@@ -308,8 +323,12 @@ pub fn coinbase_expiry_height(
         // If Nu5 does not have a height, apply the pre-Nu5 rule.
         None => validate_expiry_height_max(expiry_height, true, block_height, coinbase),
         Some(activation_height) => {
-            // Consensus rule: from NU5 activation, the nExpiryHeight field of a
-            // coinbase transaction MUST be set equal to the block height.
+            // # Consensus
+            //
+            // > [NU5 onward] The nExpiryHeight field of a coinbase transaction MUST be equal
+            // > to its block height.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             if *block_height >= activation_height {
                 match expiry_height {
                     None => Err(TransactionError::CoinbaseExpiryBlockHeight {
@@ -329,8 +348,12 @@ pub fn coinbase_expiry_height(
                 }
                 return Ok(());
             }
-            // Consensus rule: [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight
-            // MUST be less than or equal to 499999999.
+            // # Consensus
+            //
+            // > [Overwinter to Canopy inclusive, pre-NU5] `nExpiryHeight` MUST be less than
+            // > or equal to 499999999.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             validate_expiry_height_max(expiry_height, true, block_height, coinbase)
         }
     }
@@ -348,6 +371,19 @@ pub fn non_coinbase_expiry_height(
     if transaction.is_overwintered() {
         let expiry_height = transaction.expiry_height();
 
+        // # Consensus
+        //
+        // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be
+        // > less than or equal to 499999999.
+        //
+        // > [NU5 onward] nExpiryHeight MUST be less than or equal to 499999999
+        // > for non-coinbase transactions.
+        //
+        // > [Overwinter onward] If a transaction is not a coinbase transaction and its
+        // > nExpiryHeight field is nonzero, then it MUST NOT be mined at a block height
+        // > greater than its nExpiryHeight.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         validate_expiry_height_max(expiry_height, false, block_height, transaction)?;
         validate_expiry_height_mined(expiry_height, block_height, transaction)?;
     }

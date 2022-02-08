@@ -184,10 +184,12 @@ pub fn miner_fees_are_valid(
     let block_subsidy = subsidy::general::block_subsidy(height, network)
         .expect("a valid block subsidy for this height and network");
 
-    // Consensus rule: The total value in zatoshi of transparent outputs from a
-    // coinbase transaction, minus vbalanceSapling, minus vbalanceOrchard, MUST NOT
-    // be greater than the value in zatoshi of block subsidy plus the transaction fees
-    // paid by transactions in this block.
+    // # Consensus
+    //
+    // > The total value in zatoshi of transparent outputs from a coinbase transaction,
+    // > minus vbalanceSapling, minus vbalanceOrchard, MUST NOT be greater than the value
+    // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
+    //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
@@ -231,8 +233,6 @@ pub fn time_is_valid_at(
 ///
 /// # Consensus rules:
 ///
-/// - The nConsensusBranchId field MUST match the consensus branch ID used for
-///  SIGHASH transaction hashes, as specified in [ZIP-244] ([7.1]).
 /// - A SHA-256d hash in internal byte order. The merkle root is derived from the
 ///  hashes of all transactions included in this block, ensuring that none of
 ///  those transactions can be modified without modifying the header. [7.6]
