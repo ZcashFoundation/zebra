@@ -14,6 +14,7 @@ use tower::{
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
+    transaction::{AuthDigest, Hash as TxHash, UnminedTxId, WtxId},
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
@@ -179,6 +180,128 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
             response
         ),
     };
+
+    let block_gossip_result = block_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(block_gossip_result, None),
+        "unexpected error or panic in block gossip task: {:?}",
+        block_gossip_result,
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
+    Ok(())
+}
+
+/// Check that a network stack with an empty state responds to single transaction requests with `notfound`.
+///
+/// Uses a real Zebra network stack, with an isolated Zebra inbound TCP connection.
+///
+/// TODO: test a response with some Available and some Missing transactions.
+#[tokio::test]
+async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
+    let (
+        // real services
+        connected_peer_service,
+        inbound_service,
+        _peer_set,
+        _mempool_service,
+        _state_service,
+        // mocked services
+        _mock_block_verifier,
+        _mock_tx_verifier,
+        // real tasks
+        block_gossip_task_handle,
+        tx_gossip_task_handle,
+        // real open socket addresses
+        _listen_addr,
+    ) = setup().await;
+
+    let test_tx = UnminedTxId::from_legacy_id(TxHash([0x22; 32]));
+    let test_wtx: UnminedTxId = WtxId {
+        id: TxHash([0x33; 32]),
+        auth_digest: AuthDigest([0x44; 32]),
+    }
+    .into();
+
+    // Test both transaction ID variants, separately and together
+    for txs in [vec![test_tx], vec![test_wtx], vec![test_tx, test_wtx]] {
+        // Use inbound directly
+        let request = inbound_service
+            .clone()
+            .oneshot(Request::TransactionsById(txs.iter().copied().collect()));
+        let response = request.await;
+        match response.as_ref() {
+            Ok(Response::Transactions(response_txs)) => {
+                // The response order is unstable, because it depends on concurrent inbound futures.
+                // In #2244 we will fix this by replacing response Vecs with HashSets.
+                for tx in &txs {
+                    assert!(
+                        response_txs.contains(&Missing(*tx)),
+                        "expected {:?}, but it was not in the response",
+                        tx
+                    );
+                }
+                assert_eq!(response_txs.len(), txs.len());
+            }
+            _ => unreachable!(
+                "inbound service should respond to `TransactionsById` with `Ok(Response::Transactions(_))`, \
+                 actual result: {:?}",
+                response
+            ),
+        };
+
+        // Use the connected peer via a local TCP connection
+        let request = connected_peer_service
+            .clone()
+            .oneshot(Request::TransactionsById(txs.iter().copied().collect()));
+        let response = request.await;
+        match response.as_ref() {
+            Err(missing_error) => {
+                let missing_error = missing_error
+                    .downcast_ref::<SharedPeerError>()
+                    .expect("unexpected inner error type, expected SharedPeerError");
+
+                // Unfortunately, we can't access SharedPeerError's inner type,
+                // so we can't compare the actual responses.
+                if txs == vec![test_tx] {
+                    assert_eq!(
+                        missing_error.inner_debug(),
+                        "NotFound([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
+                    );
+                } else if txs == vec![test_wtx] {
+                    assert_eq!(
+                        missing_error.inner_debug(),
+                        "NotFound([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])",
+                    );
+                } else if txs == vec![test_tx, test_wtx] {
+                    // The response order is unstable, because it depends on concurrent inbound futures.
+                    // In #2244 we will fix this by replacing response Vecs with HashSets.
+                    assert!(
+                        missing_error.inner_debug() ==
+                        "NotFound([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\")), Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])"
+                        ||
+                        missing_error.inner_debug() ==
+                        "NotFound([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") }), Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
+                        "unexpected response: {:?}",
+                        missing_error.inner_debug(),
+                    );
+                } else {
+                    unreachable!("unexpected test case");
+                }
+            }
+            _ => unreachable!(
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFound(_)))`, \
+                 actual result: {:?}",
+                response
+            ),
+        };
+    }
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
