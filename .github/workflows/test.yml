@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: 'mainnet'
+        default: 'Mainnet'
   push:
     # branches:
     #   - main
@@ -19,7 +19,7 @@ on:
 env:
   CARGO_INCREMENTAL: '1'
   ZEBRA_SKIP_IPV6_TESTS: "1"
-  NETWORK: mainnet
+  NETWORK: Mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
@@ -189,10 +189,10 @@ jobs:
           --container-arg="test" \
           --container-arg="--verbose" \
           --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
+          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_mainnet" \
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_to_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
+          --container-arg="sync_to_mandatory_checkpoint_mainnet" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
