@@ -214,7 +214,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
 
     insert_fake_orchard_shielded_data(&mut transaction);
 
-    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok(),);
+    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok());
 }
 
 #[test]
