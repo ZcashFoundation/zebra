@@ -109,15 +109,22 @@ impl NetworkChainTipHeightEstimator {
         target_time: DateTime<Utc>,
     ) -> block::Height {
         let time_difference = target_time - self.current_block_time;
+        let mut time_difference_seconds = time_difference.num_seconds();
+
+        if time_difference_seconds < 0 {
+            // Undo the rounding towards negative infinity done by `chrono::Duration`, which yields
+            // an incorrect value for the dividend of the division.
+            //
+            // (See https://docs.rs/time/0.1.44/src/time/duration.rs.html#166-173)
+            time_difference_seconds -= 1;
+        }
 
         let block_difference = i32::try_from(
             // Euclidean division is used so that the number is rounded towards negative infinity,
             // so that fractionary values always round down to the previous height when going back
             // in time (i.e., when the dividend is negative). This works because the divisor (the
             // target spacing) is always positive.
-            time_difference
-                .num_seconds()
-                .div_euclid(self.current_target_spacing.num_seconds()),
+            time_difference_seconds.div_euclid(self.current_target_spacing.num_seconds()),
         )
         .expect("time difference is too large");
 
