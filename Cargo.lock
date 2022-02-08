@@ -4911,12 +4911,13 @@ dependencies = [
 
 [[package]]
 name = "tracing-journald"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fe1f0ed2b7a5fcb6da2bc9e783587d9a0c8b9535e50224afe04e543eae8a2d6"
+checksum = "36a63bcca9cab23195673d7c3c7db8aff5fc062b82cd1e51c396d9dc26968c3c"
 dependencies = [
+ "libc",
  "tracing-core",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.6",
 ]
 
 [[package]]
@@ -4977,6 +4978,20 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77be66445c4eeebb934a7340f227bfe7b338173d3f8c00a60a5a58005c9faecf"
+dependencies = [
+ "ansi_term 0.12.1",
+ "sharded-slab",
+ "smallvec 1.7.0",
+ "thread_local",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
