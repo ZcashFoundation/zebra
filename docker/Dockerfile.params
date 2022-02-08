@@ -34,5 +34,3 @@ ENV RUST_BACKTRACE ${RUST_BACKTRACE}
 COPY . .
 # Pre-download Zcash Sprout and Sapling parameters
 RUN cargo run --locked --release --features enable-sentry --bin zebrad download
-# Build zebra
-RUN cargo build --locked --release --features enable-sentry --bin zebrad
