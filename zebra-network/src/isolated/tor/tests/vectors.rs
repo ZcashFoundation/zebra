@@ -86,7 +86,7 @@ async fn connect_isolated_run_tor_once_with(network: Network, hostname: String) 
     // We make the test pass if there are network errors, if we get a valid running service,
     // or if we are still waiting for Tor or the handshake.
     let outbound_result = outbound_join_handle_timeout.await;
-    assert!(matches!(outbound_result, Ok(Ok(_)) | Err(_),));
+    assert!(matches!(outbound_result, Ok(Ok(_)) | Err(_)));
 
     outbound_join_handle.abort();
 }

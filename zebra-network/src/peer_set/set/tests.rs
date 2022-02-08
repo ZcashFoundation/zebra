@@ -19,12 +19,11 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-use super::MorePeers;
 use crate::{
     address_book::AddressMetrics,
     peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
-    peer_set::PeerSet,
-    protocol::external::{types::Version, InventoryHash},
+    peer_set::{set::MorePeers, InventoryChange, PeerSet},
+    protocol::external::types::Version,
     AddressBook, Config,
 };
 
@@ -113,7 +112,7 @@ struct PeerSetBuilder<D, C> {
     discover: Option<D>,
     demand_signal: Option<mpsc::Sender<MorePeers>>,
     handle_rx: Option<tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>>,
-    inv_stream: Option<broadcast::Receiver<(InventoryHash, SocketAddr)>>,
+    inv_stream: Option<broadcast::Receiver<InventoryChange>>,
     address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
     minimum_peer_version: Option<MinimumPeerVersion<C>>,
 }
@@ -207,7 +206,7 @@ pub struct PeerSetGuard {
     background_tasks_sender:
         Option<tokio::sync::oneshot::Sender<Vec<JoinHandle<Result<(), BoxError>>>>>,
     demand_receiver: Option<mpsc::Receiver<MorePeers>>,
-    inventory_sender: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    inventory_sender: Option<broadcast::Sender<InventoryChange>>,
     address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
 }
 
@@ -215,6 +214,31 @@ impl PeerSetGuard {
     /// Create a new empty [`PeerSetGuard`] instance.
     pub fn new() -> Self {
         PeerSetGuard::default()
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    #[allow(dead_code)]
+    pub fn background_tasks_sender(
+        &mut self,
+    ) -> &mut Option<tokio::sync::oneshot::Sender<Vec<JoinHandle<Result<(), BoxError>>>>> {
+        &mut self.background_tasks_sender
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    #[allow(dead_code)]
+    pub fn demand_receiver(&mut self) -> &mut Option<mpsc::Receiver<MorePeers>> {
+        &mut self.demand_receiver
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    pub fn inventory_sender(&mut self) -> &mut Option<broadcast::Sender<InventoryChange>> {
+        &mut self.inventory_sender
+    }
+
+    /// Return a mutable reference to the background tasks sender, if present.
+    #[allow(dead_code)]
+    pub fn address_book(&mut self) -> &mut Option<Arc<std::sync::Mutex<AddressBook>>> {
+        &mut self.address_book
     }
 
     /// Create a dummy channel for the background tasks sent to the [`PeerSet`].
@@ -247,9 +271,7 @@ impl PeerSetGuard {
     ///
     /// The sender is stored inside the [`PeerSetGuard`], while the receiver is returned to be
     /// passed to the [`PeerSet`] constructor.
-    pub fn create_inventory_receiver(
-        &mut self,
-    ) -> broadcast::Receiver<(InventoryHash, SocketAddr)> {
+    pub fn create_inventory_receiver(&mut self) -> broadcast::Receiver<InventoryChange> {
         let (sender, receiver) = broadcast::channel(1);
 
         self.inventory_sender = Some(sender);
