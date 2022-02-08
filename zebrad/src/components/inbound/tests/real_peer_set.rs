@@ -1,6 +1,6 @@
 //! Inbound service tests with a real peer set.
 
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, iter, net::SocketAddr, sync::Arc};
 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -16,7 +16,10 @@ use zebra_chain::{
     parameters::Network,
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
-use zebra_network::{connect_isolated_tcp_direct, Config as NetworkConfig, Request, Response};
+use zebra_network::{
+    connect_isolated_tcp_direct, Config as NetworkConfig, Request, Response, ResponseStatus,
+    SharedPeerError,
+};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -28,6 +31,8 @@ use crate::{
     },
     BoxError,
 };
+
+use ResponseStatus::*;
 
 /// Check that a network stack with an empty address book only contains the local listener port,
 /// by querying the inbound service via a local TCP connection.
@@ -86,6 +91,90 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
         ),
         _ => unreachable!(
             "`Peers` requests should always respond `Ok(Response::Peers(_))`, \
+             actual result: {:?}",
+            response
+        ),
+    };
+
+    let block_gossip_result = block_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(block_gossip_result, None),
+        "unexpected error or panic in block gossip task: {:?}",
+        block_gossip_result,
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
+    Ok(())
+}
+
+/// Check that a network stack with an empty state responds to block requests with `notfound`.
+///
+/// Uses a real Zebra network stack, with an isolated Zebra inbound TCP connection.
+#[tokio::test]
+async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
+    let (
+        // real services
+        connected_peer_service,
+        inbound_service,
+        _peer_set,
+        _mempool_service,
+        _state_service,
+        // mocked services
+        _mock_block_verifier,
+        _mock_tx_verifier,
+        // real tasks
+        block_gossip_task_handle,
+        tx_gossip_task_handle,
+        // real open socket addresses
+        _listen_addr,
+    ) = setup().await;
+
+    let test_block = block::Hash([0x11; 32]);
+
+    // Use inbound directly
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::BlocksByHash(iter::once(test_block).collect()));
+    let response = request.await;
+    match response.as_ref() {
+        Ok(Response::Blocks(single_block)) if single_block.len() == 1 => {
+            assert_eq!(single_block.first().unwrap(), &Missing(test_block));
+        }
+        Ok(Response::Blocks(_block_list)) => unreachable!(
+            "`BlocksByHash` response should contain a single block, \
+             actual result: {:?}",
+            response
+        ),
+        _ => unreachable!(
+            "inbound service should respond to `BlocksByHash` with `Ok(Response::Blocks(_))`, \
+             actual result: {:?}",
+            response
+        ),
+    };
+
+    // Use the connected peer via a local TCP connection
+    let request = connected_peer_service
+        .clone()
+        .oneshot(Request::BlocksByHash(iter::once(test_block).collect()));
+    let response = request.await;
+    match response.as_ref() {
+        Err(missing_error) => {
+            let missing_error = missing_error
+                .downcast_ref::<SharedPeerError>()
+                .expect("unexpected inner error type, expected SharedPeerError");
+            assert_eq!(
+                missing_error.inner_debug(),
+                "NotFound([Block(block::Hash(\"1111111111111111111111111111111111111111111111111111111111111111\"))])"
+            );
+        }
+        _ => unreachable!(
+            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFound(_)))`, \
              actual result: {:?}",
             response
         ),
