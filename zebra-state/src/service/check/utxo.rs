@@ -168,16 +168,19 @@ fn transparent_spend_chain_order(
 
 /// Check that `utxo` is spendable, based on the coinbase `spend_restriction`.
 ///
-/// "A transaction with one or more transparent inputs from coinbase transactions
-/// MUST have no transparent outputs (i.e.tx_out_count MUST be 0)."
+/// # Consensus
 ///
-/// "A transaction MUST NOT spend a transparent output of a coinbase transaction
-/// from a block less than 100 blocks prior to the spend.
+/// > A transaction with one or more transparent inputs from coinbase transactions
+/// > MUST have no transparent outputs (i.e. tx_out_count MUST be 0).
+/// > Inputs from coinbase transactions include Founders’ Reward outputs and
+/// > funding stream outputs.
 ///
-/// Note that transparent outputs of coinbase transactions include Founders’
-/// Reward outputs and transparent funding stream outputs."
+/// > A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// > from a block less than 100 blocks prior to the spend.
+/// > Note that transparent outputs of coinbase transactions include
+/// > Founders’ Reward outputs and transparent funding stream outputs.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn transparent_coinbase_spend(
     outpoint: transparent::OutPoint,
     spend_restriction: transparent::CoinbaseSpendRestriction,

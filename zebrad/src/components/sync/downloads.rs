@@ -25,18 +25,13 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
-use super::{DEFAULT_LOOKAHEAD_LIMIT, MAX_TIPS_RESPONSE_HASH_COUNT};
-
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// A divisor used to calculate the extra number of blocks we allow in the
+/// A multiplier used to calculate the extra number of blocks we allow in the
 /// verifier and state pipelines, on top of the lookahead limit.
 ///
 /// The extra number of blocks is calculated using
-/// `lookahead_limit / VERIFICATION_PIPELINE_SCALING_DIVISOR`.
-///
-/// For the default lookahead limit, the extra number of blocks is
-/// `4 * MAX_TIPS_RESPONSE_HASH_COUNT`.
+/// `lookahead_limit * VERIFICATION_PIPELINE_SCALING_MULTIPLIER`.
 ///
 /// This allows the verifier and state queues to hold a few extra tips responses worth of blocks,
 /// even if the syncer queue is full. Any unused capacity is shared between both queues.
@@ -48,8 +43,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
-const VERIFICATION_PIPELINE_SCALING_DIVISOR: usize =
-    DEFAULT_LOOKAHEAD_LIMIT / (4 * MAX_TIPS_RESPONSE_HASH_COUNT);
+const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -228,14 +222,14 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        tracing::debug!("waiting to request block");
+        debug!("waiting to request block");
         let block_req = self
             .network
             .ready()
             .await
             .map_err(|e| eyre!(e))?
             .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
-        tracing::debug!("requested block");
+        debug!("requested block");
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -250,7 +244,7 @@ where
                 let rsp = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
-                        tracing::trace!("task cancelled prior to download completion");
+                        trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload)
                     }
@@ -282,7 +276,7 @@ where
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
                     let lookahead = i32::try_from(
-                        lookahead_limit + lookahead_limit / VERIFICATION_PIPELINE_SCALING_DIVISOR,
+                        lookahead_limit + lookahead_limit * VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
                     )
                     .expect("fits in i32");
                     (tip_height + lookahead).expect("tip is much lower than Height::MAX")
@@ -309,13 +303,15 @@ where
 
                 if let Some(block_height) = block.coinbase_height() {
                     if block_height > max_lookahead_height {
-                        tracing::info!(
+                        info!(
                             ?hash,
                             ?block_height,
                             ?tip_height,
                             ?max_lookahead_height,
                             lookahead_limit = ?lookahead_limit,
-                            "synced block height too far ahead of the tip: dropped downloaded block"
+                            "synced block height too far ahead of the tip: dropped downloaded block. \
+                            Hint: Try increasing the value of the lookahead_limit field \
+                            in the sync section of the configuration file."
                         );
                         metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 
@@ -330,7 +326,7 @@ where
                         // (or blocks far ahead of the current state tip).
                         Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit)?;
                     } else if block_height < min_accepted_height {
-                        tracing::debug!(
+                        debug!(
                             ?hash,
                             ?block_height,
                             ?tip_height,
@@ -343,7 +339,7 @@ where
                         Err(BlockDownloadVerifyError::BehindTipHeightLimit)?;
                     }
                 } else {
-                    tracing::info!(
+                    debug!(
                         ?hash,
                         "synced block with no height: dropped downloaded block"
                     );
@@ -361,7 +357,7 @@ where
                 let verification = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
-                        tracing::trace!("task cancelled prior to verification");
+                        trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
                         return Err(BlockDownloadVerifyError::CancelledDuringVerification)
                     }

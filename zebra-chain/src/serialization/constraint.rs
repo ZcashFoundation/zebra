@@ -147,13 +147,19 @@ where
     }
 }
 
-// Deref (but not DerefMut, because that could break the constraint)
+// Deref and AsRef (but not DerefMut or AsMut, because that could break the constraint)
 
 impl<T> Deref for AtLeastOne<T> {
     type Target = Vec<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl<T> AsRef<[T]> for AtLeastOne<T> {
+    fn as_ref(&self) -> &[T] {
+        self.inner.as_ref()
     }
 }
 
@@ -165,7 +171,35 @@ impl<T> From<AtLeastOne<T>> for Vec<T> {
     }
 }
 
+// `IntoIterator` for `T` and `&mut T`, because iterators can't remove items
+
+impl<T> IntoIterator for AtLeastOne<T> {
+    type Item = T;
+
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> std::vec::IntoIter<T> {
+        self.inner.into_iter()
+    }
+}
+
 impl<T> AtLeastOne<T> {
+    /// Returns an iterator that allows modifying each value.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.inner.iter_mut()
+    }
+}
+
+impl<T> AtLeastOne<T> {
+    /// Returns a new `AtLeastOne`, containing a single `item`.
+    ///
+    /// Skips the `TrustedPreallocate` memory denial of service checks.
+    /// (`TrustedPreallocate` can not defend against a single item
+    /// that causes a denial of service by itself.)
+    pub fn from_one(item: T) -> AtLeastOne<T> {
+        AtLeastOne { inner: vec![item] }
+    }
+
     /// Returns a reference to the inner vector.
     pub fn as_vec(&self) -> &Vec<T> {
         &self.inner

@@ -13,10 +13,9 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
-    FutureExt, TryFutureExt,
+    FutureExt,
 };
-use tokio::sync::mpsc;
-use tower::{Service, ServiceExt};
+use tower::{timeout::Timeout, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -28,7 +27,7 @@ use zebra_chain::{
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
-    transparent,
+    transparent::{self, OrderedUtxo},
 };
 
 use zebra_script::CachedFfiTransaction;
@@ -40,6 +39,20 @@ pub mod check;
 #[cfg(test)]
 mod tests;
 
+/// A timeout applied to UTXO lookup requests.
+///
+/// The exact value is non-essential, but this should be long enough to allow
+/// out-of-order verification of blocks (UTXOs are not required to be ready
+/// immediately) while being short enough to:
+///   * prune blocks that are too far in the future to be worth keeping in the
+///     queue,
+///   * fail blocks that reference invalid UTXOs, and
+///   * fail blocks that reference UTXOs from blocks that have temporarily failed
+///     to download, because a peer sent Zebra a bad list of block hashes. (The
+///     UTXO verification failure will restart the sync, and re-download the
+///     chain in the correct order.)
+const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -50,7 +63,8 @@ mod tests;
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
     network: Network,
-    script_verifier: script::Verifier<ZS>,
+    state: Timeout<ZS>,
+    script_verifier: script::Verifier,
 }
 
 impl<ZS> Verifier<ZS>
@@ -59,10 +73,11 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: Network, script_verifier: script::Verifier<ZS>) -> Self {
+    pub fn new(network: Network, state: ZS) -> Self {
         Self {
             network,
-            script_verifier,
+            state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
+            script_verifier: script::Verifier::default(),
         }
     }
 }
@@ -279,8 +294,9 @@ where
 
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
-        let script_verifier = self.script_verifier.clone();
+        let script_verifier = self.script_verifier;
         let network = self.network;
+        let state = self.state.clone();
 
         let tx = req.transaction();
         let tx_id = req.tx_id();
@@ -288,10 +304,6 @@ where
 
         async move {
             tracing::trace!(?req);
-
-            // the size of this channel is bounded by the maximum number of inputs in a transaction
-            // (approximately 50,000 for a 2 MB transaction)
-            let (utxo_sender, mut utxo_receiver) = mpsc::unbounded_channel();
 
             // Do basic checks first
             if let Some(block_time) = req.block_time() {
@@ -338,7 +350,12 @@ where
             //
             // https://zips.z.cash/zip-0213#specification
 
-            let cached_ffi_transaction = Arc::new(CachedFfiTransaction::new(tx.clone()));
+            // Load spent UTXOs from state.
+            let (spent_utxos, spent_outputs) =
+                Self::spent_utxos(tx.clone(), req.known_utxos(), state).await?;
+
+            let cached_ffi_transaction =
+                Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
             let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
@@ -353,7 +370,6 @@ where
                     network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    utxo_sender,
                     joinsplit_data,
                     sapling_shielded_data,
                 )?,
@@ -366,7 +382,6 @@ where
                     network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    utxo_sender,
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
@@ -375,11 +390,6 @@ where
             // If the Groth16 parameter download hangs,
             // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
-
-            let mut spent_utxos = HashMap::new();
-            while let Some(script_rsp) = utxo_receiver.recv().await {
-                spent_utxos.insert(script_rsp.spent_outpoint, script_rsp.spent_utxo);
-            }
 
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
@@ -425,6 +435,53 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
+    /// Get the UTXOs that are being spent by the given transaction.
+    ///
+    /// `known_utxos` are additional UTXOs known at the time of validation (i.e.
+    /// from previous transactions in the block).
+    ///
+    /// Returns a tuple with a OutPoint -> Utxo map, and a vector of Outputs
+    /// in the same order as the matching inputs in the transaction.
+    async fn spent_utxos(
+        tx: Arc<Transaction>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
+        state: Timeout<ZS>,
+    ) -> Result<
+        (
+            HashMap<transparent::OutPoint, transparent::Utxo>,
+            Vec<transparent::Output>,
+        ),
+        TransactionError,
+    > {
+        let inputs = tx.inputs();
+        let mut spent_utxos = HashMap::new();
+        let mut spent_outputs = Vec::new();
+        for input in inputs {
+            if let transparent::Input::PrevOut { outpoint, .. } = input {
+                tracing::trace!("awaiting outpoint lookup");
+                let utxo = if let Some(output) = known_utxos.get(outpoint) {
+                    tracing::trace!("UXTO in known_utxos, discarding query");
+                    output.utxo.clone()
+                } else {
+                    let query = state
+                        .clone()
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+                    if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        utxo
+                    } else {
+                        unreachable!("AwaitUtxo always responds with Utxo")
+                    }
+                };
+                tracing::trace!(?utxo, "got UTXO");
+                spent_outputs.push(utxo.output.clone());
+                spent_utxos.insert(*outpoint, utxo);
+            } else {
+                continue;
+            }
+        }
+        Ok((spent_utxos, spent_outputs))
+    }
+
     /// Verify a V4 transaction.
     ///
     /// Returns a set of asynchronous checks that must all succeed for the transaction to be
@@ -446,9 +503,8 @@ where
     fn verify_v4_transaction(
         request: &Request,
         network: Network,
-        script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        utxo_sender: mpsc::UnboundedSender<script::Response>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -457,14 +513,18 @@ where
 
         Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
 
-        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, None);
+        let shielded_sighash = tx.sighash(
+            upgrade,
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs(),
+            None,
+        );
 
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,
             network,
             script_verifier,
             cached_ffi_transaction,
-            utxo_sender,
         )?
         .and(Self::verify_sprout_shielded_data(
             joinsplit_data,
@@ -484,12 +544,19 @@ where
         match network_upgrade {
             // Supports V4 transactions
             //
-            // Consensus rules:
-            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4, ...
-            // >
+            // # Consensus
+            //
+            // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4,
+            // > and the version group ID MUST be 0x892F2085.
+            //
             // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above two rules, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Sapling
             | NetworkUpgrade::Blossom
             | NetworkUpgrade::Heartwood
@@ -528,9 +595,8 @@ where
     fn verify_v5_transaction(
         request: &Request,
         network: Network,
-        script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        utxo_sender: mpsc::UnboundedSender<script::Response>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -539,14 +605,18 @@ where
 
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
 
-        let shielded_sighash = transaction.sighash(upgrade, HashType::ALL, None);
+        let shielded_sighash = transaction.sighash(
+            upgrade,
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs(),
+            None,
+        );
 
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,
             network,
             script_verifier,
             cached_ffi_transaction,
-            utxo_sender,
         )?
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
@@ -570,10 +640,16 @@ where
         match network_upgrade {
             // Supports V5 transactions
             //
-            // Consensus rules:
+            // # Consensus
+            //
             // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above rule, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Nu5 => Ok(()),
 
             // Does not support V5 transactions
@@ -597,9 +673,8 @@ where
     fn verify_transparent_inputs_and_outputs(
         request: &Request,
         network: Network,
-        script_verifier: script::Verifier<ZS>,
+        script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        utxo_sender: mpsc::UnboundedSender<script::Response>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
@@ -611,24 +686,18 @@ where
             // feed all of the inputs to the script verifier
             // the script_verifier also checks transparent sighashes, using its own implementation
             let inputs = transaction.inputs();
-            let known_utxos = request.known_utxos();
             let upgrade = request.upgrade(network);
 
             let script_checks = (0..inputs.len())
                 .into_iter()
                 .map(move |input_index| {
-                    let utxo_sender = utxo_sender.clone();
-
                     let request = script::Request {
                         upgrade,
-                        known_utxos: known_utxos.clone(),
                         cached_ffi_transaction: cached_ffi_transaction.clone(),
                         input_index,
                     };
 
-                    script_verifier.clone().oneshot(request).map_ok(move |rsp| {
-                        utxo_sender.send(rsp).expect("receiver is not dropped");
-                    })
+                    script_verifier.oneshot(request)
                 })
                 .collect();
 
@@ -645,16 +714,18 @@ where
 
         if let Some(joinsplit_data) = joinsplit_data {
             for joinsplit in joinsplit_data.joinsplits() {
-                // Consensus rule: The proof π_ZKSpend MUST be valid given a
-                // primary input formed from the relevant other fields and h_{Sig}
+                // # Consensus
+                //
+                // > The proof π_ZKJoinSplit MUST be valid given a
+                // > primary input formed from the relevant other fields and h_{Sig}
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each JoinSplit description while adding the
                 // resulting future to our collection of async
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
                     DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
                 ));
@@ -694,9 +765,13 @@ where
 
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             for spend in sapling_shielded_data.spends_per_anchor() {
-                // Consensus rule: The proof π_ZKSpend MUST be valid
-                // given a primary input formed from the other
-                // fields except spendAuthSig.
+                // # Consensus
+                //
+                // > The proof π_ZKSpend MUST be valid
+                // > given a primary input formed from the other
+                // > fields except spendAuthSig.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each Spend description while adding the
@@ -709,9 +784,23 @@ where
                         .oneshot(DescriptionWrapper(&spend).try_into()?),
                 );
 
-                // Consensus rule: The spend authorization signature
-                // MUST be a valid SpendAuthSig signature over
-                // SigHash using rk as the validating key.
+                // # Consensus
+                //
+                // > The spend authorization signature
+                // > MUST be a valid SpendAuthSig signature over
+                // > SigHash using rk as the validating key.
+                //
+                // This is validated by the verifier.
+                //
+                // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub,
+                // > and RedPallas’ on p. 88, the validation of the 𝑅
+                // > component of the signature changes to prohibit non-canonical encodings.
+                //
+                // This is validated by the verifier, inside the `redjubjub` crate.
+                // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
+                // that enforces the canonical encoding.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the validation of the RedJubjub spend
                 // authorization signature for each Spend

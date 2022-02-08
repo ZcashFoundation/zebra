@@ -15,9 +15,9 @@ proptest = "0.10.1"
 rand = "0.8"
 regex = "1.5.4"
 
-tokio = { version = "1.15.0", features = ["full"] }
+tokio = { version = "1.16.1", features = ["full"] }
 tower = { version = "0.4.11", features = ["util"] }
-futures = "0.3.19"
+futures = "0.3.21"
 
 color-eyre = "0.5.11"
 owo-colors = "3.2.0"

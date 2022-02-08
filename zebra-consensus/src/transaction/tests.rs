@@ -30,7 +30,7 @@ use zebra_chain::{
 
 use super::{check, Request, Verifier};
 
-use crate::{error::TransactionError, script};
+use crate::error::TransactionError;
 use color_eyre::eyre::Report;
 
 #[cfg(test)]
@@ -216,7 +216,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
 
     insert_fake_orchard_shielded_data(&mut transaction);
 
-    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok(),);
+    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok());
 }
 
 #[test]
@@ -251,8 +251,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 
     for (network, blocks) in networks {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         let transaction = fake_v5_transactions_for_network(network, blocks)
             .rev()
@@ -305,8 +304,7 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
     };
 
     let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let transaction = fake_v5_transactions_for_network(network, blocks)
         .rev()
@@ -367,8 +365,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -635,8 +632,7 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -686,8 +682,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -737,8 +732,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -792,7 +786,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, &[], None);
 
         match &mut transaction {
             Transaction::V4 {
@@ -804,8 +798,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         let result = verifier
             .oneshot(Request::Block {
@@ -864,7 +857,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, &[], None);
 
         match &mut transaction {
             Transaction::V4 {
@@ -876,8 +869,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         let result = verifier
             .oneshot(Request::Block {
@@ -931,8 +923,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -981,8 +972,7 @@ async fn v5_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1034,8 +1024,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1087,8 +1076,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1133,8 +1121,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1207,8 +1194,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     // Initialize the verifier
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     // Test the transaction verifier
     let result = verifier
@@ -1245,8 +1231,7 @@ fn v4_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1290,8 +1275,7 @@ fn v4_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1337,8 +1321,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1385,8 +1368,7 @@ fn v5_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1433,8 +1415,7 @@ fn v5_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1497,8 +1478,7 @@ fn v5_with_duplicate_orchard_action() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier

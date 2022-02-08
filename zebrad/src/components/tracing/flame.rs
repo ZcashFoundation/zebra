@@ -37,7 +37,7 @@ impl Grapher {
         let writer = BufWriter::new(out);
 
         let mut opts = inferno::flamegraph::Options::default();
-        info!("writing flamegraph to disk...");
+        debug!("writing flamegraph to disk...");
         inferno::flamegraph::from_reader(&mut opts, reader, writer)?;
 
         Ok(())

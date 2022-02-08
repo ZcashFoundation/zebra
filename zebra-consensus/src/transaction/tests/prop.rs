@@ -13,7 +13,7 @@ use zebra_chain::{
 };
 
 use super::mock_transparent_transfer;
-use crate::{error::TransactionError, script, transaction};
+use crate::{error::TransactionError, transaction};
 
 /// The maximum number of transparent inputs to include in a mock transaction.
 const MAX_TRANSPARENT_INPUTS: usize = 10;
@@ -442,8 +442,7 @@ fn validate(
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = transaction::Verifier::new(network, script_verifier);
+        let verifier = transaction::Verifier::new(network, state_service);
 
         // Test the transaction verifier
         verifier
