@@ -5,9 +5,13 @@ on:
     inputs:
       network:
         default: 'Mainnet'
-  push:
-    # branches:
-    #   - main
+      regenerate-disks:
+        type: boolean
+        default: false
+        description: Just update stateful disks
+  pull_request:
+    branches:
+      - main
     path:
       - '**/*.rs'
       - '**/*.txt'
@@ -90,6 +94,7 @@ jobs:
     name: Test all
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -107,6 +112,7 @@ jobs:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -124,6 +130,7 @@ jobs:
     name: Test large sync
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -141,6 +148,7 @@ jobs:
     name: Test with Zunstable options
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -185,7 +193,7 @@ jobs:
 
       - name: Run state disk regeneration
         id: regenerate-state
-        if: steps.changed-files-specific.outputs.any_changed == 'true'
+        if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' }} || ${{ github.event.inputs.regenerate-disks == 'true' }}
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
@@ -228,9 +236,22 @@ jobs:
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
+      - name: Write the disk SHORT_SHA to a txt
+        if: steps.regenerate-state.outcome == 'success'
+        run: |
+          short_sha=$(echo "${{ env.GITHUB_SHA_SHORT }}")
+          echo "$short_sha" > latest-disk-state-sha.txt
+
+      - name: Upload the disk state txt
+        uses: actions/upload-artifact@v2
+        with:
+          name: latest-disk-state-sha
+          path: latest-disk-state-sha.txt
+          retention-days: 1095
+
       - name: Delete test instance
         # Always run even if the earlier step fails
-        if: steps.changed-files-specific.outputs.any_changed == 'true'
+        if: steps.changed-files-specific.outputs.any_changed == 'true' || ${{ github.event.inputs.regenerate-disks == 'true' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
@@ -240,6 +261,7 @@ jobs:
     name: Test blocks sync
     runs-on: ubuntu-latest
     needs: [ build, regenerate-stateful-disks]
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -247,6 +269,21 @@ jobs:
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
+
+      # Get the latest uploaded txt with the disk SHORT_SHA from this workflow
+      - name: Download latest disk state SHORT_SHA
+        uses: dawidd6/action-download-artifact@v2.17.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: test.yml
+          name: latest-disk-state-sha
+          check_artifacts:  true
+
+      - name: Get disk state SHA from txt
+        id: get_disk_sha
+        run: |
+          output=$(cat latest-disk-state-sha.txt)
+          echo "::set-output name=sha::$output"
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -262,8 +299,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
+          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -283,6 +320,8 @@ jobs:
           --scopes cloud-platform \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
+        env:
+          DISK_SHORT_SHA: ${{ steps.get_disk_sha.outputs.sha }}
 
       - name: Wait sync process to end
         run: |
