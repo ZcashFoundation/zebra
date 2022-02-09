@@ -69,10 +69,14 @@ impl ZcashDeserialize for pallas::Base {
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplitData<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Denoted as `nJoinSplit` and `vJoinSplit` in the spec.
         let joinsplits: Vec<_> = self.joinsplits().cloned().collect();
         joinsplits.zcash_serialize(&mut writer)?;
 
+        // Denoted as `joinSplitPubKey` in the spec.
         writer.write_all(&<[u8; 32]>::from(self.pub_key)[..])?;
+
+        // Denoted as `joinSplitSig` in the spec.
         writer.write_all(&<[u8; 64]>::from(self.sig)[..])?;
         Ok(())
     }
@@ -84,11 +88,14 @@ where
     sprout::JoinSplit<P>: TrustedPreallocate,
 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Denoted as `nJoinSplit` and `vJoinSplit` in the spec.
         let joinsplits: Vec<sprout::JoinSplit<P>> = (&mut reader).zcash_deserialize_into()?;
         match joinsplits.split_first() {
             None => Ok(None),
             Some((first, rest)) => {
+                // Denoted as `joinSplitPubKey` in the spec.
                 let pub_key = reader.read_32_bytes()?.into();
+                // Denoted as `joinSplitSig` in the spec.
                 let sig = reader.read_64_bytes()?.into();
                 Ok(Some(JoinSplitData {
                     first: first.clone(),
@@ -449,6 +456,8 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
 
+                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
+                // `joinSplitPubKey` and `joinSplitSig`.
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
                     None => zcash_serialize_empty_list(writer)?,
@@ -472,6 +481,9 @@ impl ZcashSerialize for Transaction {
                 lock_time.zcash_serialize(&mut writer)?;
 
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
+
+                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
+                // `joinSplitPubKey` and `joinSplitSig`.
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
                     None => zcash_serialize_empty_list(writer)?,
@@ -537,6 +549,8 @@ impl ZcashSerialize for Transaction {
                     }
                 }
 
+                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
+                // `joinSplitPubKey` and `joinSplitSig`.
                 match joinsplit_data {
                     None => zcash_serialize_empty_list(&mut writer)?,
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
@@ -667,6 +681,8 @@ impl ZcashDeserialize for Transaction {
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
+                    // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
+                    // `joinSplitPubKey` and `joinSplitSig`.
                     joinsplit_data: OptV2Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
@@ -687,6 +703,8 @@ impl ZcashDeserialize for Transaction {
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
                     // Denoted as `nExpiryHeight` in the spec.
                     expiry_height: block::Height(limited_reader.read_u32::<LittleEndian>()?),
+                    // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
+                    // `joinSplitPubKey` and `joinSplitSig`.
                     joinsplit_data: OptV3Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
@@ -734,6 +752,8 @@ impl ZcashDeserialize for Transaction {
                         .map(Output::from_v4)
                         .collect();
 
+                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
+                // `joinSplitPubKey` and `joinSplitSig`.
                 let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut limited_reader)?;
 
                 let sapling_transfers = if !shielded_spends.is_empty() {
