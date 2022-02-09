@@ -366,9 +366,6 @@ impl Service<zn::Request> for Inbound {
                     .try_filter_map(|response| async move {
                         Ok(match response {
                             zs::Response::Block(Some(block)) => Some(block),
-                            // `zcashd` ignores missing blocks in GetData responses,
-                            // rather than including them in a trailing `NotFound`
-                            // message
                             zs::Response::Block(None) => None,
                             _ => unreachable!("wrong response from state"),
                         })
