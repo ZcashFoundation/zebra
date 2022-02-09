@@ -109,9 +109,9 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
-                // nSpendsSapling
+                // Denoted as `nSpendsSapling` in the spec.
                 zcash_serialize_empty_list(&mut writer)?;
-                // nOutputsSapling
+                // Denoted as `nOutputsSapling` in the spec.
                 zcash_serialize_empty_list(&mut writer)?;
             }
             Some(sapling_shielded_data) => {
@@ -138,30 +138,30 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
         let (output_prefixes, output_proofs): (Vec<_>, _) =
             self.outputs().cloned().map(Output::into_v5_parts).unzip();
 
-        // nSpendsSapling and vSpendsSapling
+        // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
         spend_prefixes.zcash_serialize(&mut writer)?;
-        // nOutputsSapling and vOutputsSapling
+        // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
         output_prefixes.zcash_serialize(&mut writer)?;
 
-        // valueBalanceSapling
+        // Denoted as `valueBalanceSapling` in the spec.
         self.value_balance.zcash_serialize(&mut writer)?;
 
-        // anchorSapling
+        // Denoted as `anchorSapling` in the spec.
         // `TransferData` ensures this field is only present when there is at
         // least one spend.
         if let Some(shared_anchor) = self.shared_anchor() {
             writer.write_all(&<[u8; 32]>::from(shared_anchor)[..])?;
         }
 
-        // vSpendProofsSapling
+        // Denoted as `vSpendProofsSapling` in the spec.
         zcash_serialize_external_count(&spend_proofs, &mut writer)?;
-        // vSpendAuthSigsSapling
+        // Denoted as `vSpendAuthSigsSapling` in the spec.
         zcash_serialize_external_count(&spend_sigs, &mut writer)?;
 
-        // vOutputProofsSapling
+        // Denoted as `vOutputProofsSapling` in the spec.
         zcash_serialize_external_count(&output_proofs, &mut writer)?;
 
-        // bindingSigSapling
+        // Denoted as `bindingSigSapling` in the spec.
         writer.write_all(&<[u8; 64]>::from(self.binding_sig)[..])?;
 
         Ok(())
@@ -172,10 +172,10 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // nSpendsSapling and vSpendsSapling
+        // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
         let spend_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
 
-        // nOutputsSapling and vOutputsSapling
+        // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
         let output_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
 
         // nSpendsSapling and nOutputsSapling as variables
@@ -187,10 +187,10 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             return Ok(None);
         }
 
-        // valueBalanceSapling
+        // Denoted as `valueBalanceSapling` in the spec.
         let value_balance = (&mut reader).zcash_deserialize_into()?;
 
-        // anchorSapling
+        // Denoted as `anchorSapling` in the spec.
         //
         // # Consensus
         //
@@ -205,7 +205,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             None
         };
 
-        // vSpendProofsSapling
+        // Denoted as `vSpendProofsSapling` in the spec.
         //
         // # Consensus
         //
@@ -220,7 +220,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
         let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
-        // vSpendAuthSigsSapling
+        // Denoted as `vSpendAuthSigsSapling` in the spec.
         //
         // # Consensus
         //
@@ -234,10 +234,10 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         // See [`redjubjub::Signature<SpendAuth>::zcash_deserialize`].
         let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
-        // vOutputProofsSapling
+        // Denoted as `vOutputProofsSapling` in the spec.
         let output_proofs = zcash_deserialize_external_count(outputs_count, &mut reader)?;
 
-        // bindingSigSapling
+        // Denoted as `bindingSigSapling` in the spec.
         let binding_sig = reader.read_64_bytes()?.into();
 
         // Create shielded spends from deserialized parts
@@ -518,13 +518,16 @@ impl ZcashSerialize for Transaction {
                         zcash_serialize_empty_list(&mut writer)?;
                     }
                     Some(sapling_shielded_data) => {
+                        // Denoted as `valueBalanceSapling` in the spec.
                         sapling_shielded_data
                             .value_balance
                             .zcash_serialize(&mut writer)?;
 
+                        // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
                         let spends: Vec<_> = sapling_shielded_data.spends().cloned().collect();
                         spends.zcash_serialize(&mut writer)?;
 
+                        // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
                         let outputs: Vec<_> = sapling_shielded_data
                             .outputs()
                             .cloned()
@@ -539,6 +542,7 @@ impl ZcashSerialize for Transaction {
                     Some(jsd) => jsd.zcash_serialize(&mut writer)?,
                 }
 
+                // Denoted as `bindingSigSapling` in the spec.
                 match sapling_shielded_data {
                     Some(sd) => writer.write_all(&<[u8; 64]>::from(sd.binding_sig)[..])?,
                     None => {}
@@ -577,7 +581,10 @@ impl ZcashSerialize for Transaction {
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
 
-                // sapling
+                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
+                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
+                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
+                // `bindingSigSapling`.
                 sapling_shielded_data.zcash_serialize(&mut writer)?;
 
                 // orchard
@@ -714,8 +721,13 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
+                // Denoted as `valueBalanceSapling` in the spec.
                 let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
+
+                // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
                 let shielded_spends = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
                 let shielded_outputs =
                     Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut limited_reader)?
                         .into_iter()
@@ -751,6 +763,7 @@ impl ZcashDeserialize for Transaction {
                     Some(transfers) => Some(sapling::ShieldedData {
                         value_balance,
                         transfers,
+                        // Denoted as `bindingSigSapling` in the spec.
                         binding_sig: limited_reader.read_64_bytes()?.into(),
                     }),
                     None => None,
@@ -792,7 +805,10 @@ impl ZcashDeserialize for Transaction {
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
 
-                // sapling
+                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
+                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
+                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
+                // `bindingSigSapling`.
                 let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
                 // orchard
