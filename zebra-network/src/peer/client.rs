@@ -89,6 +89,7 @@ pub(super) struct ClientRequestReceiver {
 pub(super) struct InProgressClientRequest {
     /// The actual request.
     pub request: Request,
+
     /// The return message channel, included because `peer::Client::call` returns a
     /// future that may be moved around before it resolves.
     ///
@@ -99,27 +100,31 @@ pub(super) struct InProgressClientRequest {
     /// `Ok(())`, it will assume that it is safe to unconditionally poll the
     /// `Receiver` tied to the `Sender` used to create the `ClientRequest`.
     ///
+    /// We also take advantage of this invariant to route inventory requests
+    /// away from peers that did not respond with that inventory.
+    ///
     /// We enforce this invariant via the type system, by converting
     /// `ClientRequest`s to `InProgressClientRequest`s when they are received by
     /// the background task. These conversions are implemented by
     /// `ClientRequestReceiver`.
-    pub tx: MustUseClientResponseSender<Result<Response, SharedPeerError>>,
+    pub tx: MustUseClientResponseSender,
+
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
 }
 
-/// A oneshot::Sender that must be used by calling `send()`.
+/// A `oneshot::Sender` for client responses, that must be used by calling `send()`.
 ///
 /// Panics on drop if `tx` has not been used or canceled.
 /// Panics if `tx.send()` is used more than once.
 #[derive(Debug)]
 #[must_use = "tx.send() must be called before drop"]
-pub(super) struct MustUseClientResponseSender<T: std::fmt::Debug> {
-    /// The sender for the oneshot channel.
+pub(super) struct MustUseClientResponseSender {
+    /// The sender for the oneshot client response channel.
     ///
     /// `None` if `tx.send()` has been used.
-    pub tx: Option<oneshot::Sender<T>>,
+    pub tx: Option<oneshot::Sender<Result<Response, SharedPeerError>>>,
 }
 
 impl std::fmt::Debug for Client {
@@ -199,11 +204,14 @@ impl From<mpsc::Receiver<ClientRequest>> for ClientRequestReceiver {
     }
 }
 
-impl<T: std::fmt::Debug> MustUseClientResponseSender<T> {
-    /// Forwards `t` to `tx.send()`, and marks this sender as used.
+impl MustUseClientResponseSender {
+    /// Forwards `response` to `tx.send()`, and marks this sender as used.
     ///
     /// Panics if `tx.send()` is used more than once.
-    pub fn send(mut self, t: T) -> Result<(), T> {
+    pub fn send(
+        mut self,
+        response: Result<Response, SharedPeerError>,
+    ) -> Result<(), Result<Response, SharedPeerError>> {
         self.tx
             .take()
             .unwrap_or_else(|| {
@@ -212,13 +220,13 @@ impl<T: std::fmt::Debug> MustUseClientResponseSender<T> {
                     self
                 )
             })
-            .send(t)
+            .send(response)
     }
 
     /// Returns `tx.cancellation()`.
     ///
     /// Panics if `tx.send()` has previously been used.
-    pub fn cancellation(&mut self) -> oneshot::Cancellation<'_, T> {
+    pub fn cancellation(&mut self) -> oneshot::Cancellation<'_, Result<Response, SharedPeerError>> {
         self.tx
             .as_mut()
             .map(|tx| tx.cancellation())
@@ -239,13 +247,13 @@ impl<T: std::fmt::Debug> MustUseClientResponseSender<T> {
     }
 }
 
-impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseClientResponseSender<T> {
-    fn from(sender: oneshot::Sender<T>) -> Self {
+impl From<oneshot::Sender<Result<Response, SharedPeerError>>> for MustUseClientResponseSender {
+    fn from(sender: oneshot::Sender<Result<Response, SharedPeerError>>) -> Self {
         MustUseClientResponseSender { tx: Some(sender) }
     }
 }
 
-impl<T: std::fmt::Debug> Drop for MustUseClientResponseSender<T> {
+impl Drop for MustUseClientResponseSender {
     #[instrument(skip(self))]
     fn drop(&mut self) {
         // we don't panic if we are shutting down anyway
@@ -253,7 +261,7 @@ impl<T: std::fmt::Debug> Drop for MustUseClientResponseSender<T> {
             // is_canceled() will not panic, because we check is_none() first
             assert!(
                 self.tx.is_none() || self.is_canceled(),
-                "unused oneshot sender: oneshot must be used or canceled: {:?}",
+                "unused client response sender: oneshot must be used or canceled: {:?}",
                 self
             );
         }

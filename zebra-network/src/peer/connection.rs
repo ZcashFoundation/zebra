@@ -387,7 +387,7 @@ pub(super) enum State {
     /// Awaiting a peer message we can interpret as a client request.
     AwaitingResponse {
         handler: Handler,
-        tx: MustUseClientResponseSender<Result<Response, SharedPeerError>>,
+        tx: MustUseClientResponseSender,
         span: tracing::Span,
     },
     /// A failure has occurred and we are shutting down the connection.
