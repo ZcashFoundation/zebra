@@ -40,6 +40,8 @@
 //!  * Block Gossip Task
 //!    * runs in the background and continuously queries the state for
 //!      newly committed blocks to be gossiped to peers
+//!  * Progress Task
+//!    * logs progress towards the chain tip
 //!
 //! Mempool Transactions:
 //!  * Mempool Service
@@ -52,20 +54,23 @@
 //!    * runs in the background and gossips newly added mempool transactions
 //!      to peers
 
-use std::cmp::max;
+use std::{cmp::max, time::Duration};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+
 use crate::{
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
-        sync,
+        sync::{self, SyncStatus},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
     },
@@ -146,7 +151,7 @@ impl StartCmd {
             block_verifier: chain_verifier,
             mempool: mempool.clone(),
             state,
-            latest_chain_tip,
+            latest_chain_tip: latest_chain_tip.clone(),
         };
         setup_tx
             .send(setup_data)
@@ -167,7 +172,7 @@ impl StartCmd {
             &config.mempool,
             peer_set.clone(),
             mempool.clone(),
-            sync_status,
+            sync_status.clone(),
             chain_tip_change,
         );
 
@@ -175,6 +180,11 @@ impl StartCmd {
 
         let tx_gossip_task_handle = tokio::spawn(
             mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set)
+                .in_current_span(),
+        );
+
+        let progress_task_handle = tokio::spawn(
+            Self::update_progress(config.network.network, latest_chain_tip, sync_status)
                 .in_current_span(),
         );
 
@@ -187,6 +197,7 @@ impl StartCmd {
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
+        pin!(progress_task_handle);
 
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
@@ -220,6 +231,13 @@ impl StartCmd {
                     .expect("unexpected panic in the transaction gossip task")
                     .map(|_| info!("transaction gossip task exited"))
                     .map_err(|e| eyre!(e)),
+
+                progress_result = &mut progress_task_handle => {
+                    progress_result
+                        .expect("unexpected panic in the chain progress task");
+                    info!("chain progress task exited");
+                    Ok(())
+                }
 
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.
                 groth16_download_result = &mut groth16_download_handle_fused => {
@@ -274,6 +292,91 @@ impl StartCmd {
                 mempool::downloads::MAX_INBOUND_CONCURRENCY,
             ),
         )
+    }
+
+    /// Logs Zebra's estimated progress towards the chain tip.
+    async fn update_progress(
+        network: Network,
+        latest_chain_tip: impl ChainTip,
+        sync_status: SyncStatus,
+    ) {
+        // The amount of time between progress logs.
+        const LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+        // The number of blocks we consider to be close to the tip.
+        //
+        // Most chain forks are 1-7 blocks long.
+        const MAX_CLOSE_TO_TIP_BLOCKS: i32 = 1;
+
+        // Skip slow sync warnings when we are this close to the tip.
+        //
+        // In testing, we've seen warnings around 30 blocks.
+        //
+        // TODO: replace with `MAX_CLOSE_TO_TIP_BLOCKS` after fixing slow syncing near tip (#3375)
+        const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
+
+        loop {
+            let _now = Utc::now();
+            let is_close_to_tip = sync_status.is_close_to_tip();
+
+            if let Some(estimated_height) =
+                latest_chain_tip.estimate_network_chain_tip_height(network /*, now*/)
+            {
+                // The estimate/actual race doesn't matter here,
+                // because we're only using it for metrics and logging.
+                let current_height = latest_chain_tip
+                    .best_tip_height()
+                    .expect("unexpected empty state: estimate requires a block height");
+
+                let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
+                let sync_percent = format!("{:.3}", sync_progress * 100.0);
+
+                let remaining_sync_blocks = estimated_height - current_height;
+
+                // TODO:
+                // - estimate the remaining sync time
+                // - log progress, remaining blocks, and remaining time to next network upgrade
+                // - also add this info to the metrics
+
+                if is_close_to_tip && remaining_sync_blocks > MIN_SYNC_WARNING_BLOCKS {
+                    // We've stopped syncing blocks, but we estimate we're a long way from the tip.
+                    //
+                    // TODO: warn after fixing slow syncing near tip (#3375)
+                    info!(
+                        %sync_percent,
+                        ?remaining_sync_blocks,
+                        "initial sync might have stalled, or estimated tip is wrong. \
+                         Hint: check that your computer's clock and time zone are correct"
+                    );
+                } else if is_close_to_tip {
+                    // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
+                    //
+                    // TODO: reduce this log level after full sync tests are merged,
+                    //       and have been stable for a while (#1592)
+                    info!(
+                        %sync_percent,
+                        ?remaining_sync_blocks,
+                        "finished initial sync to chain tip"
+                    );
+                } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
+                    // We estimate we're near the tip, but we have been syncing lots of blocks recently.
+                    info!(
+                        %sync_percent,
+                        ?remaining_sync_blocks,
+                        "finished initial sync to chain tip"
+                    );
+                } else {
+                    // We estimate we're far from the tip, and we've been syncing lots of blocks.
+                    info!(
+                        %sync_percent,
+                        ?remaining_sync_blocks,
+                        "estimated progress to chain tip"
+                    );
+                }
+            }
+
+            tokio::time::sleep(LOG_INTERVAL).await;
+        }
     }
 }
 
