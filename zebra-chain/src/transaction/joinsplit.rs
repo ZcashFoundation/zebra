@@ -42,9 +42,9 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
         deserialize = "JoinSplit<P>: Deserialize<'de>"
     ))]
     pub rest: Vec<JoinSplit<P>>,
-    /// The public key for the JoinSplit signature.
+    /// The public key for the JoinSplit signature, denoted as `joinSplitPubKey` in the spec.
     pub pub_key: ed25519::VerificationKeyBytes,
-    /// The JoinSplit signature.
+    /// The JoinSplit signature, denoted as `joinSplitSig` in the spec.
     pub sig: ed25519::Signature,
 }
 
