@@ -184,6 +184,10 @@ jobs:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
 
+      - name: Downcase network name for disks
+        run: |
+          echo LOWER_NET_NAME="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}' >> $GITHUB_ENV
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -198,8 +202,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy" \
+          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -208,10 +212,10 @@ jobs:
           --container-arg="test" \
           --container-arg="--verbose" \
           --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_mainnet" \
+          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_to_mandatory_checkpoint_mainnet" \
+          --container-arg="sync_to_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -234,7 +238,7 @@ jobs:
         # Only run if the earlier step succeeds
         if: steps.wait-regenerate.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ github.event.inputs.network || env.NETWORK }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
       - name: Write the disk SHORT_SHA to a txt
         if: steps.regenerate-state.outcome == 'success'
@@ -243,7 +247,7 @@ jobs:
           echo "$short_sha" > latest-disk-state-sha.txt
 
       - name: Upload the disk state txt
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.3.1
         with:
           name: latest-disk-state-sha
           path: latest-disk-state-sha.txt
@@ -269,6 +273,10 @@ jobs:
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
+
+      - name: Downcase network name for disks
+        run: |
+          echo LOWER_NET_NAME="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}' >> $GITHUB_ENV
 
       # Get the latest uploaded txt with the disk SHORT_SHA from this workflow
       - name: Download latest disk state SHORT_SHA
@@ -299,8 +307,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ github.event.inputs.network || env.NETWORK }}-canopy \
+          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.LOWER_NET_NAME }}-canopy \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.LOWER_NET_NAME }}-canopy \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -310,10 +318,10 @@ jobs:
           --container-arg="--locked" \
           --container-arg="--release" \
           --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
+          --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_past_mandatory_checkpoint_${{ github.event.inputs.network || env.NETWORK }}" \
+          --container-arg="sync_past_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
