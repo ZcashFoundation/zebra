@@ -151,7 +151,7 @@ impl Handler {
             (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
             // `zcashd` returns requested transactions in a single batch of messages.
             // Other transaction or non-transaction messages can come before or after the batch.
-            // After the transaction batch, `zcashd` sends `NotFound` if any transactions are missing:
+            // After the transaction batch, `zcashd` sends `notfound` if any transactions are missing:
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
             (
                 Handler::TransactionsById {
@@ -163,17 +163,17 @@ impl Handler {
                 // assumptions:
                 //   - the transaction messages are sent in a single continuous batch
                 //   - missing transactions are silently skipped
-                //     (there is no `NotFound` message at the end of the batch)
+                //     (there is no `notfound` message at the end of the batch)
                 if pending_ids.remove(&transaction.id) {
                     // we are in the middle of the continuous transaction messages
                     transactions.push(transaction);
                 } else {
                     // We got a transaction we didn't ask for. If the caller doesn't know any of the
-                    // transactions, they should have sent a `NotFound` with all the hashes, rather
+                    // transactions, they should have sent a `notfound` with all the hashes, rather
                     // than an unsolicited transaction.
                     //
                     // So either:
-                    // 1. The peer implements the protocol badly, skipping `NotFound`.
+                    // 1. The peer implements the protocol badly, skipping `notfound`.
                     //    We should cancel the request, so we don't hang waiting for transactions
                     //    that will never arrive.
                     // 2. The peer sent an unsolicited transaction.
@@ -188,7 +188,7 @@ impl Handler {
                 if ignored_msg.is_some() && transactions.is_empty() {
                     // If we didn't get anything we wanted, retry the request.
                     let missing_transaction_ids = pending_ids.into_iter().map(Into::into).collect();
-                    Handler::Finished(Err(PeerError::NotFound(missing_transaction_ids)))
+                    Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
                 } else if pending_ids.is_empty() || ignored_msg.is_some() {
                     // If we got some of what we wanted, let the internal client know.
                     let available = transactions.into_iter().map(ResponseStatus::Available);
@@ -214,12 +214,12 @@ impl Handler {
                 Message::NotFound(missing_invs),
             ) => {
                 // assumptions:
-                //   - the peer eventually returns a transaction or a `NotFound` entry
+                //   - the peer eventually returns a transaction or a `notfound` entry
                 //     for each hash
-                //   - all `NotFound` entries are contained in a single message
-                //   - the `NotFound` message comes after the transaction messages
+                //   - all `notfound` entries are contained in a single message
+                //   - the `notfound` message comes after the transaction messages
                 //
-                // If we're in sync with the peer, then the `NotFound` should contain the remaining
+                // If we're in sync with the peer, then the `notfound` should contain the remaining
                 // hashes from the handler. If we're not in sync with the peer, we should return
                 // what we got so far.
                 let missing_transaction_ids: HashSet<_> = transaction_ids(&missing_invs).collect();
@@ -236,7 +236,7 @@ impl Handler {
                 if transactions.is_empty() {
                     // If we didn't get anything we wanted, retry the request.
                     let missing_transaction_ids = pending_ids.into_iter().map(Into::into).collect();
-                    Handler::Finished(Err(PeerError::NotFound(missing_transaction_ids)))
+                    Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
                     let available = transactions.into_iter().map(ResponseStatus::Available);
@@ -249,7 +249,7 @@ impl Handler {
             }
             // `zcashd` returns requested blocks in a single batch of messages.
             // Other blocks or non-blocks messages can come before or after the batch.
-            // `zcashd` silently skips missing blocks, rather than sending a final `NotFound` message.
+            // `zcashd` silently skips missing blocks, rather than sending a final `notfound` message.
             // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523
             (
                 Handler::BlocksByHash {
@@ -261,7 +261,7 @@ impl Handler {
                 // assumptions:
                 //   - the block messages are sent in a single continuous batch
                 //   - missing blocks are silently skipped
-                //     (there is no `NotFound` message at the end of the batch)
+                //     (there is no `notfound` message at the end of the batch)
                 if pending_hashes.remove(&block.hash()) {
                     // we are in the middle of the continuous block messages
                     blocks.push(block);
@@ -314,12 +314,12 @@ impl Handler {
                 Message::NotFound(missing_invs),
             ) => {
                 // assumptions:
-                //   - the peer eventually returns a block or a `NotFound` entry
+                //   - the peer eventually returns a block or a `notfound` entry
                 //     for each hash
-                //   - all `NotFound` entries are contained in a single message
-                //   - the `NotFound` message comes after the block messages
+                //   - all `notfound` entries are contained in a single message
+                //   - the `notfound` message comes after the block messages
                 //
-                // If we're in sync with the peer, then the `NotFound` should contain the remaining
+                // If we're in sync with the peer, then the `notfound` should contain the remaining
                 // hashes from the handler. If we're not in sync with the peer, we should return
                 // what we got so far, and log an error.
                 let missing_blocks: HashSet<_> = block_hashes(&missing_invs).collect();
@@ -336,7 +336,7 @@ impl Handler {
                 if blocks.is_empty() {
                     // If we didn't get anything we wanted, retry the request.
                     let missing_block_hashes = pending_hashes.into_iter().map(Into::into).collect();
-                    Handler::Finished(Err(PeerError::NotFound(missing_block_hashes)))
+                    Handler::Finished(Err(PeerError::NotFoundResponse(missing_block_hashes)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
                     let available = blocks.into_iter().map(ResponseStatus::Available);

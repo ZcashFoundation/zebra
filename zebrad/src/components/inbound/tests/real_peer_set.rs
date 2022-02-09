@@ -171,11 +171,11 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
                 .expect("unexpected inner error type, expected SharedPeerError");
             assert_eq!(
                 missing_error.inner_debug(),
-                "NotFound([Block(block::Hash(\"1111111111111111111111111111111111111111111111111111111111111111\"))])"
+                "NotFoundResponse([Block(block::Hash(\"1111111111111111111111111111111111111111111111111111111111111111\"))])"
             );
         }
         _ => unreachable!(
-            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFound(_)))`, \
+            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
              actual result: {:?}",
             response
         ),
@@ -272,22 +272,22 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
                 if txs == vec![test_tx] {
                     assert_eq!(
                         missing_error.inner_debug(),
-                        "NotFound([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
+                        "NotFoundResponse([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
                     );
                 } else if txs == vec![test_wtx] {
                     assert_eq!(
                         missing_error.inner_debug(),
-                        "NotFound([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])",
+                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])",
                     );
                 } else if txs == vec![test_tx, test_wtx] {
                     // The response order is unstable, because it depends on concurrent inbound futures.
                     // In #2244 we will fix this by replacing response Vecs with HashSets.
                     assert!(
                         missing_error.inner_debug() ==
-                        "NotFound([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\")), Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])"
+                        "NotFoundResponse([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\")), Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])"
                         ||
                         missing_error.inner_debug() ==
-                        "NotFound([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") }), Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
+                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") }), Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
                         "unexpected response: {:?}",
                         missing_error.inner_debug(),
                     );
@@ -296,7 +296,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
                 }
             }
             _ => unreachable!(
-                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFound(_)))`, \
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
                  actual result: {:?}",
                 response
             ),
