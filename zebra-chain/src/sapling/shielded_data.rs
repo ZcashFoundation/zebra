@@ -90,6 +90,7 @@ where
     AnchorV: AnchorVariant + Clone,
 {
     /// The net value of Sapling spend transfers minus output transfers.
+    /// Denoted as `valueBalanceSapling` in the spec.
     pub value_balance: Amount,
 
     /// A bundle of spends and outputs, containing at least one spend or
@@ -100,6 +101,7 @@ where
     pub transfers: TransferData<AnchorV>,
 
     /// A signature on the transaction hash.
+    /// Denoted as `bindingSigSapling` in the spec.
     pub binding_sig: Signature<Binding>,
 }
 
