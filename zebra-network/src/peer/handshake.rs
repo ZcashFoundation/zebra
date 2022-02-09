@@ -822,6 +822,15 @@ where
                 let _ = address_book_updater.send(alt_addr).await;
             }
 
+            // The handshake succeeded: update the peer status from AttemptPending to Responded
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                // the collector doesn't depend on network activity,
+                // so this await should not hang
+                let _ = address_book_updater
+                    .send(MetaAddr::new_responded(&book_addr, &remote_services))
+                    .await;
+            }
+
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version =
                 std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
@@ -865,8 +874,13 @@ where
 
             // CORRECTNESS
             //
-            // Every message and error must update the peer address state via
+            // Ping/Pong messages and every error must update the peer address state via
             // the inbound_ts_collector.
+            //
+            // The heartbeat task sends regular Ping/Pong messages,
+            // and it ends the connection if the heartbeat times out.
+            // So we can just track peer activity based on Ping and Pong.
+            // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
             let inv_collector = inv_collector.clone();
             let ts_inner_conn_span = connection_span.clone();
@@ -889,11 +903,16 @@ where
                                 );
 
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                                    // the collector doesn't depend on network activity,
-                                    // so this await should not hang
-                                    let _ = inbound_ts_collector
-                                        .send(MetaAddr::new_responded(&book_addr, &remote_services))
-                                        .await;
+                                    if matches!(msg, Message::Ping(_) | Message::Pong(_)) {
+                                        // the collector doesn't depend on network activity,
+                                        // so this await should not hang
+                                        let _ = inbound_ts_collector
+                                            .send(MetaAddr::new_responded(
+                                                &book_addr,
+                                                &remote_services,
+                                            ))
+                                            .await;
+                                    }
                                 }
                             }
                             Err(err) => {

@@ -13,6 +13,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
+  NETWORK: Mainnet
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
@@ -73,7 +74,7 @@ jobs:
           ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:latest
           ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}:${{ env.GITHUB_SHA_SHORT }}
         build-args: |
-          NETWORK=${{ github.event.inputs.network }}
+          NETWORK=${{ github.event.inputs.network || env.NETWORK }}
           SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
           RUST_BACKTRACE=1
           ZEBRA_SKIP_IPV6_TESTS="1"

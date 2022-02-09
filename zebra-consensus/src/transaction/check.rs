@@ -60,19 +60,27 @@ pub fn lock_time_has_passed(
 
 /// Checks that the transaction has inputs and outputs.
 ///
+/// # Consensus
+///
 /// For `Transaction::V4`:
-/// * At least one of `tx_in_count`, `nSpendsSapling`, and `nJoinSplit` MUST be non-zero.
-/// * At least one of `tx_out_count`, `nOutputsSapling`, and `nJoinSplit` MUST be non-zero.
+///
+/// > [Sapling onward] If effectiveVersion < 5, then at least one of
+/// > tx_in_count, nSpendsSapling, and nJoinSplit MUST be nonzero.
+///
+/// > [Sapling onward] If effectiveVersion < 5, then at least one of
+/// > tx_out_count, nOutputsSapling, and nJoinSplit MUST be nonzero.
 ///
 /// For `Transaction::V5`:
-/// * This condition must hold: `tx_in_count` > 0 or `nSpendsSapling` > 0 or
-/// (`nActionsOrchard` > 0 and `enableSpendsOrchard` = 1)
-/// * This condition must hold: `tx_out_count` > 0 or `nOutputsSapling` > 0 or
-/// (`nActionsOrchard` > 0 and `enableOutputsOrchard` = 1)
+///
+/// > [NU5 onward] If effectiveVersion >= 5 then this condition MUST hold:
+/// > tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1).
+///
+/// > [NU5 onward] If effectiveVersion >= 5 then this condition MUST hold:
+/// > tx_out_count > 0 or nOutputsSapling > 0 or (nActionsOrchard > 0 and enableOutputsOrchard = 1).
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 ///
 /// This check counts both `Coinbase` and `PrevOut` transparent inputs.
-///
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
     if !tx.has_transparent_or_shielded_inputs() {
         Err(TransactionError::NoInputs)
@@ -85,11 +93,13 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 
 /// Checks that the transaction has enough orchard flags.
 ///
-/// For `Transaction::V5` only:
-/// * If `orchard_actions_count` > 0 then at least one of
-/// `ENABLE_SPENDS|ENABLE_OUTPUTS` must be active.
+/// # Consensus
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// For `Transaction::V5` only:
+///
+/// > [NU5 onward] If effectiveVersion >= 5 and nActionsOrchard > 0, then at least one of enableSpendsOrchard and enableOutputsOrchard MUST be 1.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError> {
     if !tx.has_enough_orchard_flags() {
         return Err(TransactionError::NotEnoughFlags);
