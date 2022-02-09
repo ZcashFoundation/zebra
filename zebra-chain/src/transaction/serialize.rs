@@ -418,7 +418,8 @@ impl ZcashSerialize for Transaction {
         // Since we checkpoint on Canopy activation, we won't ever need
         // to check the smaller pre-Sapling transaction size limit.
 
-        // header: Write version and set the fOverwintered bit if necessary
+        // Denoted as `header` in the spec, contains the `fOverwintered` flag and the `version` field.
+        // Write `version` and set the `fOverwintered` bit if necessary
         let overwintered_flag = if self.is_overwintered() { 1 << 31 } else { 0 };
         let version = overwintered_flag | self.version();
 
@@ -432,6 +433,8 @@ impl ZcashSerialize for Transaction {
             } => {
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
             }
             Transaction::V2 {
@@ -442,7 +445,10 @@ impl ZcashSerialize for Transaction {
             } => {
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
                     None => zcash_serialize_empty_list(writer)?,
@@ -456,10 +462,15 @@ impl ZcashSerialize for Transaction {
                 expiry_height,
                 joinsplit_data,
             } => {
+                // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(OVERWINTER_VERSION_GROUP_ID)?;
+
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
                 match joinsplit_data {
                     // Write 0 for nJoinSplits to signal no JoinSplitData.
@@ -475,10 +486,19 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data,
                 joinsplit_data,
             } => {
+                // Transaction V4 spec:
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(SAPLING_VERSION_GROUP_ID)?;
+
                 inputs.zcash_serialize(&mut writer)?;
                 outputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // The previous match arms serialize in one go, because the
@@ -535,19 +555,22 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
             } => {
                 // Transaction V5 spec:
-                // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
 
+                // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
 
-                // header: Write the nConsensusBranchId
+                // Denoted as `nConsensusBranchId` in the spec.
                 writer.write_u32::<LittleEndian>(u32::from(
                     network_upgrade
                         .branch_id()
                         .expect("valid transactions must have a network upgrade with a branch id"),
                 ))?;
 
-                // transaction validity time and height limits
+                // Denoted as `lock_time` in the spec.
                 lock_time.zcash_serialize(&mut writer)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // transparent
@@ -567,11 +590,23 @@ impl ZcashSerialize for Transaction {
 
 impl ZcashDeserialize for Transaction {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // # Consensus
+        //
+        // > [Pre-Sapling] The encoded size of the transaction MUST be less than or
+        // > equal to 100000 bytes.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        //
+        // Zebra does not verify this rule because we checkpoint up to Canopy blocks, but:
+        // Since transactions must get mined into a block to be useful,
+        // we reject transactions that are larger than blocks.
+        //
         // If the limit is reached, we'll get an UnexpectedEof error.
         let mut limited_reader = reader.take(MAX_BLOCK_BYTES);
 
         let (version, overwintered) = {
             const LOW_31_BITS: u32 = (1 << 31) - 1;
+            // Denoted as `header` in the spec, contains the `fOverwintered` flag and the `version` field.
             let header = limited_reader.read_u32::<LittleEndian>()?;
             (header & LOW_31_BITS, header >> 31 != 0)
         };
@@ -614,6 +649,7 @@ impl ZcashDeserialize for Transaction {
             (1, false) => Ok(Transaction::V1 {
                 inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                 outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                // Denoted as `lock_time` in the spec.
                 lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
             }),
             (2, false) => {
@@ -622,11 +658,13 @@ impl ZcashDeserialize for Transaction {
                 Ok(Transaction::V2 {
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
                     joinsplit_data: OptV2Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
             (3, true) => {
+                // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != OVERWINTER_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
@@ -638,12 +676,18 @@ impl ZcashDeserialize for Transaction {
                 Ok(Transaction::V3 {
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
-                    expiry_height: block::Height::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `nExpiryHeight` in the spec.
+                    expiry_height: block::Height(limited_reader.read_u32::<LittleEndian>()?),
                     joinsplit_data: OptV3Jsd::zcash_deserialize(&mut limited_reader)?,
                 })
             }
             (4, true) => {
+                // Transaction V4 spec:
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != SAPLING_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse(
@@ -663,8 +707,12 @@ impl ZcashDeserialize for Transaction {
 
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-                let expiry_height = block::Height::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
+                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
                 let shielded_spends = Vec::zcash_deserialize(&mut limited_reader)?;
@@ -687,9 +735,12 @@ impl ZcashDeserialize for Transaction {
                         outputs: shielded_outputs.try_into().expect("checked for outputs"),
                     })
                 } else {
-                    // There are no shielded outputs and no shielded spends, so the value balance
-                    // MUST be zero:
-                    // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+                    // # Consensus
+                    //
+                    // > [Sapling onward] If effectiveVersion = 4 and there are no Spend
+                    // > descriptions or Output descriptions, then valueBalanceSapling MUST be 0.
+                    //
+                    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
                     if value_balance != 0 {
                         return Err(SerializationError::BadTransactionBalance);
                     }
@@ -715,20 +766,27 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             (5, true) => {
+                // Transaction V5 spec:
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != TX_V5_VERSION_GROUP_ID {
                     return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
                 }
-                // convert the nConsensusBranchId to a NetworkUpgrade
+                // Denoted as `nConsensusBranchId` in the spec.
+                // Convert it to a NetworkUpgrade
                 let network_upgrade =
                     NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
                         .ok_or(SerializationError::Parse(
                             "expected a valid network upgrade from the consensus branch id",
                         ))?;
 
-                // Transaction lock time and expiry height.
+                // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-                let expiry_height = block::Height::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
+                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 // transparent
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
