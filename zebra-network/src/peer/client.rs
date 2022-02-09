@@ -103,7 +103,7 @@ pub(super) struct InProgressClientRequest {
     /// `ClientRequest`s to `InProgressClientRequest`s when they are received by
     /// the background task. These conversions are implemented by
     /// `ClientRequestReceiver`.
-    pub tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
+    pub tx: MustUseClientResponseSender<Result<Response, SharedPeerError>>,
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
@@ -115,7 +115,7 @@ pub(super) struct InProgressClientRequest {
 /// Panics if `tx.send()` is used more than once.
 #[derive(Debug)]
 #[must_use = "tx.send() must be called before drop"]
-pub(super) struct MustUseOneshotSender<T: std::fmt::Debug> {
+pub(super) struct MustUseClientResponseSender<T: std::fmt::Debug> {
     /// The sender for the oneshot channel.
     ///
     /// `None` if `tx.send()` has been used.
@@ -199,7 +199,7 @@ impl From<mpsc::Receiver<ClientRequest>> for ClientRequestReceiver {
     }
 }
 
-impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
+impl<T: std::fmt::Debug> MustUseClientResponseSender<T> {
     /// Forwards `t` to `tx.send()`, and marks this sender as used.
     ///
     /// Panics if `tx.send()` is used more than once.
@@ -239,13 +239,13 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     }
 }
 
-impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseOneshotSender<T> {
+impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseClientResponseSender<T> {
     fn from(sender: oneshot::Sender<T>) -> Self {
-        MustUseOneshotSender { tx: Some(sender) }
+        MustUseClientResponseSender { tx: Some(sender) }
     }
 }
 
-impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
+impl<T: std::fmt::Debug> Drop for MustUseClientResponseSender<T> {
     #[instrument(skip(self))]
     fn drop(&mut self) {
         // we don't panic if we are shutting down anyway

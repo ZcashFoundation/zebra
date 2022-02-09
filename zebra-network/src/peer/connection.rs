@@ -29,7 +29,7 @@ use crate::{
     meta_addr::MetaAddr,
     peer::{
         connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
-        ConnectedAddr, ErrorSlot, InProgressClientRequest, MustUseOneshotSender, PeerError,
+        ConnectedAddr, ErrorSlot, InProgressClientRequest, MustUseClientResponseSender, PeerError,
         SharedPeerError,
     },
     peer_set::ConnectionTracker,
@@ -387,7 +387,7 @@ pub(super) enum State {
     /// Awaiting a peer message we can interpret as a client request.
     AwaitingResponse {
         handler: Handler,
-        tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
+        tx: MustUseClientResponseSender<Result<Response, SharedPeerError>>,
         span: tracing::Span,
     },
     /// A failure has occurred and we are shutting down the connection.
