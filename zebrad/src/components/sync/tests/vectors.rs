@@ -39,7 +39,7 @@ const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
 ///
 /// This test also makes sure that the syncer downloads blocks in order.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -267,7 +267,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 /// with duplicate block hashes.
 ///
 /// This test also makes sure that the syncer downloads blocks in order.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -550,7 +550,7 @@ async fn sync_block_wrong_hash() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in obtain_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -706,7 +706,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in extend_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -937,6 +937,8 @@ fn setup() -> (
     MockService<zebra_state::Request, zebra_state::Response, PanicAssertion>,
     MockChainTipSender,
 ) {
+    zebra_test::init();
+
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
     let config = ZebradConfig {
