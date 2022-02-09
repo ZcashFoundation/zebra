@@ -431,7 +431,10 @@ impl ZcashSerialize for Transaction {
                 outputs,
                 lock_time,
             } => {
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs.zcash_serialize(&mut writer)?;
 
                 // Denoted as `lock_time` in the spec.
@@ -443,7 +446,10 @@ impl ZcashSerialize for Transaction {
                 lock_time,
                 joinsplit_data,
             } => {
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs.zcash_serialize(&mut writer)?;
 
                 // Denoted as `lock_time` in the spec.
@@ -465,7 +471,10 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(OVERWINTER_VERSION_GROUP_ID)?;
 
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs.zcash_serialize(&mut writer)?;
 
                 // Denoted as `lock_time` in the spec.
@@ -492,7 +501,10 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(SAPLING_VERSION_GROUP_ID)?;
 
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs.zcash_serialize(&mut writer)?;
 
                 // Denoted as `lock_time` in the spec.
@@ -573,8 +585,10 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
-                // transparent
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs.zcash_serialize(&mut writer)?;
 
                 // sapling
@@ -647,7 +661,9 @@ impl ZcashDeserialize for Transaction {
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         match (version, overwintered) {
             (1, false) => Ok(Transaction::V1 {
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs: Vec::zcash_deserialize(&mut limited_reader)?,
                 // Denoted as `lock_time` in the spec.
                 lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
@@ -656,7 +672,9 @@ impl ZcashDeserialize for Transaction {
                 // Version 2 transactions use Sprout-on-BCTV14.
                 type OptV2Jsd = Option<JoinSplitData<Bctv14Proof>>;
                 Ok(Transaction::V2 {
+                    // Denoted as `tx_in_count` and `tx_in` in the spec.
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `tx_out_count` and `tx_out` in the spec.
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
@@ -674,7 +692,9 @@ impl ZcashDeserialize for Transaction {
                 // Version 3 transactions use Sprout-on-BCTV14.
                 type OptV3Jsd = Option<JoinSplitData<Bctv14Proof>>;
                 Ok(Transaction::V3 {
+                    // Denoted as `tx_in_count` and `tx_in` in the spec.
                     inputs: Vec::zcash_deserialize(&mut limited_reader)?,
+                    // Denoted as `tx_out_count` and `tx_out` in the spec.
                     outputs: Vec::zcash_deserialize(&mut limited_reader)?,
                     // Denoted as `lock_time` in the spec.
                     lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
@@ -705,7 +725,10 @@ impl ZcashDeserialize for Transaction {
                 // instead we have to pull the component parts out manually and
                 // then assemble them.
 
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
 
                 // Denoted as `lock_time` in the spec.
@@ -788,8 +811,10 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
-                // transparent
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
 
                 // sapling
