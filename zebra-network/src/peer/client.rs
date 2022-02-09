@@ -1,7 +1,10 @@
 //! Handles outbound requests from our node to the network.
 
 use std::{
+    collections::HashSet,
     future::Future,
+    iter,
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -12,13 +15,14 @@ use futures::{
     stream::{Stream, StreamExt},
     FutureExt,
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
 use crate::{
     peer::error::AlreadyErrored,
+    peer_set::InventoryChange,
     protocol::{
-        external::types::Version,
+        external::{types::Version, InventoryHash},
         internal::{Request, Response},
     },
 };
@@ -36,6 +40,13 @@ pub struct Client {
 
     /// Used to send [`Request`]s to the remote peer.
     pub(crate) server_tx: mpsc::Sender<ClientRequest>,
+
+    /// Used to register missing inventory in client [`Response`]s,
+    /// so that the peer set can route retries to other clients.
+    pub(crate) inv_collector: broadcast::Sender<InventoryChange>,
+
+    /// The peer address for registering missing inventory.
+    pub(crate) transient_addr: Option<SocketAddr>,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
     ///
@@ -68,6 +79,13 @@ pub(crate) struct ClientRequest {
     /// The response [`Message`] channel, included because `peer::Client::call` returns a
     /// future that may be moved around before it resolves.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+
+    /// Used to register missing inventory in responses on `tx`,
+    /// so that the peer set can route retries to other clients.
+    pub inv_collector: Option<broadcast::Sender<InventoryChange>>,
+
+    /// The peer address for registering missing inventory.
+    pub transient_addr: Option<SocketAddr>,
 
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
@@ -125,6 +143,14 @@ pub(super) struct MustUseClientResponseSender {
     ///
     /// `None` if `tx.send()` has been used.
     pub tx: Option<oneshot::Sender<Result<Response, SharedPeerError>>>,
+
+    /// Used to register missing inventory in responses on `tx`,
+    /// so that the peer set can route retries to other clients.
+    #[allow(dead_code)]
+    pub inv_collector: Option<broadcast::Sender<InventoryChange>>,
+
+    /// The peer address for registering missing inventory.
+    pub(crate) transient_addr: Option<SocketAddr>,
 }
 
 impl std::fmt::Debug for Client {
@@ -138,10 +164,16 @@ impl std::fmt::Debug for Client {
 
 impl From<ClientRequest> for InProgressClientRequest {
     fn from(client_request: ClientRequest) -> Self {
-        let ClientRequest { request, tx, span } = client_request;
+        let ClientRequest {
+            request,
+            tx,
+            inv_collector,
+            transient_addr,
+            span,
+        } = client_request;
         InProgressClientRequest {
             request,
-            tx: tx.into(),
+            tx: MustUseClientResponseSender::new(tx, inv_collector, transient_addr),
             span,
         }
     }
@@ -205,6 +237,19 @@ impl From<mpsc::Receiver<ClientRequest>> for ClientRequestReceiver {
 }
 
 impl MustUseClientResponseSender {
+    /// Returns a newly created client response sender.
+    pub fn new(
+        tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+        inv_collector: Option<broadcast::Sender<InventoryChange>>,
+        transient_addr: Option<SocketAddr>,
+    ) -> Self {
+        Self {
+            tx: Some(tx),
+            inv_collector,
+            transient_addr,
+        }
+    }
+
     /// Forwards `response` to `tx.send()`, and marks this sender as used.
     ///
     /// Panics if `tx.send()` is used more than once.
@@ -244,12 +289,6 @@ impl MustUseClientResponseSender {
             .map(|tx| tx.is_canceled())
             .unwrap_or_else(
                 || panic!("called is_canceled() after using oneshot sender: oneshot must be used exactly once: {:?}", self))
-    }
-}
-
-impl From<oneshot::Sender<Result<Response, SharedPeerError>>> for MustUseClientResponseSender {
-    fn from(sender: oneshot::Sender<Result<Response, SharedPeerError>>) -> Self {
-        MustUseClientResponseSender { tx: Some(sender) }
     }
 }
 
@@ -409,7 +448,13 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest { request, tx, span }) {
+        match self.server_tx.try_send(ClientRequest {
+            request,
+            tx,
+            inv_collector: Some(self.inv_collector.clone()),
+            transient_addr: self.transient_addr,
+            span,
+        }) {
             Err(e) => {
                 if e.is_disconnected() {
                     let ClientRequest { tx, .. } = e.into_inner();
