@@ -106,7 +106,6 @@ impl InventoryChange {
     }
 
     /// Returns a new missing multiple inventory change, if `hashes` contains at least one change.
-    #[allow(dead_code)]
     pub fn new_missing_multi<'a>(
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,

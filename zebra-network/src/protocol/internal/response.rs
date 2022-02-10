@@ -136,4 +136,9 @@ impl Response {
             Response::Transactions(_) => "Transactions",
         }
     }
+
+    /// Returns true if the response is a block or transaction inventory download.
+    pub fn is_inventory_download(&self) -> bool {
+        matches!(self, Response::Blocks(_) | Response::Transactions(_))
+    }
 }
