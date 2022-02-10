@@ -2,7 +2,9 @@ name: zcash-params
 
 on:
   workflow_dispatch:
-  pull_request_target:
+  push:
+    branches:
+      - 'main'
     path:
       - 'zebra-consensus/src/primitives/groth16/params.rs'
       - 'zebra-consensus/src/chain.rs'
