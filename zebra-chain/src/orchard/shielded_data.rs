@@ -26,16 +26,22 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ShieldedData {
     /// The orchard flags for this transaction.
+    /// Denoted as `flagsOrchard` in the spec.
     pub flags: Flags,
     /// The net value of Orchard spends minus outputs.
+    /// Denoted as `valueBalanceOrchard` in the spec.
     pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
+    /// Denoted as `anchorOrchard` in the spec.
     pub shared_anchor: tree::Root,
     /// The aggregated zk-SNARK proof for all the actions in this transaction.
+    /// Denoted as `proofsOrchard` in the spec.
     pub proof: Halo2Proof,
     /// The Orchard Actions, in the order they appear in the transaction.
+    /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
     pub actions: AtLeastOne<AuthorizedAction>,
     /// A signature on the transaction `sighash`.
+    /// Denoted as `bindingSigOrchard` in the spec.
     pub binding_sig: Signature<Binding>,
 }
 
