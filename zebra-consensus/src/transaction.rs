@@ -854,7 +854,7 @@ where
             //
             // > The Spend transfers and Action transfers of a transaction MUST be
             // > consistent with its vbalanceSapling value as specified in § 4.13
-            // > ‘Balance and Binding Signature (Sapling)’ on p. 49.
+            // > ‘Balance and Binding Signature (Sapling)’.
             //
             // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
             //
