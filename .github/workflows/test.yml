@@ -227,9 +227,8 @@ jobs:
         if: steps.regenerate-state.outcome == 'success'
         run: |
           sleep 30s
-          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-tt" --ssh-flag="-o ServerAliveInterval=5"
-          docker ps -aqf ancestor=$CONTAINER_IMAGE | tee output.txt
-          docker logs $(cat output.txt) --follow
+          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-tt" --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker logs $(docker ps -aqf ancestor=$CONTAINER_IMAGE) --follow"
         env:
           CONTAINER_IMAGE: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
 
@@ -334,9 +333,8 @@ jobs:
       - name: Wait sync process to end
         run: |
           sleep 30s
-          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-tt" --ssh-flag="-o ServerAliveInterval=5"
-          docker ps -aqf ancestor=$CONTAINER_IMAGE | tee output.txt
-          docker logs $(cat output.txt) --follow
+          gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-tt" --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker logs $(docker ps -aqf ancestor=$CONTAINER_IMAGE) --follow"
         env:
           CONTAINER_IMAGE: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
 
