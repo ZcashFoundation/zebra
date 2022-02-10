@@ -202,8 +202,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy" \
+          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -212,10 +212,10 @@ jobs:
           --container-arg="test" \
           --container-arg="--verbose" \
           --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
+          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.lower_net_name }}" \
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_to_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
+          --container-arg="sync_to_mandatory_checkpoint_${{ env.lower_net_name }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -229,7 +229,7 @@ jobs:
           sleep 30s
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-t" --ssh-flag="-o ServerAliveInterval=5"
           docker ps -aqf ancestor=$CONTAINER_IMAGE | tee output.txt
-          docker wait $(cat output.txt)
+          docker logs $(cat output.txt) --follow
         env:
           CONTAINER_IMAGE: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
 
@@ -238,7 +238,7 @@ jobs:
         # Only run if the earlier step succeeds
         if: steps.wait-regenerate.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.LOWER_NET_NAME }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
 
       - name: Write the disk SHORT_SHA to a txt
         if: steps.regenerate-state.outcome == 'success'
@@ -307,8 +307,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.LOWER_NET_NAME }}-canopy \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.LOWER_NET_NAME }}-canopy \
+          --disk=boot=no,mode=rw,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -318,10 +318,10 @@ jobs:
           --container-arg="--locked" \
           --container-arg="--release" \
           --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
+          --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.lower_net_name }}" \
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_past_mandatory_checkpoint_${{ env.LOWER_NET_NAME }}" \
+          --container-arg="sync_past_mandatory_checkpoint_${{ env.lower_net_name }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
@@ -336,7 +336,7 @@ jobs:
           sleep 30s
           gcloud compute ssh zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --quiet --ssh-flag="-t" --ssh-flag="-o ServerAliveInterval=5"
           docker ps -aqf ancestor=$CONTAINER_IMAGE | tee output.txt
-          docker wait $(cat output.txt)
+          docker logs $(cat output.txt) --follow
         env:
           CONTAINER_IMAGE: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
 
