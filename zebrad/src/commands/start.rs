@@ -316,11 +316,11 @@ impl StartCmd {
         const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
 
         loop {
-            let _now = Utc::now();
+            let now = Utc::now();
             let is_close_to_tip = sync_status.is_close_to_tip();
 
             if let Some(estimated_height) =
-                latest_chain_tip.estimate_network_chain_tip_height(network /*, now*/)
+                latest_chain_tip.estimate_network_chain_tip_height(network, now)
             {
                 // The estimate/actual race doesn't matter here,
                 // because we're only using it for metrics and logging.
