@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - 'main'
-    path:
+    paths:
       - 'zebra-consensus/src/primitives/groth16/params.rs'
       - 'zebra-consensus/src/chain.rs'
       - 'zebrad/src/commands/start.rs'

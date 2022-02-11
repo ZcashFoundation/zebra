@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-    path-ignore:
+    paths-ignore:
       - '**/*.rs'
       - '**/*.txt'
       - '**/Cargo.toml'

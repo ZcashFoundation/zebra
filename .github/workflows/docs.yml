@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-    path:
+    paths:
       - 'book/**'
       - '**/firebase.json'
       - 'katex-header.html'
