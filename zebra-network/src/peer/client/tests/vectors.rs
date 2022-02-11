@@ -1,11 +1,19 @@
 //! Fixed peer [`Client`] test vectors.
 
+use std::iter;
+
 use futures::poll;
+use tokio::sync::broadcast;
 use tower::ServiceExt;
 
+use zebra_chain::block;
 use zebra_test::service_extensions::IsReady;
 
-use crate::{peer::ClientTestHarness, PeerError};
+use crate::{
+    peer::{client::MissingInventoryCollector, ClientTestHarness},
+    protocol::external::InventoryHash,
+    PeerError, Request, SharedPeerError,
+};
 
 /// Test that a newly initialized client functions correctly before it is polled.
 #[tokio::test]
@@ -216,4 +224,34 @@ async fn client_service_propagates_panic_from_heartbeat_task() {
     tokio::task::yield_now().await;
 
     let _ = poll!(client.ready());
+}
+
+/// Make sure MissingInventoryCollector ignores NotFoundRegistry errors.
+///
+/// ## Correctness
+///
+/// If the MissingInventoryCollector registered these locally generated errors,
+/// our missing inventory errors could get constantly refreshed locally,
+/// and we would never ask the peer if it has received the inventory.
+#[test]
+fn missing_inv_collector_ignores_local_registry_errors() {
+    zebra_test::init();
+
+    let block_hash = block::Hash([0; 32]);
+    let request = Request::BlocksByHash(iter::once(block_hash).collect());
+    let response = Err(SharedPeerError::from(PeerError::NotFoundRegistry(vec![
+        InventoryHash::from(block_hash),
+    ])));
+
+    let (inv_collector, mut inv_receiver) = broadcast::channel(1);
+    let transient_addr = "0.0.0.0:0".parse().unwrap();
+
+    let missing_inv =
+        MissingInventoryCollector::new(&request, Some(inv_collector.clone()), Some(transient_addr))
+            .expect("unexpected invalid collector: arguments should be valid");
+
+    missing_inv.send(&response);
+
+    let recv_result = inv_receiver.try_recv();
+    assert_eq!(recv_result, Err(broadcast::error::TryRecvError::Empty));
 }
