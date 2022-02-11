@@ -305,14 +305,13 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
-                // nActionsOrchard
+                // Denoted as `nActionsOrchard` in the spec.
                 zcash_serialize_empty_list(writer)?;
 
                 // We don't need to write anything else here.
                 // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
                 // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
-                // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus notes of the second
-                // table, section sign.
+                // `§` note of the second table of https://zips.z.cash/protocol/protocol.pdf#txnencoding
             }
             Some(orchard_shielded_data) => {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
@@ -332,25 +331,25 @@ impl ZcashSerialize for orchard::ShieldedData {
             .map(orchard::AuthorizedAction::into_parts)
             .unzip();
 
-        // nActionsOrchard and vActionsOrchard
+        // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
         actions.zcash_serialize(&mut writer)?;
 
-        // flagsOrchard
+        // Denoted as `flagsOrchard` in the spec.
         self.flags.zcash_serialize(&mut writer)?;
 
-        // valueBalanceOrchard
+        // Denoted as `valueBalanceOrchard` in the spec.
         self.value_balance.zcash_serialize(&mut writer)?;
 
-        // anchorOrchard
+        // Denoted as `anchorOrchard` in the spec.
         self.shared_anchor.zcash_serialize(&mut writer)?;
 
-        // sizeProofsOrchard and proofsOrchard
+        // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
         self.proof.zcash_serialize(&mut writer)?;
 
-        // vSpendAuthSigsOrchard
+        // Denoted as `vSpendAuthSigsOrchard` in the spec.
         zcash_serialize_external_count(&sigs, &mut writer)?;
 
-        // bindingSigOrchard
+        // Denoted as `bindingSigOrchard` in the spec.
         self.binding_sig.zcash_serialize(&mut writer)?;
 
         Ok(())
@@ -361,32 +360,33 @@ impl ZcashSerialize for orchard::ShieldedData {
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // nActionsOrchard and vActionsOrchard
+        // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
         let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
 
-        // "sizeProofsOrchard ... [is] present if and only if nActionsOrchard > 0"
-        // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+        // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
+        // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
+        // `§` note of the second table of https://zips.z.cash/protocol/protocol.pdf#txnencoding
         if actions.is_empty() {
             return Ok(None);
         }
 
-        // flagsOrchard
+        // Denoted as `flagsOrchard` in the spec.
         let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
-        // valueBalanceOrchard
+        // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
 
-        // anchorOrchard
+        // Denoted as `anchorOrchard` in the spec.
         let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
 
-        // sizeProofsOrchard and proofsOrchard
+        // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
         let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
-        // vSpendAuthSigsOrchard
+        // Denoted as `vSpendAuthSigsOrchard` in the spec.
         let sigs: Vec<Signature<SpendAuth>> =
             zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
-        // bindingSigOrchard
+        // Denoted as `bindingSigOrchard` in the spec.
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
 
         // Create the AuthorizedAction from deserialized parts
@@ -615,7 +615,9 @@ impl ZcashSerialize for Transaction {
                 // `bindingSigSapling`.
                 sapling_shielded_data.zcash_serialize(&mut writer)?;
 
-                // orchard
+                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
+                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
@@ -856,7 +858,9 @@ impl ZcashDeserialize for Transaction {
                 // `bindingSigSapling`.
                 let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
-                // orchard
+                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
+                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
                 Ok(Transaction::V5 {
