@@ -361,8 +361,8 @@ impl Service<zn::Request> for Inbound {
                 // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
                 use futures::stream::TryStreamExt;
                 hashes
-                    .clone()
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|hash| zs::Request::Block(hash.into()))
                     .map(|request| state.clone().oneshot(request))
                     .collect::<futures::stream::FuturesOrdered<_>>()
