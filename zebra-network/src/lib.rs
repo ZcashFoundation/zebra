@@ -172,4 +172,7 @@ pub use crate::{
 /// Types used in the definition of [`Request`] and [`Response`] messages.
 pub mod types {
     pub use crate::{meta_addr::MetaAddr, protocol::types::PeerServices};
+
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub use crate::protocol::external::InventoryHash;
 }

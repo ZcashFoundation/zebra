@@ -19,8 +19,8 @@ use zebra_chain::{
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
-    connect_isolated_tcp_direct_with_inbound, Config as NetworkConfig, InventoryResponse, Request,
-    Response, SharedPeerError,
+    connect_isolated_tcp_direct_with_inbound, types::InventoryHash, Config as NetworkConfig,
+    InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -161,25 +161,26 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
     };
 
     // Send a request via the connected peer, via a local TCP connection, to the inbound service
-    let request = connected_peer_service
+    let response = connected_peer_service
         .clone()
-        .oneshot(Request::BlocksByHash(iter::once(test_block).collect()));
-    let response = request.await;
-    match response.as_ref() {
-        Err(missing_error) => {
-            let missing_error = missing_error
-                .downcast_ref::<SharedPeerError>()
-                .expect("unexpected inner error type, expected SharedPeerError");
-            assert_eq!(
-                missing_error.inner_debug(),
-                "NotFoundResponse([Block(block::Hash(\"1111111111111111111111111111111111111111111111111111111111111111\"))])"
-            );
-        }
-        _ => unreachable!(
-            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+        .oneshot(Request::BlocksByHash(iter::once(test_block).collect()))
+        .await;
+    if let Err(missing_error) = response.as_ref() {
+        let missing_error = missing_error
+            .downcast_ref::<SharedPeerError>()
+            .expect("unexpected inner error type, expected SharedPeerError");
+
+        // Unfortunately, we can't access SharedPeerError's inner type,
+        // so we can't compare the actual responses.
+        let expected = PeerError::NotFoundResponse(vec![InventoryHash::Block(test_block)]);
+        let expected = SharedPeerError::from(expected);
+        assert_eq!(missing_error.inner_debug(), expected.inner_debug());
+    } else {
+        unreachable!(
+                "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
              actual result: {:?}",
-            response
-        ),
+                response
+            )
     };
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
@@ -258,51 +259,54 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
         };
 
         // Send a request via the connected peer, via a local TCP connection, to the inbound service
-        let request = connected_peer_service
+        let response = connected_peer_service
             .clone()
-            .oneshot(Request::TransactionsById(txs.iter().copied().collect()));
-        let response = request.await;
-        match response.as_ref() {
-            Err(missing_error) => {
-                let missing_error = missing_error
-                    .downcast_ref::<SharedPeerError>()
-                    .expect("unexpected inner error type, expected SharedPeerError");
+            .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
+            .await;
+        if let Err(missing_error) = response.as_ref() {
+            let missing_error = missing_error
+                .downcast_ref::<SharedPeerError>()
+                .expect("unexpected inner error type, expected SharedPeerError");
 
-                // Unfortunately, we can't access SharedPeerError's inner type,
-                // so we can't compare the actual responses.
-                if txs == vec![test_tx] {
-                    assert_eq!(
-                        missing_error.inner_debug(),
-                        "NotFoundResponse([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
-                    );
-                } else if txs == vec![test_wtx] {
-                    assert_eq!(
-                        missing_error.inner_debug(),
-                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])",
-                    );
-                } else if txs == vec![test_tx, test_wtx] {
-                    // The response order is unstable, because it depends on concurrent inbound futures.
-                    // In #2244 we will fix this by replacing response Vecs with HashSets.
-                    assert!(
-                        missing_error.inner_debug() ==
-                        "NotFoundResponse([Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\")), Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") })])"
-                        ||
-                        missing_error.inner_debug() ==
-                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") }), Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
-                        "unexpected response: {:?} \
-                         expected response to: {:?}",
-                        missing_error.inner_debug(),
-                        txs,
-                    );
-                } else {
-                    unreachable!("unexpected test case");
-                }
+            // Unfortunately, we can't access SharedPeerError's inner type,
+            // so we can't compare the actual responses.
+            if txs.len() <= 1 {
+                let expected = PeerError::NotFoundResponse(
+                    txs.iter().copied().map(InventoryHash::from).collect(),
+                );
+                let expected = SharedPeerError::from(expected);
+                assert_eq!(missing_error.inner_debug(), expected.inner_debug());
+            } else {
+                // The response order is unstable, because it depends on concurrent inbound futures.
+                // In #2244 we will fix this by replacing response Vecs with HashSets.
+                //
+                // Assume there are only 2 transactions.
+                let expected1: Vec<InventoryHash> =
+                    txs.iter().copied().map(InventoryHash::from).collect();
+                let expected2: Vec<InventoryHash> =
+                    txs.iter().rev().copied().map(InventoryHash::from).collect();
+
+                let expected: Vec<String> = [expected1, expected2]
+                    .into_iter()
+                    .map(PeerError::NotFoundResponse)
+                    .map(|error| SharedPeerError::from(error).inner_debug())
+                    .collect();
+                let actual = missing_error.inner_debug();
+
+                assert!(
+                    expected.iter().any(|expected| expected == &actual),
+                    "unexpected response: {:?} \
+                     expected one of: {:?}",
+                    actual,
+                    expected,
+                );
             }
-            _ => unreachable!(
-                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+        } else {
+            unreachable!(
+                        "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
                  actual result: {:?}",
-                response
-            ),
+                        response
+                    )
         };
     }
 
@@ -323,15 +327,17 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Check that a network stack returns a `ConnectionReceiveTimeout` error when a peer ignores requests.
-/// Then check that repeated requests to a non-responsive peer get a `NotFoundRegistry` error.
+/// Check that a network stack:
+/// - returns a `NotFound` error when a peer responds with an unrelated transaction, and
+/// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
 ///
-/// Uses a Zebra network stack's peer set to query an isolated Zebra TCP connection.
-/// (Isolated connections have a `Nil` inbound service, so they never respond to requests.)
+/// The requests are coming from the full stack to the isolated peer,
+/// so this is the reverse of the previous tests.
 ///
-/// The requests are coming from the full stack, so this is the reverse of the previous tests.
+/// Uses a Zebra network stack's peer set to query an isolated Zebra TCP connection,
+/// with an unrelated transaction test responder.
 #[tokio::test]
-async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
+async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError> {
     // We respond with an unrelated transaction, so the peer gives up on the request.
     let unrelated_response: Transaction =
         zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
@@ -367,7 +373,8 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
     }
     .into();
 
-    // Test both transaction ID variants, separately and together
+    // Test both transaction ID variants, separately and together.
+    // These IDs all need to be different, to avoid polluting the inventory registry between tests.
     for txs in [vec![test_tx5], vec![test_wtx67], vec![test_tx8, test_wtx91]] {
         // Send a request via the peer set, via a local TCP connection,
         // to the isolated peer's `unrelated_response` inbound service
@@ -375,101 +382,84 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
             .clone()
             .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
             .await;
-        match response.as_ref() {
-            Err(missing_error) => {
+
+        // Unfortunately, we can't access SharedPeerError's inner type,
+        // so we can't compare the actual responses.
+        if let Err(missing_error) = response.as_ref() {
+            let missing_error = missing_error
+                .downcast_ref::<SharedPeerError>()
+                .expect("unexpected inner error type, expected SharedPeerError");
+
+            if txs.len() <= 1 {
+                let expected = PeerError::NotFoundResponse(
+                    txs.iter().copied().map(InventoryHash::from).collect(),
+                );
+                let expected = SharedPeerError::from(expected);
+                assert_eq!(missing_error.inner_debug(), expected.inner_debug());
+            } else {
+                // The response order is unstable, because it depends on concurrent inbound futures.
+                // In #2244 we will fix this by replacing response Vecs with HashSets.
+                //
+                // Assume there are only 2 transactions.
+                let expected1: Vec<InventoryHash> =
+                    txs.iter().copied().map(InventoryHash::from).collect();
+                let expected2: Vec<InventoryHash> =
+                    txs.iter().rev().copied().map(InventoryHash::from).collect();
+
+                let expected: Vec<String> = [expected1, expected2]
+                    .into_iter()
+                    .map(PeerError::NotFoundResponse)
+                    .map(|error| SharedPeerError::from(error).inner_debug())
+                    .collect();
+                let actual = missing_error.inner_debug();
+
+                assert!(
+                    expected.iter().any(|expected| expected == &actual),
+                    "unexpected response: {:?} \
+                     expected one of: {:?}",
+                    actual,
+                    expected,
+                );
+            }
+        } else {
+            unreachable!(
+                        "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+                 actual result: {:?}",
+                        response
+                    )
+        };
+
+        // The peer set only does routing for single-transaction requests.
+        // (But the inventory tracker tracks the response to requests of any size.)
+        for tx in &txs {
+            // Now send the same request to the  peer set,
+            // but expect a local failure from the inventory registry.
+            let response = peer_set
+                .clone()
+                .oneshot(Request::TransactionsById(iter::once(tx).copied().collect()))
+                .await;
+
+            // The only ready peer in the PeerSet failed the same request,
+            // so we expect the peer set to return a `NotFoundRegistry` error immediately.
+            //
+            // If these asserts fail, then the PeerSet isn't returning inv routing error responses.
+            // (Or the missing inventory from the previous timeout wasn't registered correctly.)
+            if let Err(missing_error) = response.as_ref() {
                 let missing_error = missing_error
                     .downcast_ref::<SharedPeerError>()
                     .expect("unexpected inner error type, expected SharedPeerError");
 
                 // Unfortunately, we can't access SharedPeerError's inner type,
                 // so we can't compare the actual responses.
-                // Unfortunately, we can't access SharedPeerError's inner type,
-                // so we can't compare the actual responses.
-                if txs == vec![test_tx5] {
-                    assert_eq!(
-                        missing_error.inner_debug(),
-                        "NotFoundResponse([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
-                    );
-                } else if txs == vec![test_wtx67] {
-                    assert_eq!(
-                        missing_error.inner_debug(),
-                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])",
-                    );
-                } else if txs == vec![test_tx8, test_wtx91] {
-                    // The response order is unstable, because it depends on concurrent inbound futures.
-                    // In #2244 we will fix this by replacing response Vecs with HashSets.
-                    assert!(
-                        missing_error.inner_debug() ==
-                        "NotFoundResponse([Tx(transaction::Hash(\"8888888888888888888888888888888888888888888888888888888888888888\")), Wtx(WtxId { id: transaction::Hash(\"9999999999999999999999999999999999999999999999999999999999999999\"), auth_digest: AuthDigest(\"1111111111111111111111111111111111111111111111111111111111111111\") })])"
-                        ||
-                        missing_error.inner_debug() ==
-                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"9999999999999999999999999999999999999999999999999999999999999999\"), auth_digest: AuthDigest(\"1111111111111111111111111111111111111111111111111111111111111111\") }), Tx(transaction::Hash(\"8888888888888888888888888888888888888888888888888888888888888888\"))])",
-                        "unexpected response: {:?} \
-                         expected response to: {:?}",
-                        missing_error.inner_debug(),
-                        txs,
-                    );
-                } else {
-                    unreachable!("unexpected test case");
-                }
-            }
-            _ => unreachable!(
-                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(ConnectionReceiveTimeout))`, \
-                 actual result: {:?}",
-                response
-            ),
-        };
-
-        // The peer set only does routing for single-transaction requests.
-        // (But the inventory tracker tracks the response to requests of any size.)
-        for tx in txs {
-            // Now send the same request to the  peer set,
-            // but expect a local failure from the inventory registry.
-            let response = peer_set
-                .clone()
-                .oneshot(Request::TransactionsById(iter::once(tx).collect()))
-                .await;
-            match response.as_ref() {
-                Err(missing_error) => {
-                    let missing_error = missing_error
-                        .downcast_ref::<SharedPeerError>()
-                        .expect("unexpected inner error type, expected SharedPeerError");
-
-                    // The only ready peer in the PeerSet has just timed out on the same request,
-                    // so we expect the peer set to return a `NotFoundRegistry` error immediately.
-                    //
-                    // If these asserts fail with ConnectionReceiveTimeout,
-                    // then the PeerSet isn't using missing inventory to return error responses.
-                    // (Or the missing inventory from the previous timeout wasn't registered correctly.)
-                    if tx == test_tx5 {
-                        assert_eq!(
-                            missing_error.inner_debug(),
-                            "NotFoundRegistry([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
-                        );
-                    } else if tx == test_wtx67 {
-                        assert_eq!(
-                            missing_error.inner_debug(),
-                            "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])",
-                        );
-                    } else if tx == test_tx8 {
-                        assert_eq!(
-                            missing_error.inner_debug(),
-                            "NotFoundRegistry([Tx(transaction::Hash(\"8888888888888888888888888888888888888888888888888888888888888888\"))])",
-                        );
-                    } else if tx == test_wtx91 {
-                        assert_eq!(
-                            missing_error.inner_debug(),
-                            "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"9999999999999999999999999999999999999999999999999999999999999999\"), auth_digest: AuthDigest(\"1111111111111111111111111111111111111111111111111111111111111111\") })])",
-                        );
-                    } else {
-                        unreachable!("unexpected test case");
-                    }
-                }
-                _ => unreachable!(
+                let expected = PeerError::NotFoundRegistry(vec![InventoryHash::from(*tx)]);
+                let expected = SharedPeerError::from(expected);
+                assert_eq!(missing_error.inner_debug(), expected.inner_debug());
+            } else {
+                unreachable!(
                     "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundRegistry(_)))`, \
                      actual result: {:?}",
                     response
-                ),
+                )
             };
         }
     }
