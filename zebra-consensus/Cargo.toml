@@ -47,13 +47,13 @@ zebra-chain = { path = "../zebra-chain" }
 zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
 
-proptest = { version = "0.10", optional = true }
+proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
 color-eyre = "0.5.11"
 hex = "0.4.3"
-proptest = "0.10"
+proptest = "0.10.1"
 proptest-derive = "0.3.0"
 rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2"

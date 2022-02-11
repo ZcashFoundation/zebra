@@ -1,7 +1,7 @@
 //! Tests for the [`Client`] part of peer connections, and some test utilities for mocking
 //! [`Client`] instances.
 
-mod vectors;
+#![cfg_attr(feature = "proptest-impl", allow(dead_code))]
 
 use std::time::Duration;
 
@@ -19,6 +19,9 @@ use crate::{
     peer_set::InventoryChange,
     protocol::external::types::Version,
 };
+
+#[cfg(test)]
+mod vectors;
 
 /// The maximum time a mocked peer connection should be alive during a test.
 const MAX_PEER_CONNECTION_TIME: Duration = Duration::from_secs(10);
