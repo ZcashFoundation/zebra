@@ -319,6 +319,9 @@ impl Service<zn::Request> for Inbound {
 
                 async move {
                     // Correctness: get the current time after acquiring the address book lock.
+                    //
+                    // This time is used to filter outdated peers, so it doesn't really matter
+                    // if we get it when the future is created, or when it starts running.
                     let now = Utc::now();
 
                     // Send a sanitized response
