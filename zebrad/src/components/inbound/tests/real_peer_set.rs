@@ -18,8 +18,8 @@ use zebra_chain::{
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
-    connect_isolated_tcp_direct, Config as NetworkConfig, InventoryResponse, Request, Response,
-    SharedPeerError,
+    connect_isolated_tcp_direct_with_inbound, Config as NetworkConfig, InventoryResponse, Request,
+    Response, SharedPeerError,
 };
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -57,7 +57,7 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         listen_addr,
-    ) = setup().await;
+    ) = setup(None).await;
 
     // Send a request to inbound directly
     let request = inbound_service.clone().oneshot(Request::Peers);
@@ -134,7 +134,7 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup().await;
+    ) = setup(None).await;
 
     let test_block = block::Hash([0x11; 32]);
 
@@ -220,7 +220,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup().await;
+    ) = setup(None).await;
 
     let test_tx = UnminedTxId::from_legacy_id(TxHash([0x22; 32]));
     let test_wtx: UnminedTxId = WtxId {
@@ -346,7 +346,7 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup().await;
+    ) = setup(None).await;
 
     let test_tx = UnminedTxId::from_legacy_id(TxHash([0x55; 32]));
     let test_wtx: UnminedTxId = WtxId {
@@ -462,10 +462,15 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
 
 /// Setup a real Zebra network stack, with a connected peer using a real isolated network stack.
 ///
+/// The isolated peer responds to every request with `isolated_peer_response`.
+/// (If no response is provided, the isolated peer ignores inbound requests.)
+///
 /// Uses fake verifiers, and does not run a block syncer task.
-async fn setup() -> (
+async fn setup(
+    isolated_peer_response: Option<Response>,
+) -> (
     // real services
-    // connected peer
+    // connected peer which responds with isolated_peer_response
     Buffer<
         BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
         zebra_network::Request,
@@ -602,11 +607,23 @@ async fn setup() -> (
         peer_set.clone(),
     ));
 
+    // Set up the inbound service response for the isolated peer
+    let isolated_peer_response = isolated_peer_response.unwrap_or(Response::Nil);
+    let response_inbound_service = tower::service_fn(move |_req| {
+        let isolated_peer_response = isolated_peer_response.clone();
+        async move { Ok::<Response, BoxError>(isolated_peer_response) }
+    });
+    let user_agent = "test".to_string();
+
     // Open a fake peer connection to the inbound listener, using the isolated connection API
-    let connected_peer_service =
-        connect_isolated_tcp_direct(network, listen_addr, "test".to_string())
-            .await
-            .expect("local listener connection succeeds");
+    let connected_peer_service = connect_isolated_tcp_direct_with_inbound(
+        network,
+        listen_addr,
+        user_agent,
+        response_inbound_service,
+    )
+    .await
+    .expect("local listener connection succeeds");
     let connected_peer_service = ServiceBuilder::new()
         .buffer(10)
         .service(connected_peer_service);
