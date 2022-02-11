@@ -524,12 +524,13 @@ impl Arbitrary for Memo {
     type Strategy = BoxedStrategy<Self>;
 }
 
+/// Generates arbitrary [`LockTime`]s.
 impl Arbitrary for LockTime {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         prop_oneof![
-            (block::Height::MIN.0..=block::Height::MAX.0)
+            (block::Height::MIN.0..=LockTime::MAX_HEIGHT.0)
                 .prop_map(|n| LockTime::Height(block::Height(n))),
             (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
                 .prop_map(|n| { LockTime::Time(Utc.timestamp(n as i64, 0)) })
