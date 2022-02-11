@@ -30,9 +30,7 @@ proptest! {
         let (mut minimum_peer_version, best_tip_height) =
             MinimumPeerVersion::with_mock_chain_tip(network);
 
-        best_tip_height
-            .send(Some(block_height))
-            .expect("receiving endpoint lives as long as `minimum_peer_version`");
+        best_tip_height.send_best_tip_height(block_height);
 
         let current_minimum_version = minimum_peer_version.current();
 
@@ -64,9 +62,7 @@ proptest! {
         let (mut minimum_peer_version, best_tip_height) =
             MinimumPeerVersion::with_mock_chain_tip(block_heights.network);
 
-        best_tip_height
-            .send(Some(block_heights.before_upgrade))
-            .expect("receiving endpoint lives as long as `minimum_peer_version`");
+        best_tip_height.send_best_tip_height(block_heights.before_upgrade);
 
         runtime.block_on(async move {
             let (discovered_peers, mut harnesses) = peer_versions.mock_peer_discovery();
@@ -81,9 +77,7 @@ proptest! {
                 minimum_peer_version.current(),
             )?;
 
-            best_tip_height
-                .send(Some(block_heights.after_upgrade))
-                .expect("receiving endpoint lives as long as `minimum_peer_version`");
+            best_tip_height.send_best_tip_height(block_heights.after_upgrade);
 
             check_if_only_up_to_date_peers_are_live(
                 &mut peer_set,

@@ -11,12 +11,10 @@ proptest! {
         network in any::<Network>(),
         block_height in any::<Option<block::Height>>(),
     ) {
-        let (mut minimum_peer_version, best_tip_height) =
+        let (mut minimum_peer_version, best_tip) =
             MinimumPeerVersion::with_mock_chain_tip(network);
 
-        best_tip_height
-            .send(block_height)
-            .expect("receiving endpoint lives as long as `minimum_peer_version`");
+        best_tip.send_best_tip_height(block_height);
 
         let expected_minimum_version = Version::min_remote_for_height(network, block_height);
 
@@ -29,13 +27,11 @@ proptest! {
         network in any::<Network>(),
         block_heights in any::<Vec<Option<block::Height>>>(),
     ) {
-        let (mut minimum_peer_version, best_tip_height) =
+        let (mut minimum_peer_version, best_tip) =
             MinimumPeerVersion::with_mock_chain_tip(network);
 
         for block_height in block_heights {
-            best_tip_height
-                .send(block_height)
-                .expect("receiving endpoint lives as long as `minimum_peer_version`");
+            best_tip.send_best_tip_height(block_height);
 
             let expected_minimum_version = Version::min_remote_for_height(network, block_height);
 
@@ -49,7 +45,7 @@ proptest! {
         network in any::<Network>(),
         block_height_updates in any::<Vec<Option<Option<block::Height>>>>(),
     ) {
-        let (mut minimum_peer_version, best_tip_height) =
+        let (mut minimum_peer_version, best_tip) =
             MinimumPeerVersion::with_mock_chain_tip(network);
 
         let mut current_minimum_version = Version::min_remote_for_height(network, None);
@@ -59,9 +55,7 @@ proptest! {
 
         for update in block_height_updates {
             if let Some(new_block_height) = update {
-                best_tip_height
-                    .send(new_block_height)
-                    .expect("receiving endpoint lives as long as `minimum_peer_version`");
+                best_tip.send_best_tip_height(new_block_height);
 
                 let new_minimum_version = Version::min_remote_for_height(network, new_block_height);
 
