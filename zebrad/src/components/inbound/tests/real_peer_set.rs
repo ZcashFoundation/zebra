@@ -14,7 +14,8 @@ use tower::{
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    transaction::{AuthDigest, Hash as TxHash, UnminedTxId, WtxId},
+    serialization::ZcashDeserializeInto,
+    transaction::{AuthDigest, Hash as TxHash, Transaction, UnminedTxId, WtxId},
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
@@ -331,6 +332,11 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 /// The requests are coming from the full stack, so this is the reverse of the previous tests.
 #[tokio::test]
 async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
+    // We respond with an unrelated transaction, so the peer gives up on the request.
+    let unrelated_response: Transaction =
+        zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
+    let unrelated_response = Response::Transactions(vec![Available(unrelated_response.into())]);
+
     let (
         // real services
         _connected_peer_service,
@@ -346,22 +352,25 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup(None).await;
+    ) = setup(Some(unrelated_response)).await;
 
-    let test_tx = UnminedTxId::from_legacy_id(TxHash([0x55; 32]));
-    let test_wtx: UnminedTxId = WtxId {
+    let test_tx5 = UnminedTxId::from_legacy_id(TxHash([0x55; 32]));
+    let test_wtx67: UnminedTxId = WtxId {
         id: TxHash([0x66; 32]),
         auth_digest: AuthDigest([0x77; 32]),
     }
     .into();
+    let test_tx8 = UnminedTxId::from_legacy_id(TxHash([0x88; 32]));
+    let test_wtx91: UnminedTxId = WtxId {
+        id: TxHash([0x99; 32]),
+        auth_digest: AuthDigest([0x11; 32]),
+    }
+    .into();
 
     // Test both transaction ID variants, separately and together
-    for txs in [vec![test_tx], vec![test_wtx], vec![test_tx, test_wtx]] {
-        // Make the expected timeout error happen really quickly.
-        tokio::time::pause();
-
+    for txs in [vec![test_tx5], vec![test_wtx67], vec![test_tx8, test_wtx91]] {
         // Send a request via the peer set, via a local TCP connection,
-        // to the isolated peer's Nil inbound service
+        // to the isolated peer's `unrelated_response` inbound service
         let response = peer_set
             .clone()
             .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
@@ -374,58 +383,27 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
 
                 // Unfortunately, we can't access SharedPeerError's inner type,
                 // so we can't compare the actual responses.
-                assert_eq!(
-                    missing_error.inner_debug(),
-                    "ConnectionReceiveTimeout",
-                );
-            }
-            _ => unreachable!(
-                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(ConnectionReceiveTimeout))`, \
-                 actual result: {:?}",
-                response
-            ),
-        };
-
-        // The expected local peer set error should happen immediately.
-        tokio::time::resume();
-
-        // Now send the same request to the  peer set,
-        // but expect a local failure from the inventory registry.
-        let response = peer_set
-            .clone()
-            .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
-            .await;
-        match response.as_ref() {
-            Err(missing_error) => {
-                let missing_error = missing_error
-                    .downcast_ref::<SharedPeerError>()
-                    .expect("unexpected inner error type, expected SharedPeerError");
-
-                // The only ready peer in the PeerSet has just timed out on the same request,
-                // so we expect the peer set to return a `NotFoundRegistry` error immediately.
-                //
-                // If these asserts fail with ConnectionReceiveTimeout,
-                // then the PeerSet isn't using missing inventory to return error responses.
-                // (Or the missing inventory from the previous timeout wasn't registered correctly.)
-                if txs == vec![test_tx] {
+                // Unfortunately, we can't access SharedPeerError's inner type,
+                // so we can't compare the actual responses.
+                if txs == vec![test_tx5] {
                     assert_eq!(
                         missing_error.inner_debug(),
-                        "NotFoundRegistry([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
+                        "NotFoundResponse([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
                     );
-                } else if txs == vec![test_wtx] {
+                } else if txs == vec![test_wtx67] {
                     assert_eq!(
                         missing_error.inner_debug(),
-                        "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])",
+                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])",
                     );
-                } else if txs == vec![test_tx, test_wtx] {
+                } else if txs == vec![test_tx8, test_wtx91] {
                     // The response order is unstable, because it depends on concurrent inbound futures.
                     // In #2244 we will fix this by replacing response Vecs with HashSets.
                     assert!(
                         missing_error.inner_debug() ==
-                        "NotFoundRegistry([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\")), Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])"
+                        "NotFoundResponse([Tx(transaction::Hash(\"8888888888888888888888888888888888888888888888888888888888888888\")), Wtx(WtxId { id: transaction::Hash(\"9999999999999999999999999999999999999999999999999999999999999999\"), auth_digest: AuthDigest(\"1111111111111111111111111111111111111111111111111111111111111111\") })])"
                         ||
                         missing_error.inner_debug() ==
-                        "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") }), Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
+                        "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"9999999999999999999999999999999999999999999999999999999999999999\"), auth_digest: AuthDigest(\"1111111111111111111111111111111111111111111111111111111111111111\") }), Tx(transaction::Hash(\"8888888888888888888888888888888888888888888888888888888888888888\"))])",
                         "unexpected response: {:?} \
                          expected response to: {:?}",
                         missing_error.inner_debug(),
@@ -436,11 +414,64 @@ async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
                 }
             }
             _ => unreachable!(
-                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundRegistry(_)))`, \
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(ConnectionReceiveTimeout))`, \
                  actual result: {:?}",
                 response
             ),
         };
+
+        // The peer set only does routing for single-transaction requests.
+        // (But the inventory tracker tracks the response to requests of any size.)
+        for tx in txs {
+            // Now send the same request to the  peer set,
+            // but expect a local failure from the inventory registry.
+            let response = peer_set
+                .clone()
+                .oneshot(Request::TransactionsById(iter::once(tx).collect()))
+                .await;
+            match response.as_ref() {
+                Err(missing_error) => {
+                    let missing_error = missing_error
+                        .downcast_ref::<SharedPeerError>()
+                        .expect("unexpected inner error type, expected SharedPeerError");
+
+                    // The only ready peer in the PeerSet has just timed out on the same request,
+                    // so we expect the peer set to return a `NotFoundRegistry` error immediately.
+                    //
+                    // If these asserts fail with ConnectionReceiveTimeout,
+                    // then the PeerSet isn't using missing inventory to return error responses.
+                    // (Or the missing inventory from the previous timeout wasn't registered correctly.)
+                    if tx == test_tx5 {
+                        assert_eq!(
+                            missing_error.inner_debug(),
+                            "NotFoundRegistry([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
+                        );
+                    } else if tx == test_wtx67 {
+                        assert_eq!(
+                            missing_error.inner_debug(),
+                            "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])",
+                        );
+                    } else if tx == test_tx8 {
+                        assert_eq!(
+                            missing_error.inner_debug(),
+                            "NotFoundRegistry([Tx(transaction::Hash(\"8888888888888888888888888888888888888888888888888888888888888888\"))])",
+                        );
+                    } else if tx == test_wtx91 {
+                        assert_eq!(
+                            missing_error.inner_debug(),
+                            "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"9999999999999999999999999999999999999999999999999999999999999999\"), auth_digest: AuthDigest(\"1111111111111111111111111111111111111111111111111111111111111111\") })])",
+                        );
+                    } else {
+                        unreachable!("unexpected test case");
+                    }
+                }
+                _ => unreachable!(
+                    "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundRegistry(_)))`, \
+                     actual result: {:?}",
+                    response
+                ),
+            };
+        }
     }
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
