@@ -1730,7 +1730,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tracing",
 ]
 
@@ -4342,7 +4342,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
+ "tokio-util 0.6.9",
 ]
 
 [[package]]
@@ -4367,6 +4367,20 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-io",
+ "futures-sink",
+ "log",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64910e1b9c1901aaf5375561e35b9c057d95ff41a44ede043a03e09279eabaf1"
+dependencies = [
+ "bytes",
+ "futures-core",
  "futures-sink",
  "log",
  "pin-project-lite",
@@ -4720,7 +4734,7 @@ dependencies = [
  "subtle",
  "thiserror",
  "tokio",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tor-bytes",
  "tor-cell",
  "tor-cert",
@@ -4756,7 +4770,7 @@ dependencies = [
  "pin-project 1.0.7",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
+ "tokio-util 0.6.9",
 ]
 
 [[package]]
@@ -4781,7 +4795,7 @@ dependencies = [
  "pin-project 1.0.7",
  "pin-project-lite",
  "tokio",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5612,7 +5626,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.0",
  "toml",
  "tor-rtcompat",
  "tower",
