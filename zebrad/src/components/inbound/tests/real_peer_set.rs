@@ -18,7 +18,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
-    connect_isolated_tcp_direct, Config as NetworkConfig, Request, Response, InventoryResponse,
+    connect_isolated_tcp_direct, Config as NetworkConfig, InventoryResponse, Request, Response,
     SharedPeerError,
 };
 use zebra_state::Config as StateConfig;

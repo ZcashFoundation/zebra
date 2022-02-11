@@ -158,7 +158,7 @@ pub use crate::{
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,
-    protocol::internal::{Request, Response, InventoryResponse},
+    protocol::internal::{InventoryResponse, Request, Response},
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.

@@ -35,7 +35,7 @@ use crate::{
     peer_set::ConnectionTracker,
     protocol::{
         external::{types::Nonce, InventoryHash, Message},
-        internal::{Request, Response, InventoryResponse},
+        internal::{InventoryResponse, Request, Response},
     },
     BoxError,
 };
