@@ -254,7 +254,7 @@ jobs:
 
       - name: Delete test instance
         # Always run even if the earlier step fails
-        if: steps.changed-files-specific.outputs.any_changed == 'true' || ${{ github.event.inputs.regenerate-disks == 'true' }}
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
