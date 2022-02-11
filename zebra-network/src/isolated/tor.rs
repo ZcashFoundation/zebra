@@ -2,13 +2,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use arti_client::{TorAddr, TorClient, TorClientConfig, DataStream};
+use arti_client::{DataStream, TorAddr, TorClient, TorClientConfig};
 use tor_rtcompat::tokio::TokioRuntimeHandle;
 use tower::{util::BoxService, Service};
 
 use zebra_chain::parameters::Network;
 
-use crate::{connect_isolated_with_inbound, connect_isolated, BoxError, Request, Response};
+use crate::{connect_isolated, connect_isolated_with_inbound, BoxError, Request, Response};
 
 #[cfg(test)]
 mod tests;
@@ -79,8 +79,7 @@ where
 /// Creates a Zcash peer connection to `hostname` via Tor, and returns a tor stream.
 ///
 /// See [`connect_isolated`] for details.
-async fn new_tor_stream(    hostname: String,
-) -> Result<DataStream, BoxError> {
+async fn new_tor_stream(hostname: String) -> Result<DataStream, BoxError> {
     let addr = TorAddr::from(hostname)?;
 
     // Initialize or clone the shared tor client instance
