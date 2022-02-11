@@ -22,7 +22,7 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
-use zebra_network::{AddressBook, Request, Response, ResponseStatus};
+use zebra_network::{AddressBook, Request, Response, InventoryResponse};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -35,7 +35,7 @@ use crate::{
     BoxError,
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 /// Maximum time to wait for a network service request.
 ///

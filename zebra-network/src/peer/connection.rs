@@ -35,12 +35,12 @@ use crate::{
     peer_set::ConnectionTracker,
     protocol::{
         external::{types::Nonce, InventoryHash, Message},
-        internal::{Request, Response, ResponseStatus},
+        internal::{Request, Response, InventoryResponse},
     },
     BoxError,
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 mod peer_tx;
 
@@ -191,8 +191,8 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
                 } else if pending_ids.is_empty() || ignored_msg.is_some() {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = transactions.into_iter().map(ResponseStatus::Available);
-                    let missing = pending_ids.into_iter().map(ResponseStatus::Missing);
+                    let available = transactions.into_iter().map(InventoryResponse::Available);
+                    let missing = pending_ids.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Transactions(
                         available.chain(missing).collect(),
@@ -239,8 +239,8 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = transactions.into_iter().map(ResponseStatus::Available);
-                    let missing = pending_ids.into_iter().map(ResponseStatus::Missing);
+                    let available = transactions.into_iter().map(InventoryResponse::Available);
+                    let missing = pending_ids.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Transactions(
                         available.chain(missing).collect(),
@@ -295,7 +295,7 @@ impl Handler {
 
                 if pending_hashes.is_empty() {
                     // If we got everything we wanted, let the internal client know.
-                    let available = blocks.into_iter().map(ResponseStatus::Available);
+                    let available = blocks.into_iter().map(InventoryResponse::Available);
                     Handler::Finished(Ok(Response::Blocks(available.collect())))
                 } else {
                     // Keep on waiting for all the blocks we wanted, until we get them or time out.
@@ -339,8 +339,8 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_block_hashes)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = blocks.into_iter().map(ResponseStatus::Available);
-                    let missing = pending_hashes.into_iter().map(ResponseStatus::Missing);
+                    let available = blocks.into_iter().map(InventoryResponse::Available);
+                    let missing = pending_hashes.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Blocks(available.chain(missing).collect())))
                 }

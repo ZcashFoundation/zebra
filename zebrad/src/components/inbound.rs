@@ -31,7 +31,7 @@ use zebra_chain::{
 use zebra_consensus::chain::VerifyChainError;
 use zebra_network::{
     constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
-    AddressBook, ResponseStatus,
+    AddressBook, InventoryResponse,
 };
 
 // Re-use the syncer timeouts for consistency.
@@ -40,7 +40,7 @@ use super::{
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 pub(crate) mod downloads;
 

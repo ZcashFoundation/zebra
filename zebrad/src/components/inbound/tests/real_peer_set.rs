@@ -18,7 +18,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
-    connect_isolated_tcp_direct, Config as NetworkConfig, Request, Response, ResponseStatus,
+    connect_isolated_tcp_direct, Config as NetworkConfig, Request, Response, InventoryResponse,
     SharedPeerError,
 };
 use zebra_state::Config as StateConfig;
@@ -33,7 +33,7 @@ use crate::{
     BoxError,
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 /// Check that a network stack with an empty address book only contains the local listener port,
 /// by querying the inbound service via a local TCP connection.

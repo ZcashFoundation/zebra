@@ -21,14 +21,14 @@ use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, 
 use zebra_chain::{parameters::POST_BLOSSOM_POW_TARGET_SPACING, serialization::AtLeastOne};
 
 use crate::{
-    protocol::{external::InventoryHash, internal::ResponseStatus},
+    protocol::{external::InventoryHash, internal::InventoryResponse},
     BoxError,
 };
 
 use self::update::Update;
 
 /// Underlying type for the alias InventoryStatus::*
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 pub mod update;
 
@@ -36,7 +36,7 @@ pub mod update;
 mod tests;
 
 /// A peer inventory status, which tracks a hash for both available and missing inventory.
-pub type InventoryStatus<T> = ResponseStatus<T, T>;
+pub type InventoryStatus<T> = InventoryResponse<T, T>;
 
 /// A peer inventory status change, used in the inventory status channel.
 ///

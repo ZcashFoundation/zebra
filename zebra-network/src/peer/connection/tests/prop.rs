@@ -20,11 +20,11 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use crate::{
     peer::{connection::Connection, ClientRequest, ErrorSlot},
     protocol::external::Message,
-    protocol::internal::ResponseStatus,
+    protocol::internal::InventoryResponse,
     Request, Response, SharedPeerError,
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 proptest! {
     // The default value of proptest cases (256) causes this test to take more than ten seconds on

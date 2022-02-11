@@ -94,12 +94,12 @@ pub enum PeerError {
     /// or peers can download and verify the missing data.
     ///
     /// If the peer has some of the data, the request returns an [`Ok`] response,
-    /// with any `notfound` data is marked as [`Missing`](ResponseStatus::Missing).
+    /// with any `notfound` data is marked as [`Missing`](InventoryResponse::Missing).
     #[error("Remote peer could not find any of the items: {0:?}")]
     NotFoundResponse(Vec<InventoryHash>),
 
     /// We requested data, but all our ready peers are marked as recently
-    /// [`Missing`](ResponseStatus::Missing) that data in our local inventory registry.
+    /// [`Missing`](InventoryResponse::Missing) that data in our local inventory registry.
     ///
     /// This is a temporary error.
     ///
