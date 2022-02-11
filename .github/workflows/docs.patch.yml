@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-    path-ignore:
+    paths-ignore:
       - 'book/**'
       - '**/firebase.json'
       - 'katex-header.html'
