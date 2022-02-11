@@ -59,7 +59,7 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
         listen_addr,
     ) = setup().await;
 
-    // Use inbound directly
+    // Send a request to inbound directly
     let request = inbound_service.clone().oneshot(Request::Peers);
     let response = request.await;
     match response.as_ref() {
@@ -78,7 +78,7 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
         ),
     };
 
-    // Use the connected peer via a local TCP connection
+    // Send a request via the connected peer, via a local TCP connection, to the inbound service
     let request = connected_peer_service.clone().oneshot(Request::Peers);
     let response = request.await;
     match response.as_ref() {
@@ -138,7 +138,7 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
 
     let test_block = block::Hash([0x11; 32]);
 
-    // Use inbound directly
+    // Send a request to inbound directly
     let request = inbound_service
         .clone()
         .oneshot(Request::BlocksByHash(iter::once(test_block).collect()));
@@ -159,7 +159,7 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         ),
     };
 
-    // Use the connected peer via a local TCP connection
+    // Send a request via the connected peer, via a local TCP connection, to the inbound service
     let request = connected_peer_service
         .clone()
         .oneshot(Request::BlocksByHash(iter::once(test_block).collect()));
@@ -231,7 +231,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 
     // Test both transaction ID variants, separately and together
     for txs in [vec![test_tx], vec![test_wtx], vec![test_tx, test_wtx]] {
-        // Use inbound directly
+        // Send a request to inbound directly
         let request = inbound_service
             .clone()
             .oneshot(Request::TransactionsById(txs.iter().copied().collect()));
@@ -256,7 +256,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
             ),
         };
 
-        // Use the connected peer via a local TCP connection
+        // Send a request via the connected peer, via a local TCP connection, to the inbound service
         let request = connected_peer_service
             .clone()
             .oneshot(Request::TransactionsById(txs.iter().copied().collect()));
