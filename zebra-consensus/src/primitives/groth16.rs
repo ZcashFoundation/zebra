@@ -314,6 +314,14 @@ where
     type Error = TransactionError;
 
     fn try_from(input: DescriptionWrapper<&T>) -> Result<Self, Self::Error> {
+        // # Consensus
+        //
+        // > Elements of a JoinSplit description MUST have the types given above
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        //
+        // This validates the 𝜋_{ZKJoinSplit} element. In #3179 we plan to validate
+        // during deserialization, see [`JoinSplit::zcash_deserialize`].
         Ok(Item::from((
             bellman::groth16::Proof::read(&input.0.proof().0[..])
                 .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?,

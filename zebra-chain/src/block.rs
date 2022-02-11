@@ -102,13 +102,13 @@ impl Block {
     /// Check if the `network_upgrade` fields from each transaction in the block matches
     /// the network upgrade calculated from the `network` and block height.
     ///
-    /// # Consensus rule:
+    /// # Consensus
     ///
-    ///  The nConsensusBranchId field MUST match the consensus branch ID used for
-    ///  SIGHASH transaction hashes, as specified in [ZIP-244] ([7.1]).
+    /// > [NU5 onward] The nConsensusBranchId field MUST match the consensus branch ID used
+    /// > for SIGHASH transaction hashes, as specified in [ZIP-244].
     ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     /// [ZIP-244]: https://zips.z.cash/zip-0244
-    /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     pub fn check_transaction_network_upgrade_consistency(
         &self,
         network: Network,

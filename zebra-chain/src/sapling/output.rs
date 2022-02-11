@@ -257,8 +257,12 @@ impl TrustedPreallocate for OutputInTransactionV4 {
         // Since a serialized Vec<Output> uses at least one byte for its length,
         // the max allocation can never exceed (MAX_BLOCK_BYTES - 1) / OUTPUT_SIZE
         const MAX: u64 = (MAX_BLOCK_BYTES - 1) / OUTPUT_SIZE;
+        // # Consensus
+        //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        //
         // This acts as nOutputsSapling and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.

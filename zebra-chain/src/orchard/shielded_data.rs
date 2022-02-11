@@ -26,16 +26,22 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ShieldedData {
     /// The orchard flags for this transaction.
+    /// Denoted as `flagsOrchard` in the spec.
     pub flags: Flags,
     /// The net value of Orchard spends minus outputs.
+    /// Denoted as `valueBalanceOrchard` in the spec.
     pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
+    /// Denoted as `anchorOrchard` in the spec.
     pub shared_anchor: tree::Root,
     /// The aggregated zk-SNARK proof for all the actions in this transaction.
+    /// Denoted as `proofsOrchard` in the spec.
     pub proof: Halo2Proof,
     /// The Orchard Actions, in the order they appear in the transaction.
+    /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
     pub actions: AtLeastOne<AuthorizedAction>,
     /// A signature on the transaction `sighash`.
+    /// Denoted as `bindingSigOrchard` in the spec.
     pub binding_sig: Signature<Binding>,
 }
 
@@ -183,8 +189,12 @@ impl TrustedPreallocate for Action {
         // and the signature is required,
         // a valid max allocation can never exceed this size
         const MAX: u64 = (MAX_BLOCK_BYTES - 1) / AUTHORIZED_ACTION_SIZE;
+        // # Consensus
+        //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        //
         // This acts as nActionsOrchard and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.
@@ -206,13 +216,15 @@ bitflags! {
     /// The spend and output flags are passed to the `Halo2Proof` verifier, which verifies
     /// the relevant note spending and creation consensus rules.
     ///
-    /// Consensus rules:
+    /// # Consensus
     ///
-    /// - "In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard field MUST be zero."
+    /// > [NU5 onward] In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
+    /// > field MUST be zero.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    ///
     /// ([`bitflags`](https://docs.rs/bitflags/1.2.1/bitflags/index.html) restricts its values to the
     /// set of valid flags)
-    /// - "In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0."
-    /// (Checked in zebra-consensus)
     #[derive(Deserialize, Serialize)]
     pub struct Flags: u8 {
         /// Enable spending non-zero valued Orchard notes.

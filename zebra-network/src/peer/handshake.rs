@@ -29,6 +29,7 @@ use zebra_chain::{
     block,
     chain_tip::{ChainTip, NoChainTip},
     parameters::Network,
+    serialization::SerializationError,
 };
 
 use crate::{
@@ -38,7 +39,7 @@ use crate::{
         CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
         MinimumPeerVersion, PeerError,
     },
-    peer_set::ConnectionTracker,
+    peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
         external::{types::*, AddrInVersion, Codec, InventoryHash, Message},
         internal::{Request, Response},
@@ -68,7 +69,7 @@ where
 
     inbound_service: S,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-    inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
+    inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
     nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
 
@@ -349,7 +350,7 @@ where
 
     inbound_service: Option<S>,
     address_book_updater: Option<tokio::sync::mpsc::Sender<MetaAddrChange>>,
-    inv_collector: Option<broadcast::Sender<(InventoryHash, SocketAddr)>>,
+    inv_collector: Option<broadcast::Sender<InventoryChange>>,
     latest_chain_tip: C,
 }
 
@@ -377,7 +378,7 @@ where
     /// to look up peers that have specific inventory.
     pub fn with_inventory_collector(
         mut self,
-        inv_collector: broadcast::Sender<(InventoryHash, SocketAddr)>,
+        inv_collector: broadcast::Sender<InventoryChange>,
     ) -> Self {
         self.inv_collector = Some(inv_collector);
         self
@@ -821,6 +822,15 @@ where
                 let _ = address_book_updater.send(alt_addr).await;
             }
 
+            // The handshake succeeded: update the peer status from AttemptPending to Responded
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                // the collector doesn't depend on network activity,
+                // so this await should not hang
+                let _ = address_book_updater
+                    .send(MetaAddr::new_responded(&book_addr, &remote_services))
+                    .await;
+            }
+
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version =
                 std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
@@ -864,8 +874,13 @@ where
 
             // CORRECTNESS
             //
-            // Every message and error must update the peer address state via
+            // Ping/Pong messages and every error must update the peer address state via
             // the inbound_ts_collector.
+            //
+            // The heartbeat task sends regular Ping/Pong messages,
+            // and it ends the connection if the heartbeat times out.
+            // So we can just track peer activity based on Ping and Pong.
+            // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
             let inv_collector = inv_collector.clone();
             let ts_inner_conn_span = connection_span.clone();
@@ -888,11 +903,16 @@ where
                                 );
 
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                                    // the collector doesn't depend on network activity,
-                                    // so this await should not hang
-                                    let _ = inbound_ts_collector
-                                        .send(MetaAddr::new_responded(&book_addr, &remote_services))
-                                        .await;
+                                    if matches!(msg, Message::Ping(_) | Message::Pong(_)) {
+                                        // the collector doesn't depend on network activity,
+                                        // so this await should not hang
+                                        let _ = inbound_ts_collector
+                                            .send(MetaAddr::new_responded(
+                                                &book_addr,
+                                                &remote_services,
+                                            ))
+                                            .await;
+                                    }
                                 }
                             }
                             Err(err) => {
@@ -917,44 +937,7 @@ where
                 .then(move |msg| {
                     let inv_collector = inv_collector.clone();
                     let span = debug_span!(parent: inv_inner_conn_span.clone(), "inventory_filter");
-                    async move {
-                        if let (Ok(Message::Inv(hashes)), Some(transient_addr)) =
-                            (&msg, connected_addr.get_transient_addr())
-                        {
-                            // We ignore inventory messages with more than one
-                            // block, because they are most likely replies to a
-                            // query, rather than a newly gossiped block.
-                            //
-                            // (We process inventory messages with any number of
-                            // transactions.)
-                            //
-                            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
-                            //
-                            // TODO: zcashd has a bug where it merges queued inv messages of
-                            // the same or different types. So Zebra should split small
-                            // merged inv messages into separate inv messages. (#1768)
-                            match hashes.as_slice() {
-                                [hash @ InventoryHash::Block(_)] => {
-                                    debug!(?hash, "registering gossiped block inventory for peer");
-                                    let _ = inv_collector.send((*hash, transient_addr));
-                                }
-                                [hashes @ ..] => {
-                                    for hash in hashes {
-                                        if let Some(unmined_tx_id) = hash.unmined_tx_id() {
-                                            debug!(?unmined_tx_id, "registering unmined transaction inventory for peer");
-                                            // The peer set and inv collector use the peer's remote
-                                            // address as an identifier
-                                            let _ = inv_collector.send((*hash, transient_addr));
-                                        } else {
-                                            trace!(?hash, "ignoring non-transaction inventory hash in multi-hash list")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        msg
-                    }
-                    .instrument(span)
+                    register_inventory_status(msg, connected_addr, inv_collector).instrument(span)
                 })
                 .boxed();
 
@@ -1002,6 +985,76 @@ where
             .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
             .boxed()
     }
+}
+
+/// Register any advertised or missing inventory in `msg` for `connected_addr`.
+async fn register_inventory_status(
+    msg: Result<Message, SerializationError>,
+    connected_addr: ConnectedAddr,
+    inv_collector: broadcast::Sender<InventoryChange>,
+) -> Result<Message, SerializationError> {
+    match (&msg, connected_addr.get_transient_addr()) {
+        (Ok(Message::Inv(advertised)), Some(transient_addr)) => {
+            // We ignore inventory messages with more than one
+            // block, because they are most likely replies to a
+            // query, rather than a newly gossiped block.
+            //
+            // (We process inventory messages with any number of
+            // transactions.)
+            //
+            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
+            //
+            // Note: zcashd has a bug where it merges queued inv messages of
+            // the same or different types. Zebra compensates by sending `notfound`
+            // responses to the inv collector. (#2156, #1768)
+            //
+            // (We can't split `inv`s, because that fills the inventory registry
+            // with useless entries that the whole network has, making it large and slow.)
+            match advertised.as_slice() {
+                [advertised @ InventoryHash::Block(_)] => {
+                    debug!(
+                        ?advertised,
+                        "registering gossiped advertised block inventory for peer"
+                    );
+
+                    // The peer set and inv collector use the peer's remote
+                    // address as an identifier
+                    // If all receivers have been dropped, `send` returns an error.
+                    // When that happens, Zebra is shutting down, so we want to ignore this error.
+                    let _ = inv_collector
+                        .send(InventoryChange::new_advertised(*advertised, transient_addr));
+                }
+                [advertised @ ..] => {
+                    let advertised = advertised
+                        .iter()
+                        .filter(|advertised| advertised.unmined_tx_id().is_some());
+
+                    debug!(
+                        ?advertised,
+                        "registering advertised unmined transaction inventory for peer",
+                    );
+
+                    if let Some(change) =
+                        InventoryChange::new_advertised_multi(advertised, transient_addr)
+                    {
+                        // Ignore channel errors that should only happen during shutdown.
+                        let _ = inv_collector.send(change);
+                    }
+                }
+            }
+        }
+
+        (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
+            debug!(?missing, "registering missing inventory for peer");
+
+            if let Some(change) = InventoryChange::new_missing_multi(missing, transient_addr) {
+                let _ = inv_collector.send(change);
+            }
+        }
+        _ => {}
+    }
+
+    msg
 }
 
 /// Send periodical heartbeats to `server_tx`, and update the peer status through

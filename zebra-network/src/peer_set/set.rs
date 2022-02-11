@@ -124,13 +124,13 @@ use crate::{
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
-        InventoryRegistry,
+        InventoryChange, InventoryRegistry,
     },
     protocol::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    BoxError, Config,
+    BoxError, Config, PeerError, SharedPeerError,
 };
 
 #[cfg(test)]
@@ -256,7 +256,7 @@ where
     /// - `handle_rx`: receives background task handles,
     ///                monitors them to make sure they're still running,
     ///                and shuts down all the tasks as soon as one task exits;
-    /// - `inv_stream`: receives inventory advertisements for peers,
+    /// - `inv_stream`: receives inventory changes from peers,
     ///                 allowing the peer set to direct inventory requests;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
     pub fn new(
@@ -264,7 +264,7 @@ where
         discover: D,
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
-        inv_stream: broadcast::Receiver<(InventoryHash, SocketAddr)>,
+        inv_stream: broadcast::Receiver<InventoryChange>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
     ) -> Self {
@@ -650,17 +650,22 @@ where
         fut.map_err(Into::into).boxed()
     }
 
-    /// Tries to route a request to a peer that advertised that inventory,
-    /// falling back to P2C if there is no ready peer.
+    /// Tries to route a request to a ready peer that advertised that inventory,
+    /// falling back to a ready peer that isn't missing the inventory.
+    ///
+    /// If all ready peers are missing the inventory,
+    /// returns a [`NotFound`](PeerError::NotFound) error.
+    ///
+    /// Uses P2C to route requests to the least loaded peer in each list.
     fn route_inv(
         &mut self,
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
-        let inventory_peer_list = self
+        let advertising_peer_list = self
             .inventory_registry
-            .peers(&hash)
-            .filter(|&key| self.ready_services.contains_key(key))
+            .advertising_peers(hash)
+            .filter(|&addr| self.ready_services.contains_key(addr))
             .copied()
             .collect();
 
@@ -672,21 +677,57 @@ where
         // peers would be able to influence our choice by switching addresses.
         // But we need the choice to be random,
         // so that a peer can't provide all our inventory responses.
-        let peer = self.select_p2c_peer_from_list(&inventory_peer_list);
+        let peer = self.select_p2c_peer_from_list(&advertising_peer_list);
 
-        match peer.and_then(|key| self.take_ready_service(&key)) {
-            Some(mut svc) => {
-                let peer = peer.expect("just checked peer is Some");
-                tracing::trace!(?hash, ?peer, "routing based on inventory");
-                let fut = svc.call(req);
-                self.push_unready(peer, svc);
-                fut.map_err(Into::into).boxed()
-            }
-            None => {
-                tracing::trace!(?hash, "no ready peer for inventory, falling back to p2c");
-                self.route_p2c(req)
-            }
+        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
+            let peer = peer.expect("just checked peer is Some");
+            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
+            let fut = svc.call(req);
+            self.push_unready(peer, svc);
+            return fut.map_err(Into::into).boxed();
         }
+
+        let missing_peer_list: HashSet<SocketAddr> = self
+            .inventory_registry
+            .missing_peers(hash)
+            .copied()
+            .collect();
+        let maybe_peer_list = self
+            .ready_services
+            .keys()
+            .filter(|addr| !missing_peer_list.contains(addr))
+            .copied()
+            .collect();
+
+        // Security: choose a random, less-loaded peer that might have the inventory.
+        let peer = self.select_p2c_peer_from_list(&maybe_peer_list);
+
+        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
+            let peer = peer.expect("just checked peer is Some");
+            tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
+            let fut = svc.call(req);
+            self.push_unready(peer, svc);
+            return fut.map_err(Into::into).boxed();
+        }
+
+        // TODO: reduce this log level after testing #2156 and #2726
+        tracing::info!(
+            ?hash,
+            "all ready peers are missing inventory, failing request"
+        );
+        async move {
+            // Let other tasks run, so a retry request might get different ready peers.
+            tokio::task::yield_now().await;
+
+            // # Security
+            //
+            // Avoid routing requests to peers that are missing inventory.
+            // If we kept trying doomed requests, peers that are missing our requested inventory
+            // could take up a large amount of our bandwidth and retry limits.
+            Err(SharedPeerError::from(PeerError::NotFound(vec![hash])))
+        }
+        .map_err(Into::into)
+        .boxed()
     }
 
     /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
