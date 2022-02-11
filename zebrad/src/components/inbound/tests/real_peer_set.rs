@@ -320,6 +320,144 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+/// Check that a network stack returns a `ConnectionReceiveTimeout` error when a peer ignores requests.
+/// Then check that repeated requests to a non-responsive peer get a `NotFoundRegistry` error.
+///
+/// Uses a Zebra network stack's peer set to query an isolated Zebra TCP connection.
+/// (Isolated connections have a `Nil` inbound service, so they never respond to requests.)
+///
+/// The requests are coming from the full stack, so this is the reverse of the previous tests.
+#[tokio::test]
+async fn outbound_tx_nil_response_notfound() -> Result<(), crate::BoxError> {
+    let (
+        // real services
+        _connected_peer_service,
+        _inbound_service,
+        peer_set,
+        _mempool_service,
+        _state_service,
+        // mocked services
+        _mock_block_verifier,
+        _mock_tx_verifier,
+        // real tasks
+        block_gossip_task_handle,
+        tx_gossip_task_handle,
+        // real open socket addresses
+        _listen_addr,
+    ) = setup().await;
+
+    let test_tx = UnminedTxId::from_legacy_id(TxHash([0x55; 32]));
+    let test_wtx: UnminedTxId = WtxId {
+        id: TxHash([0x66; 32]),
+        auth_digest: AuthDigest([0x77; 32]),
+    }
+    .into();
+
+    // Test both transaction ID variants, separately and together
+    for txs in [vec![test_tx], vec![test_wtx], vec![test_tx, test_wtx]] {
+        // Make the expected timeout error happen really quickly.
+        tokio::time::pause();
+
+        // Send a request via the peer set, via a local TCP connection,
+        // to the isolated peer's Nil inbound service
+        let response = peer_set
+            .clone()
+            .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
+            .await;
+        match response.as_ref() {
+            Err(missing_error) => {
+                let missing_error = missing_error
+                    .downcast_ref::<SharedPeerError>()
+                    .expect("unexpected inner error type, expected SharedPeerError");
+
+                // Unfortunately, we can't access SharedPeerError's inner type,
+                // so we can't compare the actual responses.
+                assert_eq!(
+                    missing_error.inner_debug(),
+                    "ConnectionReceiveTimeout",
+                );
+            }
+            _ => unreachable!(
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(ConnectionReceiveTimeout))`, \
+                 actual result: {:?}",
+                response
+            ),
+        };
+
+        // The expected local peer set error should happen immediately.
+        tokio::time::resume();
+
+        // Now send the same request to the  peer set,
+        // but expect a local failure from the inventory registry.
+        let response = peer_set
+            .clone()
+            .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
+            .await;
+        match response.as_ref() {
+            Err(missing_error) => {
+                let missing_error = missing_error
+                    .downcast_ref::<SharedPeerError>()
+                    .expect("unexpected inner error type, expected SharedPeerError");
+
+                // The only ready peer in the PeerSet has just timed out on the same request,
+                // so we expect the peer set to return a `NotFoundRegistry` error immediately.
+                //
+                // If these asserts fail with ConnectionReceiveTimeout,
+                // then the PeerSet isn't using missing inventory to return error responses.
+                // (Or the missing inventory from the previous timeout wasn't registered correctly.)
+                if txs == vec![test_tx] {
+                    assert_eq!(
+                        missing_error.inner_debug(),
+                        "NotFoundRegistry([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
+                    );
+                } else if txs == vec![test_wtx] {
+                    assert_eq!(
+                        missing_error.inner_debug(),
+                        "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])",
+                    );
+                } else if txs == vec![test_tx, test_wtx] {
+                    // The response order is unstable, because it depends on concurrent inbound futures.
+                    // In #2244 we will fix this by replacing response Vecs with HashSets.
+                    assert!(
+                        missing_error.inner_debug() ==
+                        "NotFoundRegistry([Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\")), Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") })])"
+                        ||
+                        missing_error.inner_debug() ==
+                        "NotFoundRegistry([Wtx(WtxId { id: transaction::Hash(\"6666666666666666666666666666666666666666666666666666666666666666\"), auth_digest: AuthDigest(\"7777777777777777777777777777777777777777777777777777777777777777\") }), Tx(transaction::Hash(\"5555555555555555555555555555555555555555555555555555555555555555\"))])",
+                        "unexpected response: {:?} \
+                         expected response to: {:?}",
+                        missing_error.inner_debug(),
+                        txs,
+                    );
+                } else {
+                    unreachable!("unexpected test case");
+                }
+            }
+            _ => unreachable!(
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundRegistry(_)))`, \
+                 actual result: {:?}",
+                response
+            ),
+        };
+    }
+
+    let block_gossip_result = block_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(block_gossip_result, None),
+        "unexpected error or panic in block gossip task: {:?}",
+        block_gossip_result,
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
+    Ok(())
+}
+
 /// Setup a real Zebra network stack, with a connected peer using a real isolated network stack.
 ///
 /// Uses fake verifiers, and does not run a block syncer task.
