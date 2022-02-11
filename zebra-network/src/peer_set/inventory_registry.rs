@@ -8,7 +8,6 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use futures::{FutureExt, Stream, StreamExt};
@@ -18,9 +17,10 @@ use tokio::{
 };
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, IntervalStream};
 
-use zebra_chain::{parameters::POST_BLOSSOM_POW_TARGET_SPACING, serialization::AtLeastOne};
+use zebra_chain::serialization::AtLeastOne;
 
 use crate::{
+    constants::INVENTORY_ROTATION_INTERVAL,
     protocol::{external::InventoryHash, internal::InventoryResponse},
     BoxError,
 };
@@ -145,11 +145,7 @@ impl<T: Clone> InventoryStatus<T> {
 impl InventoryRegistry {
     /// Returns a new Inventory Registry for `inv_stream`.
     pub fn new(inv_stream: broadcast::Receiver<InventoryChange>) -> Self {
-        let interval = Duration::from_secs(
-            POST_BLOSSOM_POW_TARGET_SPACING
-                .try_into()
-                .expect("non-negative"),
-        );
+        let interval = INVENTORY_ROTATION_INTERVAL;
 
         // Don't do an immediate rotation, current and prev are already empty.
         let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);

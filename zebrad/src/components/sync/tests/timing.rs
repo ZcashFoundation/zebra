@@ -11,6 +11,7 @@ use tokio::time::{timeout, Duration};
 
 use zebra_chain::parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING};
 use zebra_network::constants::{DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT};
+use zn::constants::INVENTORY_ROTATION_INTERVAL;
 
 use super::super::*;
 use crate::config::ZebradConfig;
@@ -76,6 +77,19 @@ fn ensure_timeouts_consistent() {
                 .try_into()
                 .expect("not negative"),
         "a syncer tip crawl should complete before most new blocks"
+    );
+
+    // This is a compromise between two failure modes:
+    // - some peers have the inventory, but they weren't ready last time we checked,
+    //   so we want to retry soon
+    // - all peers are missing the inventory, so we want to wait for a while before retrying
+    assert!(
+        INVENTORY_ROTATION_INTERVAL < SYNC_RESTART_DELAY,
+        "we should expire some inventory every time the syncer resets"
+    );
+    assert!(
+        2 * INVENTORY_ROTATION_INTERVAL > SYNC_RESTART_DELAY,
+        "we should expire all inventory after the syncer has reset once or twice"
     );
 
     // The default peer crawler interval should be at least

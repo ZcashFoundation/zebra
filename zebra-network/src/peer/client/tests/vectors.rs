@@ -246,8 +246,11 @@ fn missing_inv_collector_ignores_local_registry_errors() {
     let (inv_collector, mut inv_receiver) = broadcast::channel(1);
     let transient_addr = "0.0.0.0:0".parse().unwrap();
 
+    // Keep the channel open, so we don't get a `Closed` error.
+    let _inv_channel_guard = inv_collector.clone();
+
     let missing_inv =
-        MissingInventoryCollector::new(&request, Some(inv_collector.clone()), Some(transient_addr))
+        MissingInventoryCollector::new(&request, Some(inv_collector), Some(transient_addr))
             .expect("unexpected invalid collector: arguments should be valid");
 
     missing_inv.send(&response);
