@@ -15,7 +15,7 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::{AuthDigest, Hash as TxHash, Transaction, UnminedTxId, WtxId},
+    transaction::{AuthDigest, Hash as TxHash, Transaction, UnminedTx, UnminedTxId, WtxId},
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
@@ -203,8 +203,6 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
 /// Check that a network stack with an empty state responds to single transaction requests with `notfound`.
 ///
 /// Uses a real Zebra network stack, with an isolated Zebra inbound TCP connection.
-///
-/// TODO: test a response with some Available and some Missing transactions.
 #[tokio::test]
 async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
     let (
@@ -463,6 +461,121 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
             };
         }
     }
+
+    let block_gossip_result = block_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(block_gossip_result, None),
+        "unexpected error or panic in block gossip task: {:?}",
+        block_gossip_result,
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        matches!(tx_gossip_result, None),
+        "unexpected error or panic in transaction gossip task: {:?}",
+        tx_gossip_result,
+    );
+
+    Ok(())
+}
+
+/// Check that a network stack:
+/// - returns a partial notfound response, when a peer partially responds to a multi-transaction request,
+/// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
+///
+/// The requests are coming from the full stack to the isolated peer.
+#[tokio::test]
+async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> {
+    // We repeatedly respond with the same transaction, so the peer gives up on the second response.
+    let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
+    let repeated_tx: UnminedTx = repeated_tx.into();
+    let repeated_response = Response::Transactions(vec![
+        Available(repeated_tx.clone()),
+        Available(repeated_tx.clone()),
+    ]);
+
+    let (
+        // real services
+        _connected_peer_service,
+        _inbound_service,
+        peer_set,
+        _mempool_service,
+        _state_service,
+        // mocked services
+        _mock_block_verifier,
+        _mock_tx_verifier,
+        // real tasks
+        block_gossip_task_handle,
+        tx_gossip_task_handle,
+        // real open socket addresses
+        _listen_addr,
+    ) = setup(Some(repeated_response)).await;
+
+    let missing_tx_id = UnminedTxId::from_legacy_id(TxHash([0x22; 32]));
+
+    let txs = [missing_tx_id, repeated_tx.id];
+
+    // Send a request via the peer set, via a local TCP connection,
+    // to the isolated peer's `repeated_response` inbound service
+    let response = peer_set
+        .clone()
+        .oneshot(Request::TransactionsById(txs.iter().copied().collect()))
+        .await;
+
+    if let Ok(Response::Transactions(tx_response)) = response.as_ref() {
+        let available: Vec<UnminedTx> = tx_response
+            .iter()
+            .filter_map(InventoryResponse::available)
+            .collect();
+        let missing: Vec<UnminedTxId> = tx_response
+            .iter()
+            .filter_map(InventoryResponse::missing)
+            .collect();
+
+        assert_eq!(available, vec![repeated_tx]);
+        assert_eq!(missing, vec![missing_tx_id]);
+    } else {
+        unreachable!(
+            "peer::Connection should map partial `TransactionsById` responses as `Ok(Response::Transactions(_))`, \
+             actual result: {:?}",
+            response
+        )
+    };
+
+    // Now send the same request to the  peer set,
+    // but expect a local failure from the inventory registry.
+    //
+    // The peer set only does routing for single-transaction requests.
+    // (But the inventory tracker tracks the response to requests of any size.)
+    let response = peer_set
+        .clone()
+        .oneshot(Request::TransactionsById(
+            iter::once(missing_tx_id).collect(),
+        ))
+        .await;
+
+    // The only ready peer in the PeerSet failed the same request,
+    // so we expect the peer set to return a `NotFoundRegistry` error immediately.
+    //
+    // If these asserts fail, then the PeerSet isn't returning inv routing error responses.
+    // (Or the missing inventory from the previous timeout wasn't registered correctly.)
+    if let Err(missing_error) = response.as_ref() {
+        let missing_error = missing_error
+            .downcast_ref::<SharedPeerError>()
+            .expect("unexpected inner error type, expected SharedPeerError");
+
+        // Unfortunately, we can't access SharedPeerError's inner type,
+        // so we can't compare the actual responses.
+        let expected = PeerError::NotFoundRegistry(vec![InventoryHash::from(missing_tx_id)]);
+        let expected = SharedPeerError::from(expected);
+        assert_eq!(missing_error.inner_debug(), expected.inner_debug());
+    } else {
+        unreachable!(
+            "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundRegistry(_)))`, \
+             actual result: {:?}",
+            response
+        )
+    };
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
