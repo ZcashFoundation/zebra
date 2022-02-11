@@ -247,7 +247,6 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
         let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
-
         // Denoted as `vSpendAuthSigsSapling` in the spec.
         //
         // # Consensus
