@@ -288,8 +288,10 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
                         ||
                         missing_error.inner_debug() ==
                         "NotFoundResponse([Wtx(WtxId { id: transaction::Hash(\"3333333333333333333333333333333333333333333333333333333333333333\"), auth_digest: AuthDigest(\"4444444444444444444444444444444444444444444444444444444444444444\") }), Tx(transaction::Hash(\"2222222222222222222222222222222222222222222222222222222222222222\"))])",
-                        "unexpected response: {:?}",
+                        "unexpected response: {:?} \
+                         expected response to: {:?}",
                         missing_error.inner_debug(),
+                        txs,
                     );
                 } else {
                     unreachable!("unexpected test case");
