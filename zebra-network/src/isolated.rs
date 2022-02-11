@@ -6,7 +6,7 @@ use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::{
     util::{BoxService, Oneshot},
-    ServiceExt,
+    Service, ServiceExt,
 };
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
@@ -32,11 +32,11 @@ mod tests;
 /// this low-level API is useful for custom network crawlers or Tor connections.
 ///
 /// In addition to being completely isolated from all other node state, this
-/// method also aims to be minimally distinguishable from other clients.
+/// function also aims to be minimally distinguishable from other clients.
 ///
 /// SECURITY TODO: check if the timestamp field can be zeroed, to remove another distinguisher (#3300)
 ///
-/// Note that this method does not implement any timeout behavior, so callers may
+/// Note that this function does not implement any timeout behavior, so callers may
 /// want to layer it with a timeout as appropriate for their application.
 ///
 /// # Inputs
@@ -55,6 +55,37 @@ pub fn connect_isolated<PeerTransport>(
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let nil_inbound_service =
+        tower::service_fn(|_req| async move { Ok::<Response, BoxError>(Response::Nil) });
+
+    connect_isolated_with_inbound(network, data_stream, user_agent, nil_inbound_service)
+}
+
+/// Creates an isolated Zcash peer connection using the provided data stream.
+/// This function is for testing purposes only.
+///
+/// See [`connect_isolated`] for details.
+///
+/// # Additional Inputs
+///
+/// - `inbound_service`: a [`tower::Service`] that answers inbound requests from the connected peer.
+///
+/// # Privacy
+///
+/// This function can make the isolated connection send different responses to peers,
+/// which makes it stand out from other isolated connections from other peers.
+pub fn connect_isolated_with_inbound<PeerTransport, InboundService>(
+    network: Network,
+    data_stream: PeerTransport,
+    user_agent: String,
+    inbound_service: InboundService,
+) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
+where
+    PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    InboundService:
+        Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    InboundService::Future: Send,
+{
     let config = Config {
         network,
         ..Config::default()
@@ -62,9 +93,7 @@ where
 
     let handshake = peer::Handshake::builder()
         .with_config(config)
-        .with_inbound_service(tower::service_fn(|_req| async move {
-            Ok::<Response, BoxError>(Response::Nil)
-        }))
+        .with_inbound_service(inbound_service)
         .with_user_agent(user_agent)
         .with_latest_chain_tip(NoChainTip)
         .finish()
@@ -101,7 +130,35 @@ pub fn connect_isolated_tcp_direct(
     addr: SocketAddr,
     user_agent: String,
 ) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>> {
+    let nil_inbound_service =
+        tower::service_fn(|_req| async move { Ok::<Response, BoxError>(Response::Nil) });
+
+    connect_isolated_tcp_direct_with_inbound(network, addr, user_agent, nil_inbound_service)
+}
+
+/// Creates an isolated Zcash peer connection using the provided data stream.
+/// This function is for testing purposes only.
+///
+/// See [`connect_isolated_with_inbound`] and [`connect_isolated_tcp_direct`] for details.
+///
+/// # Privacy
+///
+/// This function can make the isolated connection send different responses to peers,
+/// which makes it stand out from other isolated connections from other peers.
+pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
+    network: Network,
+    addr: SocketAddr,
+    user_agent: String,
+    inbound_service: InboundService,
+) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
+where
+    InboundService:
+        Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    InboundService::Future: Send,
+{
     tokio::net::TcpStream::connect(addr)
         .err_into()
-        .and_then(move |tcp_stream| connect_isolated(network, tcp_stream, user_agent))
+        .and_then(move |tcp_stream| {
+            connect_isolated_with_inbound(network, tcp_stream, user_agent, inbound_service)
+        })
 }

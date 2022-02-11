@@ -150,6 +150,14 @@ mod protocol;
 #[cfg(feature = "tor")]
 pub use crate::isolated::tor::connect_isolated_tor;
 
+#[cfg(all(feature = "tor", any(test, feature = "proptest-impl")))]
+pub use crate::isolated::tor::connect_isolated_tor_with_inbound;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use crate::isolated::{
+    connect_isolated_tcp_direct_with_inbound, connect_isolated_with_inbound,
+};
+
 pub use crate::{
     address_book::AddressBook,
     config::Config,
