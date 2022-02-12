@@ -705,9 +705,9 @@ where
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
     if let Message::Verack = remote_msg {
-        debug!("got verack from remote peer");
+        debug!("got verack message from remote peer");
     } else {
-        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?;
+        debug!("ignoring non-verack message from remote peer");
     }
 
     Ok((remote_version, remote_services, remote_canonical_addr))
