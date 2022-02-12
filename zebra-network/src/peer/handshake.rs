@@ -588,13 +588,25 @@ where
     debug!(?our_version, "sending initial version message");
     peer_conn.send(our_version).await?;
 
-    let remote_msg = peer_conn
+    let mut remote_msg = peer_conn
         .next()
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
-
-    // Check that we got a Version and destructure its fields into the local scope.
     debug!(?remote_msg, "got message from remote peer");
+
+    // Wait for next message if the one we have is not Version
+    match remote_msg {
+        Message::Version { .. } => (),
+        _ => {
+            remote_msg = peer_conn
+                .next()
+                .await
+                .ok_or(HandshakeError::ConnectionClosed)??;
+            debug!(?remote_msg, "got message from remote peer");
+        }
+    }
+
+    // If we got a Version message, destructure its fields into the local scope.
     let (remote_nonce, remote_services, remote_version, remote_canonical_addr, user_agent) =
         if let Message::Version {
             version,
