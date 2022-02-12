@@ -5,7 +5,7 @@ on:
     branches:
       - "**"
       - "!main"
-    path:
+    paths:
       - '**/*.rs'
       - '**/Cargo.toml'
       - '**/Cargo.lock'

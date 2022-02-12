@@ -1,3 +1,5 @@
+//! Errors for transaction serialization.
+
 use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
 
 use thiserror::Error;

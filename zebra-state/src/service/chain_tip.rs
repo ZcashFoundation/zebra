@@ -7,12 +7,15 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 use tracing::instrument;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::serialization::arbitrary::datetime_full;
 use zebra_chain::{
     block,
     chain_tip::ChainTip,
@@ -44,6 +47,13 @@ pub struct ChainTipBlock {
     /// The height of the best chain tip block.
     pub height: block::Height,
 
+    /// The network block time of the best chain tip block.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(strategy = "datetime_full()")
+    )]
+    pub time: DateTime<Utc>,
+
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
@@ -71,6 +81,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            time: block.header.time,
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
@@ -89,6 +100,7 @@ impl From<FinalizedBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            time: block.header.time,
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
@@ -301,22 +313,26 @@ impl LatestChainTip {
 }
 
 impl ChainTip for LatestChainTip {
-    /// Return the height of the best chain tip.
     #[instrument(skip(self))]
     fn best_tip_height(&self) -> Option<block::Height> {
         self.with_chain_tip_block(|block| block.height)
     }
 
-    /// Return the block hash of the best chain tip.
     #[instrument(skip(self))]
     fn best_tip_hash(&self) -> Option<block::Hash> {
         self.with_chain_tip_block(|block| block.hash)
     }
 
-    /// Return the mined transaction IDs of the transactions in the best chain tip block.
-    ///
-    /// All transactions with these mined IDs should be rejected from the mempool,
-    /// even if their authorizing data is different.
+    #[instrument(skip(self))]
+    fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
+        self.with_chain_tip_block(|block| block.time)
+    }
+
+    #[instrument(skip(self))]
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
+        self.with_chain_tip_block(|block| (block.height, block.time))
+    }
+
     #[instrument(skip(self))]
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.with_chain_tip_block(|block| block.transaction_hashes.clone())

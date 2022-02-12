@@ -930,7 +930,7 @@ fn transaction_v4_with_transparent_data(
     let mut transaction = Transaction::V4 {
         inputs,
         outputs,
-        lock_time: LockTime::min_lock_time(),
+        lock_time: LockTime::min_lock_time_timestamp(),
         expiry_height: Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
