@@ -37,20 +37,17 @@ impl<A, M> InventoryResponse<A, M> {
     }
 
     /// Returns true if the inventory item was available.
-    #[allow(dead_code)]
     pub fn is_available(&self) -> bool {
         matches!(self, Available(_))
     }
 
     /// Returns true if the inventory item was missing.
-    #[allow(dead_code)]
     pub fn is_missing(&self) -> bool {
         matches!(self, Missing(_))
     }
 
     /// Maps a `InventoryResponse<A, M>` to `InventoryResponse<B, M>` by applying a function to a
     /// contained [`Available`] value, leaving the [`Missing`] value untouched.
-    #[allow(dead_code)]
     pub fn map_available<B, F: FnOnce(A) -> B>(self, f: F) -> InventoryResponse<B, M> {
         // Based on Result::map from https://doc.rust-lang.org/src/core/result.rs.html#765
         match self {
@@ -61,7 +58,6 @@ impl<A, M> InventoryResponse<A, M> {
 
     /// Maps a `InventoryResponse<A, M>` to `InventoryResponse<A, N>` by applying a function to a
     /// contained [`Missing`] value, leaving the [`Available`] value untouched.
-    #[allow(dead_code)]
     pub fn map_missing<N, F: FnOnce(M) -> N>(self, f: F) -> InventoryResponse<A, N> {
         // Based on Result::map_err from https://doc.rust-lang.org/src/core/result.rs.html#850
         match self {
@@ -90,7 +86,6 @@ impl<A: Clone, M: Clone> InventoryResponse<A, M> {
     }
 
     /// Get the missing inventory item, if present.
-    #[allow(dead_code)]
     pub fn missing(&self) -> Option<M> {
         if let Missing(item) = self {
             Some(item.clone())
