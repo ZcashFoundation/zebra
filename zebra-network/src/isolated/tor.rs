@@ -55,13 +55,13 @@ pub async fn connect_isolated_tor(
 }
 
 /// Creates an isolated Zcash peer connection to `hostname` via Tor.
-/// This method is for testing purposes only.
+/// This function is for testing purposes only.
 ///
 /// See [`connect_isolated_with_inbound`] and [`connect_isolated_tor`] for details.
 ///
 /// # Privacy
 ///
-/// This method can make the isolated connection send different responses to peers,
+/// This function can make the isolated connection send different responses to peers,
 /// which makes it stand out from other isolated connections from other peers.
 pub async fn connect_isolated_tor_with_inbound<InboundService>(
     network: Network,
