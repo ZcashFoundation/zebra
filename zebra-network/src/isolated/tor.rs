@@ -47,7 +47,10 @@ pub async fn connect_isolated_tor(
 ) -> Result<BoxService<Request, Response, BoxError>, BoxError> {
     let tor_stream = new_tor_stream(hostname).await?;
 
-    // Calling connect_isolated_tor_with_inbound causes lifetime issues
+    // Calling connect_isolated_tor_with_inbound causes lifetime issues.
+    //
+    // TODO: fix the lifetime issues, and call connect_isolated_tor_with_inbound
+    //       so the behaviour of both functions is consistent.
     connect_isolated(network, tor_stream, user_agent).await
 }
 
