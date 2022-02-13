@@ -95,8 +95,9 @@ fn ensure_timeouts_consistent() {
         "we should expire some inventory every time the syncer resets"
     );
     assert!(
-        2 * INVENTORY_ROTATION_INTERVAL > SYNC_RESTART_DELAY,
-        "we should expire all inventory after the syncer has reset once or twice"
+        SYNC_RESTART_DELAY < 2 * INVENTORY_ROTATION_INTERVAL,
+        "we should give the syncer at least one retry attempt, \
+         before we expire all inventory"
     );
 
     // The default peer crawler interval should be at least
