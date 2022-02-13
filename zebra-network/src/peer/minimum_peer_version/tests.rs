@@ -12,9 +12,9 @@ mod prop;
 
 impl MinimumPeerVersion<MockChainTip> {
     pub fn with_mock_chain_tip(network: Network) -> (Self, MockChainTipSender) {
-        let (chain_tip, best_tip_height) = MockChainTip::new();
+        let (chain_tip, best_tip) = MockChainTip::new();
         let minimum_peer_version = MinimumPeerVersion::new(chain_tip, network);
 
-        (minimum_peer_version, best_tip_height)
+        (minimum_peer_version, best_tip)
     }
 }

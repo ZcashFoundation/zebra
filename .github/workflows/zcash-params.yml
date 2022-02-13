@@ -2,8 +2,10 @@ name: zcash-params
 
 on:
   workflow_dispatch:
-  pull_request:
-    path:
+  push:
+    branches:
+      - 'main'
+    paths:
       - 'zebra-consensus/src/primitives/groth16/params.rs'
       - 'zebra-consensus/src/chain.rs'
       - 'zebrad/src/commands/start.rs'
@@ -51,7 +53,7 @@ jobs:
     # Build and push image to Google Artifact Registry
     - name: Build & push
       id: docker_build
-      uses: docker/build-push-action@v2.8.0
+      uses: docker/build-push-action@v2.9.0
       with:
         target: builder
         context: .

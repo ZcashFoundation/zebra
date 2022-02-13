@@ -117,7 +117,7 @@ fn prepare_sprout_block(mut block_to_prepare: Block, reference_block: Block) -> 
                 .push(Arc::new(Transaction::V4 {
                     inputs: Vec::new(),
                     outputs: Vec::new(),
-                    lock_time: LockTime::min_lock_time(),
+                    lock_time: LockTime::min_lock_time_timestamp(),
                     expiry_height: Height(0),
                     joinsplit_data,
                     sapling_shielded_data: None,
@@ -173,7 +173,7 @@ fn check_sapling_anchors() {
             block1.transactions.push(Arc::new(Transaction::V4 {
                 inputs: Vec::new(),
                 outputs: Vec::new(),
-                lock_time: LockTime::min_lock_time(),
+                lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: Height(0),
                 joinsplit_data: None,
                 sapling_shielded_data,
@@ -220,7 +220,7 @@ fn check_sapling_anchors() {
             block2.transactions.push(Arc::new(Transaction::V4 {
                 inputs: Vec::new(),
                 outputs: Vec::new(),
-                lock_time: LockTime::min_lock_time(),
+                lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: Height(0),
                 joinsplit_data: None,
                 sapling_shielded_data,
