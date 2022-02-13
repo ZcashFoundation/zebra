@@ -10,11 +10,18 @@ use futures::future;
 use tokio::time::{timeout, Duration};
 
 use zebra_chain::parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING};
-use zebra_network::constants::{DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT};
-use zn::constants::INVENTORY_ROTATION_INTERVAL;
+use zebra_network::constants::{
+    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
+};
+use zebra_state::ChainTipSender;
 
-use super::super::*;
-use crate::config::ZebradConfig;
+use crate::{
+    components::sync::{
+        ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
+        GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
+    },
+    config::ZebradConfig,
+};
 
 /// Make sure the timeout values are consistent with each other.
 #[test]
@@ -147,7 +154,7 @@ fn request_genesis_is_rate_limited() {
     });
 
     // create an empty latest chain tip
-    let (_sender, latest_chain_tip, _change) = zs::ChainTipSender::new(None, Network::Mainnet);
+    let (_sender, latest_chain_tip, _change) = ChainTipSender::new(None, Network::Mainnet);
 
     // create a verifier service that will always panic as it will never be called
     let verifier_service =
