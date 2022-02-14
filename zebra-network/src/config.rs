@@ -175,9 +175,9 @@ impl Config {
                     ?peers,
                     ?peer_addresses,
                     "empty peer list after DNS resolution, retrying after {} seconds",
-                    crate::constants::DNS_LOOKUP_TIMEOUT.as_secs()
+                    DNS_LOOKUP_TIMEOUT.as_secs(),
                 );
-                tokio::time::sleep(crate::constants::DNS_LOOKUP_TIMEOUT).await;
+                tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
             } else {
                 return peer_addresses;
             }
@@ -194,7 +194,7 @@ impl Config {
                 Ok(addresses) => return addresses,
                 Err(_) => tracing::info!(?host, ?retry_count, "Retrying peer DNS resolution"),
             };
-            tokio::time::sleep(crate::constants::DNS_LOOKUP_TIMEOUT).await;
+            tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
         }
 
         HashSet::new()
@@ -206,7 +206,7 @@ impl Config {
     /// If DNS resolution fails or times out, returns an error.
     async fn resolve_host_once(host: &str) -> Result<HashSet<SocketAddr>, BoxError> {
         let fut = tokio::net::lookup_host(host);
-        let fut = tokio::time::timeout(crate::constants::DNS_LOOKUP_TIMEOUT, fut);
+        let fut = tokio::time::timeout(DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
             Ok(Ok(ip_addrs)) => {
@@ -274,7 +274,7 @@ impl Default for Config {
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
-            crawl_new_peer_interval: constants::DEFAULT_CRAWL_NEW_PEER_INTERVAL,
+            crawl_new_peer_interval: DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
             // # Security
             //
