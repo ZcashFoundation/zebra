@@ -161,9 +161,15 @@ By default, Zebra uses the following inbound TCP listener ports:
 - 8233 on Mainnet
 - 18233 on Testnet
 
-`zebrad`'s typical network usage is:
+Zebra needs some peers which have a round-trip latency of 2 seconds or less.
+If this is a problem for you, please
+[open a ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+
+`zebrad`'s typical mainnet network usage is:
 - Initial sync: 30 GB download
-- Ongoing updates: 10-50 MB upload and download per day, depending on peer requests
+- Ongoing updates: 10-100 MB upload and download per day, depending on peer requests
+
+Zebra also performs an initial sync every time its internal database version changes.
 
 For more detailed information, refer to the [documentation](https://zebra.zfnd.org/user/run.html).
 
