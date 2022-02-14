@@ -988,7 +988,7 @@ where
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
-async fn register_inventory_status(
+pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,
     inv_collector: broadcast::Sender<InventoryChange>,
@@ -1022,7 +1022,7 @@ async fn register_inventory_status(
                     // If all receivers have been dropped, `send` returns an error.
                     // When that happens, Zebra is shutting down, so we want to ignore this error.
                     let _ = inv_collector
-                        .send(InventoryChange::new_advertised(*advertised, transient_addr));
+                        .send(InventoryChange::new_available(*advertised, transient_addr));
                 }
                 [advertised @ ..] => {
                     let advertised = advertised
@@ -1035,7 +1035,7 @@ async fn register_inventory_status(
                     );
 
                     if let Some(change) =
-                        InventoryChange::new_advertised_multi(advertised, transient_addr)
+                        InventoryChange::new_available_multi(advertised, transient_addr)
                     {
                         // Ignore channel errors that should only happen during shutdown.
                         let _ = inv_collector.send(change);
@@ -1045,6 +1045,11 @@ async fn register_inventory_status(
         }
 
         (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
+            // Ignore Errors and the unsupported FilteredBlock type
+            let missing = missing.iter().filter(|missing| {
+                missing.unmined_tx_id().is_some() || missing.block_hash().is_some()
+            });
+
             debug!(?missing, "registering missing inventory for peer");
 
             if let Some(change) = InventoryChange::new_missing_multi(missing, transient_addr) {
