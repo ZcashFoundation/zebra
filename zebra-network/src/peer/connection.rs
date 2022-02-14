@@ -286,10 +286,14 @@ impl Handler {
                     // when the response for the second request arrives.
                     //
                     // Ignoring the message gives us a chance to synchronize back to the correct
-                    // request.
+                    // request. If that doesn't happen, this request times out.
                     //
-                    // Peers can avoid these cascading errors by sending an explicit `notfound`.
-                    // Zebra sends `notfound`, but `zcashd` doesn't.
+                    // In case 2, if peers respond with a `notfound` message,
+                    // the cascading errors don't happen. The `notfound` message cancels our request,
+                    // and we know we are in sync with the peer.
+                    //
+                    // Zebra sends `notfound` in response to block requests, but `zcashd` doesn't.
+                    // So we need this message workaround, and the related inventory workarounds.
                     ignored_msg = Some(Message::Block(block));
                 }
 
