@@ -9,7 +9,14 @@ use serde::{de, Deserialize, Deserializer};
 
 use zebra_chain::parameters::Network;
 
-use crate::{constants, protocol::external::canonical_socket_addr, BoxError};
+use crate::{
+    constants::{
+        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
+        OUTBOUND_PEER_LIMIT_MULTIPLIER,
+    },
+    protocol::external::canonical_socket_addr,
+    BoxError,
+};
 
 #[cfg(test)]
 mod tests;
@@ -82,21 +89,41 @@ impl Config {
     ///
     /// # Security
     ///
-    /// This is larger than the inbound connection limit,
-    /// so Zebra is more likely to be connected to peers that it has selected.
+    /// See the note at [`INBOUND_PEER_LIMIT_MULTIPLIER`].
+    ///
+    /// # Performance
+    ///
+    /// Zebra's peer set should be limited to a reasonable size,
+    /// to avoid queueing too many in-flight block downloads.
+    /// A large queue of in-flight block downloads can choke a
+    /// constrained local network connection.
+    ///
+    /// We assume that Zebra nodes have at least 10 Mbps bandwidth.
+    /// Therefore, a maximum-sized block can take up to 2 seconds to
+    /// download. So the initial outbound peer set adds up to 100 seconds worth
+    /// of blocks to the queue. If Zebra has reached its outbound peer limit,
+    /// that adds an extra 200 seconds of queued blocks.
+    ///
+    /// But the peer set for slow nodes is typically much smaller, due to
+    /// the handshake RTT timeout. And Zebra responds to inbound request
+    /// overloads by dropping peer connections.
     pub fn peerset_outbound_connection_limit(&self) -> usize {
-        let inbound_limit = self.peerset_inbound_connection_limit();
-
-        inbound_limit + inbound_limit / constants::OUTBOUND_PEER_BIAS_DENOMINATOR
+        self.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER
     }
 
     /// The maximum number of inbound connections that Zebra will accept at the same time.
-    /// When this limit is reached, Zebra drops new inbound connections without handshaking on them.
+    /// When this limit is reached, Zebra drops new inbound connections,
+    /// without handshaking on them.
+    ///
+    /// # Security
+    ///
+    /// See the note at [`INBOUND_PEER_LIMIT_MULTIPLIER`].
     pub fn peerset_inbound_connection_limit(&self) -> usize {
-        self.peerset_initial_target_size
+        self.peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER
     }
 
-    /// The maximum number of inbound and outbound connections that Zebra will have at the same time.
+    /// The maximum number of inbound and outbound connections that Zebra will have
+    /// at the same time.
     pub fn peerset_total_connection_limit(&self) -> usize {
         self.peerset_outbound_connection_limit() + self.peerset_inbound_connection_limit()
     }
@@ -249,20 +276,14 @@ impl Default for Config {
             initial_testnet_peers: testnet_peers,
             crawl_new_peer_interval: constants::DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
+            // # Security
+            //
             // The default peerset target size should be large enough to ensure
-            // nodes have a reliable set of peers. But it should also be limited
-            // to a reasonable size, to avoid queueing too many in-flight block
-            // downloads. A large queue of in-flight block downloads can choke a
-            // constrained local network connection.
+            // nodes have a reliable set of peers.
             //
-            // We assume that Zebra nodes have at least 10 Mbps bandwidth.
-            // Therefore, a maximum-sized block can take up to 2 seconds to
-            // download. So a full default peer set adds up to 100 seconds worth
-            // of blocks to the queue.
-            //
-            // But the peer set for slow nodes is typically much smaller, due to
-            // the handshake RTT timeout.
-            peerset_initial_target_size: 50,
+            // But Zebra should only make a small number of initial outbound connections,
+            // so that idle peers don't use too many connection slots.
+            peerset_initial_target_size: 25,
         }
     }
 }

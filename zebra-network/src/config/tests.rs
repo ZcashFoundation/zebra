@@ -1,7 +1,14 @@
-use super::Config;
+//! Fixed test vectors for zebra-network configuration.
+
+use crate::{
+    constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    Config,
+};
 
 #[test]
 fn parse_config_listen_addr() {
+    zebra_test::init();
+
     let fixtures = vec![
         ("listen_addr = '0.0.0.0'", "0.0.0.0:8233"),
         ("listen_addr = '0.0.0.0:9999'", "0.0.0.0:9999"),
@@ -19,4 +26,23 @@ fn parse_config_listen_addr() {
         let config: Config = toml::from_str(config).unwrap();
         assert_eq!(config.listen_addr.to_string(), value);
     }
+}
+
+/// Make sure the peer connection limits are consistent with each other.
+#[test]
+fn ensure_peer_connection_limits_consistent() {
+    zebra_test::init();
+
+    assert!(
+        INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER,
+        "constants should allow more inbound connections, to avoid connection exhaustion"
+    );
+
+    let config = Config::default();
+
+    assert!(
+        config.peerset_inbound_connection_limit() - config.peerset_outbound_connection_limit()
+            >= 50,
+        "default config should allow more inbound connections, to avoid connection exhaustion"
+    );
 }
