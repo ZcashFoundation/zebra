@@ -1,5 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
+use static_assertions::const_assert;
+
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
     Config,
@@ -33,17 +35,14 @@ fn parse_config_listen_addr() {
 fn ensure_peer_connection_limits_consistent() {
     zebra_test::init();
 
-    #[allow(clippy::assertions_on_constants)]
-    assert!(
-        INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER,
-        "constants should allow more inbound connections, to avoid connection exhaustion"
-    );
+    // Zebra should allow more inbound connections, to avoid connection exhaustion
+    const_assert!(INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER);
 
     let config = Config::default();
 
     assert!(
         config.peerset_inbound_connection_limit() - config.peerset_outbound_connection_limit()
             >= 50,
-        "default config should allow more inbound connections, to avoid connection exhaustion"
+        "default config should allow more inbound connections, to avoid connection exhaustion",
     );
 }

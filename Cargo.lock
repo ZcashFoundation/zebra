@@ -5609,6 +5609,7 @@ dependencies = [
  "rand 0.8.4",
  "regex",
  "serde",
+ "static_assertions",
  "thiserror",
  "tokio",
  "tokio-stream",
