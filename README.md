@@ -82,8 +82,6 @@ The goals of the beta release series are for Zebra to act as a fully validating 
 for all active consensus rules as of NU5 activation.
 
 Currently, Zebra validates all of the documented Zcash consensus rules, but it may not validate any:
-
-#### Other
 - Undocumented rules derived from Bitcoin
 - Undocumented network protocol requirements
 
@@ -191,19 +189,18 @@ If you forcibly terminate it, or it panics, any incomplete changes will be rolle
 
 ## Future Work
 
-In 2021, we intend to finish NU5 validation, start adding RPC support and start adding wallet integrations.
+In 2022, we intend to start adding RPC support and start adding wallet integrations.
 This phased approach allows us to test Zebra's independent implementation of the
 consensus rules, before asking users to entrust it with their funds.
 
 Features:
-- Full consensus rule validation
-- Wallet functionality
 - RPC functionality
+- Wallet functionality
 
 Performance and Reliability:
 - Reliable syncing on Testnet
 - Reliable syncing under poor network conditions
-- Batch verification
+- Additional batch verification
 - Performance tuning
 
 Currently, the following features are out of scope:
