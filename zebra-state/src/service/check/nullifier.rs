@@ -68,6 +68,12 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// > even if they have the same bit pattern.
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+///
+/// We comply with the "disjoint" rule by storing the nullifiers for each
+/// pool in separate sets (also with different types), so that even if
+/// different pools have nullifiers with same bit pattern, they won't be
+/// considered the same when determining uniqueness. This is enforced by the
+/// callers of this function.
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
     chain_nullifiers: &mut HashSet<NullifierT>,
