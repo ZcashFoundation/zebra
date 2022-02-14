@@ -12,7 +12,7 @@ on:
   pull_request:
     branches:
       - main
-    path:
+    paths:
       - '**/*.rs'
       - '**/*.txt'
       - '**/Cargo.toml'

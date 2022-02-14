@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    path-ignore:
+    paths-ignore:
       - '**/*.rs'
       - '**/*.txt'
       - '**/Cargo.toml'

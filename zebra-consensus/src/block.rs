@@ -153,8 +153,8 @@ where
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
 
-            // TODO: support block heights up to u32::MAX (#1113)
-            // In practice, these blocks are invalid anyway, because their parent block doesn't exist.
+            // Zebra does not support heights greater than
+            // [`block::Height::MAX`].
             if height > block::Height::MAX {
                 Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
             }

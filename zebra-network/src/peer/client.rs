@@ -1,3 +1,5 @@
+//! Handles outbound requests from our node to the network.
+
 use std::{
     future::Future,
     pin::Pin,

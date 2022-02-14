@@ -6,7 +6,6 @@ queue_rules:
       - check-success=Test (+stable) on ubuntu-latest
       - check-success=Test (+stable) on macOS-latest
       - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
       - check-success=Coverage (+nightly)
 
   - name: medium
@@ -16,7 +15,6 @@ queue_rules:
       - check-success=Test (+stable) on ubuntu-latest
       - check-success=Test (+stable) on macOS-latest
       - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
       - check-success=Coverage (+nightly)
 
   - name: low
@@ -26,7 +24,6 @@ queue_rules:
       - check-success=Test (+stable) on ubuntu-latest
       - check-success=Test (+stable) on macOS-latest
       - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
       - check-success=Coverage (+nightly)
 
 pull_request_rules:

@@ -1,3 +1,5 @@
+//! Sapling prop tests.
+
 use proptest::prelude::*;
 
 use crate::{
@@ -120,7 +122,7 @@ proptest! {
         let tx = Transaction::V4 {
             inputs: Vec::new(),
             outputs: Vec::new(),
-            lock_time: LockTime::min_lock_time(),
+            lock_time: LockTime::min_lock_time_timestamp(),
             expiry_height: block::Height(0),
             joinsplit_data: None,
             sapling_shielded_data: Some(shielded_v4),
@@ -182,7 +184,7 @@ proptest! {
         let tx = Transaction::V4 {
             inputs: Vec::new(),
             outputs: Vec::new(),
-            lock_time: LockTime::min_lock_time(),
+            lock_time: LockTime::min_lock_time_timestamp(),
             expiry_height: block::Height(0),
             joinsplit_data: None,
             sapling_shielded_data: Some(shielded_v4),
