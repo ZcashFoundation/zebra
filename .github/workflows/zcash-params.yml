@@ -35,7 +35,7 @@ jobs:
     # Setup gcloud CLI
     - name: Authenticate to Google Cloud
       id: auth
-      uses: google-github-actions/auth@v0.5.0
+      uses: google-github-actions/auth@v0.6.0
       with:
         credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
@@ -53,7 +53,7 @@ jobs:
     # Build and push image to Google Artifact Registry
     - name: Build & push
       id: docker_build
-      uses: docker/build-push-action@v2.8.0
+      uses: docker/build-push-action@v2.9.0
       with:
         target: builder
         context: .
