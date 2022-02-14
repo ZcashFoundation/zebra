@@ -223,6 +223,10 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
+      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP don't have a workaround for this without requiring a TTY
+      # This TODO relates to the following issues:
+      # https://github.com/actions/runner/issues/241
+      # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
         if: steps.create-instance.outcome == 'success'
@@ -238,7 +242,6 @@ jobs:
 
       - name: Regenerate stateful disks
         id: sync-to-checkpoint
-        if: steps.create-instance.outcome == 'success'
         run: |
           gcloud compute ssh \
           zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
@@ -317,8 +320,8 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       # Creates Compute Engine virtual machine instance w/ disks
-      - name: Sync past mandatory checkpoint
-        id: sync-past-checkpoint
+      - name: Create GCP compute instance
+        id: create-instance
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
@@ -346,6 +349,10 @@ jobs:
         env:
           DISK_SHORT_SHA: ${{ steps.get-disk-sha.outputs.sha }}
 
+      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP don't have a workaround for this without requiring a TTY
+      # This TODO relates to the following issues:
+      # https://github.com/actions/runner/issues/241
+      # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
         if: steps.create-instance.outcome == 'success'
@@ -359,9 +366,8 @@ jobs:
           CONTAINER_NAME=$(gcloud logging read 'logName=projects/${{ env.PROJECT_ID }}/logs/cos_containers AND jsonPayload."cos.googleapis.com/container_name":zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format="value(jsonPayload.'cos.googleapis.com/container_name')" --limit=1)
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
 
-      - name: Regenerate stateful disks
+      - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
-        if: steps.create-instance.outcome == 'success'
         run: |
           gcloud compute ssh \
           zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
