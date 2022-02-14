@@ -33,6 +33,7 @@ fn parse_config_listen_addr() {
 fn ensure_peer_connection_limits_consistent() {
     zebra_test::init();
 
+    #[allow(clippy::assertions_on_constants)]
     assert!(
         INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER,
         "constants should allow more inbound connections, to avoid connection exhaustion"
