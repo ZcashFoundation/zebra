@@ -124,7 +124,7 @@ The *latest* [GitHub Runners](https://docs.github.com/en/actions/using-github-ho
 - Ubuntu
 
 Docker:
-- Debian Buster
+- Debian Bullseye
 
 Zebra's tests can take over an hour, depending on your machine.
 We're working on making them faster.
