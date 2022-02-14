@@ -1,3 +1,5 @@
+//! Peer-related errors.
+
 use std::{borrow::Cow, sync::Arc};
 
 use thiserror::Error;
