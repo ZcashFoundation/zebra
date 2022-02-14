@@ -322,6 +322,10 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
+                    let tx = tx.available().expect(
+                        "unexpected missing tx status: single tx failures should be errors",
+                    );
+
                     metrics::counter!(
                         "mempool.downloaded.transactions.total",
                         1,

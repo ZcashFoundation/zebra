@@ -365,6 +365,11 @@ impl MetaAddr {
         MetaAddr::new_errored(addr, services.into())
     }
 
+    /// Return the address for this `MetaAddr`.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
     /// Returns the time of the last successful interaction with this peer.
     ///
     /// Initially set to the unverified "last seen time" gossiped by the remote
@@ -612,7 +617,7 @@ impl MetaAddr {
 impl MetaAddr {
     /// Forcefully change the time this peer last responded.
     ///
-    /// This method is for test-purposes only.
+    /// This method is for testing purposes only.
     pub(crate) fn set_last_response(&mut self, last_response: DateTime32) {
         self.last_response = Some(last_response);
     }

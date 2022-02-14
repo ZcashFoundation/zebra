@@ -731,9 +731,28 @@ where
                 ));
             }
 
-            // Consensus rule: The joinSplitSig MUST represent a
-            // valid signature, under joinSplitPubKey, of the
-            // sighash.
+            // # Consensus
+            //
+            // > If effectiveVersion ≥ 2 and nJoinSplit > 0, then:
+            // > - joinSplitPubKey MUST be a valid encoding of an Ed25519 validating key
+            // > - joinSplitSig MUST represent a valid signature under
+            //     joinSplitPubKey of dataToBeSigned, as defined in § 4.11
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // The `if` part is indirectly enforced, since the `joinsplit_data`
+            // is only parsed if those conditions apply in
+            // [`Transaction::zcash_deserialize`].
+            //
+            // The valid encoding is defined in
+            //
+            // > A valid Ed25519 validating key is defined as a sequence of 32
+            // > bytes encoding a point on the Ed25519 curve
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#concreteed25519
+            //
+            // which is enforced during signature verification, in both batched
+            // and single verification, when decompressing the encoded point.
             //
             // Queue the validation of the JoinSplit signature while
             // adding the resulting future to our collection of
@@ -835,6 +854,36 @@ where
                 );
             }
 
+            // # Consensus
+            //
+            // > The Spend transfers and Action transfers of a transaction MUST be
+            // > consistent with its vbalanceSapling value as specified in § 4.13
+            // > ‘Balance and Binding Signature (Sapling)’.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
+            //
+            // > [Sapling onward] If effectiveVersion ≥ 4 and
+            // > nSpendsSapling + nOutputsSapling > 0, then:
+            // > – let bvk^{Sapling} and SigHash be as defined in § 4.13;
+            // > – bindingSigSapling MUST represent a valid signature under the
+            // >   transaction binding validating key bvk Sapling of SigHash —
+            // >   i.e. BindingSig^{Sapling}.Validate_{bvk^{Sapling}}(SigHash, bindingSigSapling ) = 1.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // This is validated by the verifier. The `if` part is indirectly
+            // enforced, since the `sapling_shielded_data` is only parsed if those
+            // conditions apply in [`Transaction::zcash_deserialize`].
+            //
+            // >   [NU5 onward] As specified in § 5.4.7, the validation of the 𝑅 component
+            // >   of the signature changes to prohibit non-canonical encodings.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // This is validated by the verifier, inside the `redjubjub` crate.
+            // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
+            // that enforces the canonical encoding.
+
             let bvk = sapling_shielded_data.binding_verification_key();
 
             async_checks.push(
@@ -893,11 +942,32 @@ where
 
             // # Consensus
             //
-            // > The Spend transfers and Action transfers of a transaction MUST be
-            // > consistent with its vbalanceSapling value as specified in § 4.13
-            // > ‘Balance and Binding Signature (Sapling)’ on p. 49.
+            // > The Action transfers of a transaction MUST be consistent with
+            // > its v balanceOrchard value as specified in § 4.14.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+            // https://zips.z.cash/protocol/protocol.pdf#actions
+            //
+            // > [NU5 onward] If effectiveVersion ≥ 5 and nActionsOrchard > 0, then:
+            // > – let bvk^{Orchard} and SigHash be as defined in § 4.14;
+            // > – bindingSigOrchard MUST represent a valid signature under the
+            // >   transaction binding validating key bvk^{Orchard} of SigHash —
+            // >   i.e. BindingSig^{Orchard}.Validate_{bvk^{Orchard}}(SigHash, bindingSigOrchard) = 1.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // This is validated by the verifier. The `if` part is indirectly
+            // enforced, since the `orchard_shielded_data` is only parsed if those
+            // conditions apply in [`Transaction::zcash_deserialize`].
+            //
+            // >   As specified in § 5.4.7, validation of the 𝑅 component of the signature
+            // >   prohibits non-canonical encodings.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // This is validated by the verifier, inside the `redpallas` crate.
+            // It calls [`pallas::Affine::from_bytes`] to parse R and
+            // that enforces the canonical encoding.
+
             async_checks.push(
                 primitives::redpallas::VERIFIER
                     .clone()
