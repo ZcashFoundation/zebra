@@ -592,17 +592,21 @@ where
         .next()
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
-    debug!(?remote_msg, "got message from remote peer");
 
-    // Wait for next message if the one we have is not Version
-    match remote_msg {
-        Message::Version { .. } => (),
-        _ => {
-            remote_msg = peer_conn
-                .next()
-                .await
-                .ok_or(HandshakeError::ConnectionClosed)??;
-            debug!(?remote_msg, "got message from remote peer");
+    // Wait for next message if the one we got is not Version
+    loop {
+        match remote_msg {
+            Message::Version { .. } => {
+                debug!(?remote_msg, "got version message from remote peer");
+                break;
+            }
+            _ => {
+                remote_msg = peer_conn
+                    .next()
+                    .await
+                    .ok_or(HandshakeError::ConnectionClosed)??;
+                debug!("ignoring non-version message from remote peer");
+            }
         }
     }
 
@@ -712,14 +716,26 @@ where
 
     peer_conn.send(Message::Verack).await?;
 
-    let remote_msg = peer_conn
+    let mut remote_msg = peer_conn
         .next()
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
-    if let Message::Verack = remote_msg {
-        debug!("got verack message from remote peer");
-    } else {
-        debug!("ignoring non-verack message from remote peer");
+
+    // Wait for next message if the one we got is not Verack
+    loop {
+        match remote_msg {
+            Message::Verack => {
+                debug!(?remote_msg, "got verack message from remote peer");
+                break;
+            }
+            _ => {
+                remote_msg = peer_conn
+                    .next()
+                    .await
+                    .ok_or(HandshakeError::ConnectionClosed)??;
+                debug!("ignoring non-verack message from remote peer");
+            }
+        }
     }
 
     Ok((remote_version, remote_services, remote_canonical_addr))
