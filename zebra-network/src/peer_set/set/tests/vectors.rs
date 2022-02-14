@@ -255,7 +255,7 @@ fn peer_set_route_inv_advertised_registry_order(advertised_first: bool) {
     .parse()
     .expect("unexpected invalid peer address");
 
-    let test_change = InventoryStatus::new_advertised(test_inv, test_peer);
+    let test_change = InventoryStatus::new_available(test_inv, test_peer);
 
     // Use two peers with the same version
     let peer_version = Version::min_specified_for_upgrade(Network::Mainnet, NetworkUpgrade::Canopy);
