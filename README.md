@@ -113,7 +113,7 @@ For more detailed instructions, refer to the [documentation](https://zebra.zfnd.
 The recommended requirements for compiling and running `zebrad` are:
 - 4+ CPU cores
 - 16+ GB RAM
-- 50GB+ available disk space for finalized state
+- 50GB+ available disk space for building binaries and storing finalized state
 - 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
@@ -175,6 +175,23 @@ You can set `ZEBRA_SKIP_NETWORK_TESTS=1` to skip the network tests.
 Zebra may be unreliable on Testnet, and under less-than-perfect network conditions.
 See our [roadmap](#future-work) for details.
 
+### Disk Usage
+
+Zebra uses up to 40 GB of space for cached mainnet data,
+and 10 GB of space for cached testnet data.
+
+RocksDB cleans up outdated data periodically,
+and when the database is closed and re-opened.
+
+#### Disk Troubleshooting
+
+Zebra's state commits changes using RocksDB database transactions.
+
+If you forcibly terminate Zebra, or it panics,
+any incomplete changes will be rolled back the next time it starts.
+
+So Zebra's state should always be valid, unless your OS or disk hardware is corrupting data.
+
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
@@ -183,9 +200,6 @@ There are a few bugs in Zebra that we're still working on fixing:
   - These panics can be ignored, unless they happen frequently
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
-
-Zebra's state commits changes using database transactions.
-If you forcibly terminate it, or it panics, any incomplete changes will be rolled back the next time it starts.
 
 ## Future Work
 
