@@ -27,7 +27,7 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -729,6 +729,10 @@ const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
+/// The text that should be logged when synchronization finishes and reaches the estimated chain
+/// tip.
+const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip";
+
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
@@ -879,6 +883,54 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
+}
+
+/// Test if `zebrad` can fully sync the chain on mainnet.
+///
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_mainnet() {
+    assert!(full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").is_ok());
+}
+
+/// Test if `zebrad` can fully sync the chain on testnet.
+///
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_testnet() {
+    assert!(full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").is_ok());
+}
+
+/// Sync `network` until the chain tip is reached, or a timeout elapses.
+///
+/// The timeout is specified using an environment variable, with the name configured by the
+/// `timeout_argument_name` parameter. The value of the environment variable must the number of
+/// minutes specified as an integer.
+fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Result<()> {
+    let timeout_argument: Option<u64> = env::var(timeout_argument_name)
+        .ok()
+        .and_then(|timeout_string| timeout_string.parse().ok());
+
+    if let Some(timeout_minutes) = timeout_argument {
+        sync_until(
+            Height::MAX,
+            network,
+            SYNC_FINISHED_REGEX,
+            Duration::from_secs(60 * timeout_minutes),
+            None,
+            true,
+            MempoolBehavior::ShouldAutomaticallyActivate,
+        )
+        .map(|_| ())
+    } else {
+        Ok(())
+    }
 }
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
