@@ -89,7 +89,7 @@ pub struct Position(pub(crate) u64);
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Eq, Serialize, Deserialize)]
 pub struct Root(#[serde(with = "serde_helpers::Fq")] pub(crate) jubjub::Base);
 
 impl fmt::Debug for Root {
@@ -109,6 +109,12 @@ impl From<Root> for [u8; 32] {
 impl From<&Root> for [u8; 32] {
     fn from(root: &Root) -> Self {
         (*root).into()
+    }
+}
+
+impl PartialEq for Root {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
