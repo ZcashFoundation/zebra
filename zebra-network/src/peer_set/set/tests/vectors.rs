@@ -542,7 +542,7 @@ fn peer_set_route_inv_all_missing_fail() {
                 .downcast_ref::<SharedPeerError>()
                 .expect("peer set should return a boxed SharedPeerError")
                 .inner_debug(),
-            "NotFound([Block(block::Hash(\"0000000000000000000000000000000000000000000000000000000000000000\"))])"
+            "NotFoundRegistry([Block(block::Hash(\"0000000000000000000000000000000000000000000000000000000000000000\"))])"
         );
     });
 }

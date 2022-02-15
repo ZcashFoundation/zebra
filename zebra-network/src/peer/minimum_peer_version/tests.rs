@@ -1,5 +1,7 @@
 //! Test utilities and tests for minimum network peer version requirements.
 
+#![cfg_attr(feature = "proptest-impl", allow(dead_code))]
+
 use zebra_chain::{
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     parameters::Network,

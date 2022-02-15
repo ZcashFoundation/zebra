@@ -1,7 +1,3 @@
-#![allow(clippy::unit_arg)]
-
-use crate::constants::{self, magics};
-
 use std::{cmp::max, fmt};
 
 use zebra_chain::{
@@ -12,7 +8,9 @@ use zebra_chain::{
     },
 };
 
-#[cfg(test)]
+use crate::constants::{self, magics};
+
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 /// A magic number identifying the network.
