@@ -834,9 +834,13 @@ where
             }
 
             for output in sapling_shielded_data.outputs() {
-                // Consensus rule: The proof π_ZKOutput MUST be
-                // valid given a primary input formed from the other
-                // fields except C^enc and C^out.
+                // # Consensus
+                //
+                // > The proof π_ZKOutput MUST be
+                // > valid given a primary input formed from the other
+                // > fields except C^enc and C^out.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
                 //
                 // Queue the verification of the Groth16 output
                 // proof for each Output description while adding
