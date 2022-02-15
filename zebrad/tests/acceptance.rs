@@ -951,19 +951,31 @@ fn sync_until(
 
     child.expect_stdout_line_matches(stop_regex)?;
 
-    // make sure there is never a mempool if we don't explicitly enable it
-    if enable_mempool_at_height.is_none() {
+    // make sure mempool behaves as expected when we don't explicitly enable it
+    if !mempool_behavior.is_forced_activation() {
         // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
         // the error is delayed until the test timeout, or until the child reaches the stop height and exits.
         let mempool_is_activated = child
             .expect_stdout_line_matches("activating mempool")
             .is_ok();
 
-        // if there is a matching line, we panic and kill the test process.
-        // but we also need to kill the `zebrad` child before the test panics.
-        if mempool_is_activated {
+        let mempool_check = match mempool_behavior {
+            MempoolBehavior::ShouldAutomaticallyActivate if !mempool_is_activated => {
+                Some("mempool did not activate as expected")
+            }
+            MempoolBehavior::ShouldNotActivate if mempool_is_activated => Some(
+                "unexpected mempool activation: \
+                mempool should not activate while syncing lots of blocks",
+            ),
+            MempoolBehavior::ForceActivationAt(_) => unreachable!("checked by outer if condition"),
+            _ => None,
+        };
+
+        if let Some(error) = mempool_check {
+            // if the mempool does not behave as expected, we panic and kill the test process.
+            // but we also need to kill the `zebrad` child before the test panics.
             child.kill()?;
-            panic!("unexpected mempool activation: mempool should not activate while syncing lots of blocks")
+            panic!("{error}")
         }
     }
 
@@ -1486,6 +1498,9 @@ enum MempoolBehavior {
     /// The mempool should be forced to activate at a certain height, for debug purposes.
     ForceActivationAt(Height),
 
+    /// The mempool should be automatically activated.
+    ShouldAutomaticallyActivate,
+
     /// The mempool should not become active during the test.
     ShouldNotActivate,
 }
@@ -1495,7 +1510,9 @@ impl MempoolBehavior {
     pub fn enable_at_height(&self) -> Option<u32> {
         match self {
             MempoolBehavior::ForceActivationAt(height) => Some(height.0),
-            MempoolBehavior::ShouldNotActivate => None,
+            MempoolBehavior::ShouldAutomaticallyActivate | MempoolBehavior::ShouldNotActivate => {
+                None
+            }
         }
     }
 
