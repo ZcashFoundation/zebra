@@ -542,7 +542,7 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
         )
     };
 
-    // Now send the same request to the  peer set,
+    // Now send another request to the peer set with only the missing transaction,
     // but expect a local failure from the inventory registry.
     //
     // The peer set only does routing for single-transaction requests.
