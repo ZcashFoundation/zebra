@@ -199,7 +199,6 @@ where
         // TODO: use TransferData::shared_anchor to improve performance for V5 transactions
         self.spends_per_anchor()
             .map(|spend| spend.per_spend_anchor)
-            .sorted()
             .dedup()
     }
 

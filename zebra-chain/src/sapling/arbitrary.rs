@@ -125,7 +125,10 @@ impl Arbitrary for tree::Root {
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                jubjub::Fq::from_bytes_wide(&bytes).to_bytes().into()
+                jubjub::Fq::from_bytes_wide(&bytes)
+                    .to_bytes()
+                    .try_into()
+                    .expect("bytes are always valid")
             })
             .boxed()
     }

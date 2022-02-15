@@ -48,7 +48,7 @@ fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -
 
     // Build initial MMR tree with only Block 0
     let sapling_root0 =
-        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+        sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let (mut tree, _) =
         Tree::<V1>::new_from_block(network, block0, &sapling_root0, &Default::default())?;
 
@@ -69,11 +69,11 @@ fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -
     assert_eq!(commitment1, Commitment::ChainHistoryRoot(hash0));
 
     // Append Block to MMR tree
-    let sapling_root1 = sapling::tree::Root(
+    let sapling_root1 = sapling::tree::Root::try_from(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
-    );
+    )?;
     let append = tree
         .append_leaf(block1, &sapling_root1, &Default::default())
         .unwrap();

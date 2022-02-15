@@ -237,7 +237,7 @@ fn block_commitment(network: Network) {
                 .expect("unexpected missing final sapling root test vector");
             assert_eq!(
                 final_sapling_root,
-                expected_final_sapling_root.into(),
+                crate::sapling::tree::Root::try_from(*expected_final_sapling_root).unwrap(),
                 "unexpected invalid final sapling root commitment at {} {}",
                 network,
                 height

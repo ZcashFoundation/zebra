@@ -13,7 +13,12 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use std::{cell::Cell, fmt};
+use std::{
+    cell::Cell,
+    fmt,
+    hash::{Hash, Hasher},
+    io,
+};
 
 use bitvec::prelude::*;
 use incrementalmerkletree::{bridgetree, Frontier};
@@ -22,6 +27,9 @@ use thiserror::Error;
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 
+use crate::serialization::{
+    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+};
 pub(super) const MERKLE_DEPTH: usize = 32;
 
 /// MerkleCRH^Sapling Hash Function
@@ -81,36 +89,62 @@ pub struct Position(pub(crate) u64);
 /// commitment tree corresponding to the final Sapling treestate of
 /// this block. A root of a note commitment tree is associated with
 /// each treestate.
-#[derive(Clone, Copy, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct Root(pub [u8; 32]);
+#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Root(#[serde(with = "serde_helpers::Fq")] pub(crate) jubjub::Base);
 
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
-    }
-}
-
-impl From<[u8; 32]> for Root {
-    fn from(bytes: [u8; 32]) -> Root {
-        Self(bytes)
+        f.debug_tuple("Root")
+            .field(&hex::encode(&self.0.to_bytes()))
+            .finish()
     }
 }
 
 impl From<Root> for [u8; 32] {
     fn from(root: Root) -> Self {
-        root.0
-    }
-}
-
-impl From<&[u8; 32]> for Root {
-    fn from(bytes: &[u8; 32]) -> Root {
-        (*bytes).into()
+        root.0.to_bytes()
     }
 }
 
 impl From<&Root> for [u8; 32] {
     fn from(root: &Root) -> Self {
         (*root).into()
+    }
+}
+
+impl Hash for Root {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bytes().hash(state)
+    }
+}
+
+impl TryFrom<[u8; 32]> for Root {
+    type Error = SerializationError;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let possible_point = jubjub::Base::from_bytes(&bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(possible_point.unwrap()))
+        } else {
+            Err(SerializationError::Parse(
+                "Invalid jubjub::Base value for Sapling note commitment tree root",
+            ))
+        }
+    }
+}
+
+impl ZcashSerialize for Root {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Root {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Self::try_from(reader.read_32_bytes()?)
     }
 }
 
@@ -241,7 +275,7 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it
-                let root = Root(self.inner.root().0);
+                let root = Root::try_from(self.inner.root().0).unwrap();
                 self.cached_root.replace(Some(root));
                 root
             }
