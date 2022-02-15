@@ -1420,10 +1420,10 @@ where
     U: ZebradTestDirExt,
 {
     // Start the first node
-    let node1 = first_dir.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(&["start"])?;
 
-    // Wait a bit to spawn the second node, we want the first fully started.
-    std::thread::sleep(LAUNCH_DELAY);
+    // Wait until node1 has used the conflicting resource.
+    node1.expect_stdout_line_matches(first_stdout_regex)?;
 
     // Spawn the second node
     let node2 = second_dir.spawn_child(&["start"]);
@@ -1433,14 +1433,7 @@ where
     // Second node is terminated by panic, no need to kill.
     std::thread::sleep(LAUNCH_DELAY);
     let node1_kill_res = node1.kill();
-    let (_, node2) = node2.kill_on_error(node1_kill_res)?;
-
-    // In node1 we want to check for the success regex
-    // If there are any errors, we also want to print the node2 output.
-    let output1 = node1.wait_with_output();
-    // This mut is only used on some platforms, due to #1781.
-    #[allow(unused_mut)]
-    let (output1, mut node2) = node2.kill_on_error(output1)?;
+    let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
 
     // node2 should have panicked due to a conflict. Kill it here anyway, so it
     // doesn't outlive the test on error.
@@ -1455,22 +1448,21 @@ where
             .kill_on_error::<(), _>(Err(eyre!(
                 "conflicted node2 was still running, but the test expected a panic"
             )))
-            .context_from(&output1)
+            .context_from(&mut node1)
             .map(|_| ());
     }
+
     // Now we're sure both nodes are dead, and we have both their outputs
+    let output1 = node1.wait_with_output().context_from(&mut node2)?;
     let output2 = node2.wait_with_output().context_from(&output1)?;
 
-    // Look for the success regex
-    output1
-        .stdout_line_matches(first_stdout_regex)
-        .context_from(&output2)?;
+    // Make sure the first node was killed, rather than exiting with an error.
     output1
         .assert_was_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
         .context_from(&output2)?;
 
-    // In the second node we look for the conflict regex
+    // Make sure node2 has the expected resource conflict.
     output2
         .stderr_line_matches(second_stderr_regex)
         .context_from(&output1)?;
