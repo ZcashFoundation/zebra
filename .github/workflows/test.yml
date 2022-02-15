@@ -29,7 +29,7 @@ env:
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   ZONE: us-central1-a
-  MACHINE_TYPE: c2-standard-4
+  MACHINE_TYPE: c2-standard-8
   IMAGE_NAME: zebrad-test
 
 jobs:
@@ -247,6 +247,7 @@ jobs:
           zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
           --container=${{ env.ZEBRA_CONTAINER }} \
           --command="cargo test --locked --release --verbose --features enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.lower_net_name }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ env.lower_net_name }}"
         env:
@@ -373,6 +374,7 @@ jobs:
           zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
           --container=${{ env.ZEBRA_CONTAINER }} \
           --command="cargo test --locked --release --verbose --features enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.lower_net_name }} --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_${{ env.lower_net_name }}"
         env:
