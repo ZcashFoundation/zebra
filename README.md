@@ -81,11 +81,12 @@ and Zebra implements all the features required to reach Zcash network consensus.
 The goals of the beta release series are for Zebra to act as a fully validating Zcash node,
 for all active consensus rules as of NU5 activation.
 
-Currently, Zebra validates all of the documented Zcash consensus rules, but it may not validate any:
+Zebra currently validates all Zcash consensus rules except [this
+check](https://github.com/ZcashFoundation/zebra/issues/3528). Note that it may
+not validate any
 
-#### Other
-- Undocumented rules derived from Bitcoin
-- Undocumented network protocol requirements
+- undocumented rules derived from Bitcoin, or
+- undocumented network protocol requirements.
 
 ## Getting Started
 
@@ -102,7 +103,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.4 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.5 zebrad`
 4. Run `zebrad start` (see [Running Zebra](user/run.md) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -181,8 +182,8 @@ See our [roadmap](#future-work) for details.
 
 There are a few bugs in Zebra that we're still working on fixing:
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
-  - For examples, see [#2055](https://github.com/ZcashFoundation/zebra/issues/2055) and [#2209](https://github.com/ZcashFoundation/zebra/issues/2209)
-  - These panics can be ignored, unless they happen frequently
+  - See [#2209](https://github.com/ZcashFoundation/zebra/issues/2209) for an example.
+  - These panics can be ignored, unless they happen frequently.
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
 
@@ -191,12 +192,11 @@ If you forcibly terminate it, or it panics, any incomplete changes will be rolle
 
 ## Future Work
 
-In 2021, we intend to finish NU5 validation, start adding RPC support and start adding wallet integrations.
-This phased approach allows us to test Zebra's independent implementation of the
-consensus rules, before asking users to entrust it with their funds.
+In 2022, we intend to add RPC support and wallet integrations. This phased
+approach allows us to test Zebra's independent implementation of the consensus
+rules, before asking users to entrust it with their funds.
 
 Features:
-- Full consensus rule validation
 - Wallet functionality
 - RPC functionality
 
