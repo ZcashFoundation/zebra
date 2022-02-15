@@ -7,12 +7,12 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use crate::{meta_addr::MetaAddr, protocol::internal::ResponseStatus};
+use crate::{meta_addr::MetaAddr, protocol::internal::InventoryResponse};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,15 +66,15 @@ pub enum Response {
     /// When Zebra doesn't have a block or transaction, it always sends `notfound`.
     /// `zcashd` sometimes sends no response, and sometimes sends `notfound`.
     //
-    // TODO: make this into a HashMap<block::Hash, ResponseStatus<Arc<Block>, ()>> - a unique list (#2244)
-    Blocks(Vec<ResponseStatus<Arc<Block>, block::Hash>>),
+    // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
+    Blocks(Vec<InventoryResponse<Arc<Block>, block::Hash>>),
 
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
     //
-    // TODO: make this into a HashMap<UnminedTxId, ResponseStatus<UnminedTx, ()>> - a unique list (#2244)
-    Transactions(Vec<ResponseStatus<UnminedTx, UnminedTxId>>),
+    // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
+    Transactions(Vec<InventoryResponse<UnminedTx, UnminedTxId>>),
 }
 
 impl fmt::Display for Response {
@@ -135,5 +135,10 @@ impl Response {
             Response::Blocks(_) => "Blocks",
             Response::Transactions(_) => "Transactions",
         }
+    }
+
+    /// Returns true if the response is a block or transaction inventory download.
+    pub fn is_inventory_download(&self) -> bool {
+        matches!(self, Response::Blocks(_) | Response::Transactions(_))
     }
 }

@@ -150,6 +150,14 @@ mod protocol;
 #[cfg(feature = "tor")]
 pub use crate::isolated::tor::connect_isolated_tor;
 
+#[cfg(all(feature = "tor", any(test, feature = "proptest-impl")))]
+pub use crate::isolated::tor::connect_isolated_tor_with_inbound;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use crate::isolated::{
+    connect_isolated_tcp_direct_with_inbound, connect_isolated_with_inbound,
+};
+
 pub use crate::{
     address_book::AddressBook,
     config::Config,
@@ -158,10 +166,13 @@ pub use crate::{
     peer::{HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,
-    protocol::internal::{Request, Response, ResponseStatus},
+    protocol::internal::{InventoryResponse, Request, Response},
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.
 pub mod types {
     pub use crate::{meta_addr::MetaAddr, protocol::types::PeerServices};
+
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub use crate::protocol::external::InventoryHash;
 }

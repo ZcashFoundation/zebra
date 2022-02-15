@@ -10,10 +10,18 @@ use futures::future;
 use tokio::time::{timeout, Duration};
 
 use zebra_chain::parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING};
-use zebra_network::constants::{DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT};
+use zebra_network::constants::{
+    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
+};
+use zebra_state::ChainTipSender;
 
-use super::super::*;
-use crate::config::ZebradConfig;
+use crate::{
+    components::sync::{
+        ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
+        GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
+    },
+    config::ZebradConfig,
+};
 
 /// Make sure the timeout values are consistent with each other.
 #[test]
@@ -78,6 +86,20 @@ fn ensure_timeouts_consistent() {
         "a syncer tip crawl should complete before most new blocks"
     );
 
+    // This is a compromise between two failure modes:
+    // - some peers have the inventory, but they weren't ready last time we checked,
+    //   so we want to retry soon
+    // - all peers are missing the inventory, so we want to wait for a while before retrying
+    assert!(
+        INVENTORY_ROTATION_INTERVAL < SYNC_RESTART_DELAY,
+        "we should expire some inventory every time the syncer resets"
+    );
+    assert!(
+        SYNC_RESTART_DELAY < 2 * INVENTORY_ROTATION_INTERVAL,
+        "we should give the syncer at least one retry attempt, \
+         before we expire all inventory"
+    );
+
     // The default peer crawler interval should be at least
     // `HANDSHAKE_TIMEOUT` lower than all other crawler intervals.
     //
@@ -133,7 +155,7 @@ fn request_genesis_is_rate_limited() {
     });
 
     // create an empty latest chain tip
-    let (_sender, latest_chain_tip, _change) = zs::ChainTipSender::new(None, Network::Mainnet);
+    let (_sender, latest_chain_tip, _change) = ChainTipSender::new(None, Network::Mainnet);
 
     // create a verifier service that will always panic as it will never be called
     let verifier_service =

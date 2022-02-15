@@ -20,11 +20,11 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use crate::{
     peer::{connection::Connection, ClientRequest, ErrorSlot},
     protocol::external::Message,
-    protocol::internal::ResponseStatus,
+    protocol::internal::InventoryResponse,
     Request, Response, SharedPeerError,
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 proptest! {
     // The default value of proptest cases (256) causes this test to take more than ten seconds on
@@ -156,6 +156,9 @@ async fn send_block_request(
     let client_request = ClientRequest {
         request,
         tx: response_sender,
+        // we skip inventory collection in these tests
+        inv_collector: None,
+        transient_addr: None,
         span: Span::none(),
     };
 

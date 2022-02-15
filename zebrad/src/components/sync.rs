@@ -853,6 +853,8 @@ where
             BlockDownloadVerifyError::DownloadFailed(ref source)
                 if format!("{:?}", source).contains("NotFound") =>
             {
+                // Covers both NotFoundResponse and NotFoundRegistry errors.
+                //
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
