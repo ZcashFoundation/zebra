@@ -605,7 +605,7 @@ where
                     .next()
                     .await
                     .ok_or(HandshakeError::ConnectionClosed)??;
-                debug!("ignoring non-version message from remote peer");
+                debug!(?remote_msg, "ignoring non-version message from remote peer");
             }
         }
     }
@@ -733,7 +733,7 @@ where
                     .next()
                     .await
                     .ok_or(HandshakeError::ConnectionClosed)??;
-                debug!("ignoring non-verack message from remote peer");
+                debug!(?remote_msg, "ignoring non-verack message from remote peer");
             }
         }
     }
