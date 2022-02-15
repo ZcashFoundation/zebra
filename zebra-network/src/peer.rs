@@ -16,7 +16,7 @@ pub(crate) use client::tests::ReceiveRequestAttempt;
 #[cfg(test)]
 pub(crate) use handshake::register_inventory_status;
 
-use client::{ClientRequestReceiver, InProgressClientRequest, MustUseOneshotSender};
+use client::{ClientRequestReceiver, InProgressClientRequest, MustUseClientResponseSender};
 
 pub(crate) use client::{CancelHeartbeatTask, ClientRequest};
 

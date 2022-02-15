@@ -95,6 +95,11 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// specific manner that matches up with this math.
 pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 20 + 20);
 
+/// Zebra rotates its peer inventory registry every time this interval elapses.
+///
+/// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
+pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
+
 /// The default peer address crawler interval.
 ///
 /// This should be at least [`HANDSHAKE_TIMEOUT`](constants::HANDSHAKE_TIMEOUT)
@@ -309,6 +314,8 @@ mod tests {
 
     use std::convert::TryFrom;
 
+    use zebra_chain::parameters::POST_BLOSSOM_POW_TARGET_SPACING;
+
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
@@ -392,6 +399,22 @@ mod tests {
         assert!(
             MAX_ADDRS_IN_ADDRESS_BOOK < TYPICAL_MAINNET_ADDRESS_BOOK_SIZE,
             "the address book limit should actually be used"
+        );
+    }
+
+    /// Make sure inventory registry rotation is consistent with the target block interval.
+    #[test]
+    fn ensure_inventory_rotation_consistent() {
+        zebra_test::init();
+
+        assert!(
+            INVENTORY_ROTATION_INTERVAL
+                < Duration::from_secs(
+                    POST_BLOSSOM_POW_TARGET_SPACING
+                        .try_into()
+                        .expect("non-negative"),
+                ),
+            "we should expire inventory every time 1-2 new blocks get generated"
         );
     }
 }

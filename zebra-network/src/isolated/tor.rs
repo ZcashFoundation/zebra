@@ -2,13 +2,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use arti_client::{TorAddr, TorClient, TorClientConfig};
+use arti_client::{DataStream, TorAddr, TorClient, TorClientConfig};
 use tor_rtcompat::tokio::TokioRuntimeHandle;
-use tower::util::BoxService;
+use tower::{util::BoxService, Service};
 
 use zebra_chain::parameters::Network;
 
-use crate::{connect_isolated, BoxError, Request, Response};
+use crate::{connect_isolated, connect_isolated_with_inbound, BoxError, Request, Response};
 
 #[cfg(test)]
 mod tests;
@@ -45,6 +45,44 @@ pub async fn connect_isolated_tor(
     hostname: String,
     user_agent: String,
 ) -> Result<BoxService<Request, Response, BoxError>, BoxError> {
+    let tor_stream = new_tor_stream(hostname).await?;
+
+    // Calling connect_isolated_tor_with_inbound causes lifetime issues.
+    //
+    // TODO: fix the lifetime issues, and call connect_isolated_tor_with_inbound
+    //       so the behaviour of both functions is consistent.
+    connect_isolated(network, tor_stream, user_agent).await
+}
+
+/// Creates an isolated Zcash peer connection to `hostname` via Tor.
+/// This function is for testing purposes only.
+///
+/// See [`connect_isolated_with_inbound`] and [`connect_isolated_tor`] for details.
+///
+/// # Privacy
+///
+/// This function can make the isolated connection send different responses to peers,
+/// which makes it stand out from other isolated connections from other peers.
+pub async fn connect_isolated_tor_with_inbound<InboundService>(
+    network: Network,
+    hostname: String,
+    user_agent: String,
+    inbound_service: InboundService,
+) -> Result<BoxService<Request, Response, BoxError>, BoxError>
+where
+    InboundService:
+        Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    InboundService::Future: Send,
+{
+    let tor_stream = new_tor_stream(hostname).await?;
+
+    connect_isolated_with_inbound(network, tor_stream, user_agent, inbound_service).await
+}
+
+/// Creates a Zcash peer connection to `hostname` via Tor, and returns a tor stream.
+///
+/// See [`connect_isolated`] for details.
+async fn new_tor_stream(hostname: String) -> Result<DataStream, BoxError> {
     let addr = TorAddr::from(hostname)?;
 
     // Initialize or clone the shared tor client instance
@@ -55,7 +93,7 @@ pub async fn connect_isolated_tor(
 
     let tor_stream = tor_client.connect(addr, None).await?;
 
-    connect_isolated(network, tor_stream, user_agent).await
+    Ok(tor_stream)
 }
 
 /// Returns a new tor client instance, and updates [`SHARED_TOR_CLIENT`].

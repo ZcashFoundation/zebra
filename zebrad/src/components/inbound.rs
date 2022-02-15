@@ -31,7 +31,7 @@ use zebra_chain::{
 use zebra_consensus::chain::VerifyChainError;
 use zebra_network::{
     constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
-    AddressBook, ResponseStatus,
+    AddressBook, InventoryResponse,
 };
 
 // Re-use the syncer timeouts for consistency.
@@ -40,7 +40,7 @@ use super::{
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 pub(crate) mod downloads;
 
@@ -319,6 +319,9 @@ impl Service<zn::Request> for Inbound {
 
                 async move {
                     // Correctness: get the current time after acquiring the address book lock.
+                    //
+                    // This time is used to filter outdated peers, so it doesn't really matter
+                    // if we get it when the future is created, or when it starts running.
                     let now = Utc::now();
 
                     // Send a sanitized response
@@ -358,17 +361,14 @@ impl Service<zn::Request> for Inbound {
                 // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
                 use futures::stream::TryStreamExt;
                 hashes
-                    .clone()
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|hash| zs::Request::Block(hash.into()))
                     .map(|request| state.clone().oneshot(request))
                     .collect::<futures::stream::FuturesOrdered<_>>()
                     .try_filter_map(|response| async move {
                         Ok(match response {
                             zs::Response::Block(Some(block)) => Some(block),
-                            // `zcashd` ignores missing blocks in GetData responses,
-                            // rather than including them in a trailing `NotFound`
-                            // message
                             zs::Response::Block(None) => None,
                             _ => unreachable!("wrong response from state"),
                         })

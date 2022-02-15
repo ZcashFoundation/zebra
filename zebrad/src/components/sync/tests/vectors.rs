@@ -11,7 +11,7 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_consensus::Config as ConsensusConfig;
-use zebra_network::ResponseStatus;
+use zebra_network::InventoryResponse;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -26,7 +26,7 @@ use crate::{
     config::ZebradConfig,
 };
 
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 /// Maximum time to wait for a request to any test service.
 ///
