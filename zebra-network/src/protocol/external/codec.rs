@@ -633,17 +633,23 @@ impl Codec {
     }
 
     fn read_filterload<R: Read>(&self, mut reader: R, body_len: usize) -> Result<Message, Error> {
-        const MAX_FILTERLOAD_LENGTH: usize = 36000;
-        const FILTERLOAD_REMAINDER_LENGTH: usize = 4 + 4 + 1;
+        // The maximum length of a filter.
+        const MAX_FILTERLOAD_FILTER_LENGTH: usize = 36000;
 
-        if !(FILTERLOAD_REMAINDER_LENGTH <= body_len
-            && body_len <= FILTERLOAD_REMAINDER_LENGTH + MAX_FILTERLOAD_LENGTH)
-        {
+        // The data length of the fields:
+        // hash_functions_count + tweak + flags.
+        const FILTERLOAD_FIELDS_LENGTH: usize = 4 + 4 + 1;
+
+        // The maximum length of a filter message's data.
+        const MAX_FILTERLOAD_MESSAGE_LENGTH: usize =
+            MAX_FILTERLOAD_FILTER_LENGTH + FILTERLOAD_FIELDS_LENGTH;
+
+        if !(FILTERLOAD_FIELDS_LENGTH..=MAX_FILTERLOAD_MESSAGE_LENGTH).contains(&body_len) {
             return Err(Error::Parse("Invalid filterload message body length."));
         }
 
-        // Memory Denial of Service: we just limited the untrusted parsed length
-        let filter_length: usize = body_len - FILTERLOAD_REMAINDER_LENGTH;
+        // Memory Denial of Service: we just checked the untrusted parsed length
+        let filter_length: usize = body_len - FILTERLOAD_FIELDS_LENGTH;
         let filter_bytes = zcash_deserialize_bytes_external_count(filter_length, &mut reader)?;
 
         Ok(Message::FilterLoad {
