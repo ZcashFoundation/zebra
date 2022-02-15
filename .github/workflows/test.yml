@@ -210,12 +210,13 @@ jobs:
           --container-tty \
           --container-command="cargo" \
           --container-arg="test" \
-          --container-arg="--verbose" \
+          --container-arg="--locked" \
+          --container-arg="--release" \
           --container-arg="--features" \
-          --container-arg="enable-sentry" \
-          --container-arg="--test" \
-          --container-arg="acceptance" \
-          --container-arg="sync_large_checkpoints_" \
+          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.lower_net_name }}" \
+          --container-arg="--manifest-path" \
+          --container-arg="zebrad/Cargo.toml" \
+          --container-arg="sync_to_mandatory_checkpoint_${{ env.lower_net_name }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -223,7 +224,7 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP don't have a workaround for this without requiring a TTY
+      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
       # https://github.com/actions/runner/issues/241
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
@@ -234,13 +235,14 @@ jobs:
           INSTANCE_ID=$(gcloud compute instances describe zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
           while [[ ${CONTAINER_NAME} != *"zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'logName=projects/${{ env.PROJECT_ID }}/logs/cos_containers AND jsonPayload."cos.googleapis.com/container_name":zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format="value(jsonPayload.'cos.googleapis.com/container_name')" --limit=1)
-              echo "Using container: ${CONTAINER_NAME}"
+              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
+              echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
+              sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'logName=projects/${{ env.PROJECT_ID }}/logs/cos_containers AND jsonPayload."cos.googleapis.com/container_name":zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format="value(jsonPayload.'cos.googleapis.com/container_name')" --limit=1)
+          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
 
-      - name: Regenerate stateful disks
+      - name: Regenerate stateful disks logs
         id: sync-to-checkpoint
         run: |
           gcloud compute ssh \
@@ -248,8 +250,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --container=${{ env.ZEBRA_CONTAINER }} \
-          --command="cargo test --locked --release --verbose --features enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.lower_net_name }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ env.lower_net_name }}"
+          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
@@ -274,8 +275,8 @@ jobs:
           retention-days: 1095
 
       - name: Delete test instance
-        # Always run even if the earlier step fails
-        if: ${{ always() }}
+        # Do not delete the instance if the sync timeouts in GitHub
+        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }} || ${{ steps.sync-to-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
@@ -335,12 +336,13 @@ jobs:
           --container-tty \
           --container-command="cargo" \
           --container-arg="test" \
-          --container-arg="--verbose" \
+          --container-arg="--locked" \
+          --container-arg="--release" \
           --container-arg="--features" \
-          --container-arg="enable-sentry" \
-          --container-arg="--test" \
-          --container-arg="acceptance" \
-          --container-arg="sync_large_checkpoints_" \
+          --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.lower_net_name }}" \
+          --container-arg="--manifest-path" \
+          --container-arg="zebrad/Cargo.toml" \
+          --container-arg="sync_past_mandatory_checkpoint_${{ env.lower_net_name }}" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -350,7 +352,7 @@ jobs:
         env:
           DISK_SHORT_SHA: ${{ steps.get-disk-sha.outputs.sha }}
 
-      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP don't have a workaround for this without requiring a TTY
+      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
       # https://github.com/actions/runner/issues/241
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
@@ -361,13 +363,14 @@ jobs:
           INSTANCE_ID=$(gcloud compute instances describe zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
           while [[ ${CONTAINER_NAME} != *"zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'logName=projects/${{ env.PROJECT_ID }}/logs/cos_containers AND jsonPayload."cos.googleapis.com/container_name":zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format="value(jsonPayload.'cos.googleapis.com/container_name')" --limit=1)
-              echo "Using container: ${CONTAINER_NAME}"
+              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
+              echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
+              sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'logName=projects/${{ env.PROJECT_ID }}/logs/cos_containers AND jsonPayload."cos.googleapis.com/container_name":zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format="value(jsonPayload.'cos.googleapis.com/container_name')" --limit=1)
+          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
 
-      - name: Sync past mandatory checkpoint
+      - name: Sync past mandatory checkpoint logs
         id: sync-past-checkpoint
         run: |
           gcloud compute ssh \
@@ -375,14 +378,13 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --container=${{ env.ZEBRA_CONTAINER }} \
-          --command="cargo test --locked --release --verbose --features enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.lower_net_name }} --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_${{ env.lower_net_name }}"
+          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
       - name: Delete test instance
-        # Always run even if the earlier step fails
-        if: ${{ always() }}
+        # Do not delete the instance if the sync timeouts in GitHub
+        if: ${{ steps.sync-past-checkpoint.outcome == 'success' }} || ${{ steps.sync-past-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
