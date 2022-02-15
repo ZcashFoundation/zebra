@@ -255,14 +255,20 @@ jobs:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
       # Create image from disk that will be used to sync past mandatory checkpoint test
+      # Force the image creation as the disk is still attached even though is not being used by the container
       - name: Create image from state disk
         # Only run if the earlier step succeeds
         if: steps.sync-to-checkpoint.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy --source-disk=zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy --source-disk-zone=${{ env.ZONE }} --storage-location=us
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy \
+          --force \
+          --source-disk=zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy \
+          --source-disk-zone=${{ env.ZONE }} \
+          --storage-location=us \
+          --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
 
       - name: Write the disk SHORT_SHA to a txt
-        if: steps.create-instance.outcome == 'success'
+        if: steps.sync-to-checkpoint.outcome == 'success'
         run: |
           short_sha=$(echo "${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}")
           echo "$short_sha" > latest-disk-state-sha.txt
@@ -280,7 +286,6 @@ jobs:
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
-          sleep 60s
 
   test-stateful-sync:
     name: Test blocks sync
