@@ -1481,3 +1481,27 @@ where
 
     Ok(())
 }
+
+/// What the expected behavior of the mempool is for a test that uses [`sync_until`].
+enum MempoolBehavior {
+    /// The mempool should be forced to activate at a certain height, for debug purposes.
+    ForceActivationAt(Height),
+
+    /// The mempool should not become active during the test.
+    ShouldNotActivate,
+}
+
+impl MempoolBehavior {
+    /// Return the height value that the mempool should be enabled at, if available.
+    pub fn enable_at_height(&self) -> Option<u32> {
+        match self {
+            MempoolBehavior::ForceActivationAt(height) => Some(height.0),
+            MempoolBehavior::ShouldNotActivate => None,
+        }
+    }
+
+    /// Returns `true` if the mempool should be forcefully activated at a specified height.
+    pub fn is_forced_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ForceActivationAt(_))
+    }
+}
