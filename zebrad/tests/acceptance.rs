@@ -754,7 +754,7 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )
     .map(|_tempdir| ())
 }
@@ -771,7 +771,7 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )
     .map(|_tempdir| ())
 }
@@ -795,7 +795,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -807,7 +807,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
         false,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
 
     Ok(())
@@ -824,7 +824,7 @@ fn activate_mempool_mainnet() -> Result<()> {
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        Some(TINY_CHECKPOINT_TEST_HEIGHT),
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
 }
@@ -844,7 +844,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -854,7 +854,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
         false,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
 
     Ok(())
@@ -876,7 +876,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
-        Some(TINY_CHECKPOINT_TEST_HEIGHT),
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
 }
@@ -908,7 +908,7 @@ fn sync_until(
     timeout: Duration,
     reuse_tempdir: impl Into<Option<TempDir>>,
     check_legacy_chain: bool,
-    enable_mempool_at_height: impl Into<Option<Height>>,
+    mempool_behavior: MempoolBehavior,
 ) -> Result<TempDir> {
     zebra_test::init();
 
@@ -917,14 +917,13 @@ fn sync_until(
     }
 
     let reuse_tempdir = reuse_tempdir.into();
-    let enable_mempool_at_height = enable_mempool_at_height.into();
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
-    config.mempool.debug_enable_at_height = enable_mempool_at_height.map(|height| height.0);
+    config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
         reuse_tempdir.replace_config(&mut config)?
@@ -942,7 +941,7 @@ fn sync_until(
         child.expect_stdout_line_matches("no legacy chain found")?;
     }
 
-    if enable_mempool_at_height.is_some() {
+    if mempool_behavior.is_forced_activation() {
         child.expect_stdout_line_matches("enabling mempool for debugging")?;
         child.expect_stdout_line_matches("activating mempool")?;
 
