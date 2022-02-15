@@ -48,7 +48,7 @@ atty = "0.2.14"
 sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
 sentry-tracing = "0.23.0"
 
-rand = "0.8.4"
+rand = "0.8.5"
 
 [build-dependencies]
 vergen = { version = "6.0.2", default-features = false, features = ["cargo", "git"] }
