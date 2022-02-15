@@ -20,6 +20,7 @@ pub use in_version::AddrInVersion;
 pub(super) use v1::AddrV1;
 pub(super) use v2::AddrV2;
 
+#[allow(unused_imports)]
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(super) use v1::{ipv6_mapped_socket_addr, ADDR_V1_SIZE};
 

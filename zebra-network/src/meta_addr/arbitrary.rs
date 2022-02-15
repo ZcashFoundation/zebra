@@ -12,12 +12,14 @@ use super::{MetaAddr, MetaAddrChange, PeerServices};
 ///
 /// This should be at least twice the number of [`PeerAddrState`]s, so the tests
 /// can cover multiple transitions through every state.
+#[allow(dead_code)]
 pub const MAX_ADDR_CHANGE: usize = 15;
 
 /// The largest number of random addresses we want to add to an [`AddressBook`].
 ///
 /// This should be at least the number of [`PeerAddrState`]s, so the tests can
 /// cover interactions between addresses in different states.
+#[allow(dead_code)]
 pub const MAX_META_ADDR: usize = 8;
 
 impl MetaAddr {

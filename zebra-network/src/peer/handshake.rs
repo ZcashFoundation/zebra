@@ -882,7 +882,7 @@ where
             // So we can just track peer activity based on Ping and Pong.
             // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
-            let inv_collector = inv_collector.clone();
+            let inbound_inv_collector = inv_collector.clone();
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
             let peer_rx = peer_rx
@@ -892,6 +892,7 @@ where
                     let inbound_ts_collector = inbound_ts_collector.clone();
                     let span =
                         debug_span!(parent: ts_inner_conn_span.clone(), "inbound_ts_collector");
+
                     async move {
                         match &msg {
                             Ok(msg) => {
@@ -935,9 +936,10 @@ where
                     .instrument(span)
                 })
                 .then(move |msg| {
-                    let inv_collector = inv_collector.clone();
+                    let inbound_inv_collector = inbound_inv_collector.clone();
                     let span = debug_span!(parent: inv_inner_conn_span.clone(), "inventory_filter");
-                    register_inventory_status(msg, connected_addr, inv_collector).instrument(span)
+                    register_inventory_status(msg, connected_addr, inbound_inv_collector)
+                        .instrument(span)
                 })
                 .boxed();
 
@@ -971,6 +973,8 @@ where
             let client = Client {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
+                inv_collector,
+                transient_addr: connected_addr.get_transient_addr(),
                 error_slot,
                 version: remote_version,
                 connection_task,
@@ -1184,6 +1188,9 @@ async fn send_one_heartbeat(
     match server_tx.try_send(ClientRequest {
         request,
         tx,
+        // we're not requesting inventory, so we don't need to update the registry
+        inv_collector: None,
+        transient_addr: None,
         span: tracing::Span::current(),
     }) {
         Ok(()) => {}

@@ -8,7 +8,6 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use futures::{FutureExt, Stream, StreamExt};
@@ -18,17 +17,18 @@ use tokio::{
 };
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, IntervalStream};
 
-use zebra_chain::{parameters::POST_BLOSSOM_POW_TARGET_SPACING, serialization::AtLeastOne};
+use zebra_chain::serialization::AtLeastOne;
 
 use crate::{
-    protocol::{external::InventoryHash, internal::ResponseStatus},
+    constants::INVENTORY_ROTATION_INTERVAL,
+    protocol::{external::InventoryHash, internal::InventoryResponse},
     BoxError,
 };
 
 use self::update::Update;
 
 /// Underlying type for the alias InventoryStatus::*
-use ResponseStatus::*;
+use InventoryResponse::*;
 
 pub mod update;
 
@@ -36,7 +36,7 @@ pub mod update;
 mod tests;
 
 /// A peer inventory status, which tracks a hash for both available and missing inventory.
-pub type InventoryStatus<T> = ResponseStatus<T, T>;
+pub type InventoryStatus<T> = InventoryResponse<T, T>;
 
 /// A peer inventory status change, used in the inventory status channel.
 ///
@@ -106,7 +106,6 @@ impl InventoryChange {
     }
 
     /// Returns a new missing multiple inventory change, if `hashes` contains at least one change.
-    #[allow(dead_code)]
     pub fn new_missing_multi<'a>(
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
@@ -135,8 +134,8 @@ impl<T> InventoryStatus<T> {
 }
 
 impl<T: Clone> InventoryStatus<T> {
-    /// Get the inner item, regardless of status.
-    pub fn inner(&self) -> T {
+    /// Returns a clone of the inner item, regardless of status.
+    pub fn to_inner(&self) -> T {
         match self {
             Available(item) | Missing(item) => item.clone(),
         }
@@ -146,11 +145,7 @@ impl<T: Clone> InventoryStatus<T> {
 impl InventoryRegistry {
     /// Returns a new Inventory Registry for `inv_stream`.
     pub fn new(inv_stream: broadcast::Receiver<InventoryChange>) -> Self {
-        let interval = Duration::from_secs(
-            POST_BLOSSOM_POW_TARGET_SPACING
-                .try_into()
-                .expect("non-negative"),
-        );
+        let interval = INVENTORY_ROTATION_INTERVAL;
 
         // Don't do an immediate rotation, current and prev are already empty.
         let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);
@@ -270,7 +265,7 @@ impl InventoryRegistry {
     /// `Missing` markers are not updated until the registry rotates, for security reasons.
     fn register(&mut self, change: InventoryChange) {
         let new_status = change.marker();
-        let (invs, addr) = change.inner();
+        let (invs, addr) = change.to_inner();
 
         for inv in invs {
             use InventoryHash::*;

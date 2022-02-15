@@ -174,14 +174,13 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), BoxError> {
 
     // Parse the genesis block
     let mut checkpoint_data = Vec::new();
-    for b in &[&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]] {
-        let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash = block.hash();
-        checkpoint_data.push((
-            block.coinbase_height().expect("test block has height"),
-            hash,
-        ));
-    }
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+    let hash = block.hash();
+    checkpoint_data.push((
+        block.coinbase_height().expect("test block has height"),
+        hash,
+    ));
 
     // Then add some fake entries with duplicate heights
     checkpoint_data.push((block::Height(1), block::Hash([0xaa; 32])));
@@ -202,14 +201,13 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
 
     // Parse the genesis block
     let mut checkpoint_data = Vec::new();
-    for b in &[&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]] {
-        let block = Arc::<Block>::zcash_deserialize(*b)?;
-        let hash = block.hash();
-        checkpoint_data.push((
-            block.coinbase_height().expect("test block has height"),
-            hash,
-        ));
-    }
+    let block =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+    let hash = block.hash();
+    checkpoint_data.push((
+        block.coinbase_height().expect("test block has height"),
+        hash,
+    ));
 
     // Then add some fake entries with duplicate hashes
     checkpoint_data.push((block::Height(1), block::Hash([0xcc; 32])));

@@ -29,7 +29,6 @@ proptest! {
 
         // Start the runtime
         let runtime = zebra_test::init_async();
-        let _guard = runtime.enter();
 
         runtime.block_on(async move {
             // Check all combinations of:
