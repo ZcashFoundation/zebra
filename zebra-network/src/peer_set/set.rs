@@ -654,7 +654,7 @@ where
     /// falling back to a ready peer that isn't missing the inventory.
     ///
     /// If all ready peers are missing the inventory,
-    /// returns a [`NotFound`](PeerError::NotFound) error.
+    /// returns a synthetic [`NotFoundRegistry`](PeerError::NotFoundRegistry) error.
     ///
     /// Uses P2C to route requests to the least loaded peer in each list.
     fn route_inv(
@@ -724,7 +724,9 @@ where
             // Avoid routing requests to peers that are missing inventory.
             // If we kept trying doomed requests, peers that are missing our requested inventory
             // could take up a large amount of our bandwidth and retry limits.
-            Err(SharedPeerError::from(PeerError::NotFound(vec![hash])))
+            Err(SharedPeerError::from(PeerError::NotFoundRegistry(vec![
+                hash,
+            ])))
         }
         .map_err(Into::into)
         .boxed()

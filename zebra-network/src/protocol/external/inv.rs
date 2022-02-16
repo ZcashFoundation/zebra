@@ -1,4 +1,4 @@
-//! Inventory items for the Bitcoin protocol.
+//! Inventory items for the Zcash network protocol.
 
 use std::io::{Read, Write};
 
@@ -63,6 +63,19 @@ impl InventoryHash {
     #[allow(dead_code)]
     pub fn from_legacy_tx_id(legacy_tx_id: transaction::Hash) -> InventoryHash {
         InventoryHash::Tx(legacy_tx_id)
+    }
+
+    /// Returns the block hash for this inventory hash,
+    /// if this inventory hash is a non-filtered block variant.
+    pub fn block_hash(&self) -> Option<block::Hash> {
+        match self {
+            InventoryHash::Error => None,
+            InventoryHash::Tx(_legacy_tx_id) => None,
+            InventoryHash::Block(hash) => Some(*hash),
+            // Zebra does not support filtered blocks
+            InventoryHash::FilteredBlock(_ignored_hash) => None,
+            InventoryHash::Wtx(_wtx_id) => None,
+        }
     }
 
     /// Returns the unmined transaction ID for this inventory hash,

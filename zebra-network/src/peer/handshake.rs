@@ -588,13 +588,29 @@ where
     debug!(?our_version, "sending initial version message");
     peer_conn.send(our_version).await?;
 
-    let remote_msg = peer_conn
+    let mut remote_msg = peer_conn
         .next()
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
 
-    // Check that we got a Version and destructure its fields into the local scope.
-    debug!(?remote_msg, "got message from remote peer");
+    // Wait for next message if the one we got is not Version
+    loop {
+        match remote_msg {
+            Message::Version { .. } => {
+                debug!(?remote_msg, "got version message from remote peer");
+                break;
+            }
+            _ => {
+                remote_msg = peer_conn
+                    .next()
+                    .await
+                    .ok_or(HandshakeError::ConnectionClosed)??;
+                debug!(?remote_msg, "ignoring non-version message from remote peer");
+            }
+        }
+    }
+
+    // If we got a Version message, destructure its fields into the local scope.
     let (remote_nonce, remote_services, remote_version, remote_canonical_addr, user_agent) =
         if let Message::Version {
             version,
@@ -700,14 +716,26 @@ where
 
     peer_conn.send(Message::Verack).await?;
 
-    let remote_msg = peer_conn
+    let mut remote_msg = peer_conn
         .next()
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
-    if let Message::Verack = remote_msg {
-        debug!("got verack from remote peer");
-    } else {
-        Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?;
+
+    // Wait for next message if the one we got is not Verack
+    loop {
+        match remote_msg {
+            Message::Verack => {
+                debug!(?remote_msg, "got verack message from remote peer");
+                break;
+            }
+            _ => {
+                remote_msg = peer_conn
+                    .next()
+                    .await
+                    .ok_or(HandshakeError::ConnectionClosed)??;
+                debug!(?remote_msg, "ignoring non-verack message from remote peer");
+            }
+        }
     }
 
     Ok((remote_version, remote_services, remote_canonical_addr))
@@ -882,7 +910,7 @@ where
             // So we can just track peer activity based on Ping and Pong.
             // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
-            let inv_collector = inv_collector.clone();
+            let inbound_inv_collector = inv_collector.clone();
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
             let peer_rx = peer_rx
@@ -892,6 +920,7 @@ where
                     let inbound_ts_collector = inbound_ts_collector.clone();
                     let span =
                         debug_span!(parent: ts_inner_conn_span.clone(), "inbound_ts_collector");
+
                     async move {
                         match &msg {
                             Ok(msg) => {
@@ -935,9 +964,10 @@ where
                     .instrument(span)
                 })
                 .then(move |msg| {
-                    let inv_collector = inv_collector.clone();
+                    let inbound_inv_collector = inbound_inv_collector.clone();
                     let span = debug_span!(parent: inv_inner_conn_span.clone(), "inventory_filter");
-                    register_inventory_status(msg, connected_addr, inv_collector).instrument(span)
+                    register_inventory_status(msg, connected_addr, inbound_inv_collector)
+                        .instrument(span)
                 })
                 .boxed();
 
@@ -971,6 +1001,8 @@ where
             let client = Client {
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
+                inv_collector,
+                transient_addr: connected_addr.get_transient_addr(),
                 error_slot,
                 version: remote_version,
                 connection_task,
@@ -988,7 +1020,7 @@ where
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
-async fn register_inventory_status(
+pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,
     inv_collector: broadcast::Sender<InventoryChange>,
@@ -1022,7 +1054,7 @@ async fn register_inventory_status(
                     // If all receivers have been dropped, `send` returns an error.
                     // When that happens, Zebra is shutting down, so we want to ignore this error.
                     let _ = inv_collector
-                        .send(InventoryChange::new_advertised(*advertised, transient_addr));
+                        .send(InventoryChange::new_available(*advertised, transient_addr));
                 }
                 [advertised @ ..] => {
                     let advertised = advertised
@@ -1035,7 +1067,7 @@ async fn register_inventory_status(
                     );
 
                     if let Some(change) =
-                        InventoryChange::new_advertised_multi(advertised, transient_addr)
+                        InventoryChange::new_available_multi(advertised, transient_addr)
                     {
                         // Ignore channel errors that should only happen during shutdown.
                         let _ = inv_collector.send(change);
@@ -1045,6 +1077,11 @@ async fn register_inventory_status(
         }
 
         (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
+            // Ignore Errors and the unsupported FilteredBlock type
+            let missing = missing.iter().filter(|missing| {
+                missing.unmined_tx_id().is_some() || missing.block_hash().is_some()
+            });
+
             debug!(?missing, "registering missing inventory for peer");
 
             if let Some(change) = InventoryChange::new_missing_multi(missing, transient_addr) {
@@ -1179,6 +1216,9 @@ async fn send_one_heartbeat(
     match server_tx.try_send(ClientRequest {
         request,
         tx,
+        // we're not requesting inventory, so we don't need to update the registry
+        inv_collector: None,
+        transient_addr: None,
         span: tracing::Span::current(),
     }) {
         Ok(()) => {}

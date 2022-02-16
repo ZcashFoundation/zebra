@@ -1,3 +1,5 @@
+//! Watches for chain tip height updates to determine the minimum supported peer protocol version.
+
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::protocol::external::types::Version;

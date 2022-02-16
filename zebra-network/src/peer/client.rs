@@ -1,5 +1,10 @@
+//! Handles outbound requests from our node to the network.
+
 use std::{
+    collections::HashSet,
     future::Future,
+    iter,
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -10,13 +15,14 @@ use futures::{
     stream::{Stream, StreamExt},
     FutureExt,
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
 use crate::{
     peer::error::AlreadyErrored,
+    peer_set::InventoryChange,
     protocol::{
-        external::types::Version,
+        external::{types::Version, InventoryHash},
         internal::{Request, Response},
     },
 };
@@ -34,6 +40,13 @@ pub struct Client {
 
     /// Used to send [`Request`]s to the remote peer.
     pub(crate) server_tx: mpsc::Sender<ClientRequest>,
+
+    /// Used to register missing inventory in client [`Response`]s,
+    /// so that the peer set can route retries to other clients.
+    pub(crate) inv_collector: broadcast::Sender<InventoryChange>,
+
+    /// The peer address for registering missing inventory.
+    pub(crate) transient_addr: Option<SocketAddr>,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
     ///
@@ -67,6 +80,13 @@ pub(crate) struct ClientRequest {
     /// future that may be moved around before it resolves.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
 
+    /// Used to register missing inventory in responses on `tx`,
+    /// so that the peer set can route retries to other clients.
+    pub inv_collector: Option<broadcast::Sender<InventoryChange>>,
+
+    /// The peer address for registering missing inventory.
+    pub transient_addr: Option<SocketAddr>,
+
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
@@ -87,6 +107,7 @@ pub(super) struct ClientRequestReceiver {
 pub(super) struct InProgressClientRequest {
     /// The actual request.
     pub request: Request,
+
     /// The return message channel, included because `peer::Client::call` returns a
     /// future that may be moved around before it resolves.
     ///
@@ -97,27 +118,53 @@ pub(super) struct InProgressClientRequest {
     /// `Ok(())`, it will assume that it is safe to unconditionally poll the
     /// `Receiver` tied to the `Sender` used to create the `ClientRequest`.
     ///
+    /// We also take advantage of this invariant to route inventory requests
+    /// away from peers that did not respond with that inventory.
+    ///
     /// We enforce this invariant via the type system, by converting
     /// `ClientRequest`s to `InProgressClientRequest`s when they are received by
     /// the background task. These conversions are implemented by
     /// `ClientRequestReceiver`.
-    pub tx: MustUseOneshotSender<Result<Response, SharedPeerError>>,
+    pub tx: MustUseClientResponseSender,
+
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
 }
 
-/// A oneshot::Sender that must be used by calling `send()`.
+/// A `oneshot::Sender` for client responses, that must be used by calling `send()`.
+/// Also handles forwarding missing inventory to the inventory registry.
 ///
 /// Panics on drop if `tx` has not been used or canceled.
 /// Panics if `tx.send()` is used more than once.
 #[derive(Debug)]
 #[must_use = "tx.send() must be called before drop"]
-pub(super) struct MustUseOneshotSender<T: std::fmt::Debug> {
-    /// The sender for the oneshot channel.
+pub(super) struct MustUseClientResponseSender {
+    /// The sender for the oneshot client response channel.
     ///
     /// `None` if `tx.send()` has been used.
-    pub tx: Option<oneshot::Sender<T>>,
+    pub tx: Option<oneshot::Sender<Result<Response, SharedPeerError>>>,
+
+    /// Forwards missing inventory in the response to the inventory collector.
+    ///
+    /// Boxed to reduce the size of containing structures.
+    pub missing_inv: Option<Box<MissingInventoryCollector>>,
+}
+
+/// Forwards missing inventory in the response to the inventory registry.
+#[derive(Debug)]
+pub(super) struct MissingInventoryCollector {
+    /// A clone of the original request, if it is an inventory request.
+    ///
+    /// This struct is only ever created with inventory requests.
+    request: Request,
+
+    /// Used to register missing inventory from responses,
+    /// so that the peer set can route retries to other clients.
+    collector: broadcast::Sender<InventoryChange>,
+
+    /// The peer address for registering missing inventory.
+    transient_addr: SocketAddr,
 }
 
 impl std::fmt::Debug for Client {
@@ -131,12 +178,17 @@ impl std::fmt::Debug for Client {
 
 impl From<ClientRequest> for InProgressClientRequest {
     fn from(client_request: ClientRequest) -> Self {
-        let ClientRequest { request, tx, span } = client_request;
-        InProgressClientRequest {
+        let ClientRequest {
             request,
-            tx: tx.into(),
+            tx,
+            inv_collector,
+            transient_addr,
             span,
-        }
+        } = client_request;
+
+        let tx = MustUseClientResponseSender::new(tx, &request, inv_collector, transient_addr);
+
+        InProgressClientRequest { request, tx, span }
     }
 }
 
@@ -197,26 +249,52 @@ impl From<mpsc::Receiver<ClientRequest>> for ClientRequestReceiver {
     }
 }
 
-impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
-    /// Forwards `t` to `tx.send()`, and marks this sender as used.
+impl MustUseClientResponseSender {
+    /// Returns a newly created client response sender for `tx`.
+    ///
+    /// If `request` or the response contains missing inventory,
+    /// it is forwarded to the `inv_collector`, for the peer at `transient_addr`.
+    pub fn new(
+        tx: oneshot::Sender<Result<Response, SharedPeerError>>,
+        request: &Request,
+        inv_collector: Option<broadcast::Sender<InventoryChange>>,
+        transient_addr: Option<SocketAddr>,
+    ) -> Self {
+        Self {
+            tx: Some(tx),
+            missing_inv: MissingInventoryCollector::new(request, inv_collector, transient_addr),
+        }
+    }
+
+    /// Forwards `response` to `tx.send()`, and missing inventory to `inv_collector`,
+    /// and marks this sender as used.
     ///
     /// Panics if `tx.send()` is used more than once.
-    pub fn send(mut self, t: T) -> Result<(), T> {
+    pub fn send(
+        mut self,
+        response: Result<Response, SharedPeerError>,
+    ) -> Result<(), Result<Response, SharedPeerError>> {
+        // Forward any missing inventory to the registry.
+        if let Some(missing_inv) = self.missing_inv.take() {
+            missing_inv.send(&response);
+        }
+
+        // Forward the response to the internal requester.
         self.tx
             .take()
             .unwrap_or_else(|| {
                 panic!(
-                    "multiple uses of oneshot sender: oneshot must be used exactly once: {:?}",
+                    "multiple uses of response sender: response must be sent exactly once: {:?}",
                     self
                 )
             })
-            .send(t)
+            .send(response)
     }
 
     /// Returns `tx.cancellation()`.
     ///
     /// Panics if `tx.send()` has previously been used.
-    pub fn cancellation(&mut self) -> oneshot::Cancellation<'_, T> {
+    pub fn cancellation(&mut self) -> oneshot::Cancellation<'_, Result<Response, SharedPeerError>> {
         self.tx
             .as_mut()
             .map(|tx| tx.cancellation())
@@ -237,13 +315,7 @@ impl<T: std::fmt::Debug> MustUseOneshotSender<T> {
     }
 }
 
-impl<T: std::fmt::Debug> From<oneshot::Sender<T>> for MustUseOneshotSender<T> {
-    fn from(sender: oneshot::Sender<T>) -> Self {
-        MustUseOneshotSender { tx: Some(sender) }
-    }
-}
-
-impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
+impl Drop for MustUseClientResponseSender {
     #[instrument(skip(self))]
     fn drop(&mut self) {
         // we don't panic if we are shutting down anyway
@@ -251,9 +323,96 @@ impl<T: std::fmt::Debug> Drop for MustUseOneshotSender<T> {
             // is_canceled() will not panic, because we check is_none() first
             assert!(
                 self.tx.is_none() || self.is_canceled(),
-                "unused oneshot sender: oneshot must be used or canceled: {:?}",
+                "unused client response sender: oneshot must be used or canceled: {:?}",
                 self
             );
+        }
+    }
+}
+
+impl MissingInventoryCollector {
+    /// Returns a newly created missing inventory collector, if needed.
+    ///
+    /// If `request` or the response contains missing inventory,
+    /// it is forwarded to the `inv_collector`, for the peer at `transient_addr`.
+    pub fn new(
+        request: &Request,
+        inv_collector: Option<broadcast::Sender<InventoryChange>>,
+        transient_addr: Option<SocketAddr>,
+    ) -> Option<Box<MissingInventoryCollector>> {
+        if !request.is_inventory_download() {
+            return None;
+        }
+
+        if let (Some(inv_collector), Some(transient_addr)) = (inv_collector, transient_addr) {
+            Some(Box::new(MissingInventoryCollector {
+                request: request.clone(),
+                collector: inv_collector,
+                transient_addr,
+            }))
+        } else {
+            None
+        }
+    }
+
+    /// Forwards any missing inventory to the registry.
+    ///
+    /// `zcashd` doesn't send `notfound` messages for blocks,
+    /// so we need to track missing blocks ourselves.
+    ///
+    /// This can sometimes send duplicate missing inventory,
+    /// but the registry ignores duplicates anyway.
+    pub fn send(self, response: &Result<Response, SharedPeerError>) {
+        let missing_inv: HashSet<InventoryHash> = match (self.request, response) {
+            // Missing block hashes from partial responses.
+            (_, Ok(Response::Blocks(block_statuses))) => block_statuses
+                .iter()
+                .filter_map(|b| b.missing())
+                .map(InventoryHash::Block)
+                .collect(),
+
+            // Missing transaction IDs from partial responses.
+            (_, Ok(Response::Transactions(tx_statuses))) => tx_statuses
+                .iter()
+                .filter_map(|tx| tx.missing())
+                .map(|tx| tx.into())
+                .collect(),
+
+            // Other response types never contain missing inventory.
+            (_, Ok(_)) => iter::empty().collect(),
+
+            // We don't forward NotFoundRegistry errors,
+            // because the errors are generated locally from the registry,
+            // so those statuses are already in the registry.
+            //
+            // Unfortunately, we can't access the inner error variant here,
+            // due to TracedError.
+            (_, Err(e)) if e.inner_debug().contains("NotFoundRegistry") => iter::empty().collect(),
+
+            // Missing inventory from other errors, including NotFoundResponse, timeouts,
+            // and dropped connections.
+            (request, Err(_)) => {
+                // The request either contains blocks or transactions,
+                // but this is a convenient way to collect them both.
+                let missing_blocks = request
+                    .block_hash_inventory()
+                    .into_iter()
+                    .map(InventoryHash::Block);
+
+                let missing_txs = request
+                    .transaction_id_inventory()
+                    .into_iter()
+                    .map(InventoryHash::from);
+
+                missing_blocks.chain(missing_txs).collect()
+            }
+        };
+
+        if let Some(missing_inv) =
+            InventoryChange::new_missing_multi(missing_inv.iter(), self.transient_addr)
+        {
+            // if all the receivers are closed, assume we're in tests or an isolated connection
+            let _ = self.collector.send(missing_inv);
         }
     }
 }
@@ -399,7 +558,13 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest { request, tx, span }) {
+        match self.server_tx.try_send(ClientRequest {
+            request,
+            tx,
+            inv_collector: Some(self.inv_collector.clone()),
+            transient_addr: self.transient_addr,
+            span,
+        }) {
             Err(e) => {
                 if e.is_disconnected() {
                     let ClientRequest { tx, .. } = e.into_inner();

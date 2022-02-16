@@ -6,6 +6,7 @@
 //! It also responds to peer requests for blocks, transactions, and peer addresses.
 
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -23,11 +24,14 @@ use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, Service
 use zebra_network as zn;
 use zebra_state as zs;
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    transaction::UnminedTxId,
+};
 use zebra_consensus::chain::VerifyChainError;
 use zebra_network::{
     constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
-    AddressBook,
+    AddressBook, InventoryResponse,
 };
 
 // Re-use the syncer timeouts for consistency.
@@ -35,6 +39,8 @@ use super::{
     mempool, mempool as mp,
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
+
+use InventoryResponse::*;
 
 pub(crate) mod downloads;
 
@@ -307,33 +313,44 @@ impl Service<zn::Request> for Inbound {
                 // # Correctness
                 //
                 // Briefly hold the address book threaded mutex while
-                // cloning the address book. Then sanitize after releasing
-                // the lock.
+                // cloning the address book. Then sanitize in the future,
+                // after releasing the lock.
                 let peers = address_book.lock().unwrap().clone();
 
-                // Correctness: get the current time after acquiring the address book lock.
-                let now = Utc::now();
+                async move {
+                    // Correctness: get the current time after acquiring the address book lock.
+                    //
+                    // This time is used to filter outdated peers, so it doesn't really matter
+                    // if we get it when the future is created, or when it starts running.
+                    let now = Utc::now();
 
-                // Send a sanitized response
-                let mut peers = peers.sanitized(now);
+                    // Send a sanitized response
+                    let mut peers = peers.sanitized(now);
 
-                // Truncate the list
-                //
-                // TODO: replace with div_ceil once it stabilises
-                //       https://github.com/rust-lang/rust/issues/88581
-                let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
-                let address_limit = MAX_ADDRS_IN_MESSAGE
-                    .min(address_limit);
-                peers.truncate(address_limit);
+                    // Truncate the list
+                    //
+                    // TODO: replace with div_ceil once it stabilises
+                    //       https://github.com/rust-lang/rust/issues/88581
+                    let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
+                    let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
+                    peers.truncate(address_limit);
 
-                if !peers.is_empty() {
-                    async { Ok(zn::Response::Peers(peers)) }.boxed()
-                } else {
-                    debug!("ignoring `Peers` request from remote peer because our address book is empty");
-                    async { Ok(zn::Response::Nil) }.boxed()
-                }
+                    if peers.is_empty() {
+                        // We don't know if the peer response will be empty until we've sanitized them.
+                        debug!("ignoring `Peers` request from remote peer because our address book is empty");
+                        Ok(zn::Response::Nil)
+                    } else {
+                        Ok(zn::Response::Peers(peers))
+                    }
+                }.boxed()
             }
             zn::Request::BlocksByHash(hashes) => {
+                // We return an available or missing response to each inventory request,
+                // unless the request is empty.
+                if hashes.is_empty() {
+                    return async { Ok(zn::Response::Nil) }.boxed();
+                }
+
                 // Correctness:
                 //
                 // We can't use `call_all` here, because it can hold one buffer slot per concurrent
@@ -344,38 +361,50 @@ impl Service<zn::Request> for Inbound {
                 // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
                 use futures::stream::TryStreamExt;
                 hashes
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|hash| zs::Request::Block(hash.into()))
                     .map(|request| state.clone().oneshot(request))
                     .collect::<futures::stream::FuturesOrdered<_>>()
                     .try_filter_map(|response| async move {
                         Ok(match response {
                             zs::Response::Block(Some(block)) => Some(block),
-                            // `zcashd` ignores missing blocks in GetData responses,
-                            // rather than including them in a trailing `NotFound`
-                            // message
                             zs::Response::Block(None) => None,
                             _ => unreachable!("wrong response from state"),
                         })
                     })
                     .try_collect::<Vec<_>>()
                     .map_ok(|blocks| {
-                        if blocks.is_empty() {
-                            zn::Response::Nil
-                        } else {
-                            zn::Response::Blocks(blocks)
-                        }
+                        // Work out which hashes were missing.
+                        let available_hashes: HashSet<block::Hash> = blocks.iter().map(|block| block.hash()).collect();
+                        let available = blocks.into_iter().map(Available);
+                        let missing = hashes.into_iter().filter(|hash| !available_hashes.contains(hash)).map(Missing);
+
+                        zn::Response::Blocks(available.chain(missing).collect())
                     })
                     .boxed()
             }
-            zn::Request::TransactionsById(transactions) => {
-                let request = mempool::Request::TransactionsById(transactions);
-                mempool.clone().oneshot(request).map_ok(|resp| match resp {
-                    mempool::Response::Transactions(transactions) if transactions.is_empty() => zn::Response::Nil,
-                    mempool::Response::Transactions(transactions) => zn::Response::Transactions(transactions),
-                    _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
-                })
-                    .boxed()
+            zn::Request::TransactionsById(req_tx_ids) => {
+                // We return an available or missing response to each inventory request,
+                // unless the request is empty.
+                if req_tx_ids.is_empty() {
+                    return async { Ok(zn::Response::Nil) }.boxed();
+                }
+
+                let request = mempool::Request::TransactionsById(req_tx_ids.clone());
+                mempool.clone().oneshot(request).map_ok(move |resp| {
+                    let transactions = match resp {
+                        mempool::Response::Transactions(transactions) => transactions,
+                        _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
+                    };
+
+                    // Work out which transaction IDs were missing.
+                    let available_tx_ids: HashSet<UnminedTxId> = transactions.iter().map(|tx| tx.id).collect();
+                    let available = transactions.into_iter().map(Available);
+                    let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
+
+                    zn::Response::Transactions(available.chain(missing).collect())
+                }).boxed()
             }
             zn::Request::FindBlocks { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
