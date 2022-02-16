@@ -54,7 +54,7 @@
 //!    * runs in the background and gossips newly added mempool transactions
 //!      to peers
 
-use std::{cmp::max, time::Duration};
+use std::{cmp::max, ops::Add, time::Duration};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use chrono::Utc;
@@ -65,6 +65,7 @@ use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_consensus::CheckpointList;
 
 use crate::{
     components::{
@@ -315,6 +316,20 @@ impl StartCmd {
         // TODO: replace with `MAX_CLOSE_TO_TIP_BLOCKS` after fixing slow syncing near tip (#3375)
         const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
 
+        // The minimum number of extra blocks after the highest checkpoint, based on:
+        // - the non-finalized state limit, and
+        // - how long it takes to build Zebra and re-sync non-finalized blocks (~12 minutes).
+        let min_after_checkpoint_blocks =
+            i32::try_from(zebra_state::MAX_BLOCK_REORG_HEIGHT).expect("constant fits in i32") + 10;
+
+        // The minimum height of the valid best chain, based on:
+        // - the hard-coded checkpoint height,
+        // - the minimum number of blocks after the highest checkpoint.
+        let after_checkpoint_height = CheckpointList::new(network)
+            .max_height()
+            .add(min_after_checkpoint_blocks)
+            .expect("hard-coded checkpoint height is far below Height::MAX");
+
         loop {
             let now = Utc::now();
             let is_close_to_tip = sync_status.is_close_to_tip();
@@ -334,9 +349,8 @@ impl StartCmd {
                 let remaining_sync_blocks = estimated_height - current_height;
 
                 // TODO:
-                // - estimate the remaining sync time
                 // - log progress, remaining blocks, and remaining time to next network upgrade
-                // - also add this info to the metrics
+                // - add some of this info to the metrics
 
                 if is_close_to_tip && remaining_sync_blocks > MIN_SYNC_WARNING_BLOCKS {
                     // We've stopped syncing blocks, but we estimate we're a long way from the tip.
@@ -346,8 +360,21 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        "initial sync might have stalled, or estimated tip is wrong. \
-                         Hint: check that your computer's clock and time zone are correct"
+                        ?after_checkpoint_height,
+                        "initial sync is very slow, or estimated tip is wrong. \
+                         Hint: check your network connection, \
+                         and your computer clock and time zone",
+                    );
+                } else if is_close_to_tip && current_height <= after_checkpoint_height {
+                    // We've stopped syncing blocks,
+                    // but we're below the height our checkpoints were generated from.
+                    warn!(
+                        %sync_percent,
+                        ?current_height,
+                        ?remaining_sync_blocks,
+                        ?after_checkpoint_height,
+                        "initial sync is very slow, and state is below the highest checkpoint. \
+                         Hint: check your network connection",
                     );
                 } else if is_close_to_tip {
                     // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
