@@ -1,11 +1,4 @@
 //! Checks for nullifier uniqueness.
-//!
-//! "A nullifier MUST NOT repeat either within a transaction,
-//! or across transactions in a valid blockchain.
-//! Sprout and Sapling and Orchard nullifiers are considered disjoint,
-//! even if they have the same bit pattern."
-//!
-//! https://zips.z.cash/protocol/protocol.pdf#nullifierset
 
 use std::collections::HashSet;
 
@@ -22,10 +15,14 @@ use crate::{
 /// (Duplicate non-finalized nullifiers are rejected during the chain update,
 /// see [`add_to_non_finalized_chain_unique`] for details.)
 ///
-/// "A transaction is not valid if it would have added a nullifier
-/// to the nullifier set that already exists in the set"
+/// # Consensus
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
+/// > A nullifier MUST NOT repeat either within a transaction,
+/// > or across transactions in a valid blockchain.
+/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > even if they have the same bit pattern.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
 #[tracing::instrument(skip(prepared, finalized_state))]
 pub(crate) fn no_duplicates_in_finalized_chain(
     prepared: &PreparedBlock,
@@ -63,10 +60,20 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// (Duplicate finalized nullifiers are rejected during service contextual validation,
 /// see [`no_duplicates_in_finalized_chain`] for details.)
 ///
-/// "A transaction is not valid if it would have added a nullifier
-/// to the nullifier set that already exists in the set"
+/// # Consensus
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
+/// > A nullifier MUST NOT repeat either within a transaction,
+/// > or across transactions in a valid blockchain.
+/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > even if they have the same bit pattern.
+///
+/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+///
+/// We comply with the "disjoint" rule by storing the nullifiers for each
+/// pool in separate sets (also with different types), so that even if
+/// different pools have nullifiers with same bit pattern, they won't be
+/// considered the same when determining uniqueness. This is enforced by the
+/// callers of this function.
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
     chain_nullifiers: &mut HashSet<NullifierT>,
