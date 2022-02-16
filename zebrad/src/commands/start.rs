@@ -351,9 +351,6 @@ impl StartCmd {
                     );
                 } else if is_close_to_tip {
                     // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
-                    //
-                    // TODO: reduce this log level after full sync tests are merged,
-                    //       and have been stable for a while (#1592)
                     info!(
                         %sync_percent,
                         ?current_height,
