@@ -346,6 +346,11 @@ impl StartCmd {
         // Most chain forks are 1-7 blocks long.
         let min_state_block_interval = max_block_spacing.unwrap_or(target_block_spacing * 4) * 2;
 
+        // Formatted string for logging.
+        let max_block_spacing = max_block_spacing
+            .map(|duration| duration.to_string())
+            .unwrap_or_else(|| "None".to_string());
+
         // The last time we downloaded and verified at least one block.
         //
         // Initialized to the start time to simplify the code.
@@ -400,9 +405,9 @@ impl StartCmd {
                     warn!(
                         %sync_percent,
                         ?current_height,
-                        ?time_since_last_state_block,
-                        ?target_block_spacing,
-                        ?max_block_spacing,
+                        %time_since_last_state_block,
+                        %target_block_spacing,
+                        %max_block_spacing,
                         ?is_syncer_stopped,
                         "chain updates have stalled, \
                          state height has not increased for {} minutes. \
@@ -419,7 +424,7 @@ impl StartCmd {
                         ?current_height,
                         ?remaining_sync_blocks,
                         ?after_checkpoint_height,
-                        ?time_since_last_state_block,
+                        %time_since_last_state_block,
                         "initial sync is very slow, or estimated tip is wrong. \
                          Hint: check your network connection, \
                          and your computer clock and time zone",
@@ -432,7 +437,7 @@ impl StartCmd {
                         ?current_height,
                         ?remaining_sync_blocks,
                         ?after_checkpoint_height,
-                        ?time_since_last_state_block,
+                        %time_since_last_state_block,
                         "initial sync is very slow, and state is below the highest checkpoint. \
                          Hint: check your network connection, \
                          and your computer clock and time zone",
@@ -443,7 +448,7 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        ?time_since_last_state_block,
+                        %time_since_last_state_block,
                         "finished initial sync to chain tip, and activated mempool",
                     );
                 } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
@@ -452,7 +457,7 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        ?time_since_last_state_block,
+                        %time_since_last_state_block,
                         "finished initial sync, \
                          waiting for syncer to stabilise before activating mempool",
                     );
@@ -462,7 +467,7 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        ?time_since_last_state_block,
+                        %time_since_last_state_block,
                         "estimated progress to chain tip",
                     );
                 }
