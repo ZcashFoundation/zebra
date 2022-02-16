@@ -981,7 +981,6 @@ fn sync_until(
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
-    // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
