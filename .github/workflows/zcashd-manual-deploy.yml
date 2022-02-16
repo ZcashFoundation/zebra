@@ -4,22 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: 'testnet'
+        default: 'Testnet'
       size:
         default: 10
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
-  MACHINE_TYPE: n2-standard-4
-  DEPLOY_SA: cos-vm@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+  ZONE: us-central1-a
+  MACHINE_TYPE: c2-standard-4
 
 jobs:
-
   deploy:
     name: Deploy zcashd nodes
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -38,14 +38,17 @@ jobs:
       # Create instance template from container image
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container "zcashd-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
-          --container-image "electriccoinco/zcashd" \
+          gcloud compute instance-templates create-with-container zcashd-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_SHA_SHORT }} \
+          --boot-disk-size 10GB \
+          --boot-disk-type=pd-ssd \
+          --container-stdin \
+          --container-tty \
+          --container-image electriccoinco/zcashd \
           --container-env ZCASHD_NETWORK="${{ github.event.inputs.network }}" \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
-          --tags zcashd \
+          --tags zcashd
 
       # Check if our destination instance group exists already
       - name: Check if instance group exists
