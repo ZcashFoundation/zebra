@@ -1363,7 +1363,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    // Create a test config that listens on any unused port.
+    // Create a test config that listens on an unused port.
     let listen_addr = "127.0.0.1:0".parse().unwrap();
     let mut config = Config {
         listen_addr,

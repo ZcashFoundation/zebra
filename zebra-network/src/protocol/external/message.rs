@@ -230,7 +230,7 @@ pub enum Message {
     ///
     /// `zcashd` returns requested items in a single batch of messages.
     /// Missing blocks are silently skipped. Missing transaction hashes are
-    /// included in a single `NotFound` message following the transactions.
+    /// included in a single `notfound` message following the transactions.
     /// Other item or non-item messages can come before or after the batch.
     ///
     /// The list contains zero or more inventory hashes.
@@ -254,13 +254,15 @@ pub enum Message {
 
     /// A `notfound` message.
     ///
+    /// Zebra responds with this message when it doesn't have the requested blocks or transactions.
+    ///
     /// When a peer requests a list of transaction hashes, `zcashd` returns:
     ///   - a batch of messages containing found transactions, then
-    ///   - a `NotFound` message containing a list of transaction hashes that
+    ///   - a `notfound` message containing a list of transaction hashes that
     ///      aren't available in its mempool or state.
     ///
     /// But when a peer requests blocks or headers, any missing items are
-    /// silently skipped, without any `NotFound` messages.
+    /// silently skipped, without any `notfound` messages.
     ///
     /// The list contains zero or more inventory hashes.
     ///

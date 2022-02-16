@@ -13,23 +13,51 @@ use zebra_chain::{
     serialization::Duration32,
 };
 
-/// The fractional bias towards outbound peers in the peer set,
-/// if connection limits have been reached.
+/// A multiplier used to calculate the inbound connection limit for the peer set,
 ///
-/// Inbound and outbound connections are limited based on
-/// [`Config.peerset_initial_target_size`].
+/// When it starts up, Zebra opens [`Config.peerset_initial_target_size`]
+/// outbound connections.
 ///
-/// The outbound limit is larger than the inbound limit by:
-/// `Config.peerset_initial_target_size / OUTBOUND_PEER_BIAS_DENOMINATOR`.
+/// Then it opens additional outbound connections as needed for network requests,
+/// and accepts inbound connections initiated by other peers.
+///
+/// The inbound and outbound connection limits are calculated from:
+///
+/// The inbound limit is:
+/// `Config.peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER`.
+/// (This is similar to `zcashd`'s default inbound limit.)
+///
+/// The outbound limit is:
+/// `Config.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER`.
+/// (This is a bit larger than `zcashd`'s default outbound limit.)
 ///
 /// # Security
 ///
-/// This bias helps make sure that Zebra is connected to a majority of peers
-/// that it has chosen from its [`AddressBook`].
+/// Each connection requires one inbound slot and one outbound slot, on two different peers.
+/// But some peers only make outbound connections, because they are behind a firewall,
+/// or their lister port address is misconfigured.
+///
+/// Zebra allows extra inbound connection slots,
+/// to prevent accidental connection slot exhaustion.
+/// (`zcashd` also allows a large number of extra inbound slots.)
+///
+/// ## Security Tradeoff
+///
+/// Since the inbound peer limit is higher than the outbound peer limit,
+/// Zebra can be connected to a majority of peers
+/// that it has *not* chosen from its [`AddressBook`].
 ///
 /// Inbound peer connections are initiated by the remote peer,
 /// so inbound peer selection is not controlled by the local node.
-pub const OUTBOUND_PEER_BIAS_DENOMINATOR: usize = 2;
+/// This means that an attacker can easily become a majority of a node's peers.
+///
+/// However, connection exhaustion is a higher priority.
+pub const INBOUND_PEER_LIMIT_MULTIPLIER: usize = 5;
+
+/// A multiplier used to calculate the outbound connection limit for the peer set,
+///
+/// See [`INBOUND_PEER_LIMIT_MULTIPLIER`] for details.
+pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 
 /// The buffer size for the peer set.
 ///
@@ -66,6 +94,11 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
 pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 20 + 20);
+
+/// Zebra rotates its peer inventory registry every time this interval elapses.
+///
+/// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
+pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
 /// The default peer address crawler interval.
 ///
@@ -281,6 +314,8 @@ mod tests {
 
     use std::convert::TryFrom;
 
+    use zebra_chain::parameters::POST_BLOSSOM_POW_TARGET_SPACING;
+
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
@@ -364,6 +399,22 @@ mod tests {
         assert!(
             MAX_ADDRS_IN_ADDRESS_BOOK < TYPICAL_MAINNET_ADDRESS_BOOK_SIZE,
             "the address book limit should actually be used"
+        );
+    }
+
+    /// Make sure inventory registry rotation is consistent with the target block interval.
+    #[test]
+    fn ensure_inventory_rotation_consistent() {
+        zebra_test::init();
+
+        assert!(
+            INVENTORY_ROTATION_INTERVAL
+                < Duration::from_secs(
+                    POST_BLOSSOM_POW_TARGET_SPACING
+                        .try_into()
+                        .expect("non-negative"),
+                ),
+            "we should expire inventory every time 1-2 new blocks get generated"
         );
     }
 }

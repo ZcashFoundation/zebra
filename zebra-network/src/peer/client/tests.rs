@@ -1,7 +1,7 @@
 //! Tests for the [`Client`] part of peer connections, and some test utilities for mocking
 //! [`Client`] instances.
 
-mod vectors;
+#![cfg_attr(feature = "proptest-impl", allow(dead_code))]
 
 use std::time::Duration;
 
@@ -9,12 +9,19 @@ use futures::{
     channel::{mpsc, oneshot},
     future::{self, AbortHandle, Future, FutureExt},
 };
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::broadcast::{self, error::TryRecvError},
+    task::JoinHandle,
+};
 
 use crate::{
     peer::{error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ErrorSlot},
+    peer_set::InventoryChange,
     protocol::external::types::Version,
 };
+
+#[cfg(test)]
+mod vectors;
 
 /// The maximum time a mocked peer connection should be alive during a test.
 const MAX_PEER_CONNECTION_TIME: Duration = Duration::from_secs(10);
@@ -23,6 +30,8 @@ const MAX_PEER_CONNECTION_TIME: Duration = Duration::from_secs(10);
 pub struct ClientTestHarness {
     client_request_receiver: Option<mpsc::Receiver<ClientRequest>>,
     shutdown_receiver: Option<oneshot::Receiver<CancelHeartbeatTask>>,
+    #[allow(dead_code)]
+    inv_receiver: Option<broadcast::Receiver<InventoryChange>>,
     error_slot: ErrorSlot,
     version: Version,
     connection_aborter: AbortHandle,
@@ -106,6 +115,42 @@ impl ClientTestHarness {
             Ok(Some(request)) => ReceiveRequestAttempt::Request(request),
             Ok(None) => ReceiveRequestAttempt::Closed,
             Err(_) => ReceiveRequestAttempt::Empty,
+        }
+    }
+
+    /// Drops the receiver endpoint of [`InventoryChanges`], forcefully closing the channel.
+    ///
+    /// The inventory registry that would track the changes is mocked for testing.
+    ///
+    /// Note: this closes the broadcast receiver, it doesn't have a separate `close()` method.
+    #[allow(dead_code)]
+    pub fn drop_inventory_change_receiver(&mut self) {
+        self.inv_receiver
+            .take()
+            .expect("inventory change receiver endpoint has already been dropped");
+    }
+
+    /// Tries to receive an [`InventoryChange`] sent by the [`Client`] instance.
+    ///
+    /// This method acts like a mock inventory registry, allowing tests to track the changes.
+    ///
+    /// TODO: make ReceiveRequestAttempt generic, and use it here.
+    #[allow(dead_code)]
+    pub(crate) fn try_to_receive_inventory_change(&mut self) -> Option<InventoryChange> {
+        let receive_result = self
+            .inv_receiver
+            .as_mut()
+            .expect("inventory change receiver endpoint has been dropped")
+            .try_recv();
+
+        match receive_result {
+            Ok(change) => Some(change),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Closed) => None,
+            Err(TryRecvError::Lagged(skipped_messages)) => unreachable!(
+                "unexpected lagged inventory receiver in tests, skipped {} messages",
+                skipped_messages,
+            ),
         }
     }
 
@@ -228,6 +273,8 @@ where
     pub fn finish(self) -> (Client, ClientTestHarness) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (client_request_sender, client_request_receiver) = mpsc::channel(1);
+        let (inv_sender, inv_receiver) = broadcast::channel(5);
+
         let error_slot = ErrorSlot::default();
         let version = self.version.unwrap_or(Version(0));
 
@@ -239,6 +286,8 @@ where
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
+            inv_collector: inv_sender,
+            transient_addr: None,
             error_slot: error_slot.clone(),
             version,
             connection_task,
@@ -248,6 +297,7 @@ where
         let harness = ClientTestHarness {
             client_request_receiver: Some(client_request_receiver),
             shutdown_receiver: Some(shutdown_receiver),
+            inv_receiver: Some(inv_receiver),
             error_slot,
             version,
             connection_aborter,

@@ -1,3 +1,5 @@
+//! Peer-related errors.
+
 use std::{borrow::Cow, sync::Arc};
 
 use thiserror::Error;
@@ -80,9 +82,40 @@ pub enum PeerError {
     #[error("Internal services over capacity")]
     Overloaded,
 
-    /// We requested data that the peer couldn't find.
-    #[error("Remote peer could not find items: {0:?}")]
-    NotFound(Vec<InventoryHash>),
+    /// We requested data, but the peer replied with a `notfound` message.
+    /// (Or it didn't respond before the request finished.)
+    ///
+    /// This error happens when the peer doesn't have any of the requested data,
+    /// so that the original request can be retried.
+    ///
+    /// This is a temporary error.
+    ///
+    /// Zebra can try different peers if the request is retried,
+    /// or peers can download and verify the missing data.
+    ///
+    /// If the peer has some of the data, the request returns an [`Ok`] response,
+    /// with any `notfound` data is marked as [`Missing`](InventoryResponse::Missing).
+    #[error("Remote peer could not find any of the items: {0:?}")]
+    NotFoundResponse(Vec<InventoryHash>),
+
+    /// We requested data, but all our ready peers are marked as recently
+    /// [`Missing`](InventoryResponse::Missing) that data in our local inventory registry.
+    ///
+    /// This is a temporary error.
+    ///
+    /// Peers with the inventory can finish their requests and become ready,
+    /// or other peers can download and verify the missing data.
+    ///
+    /// # Correctness
+    ///
+    /// This error is produced using Zebra's local inventory registry,
+    /// without contacting any peers.
+    ///
+    /// Client responses containing this error must not be used to update the inventory registry.
+    /// This makes sure that we eventually expire our local cache of missing inventory,
+    /// and send requests to peers again.
+    #[error("All ready peers are registered as recently missing these items: {0:?}")]
+    NotFoundRegistry(Vec<InventoryHash>),
 }
 
 impl PeerError {
@@ -101,7 +134,8 @@ impl PeerError {
             PeerError::Serialization(inner) => format!("Serialization({})", inner).into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
-            PeerError::NotFound(_) => "NotFound".into(),
+            PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),
+            PeerError::NotFoundRegistry(_) => "NotFoundRegistry".into(),
         }
     }
 }
