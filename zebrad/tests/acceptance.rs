@@ -957,9 +957,8 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
 /// If `check_legacy_chain` is true,
 /// make sure the logs contain the legacy chain check.
 ///
-/// If `enable_mempool_at_height` is `Some(Height(_))`,
-/// configure `zebrad` to debug-enable the mempool at that height.
-/// Then check the logs for the mempool being enabled.
+/// Configure `zebrad` to debug-enable the mempool based on `mempool_behavior`,
+/// Then check the logs for the expected `mempool_behavior`.
 ///
 /// If `stop_regex` is encountered before the process exits, kills the
 /// process, and mark the test as successful, even if `height` has not
@@ -1122,6 +1121,10 @@ fn create_cached_database(network: Network) -> Result<()> {
         true,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure pre-cached databases finish before the mandatory checkpoint
+            //
+            // TODO: this check passes even if we reach the mandatory checkpoint,
+            //       because we sync finalized state, then non-finalized state.
+            //       Instead, fail if we see "best non-finalized chain root" in the logs.
             test_child.expect_stdout_line_matches("CommitFinalized request")?;
             Ok(())
         },
