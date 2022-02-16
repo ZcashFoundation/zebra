@@ -246,6 +246,7 @@ jobs:
 
       - name: Regenerate stateful disks logs
         id: sync-to-checkpoint
+        if: steps.create-instance.outcome == 'success'
         run: |
           gcloud compute ssh \
           zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
@@ -278,6 +279,7 @@ jobs:
           echo "::set-output name=disk_short_sha::$short_sha"
 
       - name: Upload the disk state txt
+        if: steps.sync-to-checkpoint.outcome == 'success'
         uses: actions/upload-artifact@v2.3.1
         with:
           name: latest-disk-state-sha
