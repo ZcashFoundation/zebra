@@ -316,6 +316,9 @@ impl StartCmd {
         // TODO: replace with `MAX_CLOSE_TO_TIP_BLOCKS` after fixing slow syncing near tip (#3375)
         const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
 
+        // The number of fractional digits in sync percentages.
+        const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
+
         // The minimum number of extra blocks after the highest checkpoint, based on:
         // - the non-finalized state limit, and
         // - how long it takes to build Zebra and re-sync non-finalized blocks (~12 minutes).
@@ -344,7 +347,11 @@ impl StartCmd {
                     .expect("unexpected empty state: estimate requires a block height");
 
                 let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
-                let sync_percent = format!("{:.3}", sync_progress * 100.0);
+                let sync_percent = format!(
+                    "{:.frac$}",
+                    sync_progress * 100.0,
+                    frac = SYNC_PERCENT_FRAC_DIGITS,
+                );
 
                 let remaining_sync_blocks = estimated_height - current_height;
 
@@ -368,13 +375,16 @@ impl StartCmd {
                 } else if is_close_to_tip && current_height <= after_checkpoint_height {
                     // We've stopped syncing blocks,
                     // but we're below the height our checkpoints were generated from.
+                    //
+                    // Block verification can fail if the local node's clock is wrong.
                     warn!(
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
                         ?after_checkpoint_height,
                         "initial sync is very slow, and state is below the highest checkpoint. \
-                         Hint: check your network connection",
+                         Hint: check your network connection, \
+                         and your computer clock and time zone",
                     );
                 } else if is_close_to_tip {
                     // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
@@ -400,6 +410,28 @@ impl StartCmd {
                         ?current_height,
                         ?remaining_sync_blocks,
                         "estimated progress to chain tip",
+                    );
+                }
+            } else {
+                let sync_percent = format!("{:.frac$}", 0.0f64, frac = SYNC_PERCENT_FRAC_DIGITS,);
+
+                if is_close_to_tip {
+                    // We've stopped syncing blocks,
+                    // but we haven't downloaded and verified the genesis block.
+                    warn!(
+                        %sync_percent,
+                        current_height = %"None",
+                        "initial sync can't download and verify the genesis block. \
+                         Hint: check your network connection, \
+                         and your computer clock and time zone",
+                    );
+                } else {
+                    // We're waiting for the genesis block to be committed to the state,
+                    // before we can estimate the best chain tip.
+                    info!(
+                        %sync_percent,
+                        current_height = %"None",
+                        "initial sync is waiting to download the genesis block"
                     );
                 }
             }
