@@ -200,7 +200,6 @@ where
         self.spends_per_anchor()
             .map(|spend| spend.per_spend_anchor)
             .unique_by(|raw| raw.0.to_bytes())
-            .dedup()
     }
 
     /// Iterate over the [`Spend`]s for this transaction, returning
