@@ -739,9 +739,9 @@ const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
-/// The text that should be logged when synchronization finishes and reaches the estimated chain
-/// tip.
-const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip";
+/// The text that should be logged when synchronization finishes, reaches the estimated chain tip,
+/// and activates the mempool.
+const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip, and activated mempool";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///

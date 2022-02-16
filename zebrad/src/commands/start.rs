@@ -355,7 +355,7 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        "finished initial sync to chain tip"
+                        "finished initial sync to chain tip, and activated mempool",
                     );
                 } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
                     // We estimate we're near the tip, but we have been syncing lots of blocks recently.
@@ -363,7 +363,8 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        "finished initial sync to chain tip"
+                        "finished initial sync, \
+                         waiting for syncer to stabilise before activating mempool",
                     );
                 } else {
                     // We estimate we're far from the tip, and we've been syncing lots of blocks.
@@ -371,7 +372,7 @@ impl StartCmd {
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
-                        "estimated progress to chain tip"
+                        "estimated progress to chain tip",
                     );
                 }
             }
