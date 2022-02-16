@@ -339,8 +339,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy,size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy \
+          --create-disk=image=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy,name=zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy,size=100GB,type=pd-ssd \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
