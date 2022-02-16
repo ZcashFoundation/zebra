@@ -344,6 +344,7 @@ impl StartCmd {
                     // TODO: warn after fixing slow syncing near tip (#3375)
                     info!(
                         %sync_percent,
+                        ?current_height,
                         ?remaining_sync_blocks,
                         "initial sync might have stalled, or estimated tip is wrong. \
                          Hint: check that your computer's clock and time zone are correct"
@@ -355,6 +356,7 @@ impl StartCmd {
                     //       and have been stable for a while (#1592)
                     info!(
                         %sync_percent,
+                        ?current_height,
                         ?remaining_sync_blocks,
                         "finished initial sync to chain tip"
                     );
@@ -362,6 +364,7 @@ impl StartCmd {
                     // We estimate we're near the tip, but we have been syncing lots of blocks recently.
                     info!(
                         %sync_percent,
+                        ?current_height,
                         ?remaining_sync_blocks,
                         "finished initial sync to chain tip"
                     );
@@ -369,6 +372,7 @@ impl StartCmd {
                     // We estimate we're far from the tip, and we've been syncing lots of blocks.
                     info!(
                         %sync_percent,
+                        ?current_height,
                         ?remaining_sync_blocks,
                         "estimated progress to chain tip"
                     );
