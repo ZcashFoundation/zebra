@@ -13,7 +13,7 @@ use crate::{
     },
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
-        ZcashSerialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
 };
 
@@ -161,7 +161,7 @@ impl Spend<SharedAnchor> {
 impl ZcashSerialize for Spend<PerSpendAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.per_spend_anchor.0.to_bytes())?;
+        self.per_spend_anchor.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.nullifier.into())?;
         writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
@@ -199,7 +199,7 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
-            per_spend_anchor: tree::Root::try_from(reader.read_32_bytes()?)?,
+            per_spend_anchor: (&mut reader).zcash_deserialize_into()?,
             // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J
