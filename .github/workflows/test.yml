@@ -199,7 +199,7 @@ jobs:
 
       - name: Create GCP compute instance
         id: create-instance
-        if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' }} || ${{ github.event.inputs.regenerate-disks == 'true' }}
+        if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         run: |
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
