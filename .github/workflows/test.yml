@@ -163,7 +163,7 @@ jobs:
           docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- -Zunstable-options --include-ignored
 
   regenerate-stateful-disks:
-    name: Renerate state disks
+    name: Regenerate stateful disks
     runs-on: ubuntu-latest
     needs: build
     outputs:
@@ -297,7 +297,6 @@ jobs:
     name: Test blocks sync
     runs-on: ubuntu-latest
     needs: [ build, regenerate-stateful-disks]
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
