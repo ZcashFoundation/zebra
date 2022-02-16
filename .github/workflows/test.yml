@@ -90,6 +90,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Run all the zebra tests, including tests that are ignored by default
   test-all:
     name: Test all
     runs-on: ubuntu-latest
@@ -106,7 +107,7 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
 
   test-fake-activation-heights:
     name: Test with fake activation heights
@@ -143,24 +144,6 @@ jobs:
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
           docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
-
-  test-zunstable:
-    name: Test with Zunstable options
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
-    steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-
-      - name: Run Zunstable-options tests
-        run: |
-          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- -Zunstable-options --include-ignored
 
   regenerate-stateful-disks:
     name: Regenerate stateful disks
@@ -339,8 +322,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy,name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy,size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy \
+          --create-disk=image=zebrad-cache-${{ env.DISK_SHORT_SHA }}-${{ env.lower_net_name }}-canopy,name=zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy,size=100GB,type=pd-ssd \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
