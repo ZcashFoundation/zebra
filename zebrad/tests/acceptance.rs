@@ -903,7 +903,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn full_sync_mainnet() {
-    assert!(full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").is_ok());
+    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
 /// Test if `zebrad` can fully sync the chain on testnet.
@@ -914,7 +914,7 @@ fn full_sync_mainnet() {
 #[test]
 #[ignore]
 fn full_sync_testnet() {
-    assert!(full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").is_ok());
+    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
 /// Sync `network` until the chain tip is reached, or a timeout elapses.
@@ -939,6 +939,13 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
         )
         .map(|_| ())
     } else {
+        tracing::info!(
+            ?network,
+            "skipped full sync test, \
+             set the {:?} environmental variable to run the test",
+            timeout_argument_name,
+        );
+
         Ok(())
     }
 }
