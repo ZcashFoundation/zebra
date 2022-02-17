@@ -159,7 +159,7 @@ jobs:
 
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v14.4
+        uses: tj-actions/changed-files@v15.1
         with:
           files: |
             /zebra-state/**/disk_format.rs
