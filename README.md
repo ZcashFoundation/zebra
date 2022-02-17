@@ -82,8 +82,6 @@ The goals of the beta release series are for Zebra to act as a fully validating 
 for all active consensus rules as of NU5 activation.
 
 Currently, Zebra validates all of the documented Zcash consensus rules, but it may not validate any:
-
-#### Other
 - Undocumented rules derived from Bitcoin
 - Undocumented network protocol requirements
 
@@ -115,7 +113,7 @@ For more detailed instructions, refer to the [documentation](https://zebra.zfnd.
 The recommended requirements for compiling and running `zebrad` are:
 - 4+ CPU cores
 - 16+ GB RAM
-- 50GB+ available disk space for finalized state
+- 50GB+ available disk space for building binaries and storing finalized state
 - 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
@@ -126,7 +124,7 @@ The *latest* [GitHub Runners](https://docs.github.com/en/actions/using-github-ho
 - Ubuntu
 
 Docker:
-- Debian Buster
+- Debian Bullseye
 
 Zebra's tests can take over an hour, depending on your machine.
 We're working on making them faster.
@@ -163,9 +161,15 @@ By default, Zebra uses the following inbound TCP listener ports:
 - 8233 on Mainnet
 - 18233 on Testnet
 
-`zebrad`'s typical network usage is:
+Zebra needs some peers which have a round-trip latency of 2 seconds or less.
+If this is a problem for you, please
+[open a ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+
+`zebrad`'s typical mainnet network usage is:
 - Initial sync: 30 GB download
-- Ongoing updates: 10-50 MB upload and download per day, depending on peer requests
+- Ongoing updates: 10-100 MB upload and download per day, depending on peer requests
+
+Zebra also performs an initial sync every time its internal database version changes.
 
 For more detailed information, refer to the [documentation](https://zebra.zfnd.org/user/run.html).
 
@@ -177,6 +181,23 @@ You can set `ZEBRA_SKIP_NETWORK_TESTS=1` to skip the network tests.
 Zebra may be unreliable on Testnet, and under less-than-perfect network conditions.
 See our [roadmap](#future-work) for details.
 
+### Disk Usage
+
+Zebra uses up to 40 GB of space for cached mainnet data,
+and 10 GB of space for cached testnet data.
+
+RocksDB cleans up outdated data periodically,
+and when the database is closed and re-opened.
+
+#### Disk Troubleshooting
+
+Zebra's state commits changes using RocksDB database transactions.
+
+If you forcibly terminate Zebra, or it panics,
+any incomplete changes will be rolled back the next time it starts.
+
+So Zebra's state should always be valid, unless your OS or disk hardware is corrupting data.
+
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
@@ -186,24 +207,20 @@ There are a few bugs in Zebra that we're still working on fixing:
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
 
-Zebra's state commits changes using database transactions.
-If you forcibly terminate it, or it panics, any incomplete changes will be rolled back the next time it starts.
-
 ## Future Work
 
-In 2021, we intend to finish NU5 validation, start adding RPC support and start adding wallet integrations.
+In 2022, we intend to start adding RPC support and start adding wallet integrations.
 This phased approach allows us to test Zebra's independent implementation of the
 consensus rules, before asking users to entrust it with their funds.
 
 Features:
-- Full consensus rule validation
-- Wallet functionality
 - RPC functionality
+- Wallet functionality
 
 Performance and Reliability:
 - Reliable syncing on Testnet
 - Reliable syncing under poor network conditions
-- Batch verification
+- Additional batch verification
 - Performance tuning
 
 Currently, the following features are out of scope:
