@@ -605,10 +605,10 @@ We use the following rocksdb column families:
 | `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
 | `height_tx_count_by_hash`      | `block::Hash`          | `HeightTransactionCount`            | Never   |
 | `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
-| `tx_by_location`               | `TransactionLocation`  | `Transaction`                       | Never   |
-| `hash_by_tx`                   | `TransactionLocation`  | `transaction::Hash`                 | Never   |
-| `tx_by_hash`                   | `transaction::Hash`    | `TransactionLocation`               | Never   |
-| `utxo_by_outpoint`             | `OutLocation`          | `transparent::Output`               | Delete  |
+| `tx_by_loc`                    | `TransactionLocation`  | `Transaction`                       | Never   |
+| `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
+| `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
+| `utxo_by_out_loc`              | `OutLocation`          | `transparent::Output`               | Delete  |
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| TransparentAddrLoc`    | Update  |
 | `utxo_by_transparent_addr_loc` | `TransparentAddrLoc`   | `AtLeastOne<OutLocation>`           | Up/Del  |
 | `tx_by_transparent_addr_loc`   | `TransparentAddrLoc`   | `AtLeastOne<TransactionLocation>`   | Append  |
