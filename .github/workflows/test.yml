@@ -52,14 +52,14 @@ jobs:
           driver-opts: network=host
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v1.12.0
+        uses: docker/login-action@v1.13.0
         with:
           registry: us-docker.pkg.dev
           username: _json_key
           password: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Login to Google Container Registry
-        uses: docker/login-action@v1.12.0
+        uses: docker/login-action@v1.13.0
         with:
           registry: gcr.io
           username: _json_key
