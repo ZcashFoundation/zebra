@@ -127,8 +127,9 @@ jobs:
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
           docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
 
-  test-large-sync:
-    name: Test large sync
+  # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state
+  test-empty-sync:
+    name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' }}
@@ -277,8 +278,9 @@ jobs:
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
 
+  # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
-    name: Test blocks sync
+    name: Test full validation sync from cached state
     runs-on: ubuntu-latest
     needs: [ build, regenerate-stateful-disks]
     steps:
