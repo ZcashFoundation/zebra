@@ -602,25 +602,32 @@ We use the following rocksdb column families:
 
 | Column Family                  | Keys                   | Values                              | Updates |
 | ------------------------------ | ---------------------- | ----------------------------------- | ------- |
+| *Blocks*                       |                        |                                     |         |
 | `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
 | `height_tx_count_by_hash`      | `block::Hash`          | `HeightTransactionCount`            | Never   |
 | `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
+| *Transactions*                 |                        |                                     |         |
 | `tx_by_loc`                    | `TransactionLocation`  | `Transaction`                       | Never   |
 | `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
 | `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
+| *Transparent*                  |                        |                                     |         |
 | `utxo_by_out_loc`              | `OutLocation`          | `transparent::Output`               | Delete  |
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| TransparentAddrLoc`    | Update  |
 | `utxo_by_transparent_addr_loc` | `TransparentAddrLoc`   | `AtLeastOne<OutLocation>`           | Up/Del  |
 | `tx_by_transparent_addr_loc`   | `TransparentAddrLoc`   | `AtLeastOne<TransactionLocation>`   | Append  |
+| *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
 | `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`  | Delete  |
+| *Sapling*                      |                        |                                     |         |
 | `sapling_nullifiers`           | `sapling::Nullifier`   | `()`                                | Never   |
 | `sapling_anchors`              | `sapling::tree::Root`  | `()`                                | Never   |
 | `sapling_note_commitment_tree` | `block::Height`        | `sapling::tree::NoteCommitmentTree` | Delete  |
+| *Orchard*                      |                        |                                     |         |
 | `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                | Never   |
 | `orchard_anchors`              | `orchard::tree::Root`  | `()`                                | Never   |
 | `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree` | Delete  |
+| *Chain*                        |                        |                                     |         |
 | `history_tree`                 | `block::Height`        | `NonEmptyHistoryTree`               | Delete  |
 | `tip_chain_value_pool`         | `()`                   | `ValueBalance`                      | Update  |
 
