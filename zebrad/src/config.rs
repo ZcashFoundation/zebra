@@ -57,6 +57,14 @@ pub struct TracingSection {
     /// terminals.
     pub use_color: bool,
 
+    /// Whether to force the use of colored terminal output, even if it's not available.
+    ///
+    /// Will force Zebra to use colored terminal output even if it does not detect that the output
+    /// is a terminal that supports colors.
+    ///
+    /// Defaults to `false`, which keeps the behavior of `use_color`.
+    pub force_use_color: bool,
+
     /// The filter used for tracing events.
     ///
     /// The filter is used to create a `tracing-subscriber`
@@ -120,6 +128,7 @@ impl Default for TracingSection {
     fn default() -> Self {
         Self {
             use_color: true,
+            force_use_color: false,
             filter: None,
             endpoint_addr: None,
             flamegraph: None,
