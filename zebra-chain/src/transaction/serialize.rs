@@ -215,7 +215,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
         let shared_anchor = if spends_count > 0 {
-            Some(reader.read_32_bytes()?.into())
+            Some((&mut reader).zcash_deserialize_into()?)
         } else {
             None
         };
