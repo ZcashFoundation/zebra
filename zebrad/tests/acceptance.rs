@@ -27,7 +27,7 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -42,7 +42,7 @@ use zebra_test::{
 };
 use zebrad::{
     components::{mempool, sync},
-    config::{SyncSection, ZebradConfig},
+    config::{SyncSection, TracingSection, ZebradConfig},
 };
 
 /// The amount of time we wait after launching `zebrad`.
@@ -82,12 +82,22 @@ fn default_test_config() -> Result<ZebradConfig> {
         ..zebra_consensus::Config::default()
     };
 
+    let force_use_color = !matches!(
+        env::var("ZEBRA_FORCE_USE_COLOR"),
+        Err(env::VarError::NotPresent)
+    );
+    let tracing = TracingSection {
+        force_use_color,
+        ..TracingSection::default()
+    };
+
     let config = ZebradConfig {
         network,
         state: zebra_state::Config::ephemeral(),
         sync,
         mempool,
         consensus,
+        tracing,
         ..ZebradConfig::default()
     };
 
@@ -729,6 +739,10 @@ const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
+/// The text that should be logged when synchronization finishes and reaches the estimated chain
+/// tip.
+const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip";
+
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
@@ -754,7 +768,7 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )
     .map(|_tempdir| ())
 }
@@ -771,7 +785,7 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )
     .map(|_tempdir| ())
 }
@@ -795,7 +809,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -807,7 +821,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
         false,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
 
     Ok(())
@@ -824,7 +838,7 @@ fn activate_mempool_mainnet() -> Result<()> {
         TINY_CHECKPOINT_TIMEOUT,
         None,
         true,
-        Some(TINY_CHECKPOINT_TEST_HEIGHT),
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
 }
@@ -844,7 +858,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -854,7 +868,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
         false,
-        None,
+        MempoolBehavior::ShouldNotActivate,
     )?;
 
     Ok(())
@@ -876,9 +890,57 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         LARGE_CHECKPOINT_TIMEOUT,
         None,
         true,
-        Some(TINY_CHECKPOINT_TEST_HEIGHT),
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
     )
     .map(|_tempdir| ())
+}
+
+/// Test if `zebrad` can fully sync the chain on mainnet.
+///
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_mainnet() {
+    assert!(full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").is_ok());
+}
+
+/// Test if `zebrad` can fully sync the chain on testnet.
+///
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_testnet() {
+    assert!(full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").is_ok());
+}
+
+/// Sync `network` until the chain tip is reached, or a timeout elapses.
+///
+/// The timeout is specified using an environment variable, with the name configured by the
+/// `timeout_argument_name` parameter. The value of the environment variable must the number of
+/// minutes specified as an integer.
+fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Result<()> {
+    let timeout_argument: Option<u64> = env::var(timeout_argument_name)
+        .ok()
+        .and_then(|timeout_string| timeout_string.parse().ok());
+
+    if let Some(timeout_minutes) = timeout_argument {
+        sync_until(
+            Height::MAX,
+            network,
+            SYNC_FINISHED_REGEX,
+            Duration::from_secs(60 * timeout_minutes),
+            None,
+            true,
+            MempoolBehavior::ShouldAutomaticallyActivate,
+        )
+        .map(|_| ())
+    } else {
+        Ok(())
+    }
 }
 
 /// Sync `network` until `zebrad` reaches `height`, and ensure that
@@ -908,7 +970,7 @@ fn sync_until(
     timeout: Duration,
     reuse_tempdir: impl Into<Option<TempDir>>,
     check_legacy_chain: bool,
-    enable_mempool_at_height: impl Into<Option<Height>>,
+    mempool_behavior: MempoolBehavior,
 ) -> Result<TempDir> {
     zebra_test::init();
 
@@ -917,14 +979,13 @@ fn sync_until(
     }
 
     let reuse_tempdir = reuse_tempdir.into();
-    let enable_mempool_at_height = enable_mempool_at_height.into();
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
     // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
-    config.mempool.debug_enable_at_height = enable_mempool_at_height.map(|height| height.0);
+    config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
         reuse_tempdir.replace_config(&mut config)?
@@ -942,7 +1003,7 @@ fn sync_until(
         child.expect_stdout_line_matches("no legacy chain found")?;
     }
 
-    if enable_mempool_at_height.is_some() {
+    if mempool_behavior.is_forced_activation() {
         child.expect_stdout_line_matches("enabling mempool for debugging")?;
         child.expect_stdout_line_matches("activating mempool")?;
 
@@ -952,19 +1013,31 @@ fn sync_until(
 
     child.expect_stdout_line_matches(stop_regex)?;
 
-    // make sure there is never a mempool if we don't explicitly enable it
-    if enable_mempool_at_height.is_none() {
+    // make sure mempool behaves as expected when we don't explicitly enable it
+    if !mempool_behavior.is_forced_activation() {
         // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
         // the error is delayed until the test timeout, or until the child reaches the stop height and exits.
         let mempool_is_activated = child
             .expect_stdout_line_matches("activating mempool")
             .is_ok();
 
-        // if there is a matching line, we panic and kill the test process.
-        // but we also need to kill the `zebrad` child before the test panics.
-        if mempool_is_activated {
+        let mempool_check = match mempool_behavior {
+            MempoolBehavior::ShouldAutomaticallyActivate if !mempool_is_activated => {
+                Some("mempool did not activate as expected")
+            }
+            MempoolBehavior::ShouldNotActivate if mempool_is_activated => Some(
+                "unexpected mempool activation: \
+                mempool should not activate while syncing lots of blocks",
+            ),
+            MempoolBehavior::ForceActivationAt(_) => unreachable!("checked by outer if condition"),
+            _ => None,
+        };
+
+        if let Some(error) = mempool_check {
+            // if the mempool does not behave as expected, we panic and kill the test process.
+            // but we also need to kill the `zebrad` child before the test panics.
             child.kill()?;
-            panic!("unexpected mempool activation: mempool should not activate while syncing lots of blocks")
+            panic!("{error}")
         }
     }
 
@@ -1420,10 +1493,10 @@ where
     U: ZebradTestDirExt,
 {
     // Start the first node
-    let node1 = first_dir.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(&["start"])?;
 
-    // Wait a bit to spawn the second node, we want the first fully started.
-    std::thread::sleep(LAUNCH_DELAY);
+    // Wait until node1 has used the conflicting resource.
+    node1.expect_stdout_line_matches(first_stdout_regex)?;
 
     // Spawn the second node
     let node2 = second_dir.spawn_child(&["start"]);
@@ -1433,14 +1506,7 @@ where
     // Second node is terminated by panic, no need to kill.
     std::thread::sleep(LAUNCH_DELAY);
     let node1_kill_res = node1.kill();
-    let (_, node2) = node2.kill_on_error(node1_kill_res)?;
-
-    // In node1 we want to check for the success regex
-    // If there are any errors, we also want to print the node2 output.
-    let output1 = node1.wait_with_output();
-    // This mut is only used on some platforms, due to #1781.
-    #[allow(unused_mut)]
-    let (output1, mut node2) = node2.kill_on_error(output1)?;
+    let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
 
     // node2 should have panicked due to a conflict. Kill it here anyway, so it
     // doesn't outlive the test on error.
@@ -1455,22 +1521,21 @@ where
             .kill_on_error::<(), _>(Err(eyre!(
                 "conflicted node2 was still running, but the test expected a panic"
             )))
-            .context_from(&output1)
+            .context_from(&mut node1)
             .map(|_| ());
     }
+
     // Now we're sure both nodes are dead, and we have both their outputs
+    let output1 = node1.wait_with_output().context_from(&mut node2)?;
     let output2 = node2.wait_with_output().context_from(&output1)?;
 
-    // Look for the success regex
-    output1
-        .stdout_line_matches(first_stdout_regex)
-        .context_from(&output2)?;
+    // Make sure the first node was killed, rather than exiting with an error.
     output1
         .assert_was_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
         .context_from(&output2)?;
 
-    // In the second node we look for the conflict regex
+    // Make sure node2 has the expected resource conflict.
     output2
         .stderr_line_matches(second_stderr_regex)
         .context_from(&output1)?;
@@ -1480,4 +1545,33 @@ where
         .context_from(&output1)?;
 
     Ok(())
+}
+
+/// What the expected behavior of the mempool is for a test that uses [`sync_until`].
+enum MempoolBehavior {
+    /// The mempool should be forced to activate at a certain height, for debug purposes.
+    ForceActivationAt(Height),
+
+    /// The mempool should be automatically activated.
+    ShouldAutomaticallyActivate,
+
+    /// The mempool should not become active during the test.
+    ShouldNotActivate,
+}
+
+impl MempoolBehavior {
+    /// Return the height value that the mempool should be enabled at, if available.
+    pub fn enable_at_height(&self) -> Option<u32> {
+        match self {
+            MempoolBehavior::ForceActivationAt(height) => Some(height.0),
+            MempoolBehavior::ShouldAutomaticallyActivate | MempoolBehavior::ShouldNotActivate => {
+                None
+            }
+        }
+    }
+
+    /// Returns `true` if the mempool should be forcefully activated at a specified height.
+    pub fn is_forced_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ForceActivationAt(_))
+    }
 }
