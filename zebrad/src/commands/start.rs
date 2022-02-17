@@ -444,22 +444,24 @@ impl StartCmd {
                     );
                 } else if is_syncer_stopped {
                     // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
+                    // So we're mostly using gossiped blocks now.
                     info!(
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
                         %time_since_last_state_block,
-                        "finished initial sync to chain tip, and activated mempool",
+                        "finished initial sync to chain tip, using gossiped blocks",
                     );
                 } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
                     // We estimate we're near the tip, but we have been syncing lots of blocks recently.
+                    // We might also be using some gossiped blocks.
                     info!(
                         %sync_percent,
                         ?current_height,
                         ?remaining_sync_blocks,
                         %time_since_last_state_block,
-                        "finished initial sync, \
-                         waiting for syncer to stabilise before activating mempool",
+                        "close to finishing initial sync, \
+                         confirming using syncer and gossiped blocks",
                     );
                 } else {
                     // We estimate we're far from the tip, and we've been syncing lots of blocks.
