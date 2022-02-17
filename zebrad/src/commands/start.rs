@@ -60,6 +60,7 @@ use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
+use num_integer::div_ceil;
 use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
@@ -67,7 +68,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     block::Height,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_consensus::CheckpointList;
 
@@ -323,11 +324,26 @@ impl StartCmd {
         // The number of fractional digits in sync percentages.
         const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
 
+        // The minimum number of extra blocks mined between updating a checkpoint list,
+        // and running an automated test that depends on that list.
+        //
+        // This is an estimate based on the time it takes to:
+        // - get the tip height from `zcashd`,
+        // - run `zebra-checkpoints` to update the checkpoint list,
+        // - submit a pull request, and
+        // - run a CI test that logs progress based on the new checkpoint height.
+        //
+        // We might add tests that sync from a cached tip state,
+        // so we only allow a few extra blocks here.
+        const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: i32 = 10;
+
         // The minimum number of extra blocks after the highest checkpoint, based on:
         // - the non-finalized state limit, and
-        // - how long it takes to build Zebra and re-sync non-finalized blocks (~12 minutes).
-        let min_after_checkpoint_blocks =
-            i32::try_from(zebra_state::MAX_BLOCK_REORG_HEIGHT).expect("constant fits in i32") + 10;
+        // - the minimum number of extra blocks mined between a checkpoint update,
+        //   and the automated tests for that update.
+        let min_after_checkpoint_blocks = i32::try_from(zebra_state::MAX_BLOCK_REORG_HEIGHT)
+            .expect("constant fits in i32")
+            + MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE;
 
         // The minimum height of the valid best chain, based on:
         // - the hard-coded checkpoint height,
@@ -434,7 +450,13 @@ impl StartCmd {
                     );
                 } else if is_syncer_stopped && current_height <= after_checkpoint_height {
                     // We've stopped syncing blocks,
-                    // but we're below the height our checkpoints were generated from.
+                    // but we're below the minimum height estimated from our checkpoints.
+                    let min_minutes_after_checkpoint_update: i64 = div_ceil(
+                        i64::from(MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE)
+                            * POST_BLOSSOM_POW_TARGET_SPACING,
+                        60,
+                    );
+
                     warn!(
                         %sync_percent,
                         ?current_height,
@@ -443,7 +465,9 @@ impl StartCmd {
                         %time_since_last_state_block,
                         "initial sync is very slow, and state is below the highest checkpoint. \
                          Hint: check your network connection, \
-                         and your computer clock and time zone",
+                         and your computer clock and time zone. \
+                         Dev Hint: were the checkpoints updated in the last {} minutes?",
+                        min_minutes_after_checkpoint_update,
                     );
                 } else if is_syncer_stopped {
                     // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
