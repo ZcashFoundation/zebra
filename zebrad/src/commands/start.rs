@@ -327,6 +327,9 @@ impl StartCmd {
         // The minimum number of extra blocks mined between updating a checkpoint list,
         // and running an automated test that depends on that list.
         //
+        // Makes sure that the block finalization code always runs in sync tests,
+        // even if the miner or test node clock is wrong by a few minutes.
+        //
         // This is an estimate based on the time it takes to:
         // - get the tip height from `zcashd`,
         // - run `zebra-checkpoints` to update the checkpoint list,
