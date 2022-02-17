@@ -91,7 +91,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
 
     // Check if root of the tree of the activation block is correct
     let sapling_activation_block_root =
-        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+        sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     assert_eq!(sapling_activation_block_root, tree.root());
 
     // Load the block immediately after Sapling activation (activation + 1)
@@ -102,11 +102,11 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid"),
     );
-    let block_after_sapling_activation_root = sapling::tree::Root(
+    let block_after_sapling_activation_root = sapling::tree::Root::try_from(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
-    );
+    )?;
 
     // Add note commitments from the block after Sapling activatoin to the tree
     let mut appended_count = 0;
