@@ -163,6 +163,7 @@ jobs:
         with:
           files: |
             /zebra-state/**/disk_format.rs
+            /zebra-state/**/disk_db.rs
             /zebra-state/**/finalized_state.rs
             /zebra-state/**/constants.rs
 
