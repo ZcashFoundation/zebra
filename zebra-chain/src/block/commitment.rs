@@ -108,7 +108,10 @@ impl Commitment {
 
         match NetworkUpgrade::current(network, height) {
             Genesis | BeforeOverwinter | Overwinter => Ok(PreSaplingReserved(bytes)),
-            Sapling | Blossom => Ok(FinalSaplingRoot(sapling::tree::Root(bytes))),
+            Sapling | Blossom => match sapling::tree::Root::try_from(bytes) {
+                Ok(root) => Ok(FinalSaplingRoot(root)),
+                _ => Err(InvalidSapingRootBytes),
+            },
             Heartwood if Some(height) == Heartwood.activation_height(network) => {
                 if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
                     Ok(ChainHistoryActivationReserved)
@@ -130,7 +133,7 @@ impl Commitment {
 
         match self {
             PreSaplingReserved(bytes) => bytes,
-            FinalSaplingRoot(hash) => hash.0,
+            FinalSaplingRoot(hash) => hash.0.into(),
             ChainHistoryActivationReserved => CHAIN_HISTORY_ACTIVATION_RESERVED,
             ChainHistoryRoot(hash) => hash.0,
             ChainHistoryBlockTxAuthCommitment(hash) => hash.0,
@@ -247,4 +250,7 @@ pub enum CommitmentError {
 
     #[error("missing required block height: block commitments can't be parsed without a block height, block hash: {block_hash:?}")]
     MissingBlockHeight { block_hash: block::Hash },
+
+    #[error("provided bytes are not a valid sapling root")]
+    InvalidSapingRootBytes,
 }
