@@ -963,7 +963,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
 /// make sure the logs contain the legacy chain check.
 ///
 /// Configure `zebrad` to debug-enable the mempool based on `mempool_behavior`,
-/// Then check the logs for the expected `mempool_behavior`.
+/// then check the logs for the expected `mempool_behavior`.
 ///
 /// If `stop_regex` is encountered before the process exits, kills the
 /// process, and mark the test as successful, even if `height` has not
