@@ -129,23 +129,21 @@ fn block_commitment_is_valid_for_chain_history(
     history_tree: &HistoryTree,
 ) -> Result<(), ValidateContextError> {
     match block.commitment(network)? {
-        // TODO: move this below after it's implemented
-        //
-        // # Consensus
-        //
-        // > [Sapling and Blossom only, pre-Heartwood] hashLightClientRoot MUST
-        // > be LEBS2OSP_{256}(rt^{Sapling}) where rt^{Sapling} is the root of
-        // > the Sapling note commitment tree for the final Sapling treestate of
-        // > this block .
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#blockheader
-        //
-        // The network is checked by [`Block::commitment`] above; it will only
-        // return the sapling root if it's Sapling or Blossom.
         block::Commitment::PreSaplingReserved(_)
         | block::Commitment::FinalSaplingRoot(_)
         | block::Commitment::ChainHistoryActivationReserved => {
-            // No contextual checks needed for those.
+            // # Consensus
+            //
+            // > [Sapling and Blossom only, pre-Heartwood] hashLightClientRoot MUST
+            // > be LEBS2OSP_{256}(rt^{Sapling}) where rt^{Sapling} is the root of
+            // > the Sapling note commitment tree for the final Sapling treestate of
+            // > this block .
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#blockheader
+            //
+            // We don't need to validate this rule since we checkpoint on Canopy.
+            //
+            // We also don't need to do anything in the other cases.
             Ok(())
         }
         block::Commitment::ChainHistoryRoot(actual_history_tree_root) => {
