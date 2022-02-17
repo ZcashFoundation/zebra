@@ -344,6 +344,9 @@ impl StartCmd {
         // We expect the state height to increase at least once in this interval.
         //
         // Most chain forks are 1-7 blocks long.
+        //
+        // TODO: remove the target_block_spacing multiplier,
+        //       after fixing slow syncing near tip (#3375)
         let min_state_block_interval = max_block_spacing.unwrap_or(target_block_spacing * 4) * 2;
 
         // Formatted string for logging.
@@ -492,7 +495,7 @@ impl StartCmd {
                     info!(
                         %sync_percent,
                         current_height = %"None",
-                        "initial sync is waiting to download the genesis block"
+                        "initial sync is waiting to download the genesis block",
                     );
                 }
             }
