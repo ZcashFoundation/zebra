@@ -21,8 +21,10 @@ impl Tracing {
         let filter = config.filter.unwrap_or_else(|| "".to_string());
         let flame_root = &config.flamegraph;
 
-        // Only use color if tracing output is being sent to a terminal
-        let use_color = config.use_color && atty::is(atty::Stream::Stdout);
+        // Only use color if tracing output is being sent to a terminal or if it was explicitly
+        // forced to.
+        let use_color =
+            config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = FmtSubscriber::builder()

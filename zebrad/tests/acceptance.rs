@@ -42,7 +42,7 @@ use zebra_test::{
 };
 use zebrad::{
     components::{mempool, sync},
-    config::{SyncSection, ZebradConfig},
+    config::{SyncSection, TracingSection, ZebradConfig},
 };
 
 /// The amount of time we wait after launching `zebrad`.
@@ -82,12 +82,22 @@ fn default_test_config() -> Result<ZebradConfig> {
         ..zebra_consensus::Config::default()
     };
 
+    let force_use_color = !matches!(
+        env::var("ZEBRA_FORCE_USE_COLOR"),
+        Err(env::VarError::NotPresent)
+    );
+    let tracing = TracingSection {
+        force_use_color,
+        ..TracingSection::default()
+    };
+
     let config = ZebradConfig {
         network,
         state: zebra_state::Config::ephemeral(),
         sync,
         mempool,
         consensus,
+        tracing,
         ..ZebradConfig::default()
     };
 
