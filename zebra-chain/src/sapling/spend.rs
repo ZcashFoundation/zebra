@@ -193,12 +193,20 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
         // https://zips.z.cash/protocol/protocol.pdf#spenddesc
         //
         // See comments below for each specific type.
+        //
+        // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
+        //
+        // Applies to `per_spend_anchor` below; validated in
+        // [`crate::sapling::tree::Root::zcash_deserialize`].
         Ok(Spend {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
-            // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
+            // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
+            // But as mentioned above, we validate it further as an integer.
             per_spend_anchor: (&mut reader).zcash_deserialize_into()?,
             // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
