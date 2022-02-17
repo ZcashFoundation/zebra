@@ -399,7 +399,7 @@ impl StartCmd {
                 // Work out the sync progress towards the estimated tip.
                 let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
                 let sync_percent = format!(
-                    "{:.frac$}",
+                    "{:.frac$} %",
                     sync_progress * 100.0,
                     frac = SYNC_PERCENT_FRAC_DIGITS,
                 );
@@ -504,7 +504,7 @@ impl StartCmd {
                     );
                 }
             } else {
-                let sync_percent = format!("{:.frac$}", 0.0f64, frac = SYNC_PERCENT_FRAC_DIGITS,);
+                let sync_percent = format!("{:.frac$} %", 0.0f64, frac = SYNC_PERCENT_FRAC_DIGITS,);
 
                 if is_syncer_stopped {
                     // We've stopped syncing blocks,
