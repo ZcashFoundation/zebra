@@ -20,8 +20,7 @@ use crate::{
     Config,
 };
 
-/// Wrapper struct to ensure low-level disk reads go through
-/// the correct API.
+/// Wrapper struct to ensure low-level database access goes through the correct API.
 pub struct DiskDb {
     /// The inner RocksDB database.
     db: rocksdb::DB,
@@ -30,6 +29,12 @@ pub struct DiskDb {
     ///
     /// If true, the database files are deleted on drop.
     ephemeral: bool,
+}
+
+/// Wrapper struct to ensure low-level database writes go through the correct API.
+pub struct DiskWriteBatch {
+    /// The inner RocksDB write batch.
+    batch: rocksdb::WriteBatch,
 }
 
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
@@ -48,7 +53,7 @@ pub trait WriteDisk {
         K: IntoDisk + Debug;
 }
 
-impl WriteDisk for rocksdb::WriteBatch {
+impl WriteDisk for DiskWriteBatch {
     fn zs_insert<K, V>(&mut self, cf: &rocksdb::ColumnFamily, key: K, value: V)
     where
         K: IntoDisk + Debug,
@@ -56,7 +61,7 @@ impl WriteDisk for rocksdb::WriteBatch {
     {
         let key_bytes = key.as_bytes();
         let value_bytes = value.as_bytes();
-        self.put_cf(cf, key_bytes, value_bytes);
+        self.batch.put_cf(cf, key_bytes, value_bytes);
     }
 
     fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
@@ -64,7 +69,7 @@ impl WriteDisk for rocksdb::WriteBatch {
         K: IntoDisk + Debug,
     {
         let key_bytes = key.as_bytes();
-        self.delete_cf(cf, key_bytes);
+        self.batch.delete_cf(cf, key_bytes);
     }
 }
 
@@ -114,6 +119,14 @@ impl ReadDisk for DiskDb {
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur")
             .is_some()
+    }
+}
+
+impl DiskWriteBatch {
+    pub fn new() -> Self {
+        DiskWriteBatch {
+            batch: rocksdb::WriteBatch::default(),
+        }
     }
 }
 
@@ -216,11 +229,9 @@ impl DiskDb {
     }
 
     /// Writes `batch` to the database.
-    ///
-    /// TODO: replace with type wrapper in next PR.
-    pub fn write(&self, batch: rocksdb::WriteBatch) -> Result<(), rocksdb::Error> {
+    pub fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         // TODO: move writing to the database to a blocking thread (#2188)
-        self.db.write(batch)
+        self.db.write(batch.batch)
     }
 
     /// Returns the database options for the finalized state database.

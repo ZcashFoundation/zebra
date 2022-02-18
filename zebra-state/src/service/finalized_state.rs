@@ -30,8 +30,8 @@ use crate::{
     service::{
         check,
         finalized_state::{
-            disk_db::{DiskDb, ReadDisk, WriteDisk},
-            disk_format::{FromDisk, IntoDisk, TransactionLocation},
+            disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+            disk_format::{FromDisk, TransactionLocation},
         },
         QueuedFinalized,
     },
@@ -299,8 +299,8 @@ impl FinalizedState {
         // the genesis case.
         // If the closure returns an error it will be propagated and the batch will not be written
         // to the BD afterwards.
-        let prepare_commit = || -> Result<rocksdb::WriteBatch, BoxError> {
-            let mut batch = rocksdb::WriteBatch::default();
+        let prepare_commit = || -> Result<DiskWriteBatch, BoxError> {
+            let mut batch = DiskWriteBatch::new();
 
             // Index the block
             batch.zs_insert(hash_by_height, height, hash);
@@ -366,7 +366,7 @@ impl FinalizedState {
                             if let Some(utxo) = self.utxo(outpoint) {
                                 all_utxos_spent_by_block.insert(*outpoint, utxo);
                             }
-                            batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
+                            batch.zs_delete(utxo_by_outpoint, outpoint);
                         }
                         // Coinbase inputs represent new coins,
                         // so there are no UTXOs to mark as spent.
@@ -726,8 +726,9 @@ impl FinalizedState {
     #[cfg(any(test, feature = "proptest-impl"))]
     #[allow(dead_code)]
     pub fn set_current_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
-        let mut batch = rocksdb::WriteBatch::default();
+        let mut batch = DiskWriteBatch::new();
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
+
         batch.zs_insert(value_pool_cf, (), fake_value_pool);
         self.db.write(batch).unwrap();
     }
@@ -736,7 +737,7 @@ impl FinalizedState {
     /// referenced in a block, for testing purposes _only_.
     #[cfg(test)]
     pub fn populate_with_anchors(&self, block: &Block) {
-        let mut batch = rocksdb::WriteBatch::default();
+        let mut batch = DiskWriteBatch::new();
 
         let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
