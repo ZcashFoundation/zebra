@@ -15,9 +15,7 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    borrow::Borrow,
     collections::HashMap,
-    convert::TryInto,
     io::{stderr, stdout, Write},
     path::Path,
     sync::Arc,
@@ -25,19 +23,12 @@ use std::{
 
 use zebra_chain::{
     block::{self, Block},
+    history_tree::HistoryTree,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
-    transparent,
 };
 
 use crate::{
-    service::{
-        check,
-        finalized_state::{
-            disk_db::{DiskDb, DiskWriteBatch, WriteDisk},
-            disk_format::TransactionLocation,
-        },
-        QueuedFinalized,
-    },
+    service::{check, finalized_state::disk_db::DiskDb, QueuedFinalized},
     BoxError, Config, FinalizedBlock,
 };
 
@@ -233,7 +224,7 @@ impl FinalizedState {
         block_result
     }
 
-    /// Immediately commit `finalized` to the finalized state.
+    /// Immediately commit a `finalized` block to the finalized state.
     ///
     /// This can be called either by the non-finalized state (when finalizing
     /// a block) or by the checkpoint verifier.
@@ -251,36 +242,13 @@ impl FinalizedState {
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let finalized_tip_height = self.finalized_tip_height();
-
-        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = self.db.cf_handle("block_by_height").unwrap();
-        let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
-
-        let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
-        let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
-        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
-
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
-        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
-
-        let sprout_note_commitment_tree_cf =
-            self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree_cf =
-            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree_cf =
-            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
-
-        let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
+        let committed_tip_hash = self.finalized_tip_hash();
+        let committed_tip_height = self.finalized_tip_height();
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.is_empty() {
             assert_eq!(
-                GENESIS_PREVIOUS_BLOCK_HASH, finalized.block.header.previous_block_hash,
+                committed_tip_hash, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {}",
                 source,
             );
@@ -292,26 +260,18 @@ impl FinalizedState {
             );
         } else {
             assert_eq!(
-                finalized_tip_height.expect("state must have a genesis block committed") + 1,
+                committed_tip_height.expect("state must have a genesis block committed") + 1,
                 Some(finalized.height),
                 "committed block height must be 1 more than the finalized tip height, source: {}",
                 source,
             );
 
             assert_eq!(
-                self.finalized_tip_hash(),
-                finalized.block.header.previous_block_hash,
+                committed_tip_hash, finalized.block.header.previous_block_hash,
                 "committed block must be a child of the finalized tip, source: {}",
                 source,
             );
         }
-
-        // Read the current note commitment trees. If there are no blocks in the
-        // state, these will contain the empty trees.
-        let mut sprout_note_commitment_tree = self.sprout_note_commitment_tree();
-        let mut sapling_note_commitment_tree = self.sapling_note_commitment_tree();
-        let mut orchard_note_commitment_tree = self.orchard_note_commitment_tree();
-        let mut history_tree = self.history_tree();
 
         // Check the block commitment. For Nu5-onward, the block hash commits only
         // to non-authorizing data (see ZIP-244). This checks the authorizing data
@@ -320,199 +280,81 @@ impl FinalizedState {
         // the history tree root. While it _is_ checked during contextual validation,
         // that is not called by the checkpoint verifier, and keeping a history tree there
         // would be harder to implement.
+        let history_tree = self.history_tree();
         check::finalized_block_commitment_is_valid_for_chain_history(
             &finalized,
             self.network,
             &history_tree,
         )?;
 
-        let FinalizedBlock {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-        } = finalized;
+        let finalized_height = finalized.height;
+        let finalized_hash = finalized.hash;
 
-        // Prepare a batch of DB modifications and return it (without actually writing anything).
-        // We use a closure so we can use an early return for control flow in
-        // the genesis case.
-        // If the closure returns an error it will be propagated and the batch will not be written
-        // to the BD afterwards.
-        let prepare_commit = || -> Result<DiskWriteBatch, BoxError> {
-            let mut batch = disk_db::DiskWriteBatch::new();
+        let result = self.write_block(finalized, history_tree, source);
 
-            // Index the block
-            batch.zs_insert(hash_by_height, height, hash);
-            batch.zs_insert(height_by_hash, hash, height);
-            batch.zs_insert(block_by_height, height, &block);
-
-            // # Consensus
-            //
-            // > A transaction MUST NOT spend an output of the genesis block coinbase transaction.
-            // > (There is one such zero-valued output, on each of Testnet and Mainnet.)
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
-                // Insert empty note commitment trees. Note that these can't be
-                // used too early (e.g. the Orchard tree before Nu5 activates)
-                // since the block validation will make sure only appropriate
-                // transactions are allowed in a block.
-                batch.zs_insert(
-                    sprout_note_commitment_tree_cf,
-                    height,
-                    sprout_note_commitment_tree,
-                );
-                batch.zs_insert(
-                    sapling_note_commitment_tree_cf,
-                    height,
-                    sapling_note_commitment_tree,
-                );
-                batch.zs_insert(
-                    orchard_note_commitment_tree_cf,
-                    height,
-                    orchard_note_commitment_tree,
-                );
-                return Ok(batch);
-            }
-
-            // Index all new transparent outputs
-            for (outpoint, utxo) in new_outputs.borrow().iter() {
-                batch.zs_insert(utxo_by_outpoint, outpoint, utxo);
-            }
-
-            // Create a map for all the utxos spent by the block
-            let mut all_utxos_spent_by_block = HashMap::new();
-
-            // Index each transaction, spent inputs, nullifiers
-            for (transaction_index, (transaction, transaction_hash)) in block
-                .transactions
-                .iter()
-                .zip(transaction_hashes.iter())
-                .enumerate()
-            {
-                let transaction_location = TransactionLocation {
-                    height,
-                    index: transaction_index
-                        .try_into()
-                        .expect("no more than 4 billion transactions per block"),
-                };
-                batch.zs_insert(tx_by_hash, transaction_hash, transaction_location);
-
-                // Mark all transparent inputs as spent, collect them as well.
-                for input in transaction.inputs() {
-                    match input {
-                        transparent::Input::PrevOut { outpoint, .. } => {
-                            if let Some(utxo) = self.utxo(outpoint) {
-                                all_utxos_spent_by_block.insert(*outpoint, utxo);
-                            }
-                            batch.zs_delete(utxo_by_outpoint, outpoint);
-                        }
-                        // Coinbase inputs represent new coins,
-                        // so there are no UTXOs to mark as spent.
-                        transparent::Input::Coinbase { .. } => {}
-                    }
-                }
-
-                // Mark sprout, sapling and orchard nullifiers as spent
-                for sprout_nullifier in transaction.sprout_nullifiers() {
-                    batch.zs_insert(sprout_nullifiers, sprout_nullifier, ());
-                }
-                for sapling_nullifier in transaction.sapling_nullifiers() {
-                    batch.zs_insert(sapling_nullifiers, sapling_nullifier, ());
-                }
-                for orchard_nullifier in transaction.orchard_nullifiers() {
-                    batch.zs_insert(orchard_nullifiers, orchard_nullifier, ());
-                }
-
-                for sprout_note_commitment in transaction.sprout_note_commitments() {
-                    sprout_note_commitment_tree.append(*sprout_note_commitment)?;
-                }
-                for sapling_note_commitment in transaction.sapling_note_commitments() {
-                    sapling_note_commitment_tree.append(*sapling_note_commitment)?;
-                }
-                for orchard_note_commitment in transaction.orchard_note_commitments() {
-                    orchard_note_commitment_tree.append(*orchard_note_commitment)?;
-                }
-            }
-
-            let sprout_root = sprout_note_commitment_tree.root();
-            let sapling_root = sapling_note_commitment_tree.root();
-            let orchard_root = orchard_note_commitment_tree.root();
-
-            history_tree.push(self.network, block.clone(), sapling_root, orchard_root)?;
-
-            // Compute the new anchors and index them
-            // Note: if the root hasn't changed, we write the same value again.
-            batch.zs_insert(sprout_anchors, sprout_root, &sprout_note_commitment_tree);
-            batch.zs_insert(sapling_anchors, sapling_root, ());
-            batch.zs_insert(orchard_anchors, orchard_root, ());
-
-            // Update the trees in state
-            if let Some(h) = finalized_tip_height {
-                batch.zs_delete(sprout_note_commitment_tree_cf, h);
-                batch.zs_delete(sapling_note_commitment_tree_cf, h);
-                batch.zs_delete(orchard_note_commitment_tree_cf, h);
-                batch.zs_delete(history_tree_cf, h);
-            }
-
-            batch.zs_insert(
-                sprout_note_commitment_tree_cf,
-                height,
-                sprout_note_commitment_tree,
-            );
-
-            batch.zs_insert(
-                sapling_note_commitment_tree_cf,
-                height,
-                sapling_note_commitment_tree,
-            );
-
-            batch.zs_insert(
-                orchard_note_commitment_tree_cf,
-                height,
-                orchard_note_commitment_tree,
-            );
-
-            if let Some(history_tree) = history_tree.as_ref() {
-                batch.zs_insert(history_tree_cf, height, history_tree);
-            }
-
-            // Some utxos are spent in the same block so they will be in `new_outputs`.
-            all_utxos_spent_by_block.extend(new_outputs);
-
-            let current_pool = self.current_value_pool();
-            let new_pool = current_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
-            batch.zs_insert(tip_chain_value_pool, (), new_pool);
-
-            Ok(batch)
-        };
-
-        // In case of errors, propagate and do not write the batch.
-        let batch = prepare_commit()?;
-
-        // The block has passed contextual validation, so update the metrics
-        block_precommit_metrics(&block, hash, height);
-
-        let result = self.db.write(batch).map(|()| hash);
-
-        tracing::trace!(?source, "committed block from");
-
-        if result.is_ok() && self.is_at_stop_height(height) {
-            tracing::info!(?source, "committed block from");
+        // TODO: move the stop height check to the syncer (#3442)
+        if result.is_ok() && self.is_at_stop_height(finalized_height) {
             tracing::info!(
-                ?height,
-                ?hash,
+                height = ?finalized_height,
+                hash = ?finalized_hash,
+                block_source = ?source,
                 "stopping at configured height, flushing database to disk"
             );
 
             self.db.shutdown();
 
-            // TODO: replace with a graceful shutdown (#1678)
             Self::exit_process();
         }
 
-        result.map_err(Into::into)
+        result
+    }
+
+    /// Write `finalized` to the finalized state.
+    ///
+    /// Uses:
+    /// - `history_tree`: the current tip's history tree
+    /// - `source`: the source of the block in log messages
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    /// - Propagates any errors from updating history and note commitment trees
+    fn write_block(
+        &mut self,
+        finalized: FinalizedBlock,
+        history_tree: HistoryTree,
+        source: &str,
+    ) -> Result<block::Hash, BoxError> {
+        let finalized_hash = finalized.hash;
+
+        let all_utxos_spent_by_block = finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
+            .collect();
+
+        // In case of errors, propagate and do not write the batch.
+        let batch = FinalizedState::prepare_block_batch(
+            &self.db,
+            finalized,
+            self.network,
+            self.finalized_tip_height(),
+            all_utxos_spent_by_block,
+            self.sprout_note_commitment_tree(),
+            self.sapling_note_commitment_tree(),
+            self.orchard_note_commitment_tree(),
+            history_tree,
+            self.finalized_value_pool(),
+        )?;
+
+        self.db.write(batch)?;
+
+        tracing::trace!(?source, "committed block from");
+
+        Ok(finalized_hash)
     }
 
     /// Stop the process if `block_height` is greater than or equal to the
@@ -547,78 +389,4 @@ impl FinalizedState {
 
         std::process::exit(0);
     }
-}
-
-fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
-    let transaction_count = block.transactions.len();
-    let transparent_prevout_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.inputs().iter())
-        .count()
-        // Each block has a single coinbase input which is not a previous output.
-        - 1;
-    let transparent_newout_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.outputs().iter())
-        .count();
-
-    let sprout_nullifier_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.sprout_nullifiers())
-        .count();
-
-    let sapling_nullifier_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.sapling_nullifiers())
-        .count();
-
-    let orchard_nullifier_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.orchard_nullifiers())
-        .count();
-
-    tracing::debug!(
-        ?hash,
-        ?height,
-        transaction_count,
-        transparent_prevout_count,
-        transparent_newout_count,
-        sprout_nullifier_count,
-        sapling_nullifier_count,
-        orchard_nullifier_count,
-        "preparing to commit finalized block"
-    );
-
-    metrics::counter!("state.finalized.block.count", 1);
-    metrics::gauge!("state.finalized.block.height", height.0 as _);
-
-    metrics::counter!(
-        "state.finalized.cumulative.transactions",
-        transaction_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.transparent_prevouts",
-        transparent_prevout_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.transparent_newouts",
-        transparent_newout_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.sprout_nullifiers",
-        sprout_nullifier_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.sapling_nullifiers",
-        sapling_nullifier_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.orchard_nullifiers",
-        orchard_nullifier_count as u64
-    );
 }
