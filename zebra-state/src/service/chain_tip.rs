@@ -120,10 +120,6 @@ pub struct ChainTipSender {
 
     /// The sender channel for chain tip data.
     sender: watch::Sender<ChainTipData>,
-
-    /// A copy of the data in `sender`.
-    // TODO: Replace with calls to `watch::Sender::borrow` once Tokio is updated to 1.0.0 (#2573)
-    active_value: ChainTipData,
 }
 
 impl ChainTipSender {
@@ -142,7 +138,6 @@ impl ChainTipSender {
         let mut sender = ChainTipSender {
             use_non_finalized_tip: false,
             sender,
-            active_value: None,
         };
 
         let current = LatestChainTip::new(receiver);
@@ -202,7 +197,7 @@ impl ChainTipSender {
     /// An update is only sent if the current best tip is different from the last best tip
     /// that was sent.
     fn update(&mut self, new_tip: Option<ChainTipBlock>) {
-        let needs_update = match (new_tip.as_ref(), self.active_value.as_ref()) {
+        let needs_update = match (new_tip.as_ref(), self.sender.borrow().as_ref()) {
             // since the blocks have been contextually validated,
             // we know their hashes cover all the block data
             (Some(new_tip), Some(active_value)) => new_tip.hash != active_value.hash,
@@ -211,8 +206,7 @@ impl ChainTipSender {
         };
 
         if needs_update {
-            let _ = self.sender.send(new_tip.clone());
-            self.active_value = new_tip;
+            let _ = self.sender.send(new_tip);
         }
     }
 
@@ -235,7 +229,7 @@ impl ChainTipSender {
     ///
     /// Callers should create a new span with the empty fields described above.
     fn record_fields(&self, new_tip: &Option<ChainTipBlock>) {
-        let old_tip = &self.active_value;
+        let old_tip = &*self.sender.borrow();
 
         Self::record_tip("new", new_tip);
         Self::record_tip("old", old_tip);
