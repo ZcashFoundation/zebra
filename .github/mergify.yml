@@ -55,6 +55,7 @@ pull_request_rules:
           - "label~=^P-Critical"
           - "label~=^P-High"
       - label!=do-not-merge
+      -  allow_inplace_checks=False
     actions:
       queue:
         name: urgent
@@ -68,6 +69,7 @@ pull_request_rules:
       - base=main
       - "label~=^P-Medium"
       - label!=do-not-merge
+      -  allow_inplace_checks=False
     actions:
       queue:
         name: medium
@@ -80,6 +82,7 @@ pull_request_rules:
       - -draft
       - base=main
       - label!=do-not-merge
+      -  allow_inplace_checks=False
       # This queue handles Low, Optional, and PRs with no priority label,
       # including automated dependabot PRs.
       #
