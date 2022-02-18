@@ -208,7 +208,7 @@ impl ChainTipSender {
     ///
     /// Callers should create a new span with empty `new_height` and `new_hash` fields.
     fn record_new_tip(new_tip: &Option<ChainTipBlock>) {
-        Self::record_tip("new", new_tip);
+        Self::record_tip(&tracing::Span::current(), "new", new_tip);
     }
 
     /// Record `new_tip` and the fields from `self` in the current span.
@@ -223,23 +223,23 @@ impl ChainTipSender {
     ///
     /// Callers should create a new span with the empty fields described above.
     fn record_fields(&self, new_tip: &Option<ChainTipBlock>) {
+        let span = tracing::Span::current();
+
         let old_tip = &*self.sender.borrow();
 
-        Self::record_tip("new", new_tip);
-        Self::record_tip("old", old_tip);
+        Self::record_tip(&span, "new", new_tip);
+        Self::record_tip(&span, "old", old_tip);
 
-        tracing::Span::current().record(
+        span.record(
             "old_use_non_finalized_tip",
             &field::debug(self.use_non_finalized_tip),
         );
     }
 
-    /// Record `tip` using the provided prefix to name the fields.
+    /// Record `tip` into `span` using the `prefix` to name the fields.
     ///
     /// Callers should create a new span with empty `{prefix}_height` and `{prefix}_hash` fields.
-    fn record_tip(prefix: &str, tip: &Option<ChainTipBlock>) {
-        let span = tracing::Span::current();
-
+    fn record_tip(span: &tracing::Span, prefix: &str, tip: &Option<ChainTipBlock>) {
         let height = tip.as_ref().map(|block| block.height);
         let hash = tip.as_ref().map(|block| block.hash);
 
