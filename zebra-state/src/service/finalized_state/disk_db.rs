@@ -167,6 +167,7 @@ impl DiskDb {
             rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
         ];
 
+        // TODO: move opening the database to a blocking thread (#2188)
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
         match db_result {
@@ -193,7 +194,36 @@ impl DiskDb {
         self.db.path()
     }
 
-    /// Returns the database options for the finalized state database
+    /// Returns the column family handle for `cf_name`.
+    pub fn cf_handle(&self, cf_name: &str) -> Option<&rocksdb::ColumnFamily> {
+        self.db.cf_handle(cf_name)
+    }
+
+    /// Returns an iterator over the keys in `cf_name`, starting from the first key.
+    pub fn forward_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
+        self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::Start)
+    }
+
+    /// Returns a reverse iterator over the keys in `cf_name`, starting from the last key.
+    pub fn reverse_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
+        self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::End)
+    }
+
+    /// Returns true if `cf` does not contain any entries.
+    pub fn is_empty(&self, cf_handle: &rocksdb::ColumnFamily) -> bool {
+        // Empty column families return invalid iterators.
+        !self.forward_iterator(cf_handle).valid()
+    }
+
+    /// Writes `batch` to the database.
+    ///
+    /// TODO: replace with type wrapper in next PR.
+    pub fn write(&self, batch: rocksdb::WriteBatch) -> Result<(), rocksdb::Error> {
+        // TODO: move writing to the database to a blocking thread (#2188)
+        self.db.write(batch)
+    }
+
+    /// Returns the database options for the finalized state database.
     fn options() -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
 
@@ -303,6 +333,7 @@ impl DiskDb {
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
+    ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self) {
         // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
         //

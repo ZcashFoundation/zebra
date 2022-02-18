@@ -193,14 +193,6 @@ impl FinalizedState {
         self.tip().map(|(height, _)| height)
     }
 
-    fn is_empty(&self, cf: &rocksdb::ColumnFamily) -> bool {
-        // use iterator to check if it's empty
-        !self
-            .db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .valid()
-    }
-
     /// Immediately commit `finalized` to the finalized state.
     ///
     /// This can be called either by the non-finalized state (when finalizing
@@ -246,7 +238,7 @@ impl FinalizedState {
         let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
-        if self.is_empty(hash_by_height) {
+        if self.db.is_empty(hash_by_height) {
             assert_eq!(
                 GENESIS_PREVIOUS_BLOCK_HASH, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {}",
@@ -466,7 +458,7 @@ impl FinalizedState {
 
         tracing::trace!(?source, "committed block from");
 
-        // TODO: move this check to the syncer (#3442)
+        // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(height) {
             tracing::info!(?source, "committed block from");
             tracing::info!(
@@ -477,7 +469,6 @@ impl FinalizedState {
 
             self.db.shutdown();
 
-            // TODO: replace with a graceful shutdown (#1678)
             Self::exit_process();
         }
 
@@ -487,7 +478,8 @@ impl FinalizedState {
     /// Exit the host process.
     ///
     /// Designed for debugging and tests.
-    /// TODO: replace with a graceful shutdown (#1678)
+    ///
+    /// TODO: move the stop height check to the syncer (#3442)
     fn exit_process() -> ! {
         tracing::info!("exiting Zebra");
 
@@ -544,7 +536,7 @@ impl FinalizedState {
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db
-            .iterator_cf(hash_by_height, rocksdb::IteratorMode::End)
+            .reverse_iterator(hash_by_height)
             .next()
             .map(|(height_bytes, hash_bytes)| {
                 let height = block::Height::from_bytes(height_bytes);
