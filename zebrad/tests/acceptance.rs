@@ -761,6 +761,15 @@ const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
 /// The maximum amount of time Zebra should take to sync a thousand blocks.
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// The test sync height where we switch to using the default lookahead limit.
+///
+/// Most tests only download a few blocks. So tests default to the minimum lookahead limit,
+/// to avoid downloading extra blocks, and slowing down the test.
+///
+/// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
+/// so that the sync is faster. This can increase the RAM needed for tests.
+const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height = Height(3 * sync::DEFAULT_LOOKAHEAD_LIMIT as u32);
+
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
 /// The first checkpoint contains a single genesis block.
@@ -993,10 +1002,20 @@ fn sync_until(
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
-    // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
+
+    // Download the parameters at launch, if we're going to need them later.
+    if height > network.mandatory_checkpoint_height() {
+        config.consensus.debug_skip_parameter_preload = false;
+    }
+
+    // Use the default lookahead limit if we're syncing lots of blocks.
+    // (Most tests use a smaller limit to minimise redundant block downloads.)
+    if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
+        config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+    }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
         reuse_tempdir.replace_config(&mut config)?
@@ -1062,7 +1081,15 @@ fn sync_until(
 fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
     config.state.cache_dir = "/zebrad-cache".into();
+
+    // To get to the mandatory checkpoint, we need to sync lots of blocks.
+    // (Most tests use a smaller limit to minimise redundant block downloads.)
+    //
+    // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
+    // But the extra downloaded blocks shouldn't slow down the test that much,
+    // and testing with the defaults gives us better test coverage.
     config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+
     Ok(config)
 }
 
