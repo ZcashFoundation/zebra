@@ -739,9 +739,14 @@ const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
-/// The text that should be logged when synchronization finishes and reaches the estimated chain
-/// tip.
-const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip";
+/// The text that should be logged when the initial sync finishes at the estimated chain tip.
+///
+/// This message is only logged if:
+/// - we have reached the estimated chain tip,
+/// - we have synced all known checkpoints,
+/// - the syncer has stopped downloading lots of blocks, and
+/// - we are regularly downloading some blocks via the syncer or block gossip.
+const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip, using gossiped blocks";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
@@ -755,6 +760,15 @@ const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The maximum amount of time Zebra should take to sync a thousand blocks.
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// The test sync height where we switch to using the default lookahead limit.
+///
+/// Most tests only download a few blocks. So tests default to the minimum lookahead limit,
+/// to avoid downloading extra blocks, and slowing down the test.
+///
+/// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
+/// so that the sync is faster. This can increase the RAM needed for tests.
+const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height = Height(3 * sync::DEFAULT_LOOKAHEAD_LIMIT as u32);
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
@@ -903,7 +917,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn full_sync_mainnet() {
-    assert!(full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").is_ok());
+    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
 /// Test if `zebrad` can fully sync the chain on testnet.
@@ -914,7 +928,7 @@ fn full_sync_mainnet() {
 #[test]
 #[ignore]
 fn full_sync_testnet() {
-    assert!(full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").is_ok());
+    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
 /// Sync `network` until the chain tip is reached, or a timeout elapses.
@@ -939,6 +953,13 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
         )
         .map(|_| ())
     } else {
+        tracing::info!(
+            ?network,
+            "skipped full sync test, \
+             set the {:?} environmental variable to run the test",
+            timeout_argument_name,
+        );
+
         Ok(())
     }
 }
@@ -950,9 +971,8 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
 /// If `check_legacy_chain` is true,
 /// make sure the logs contain the legacy chain check.
 ///
-/// If `enable_mempool_at_height` is `Some(Height(_))`,
-/// configure `zebrad` to debug-enable the mempool at that height.
-/// Then check the logs for the mempool being enabled.
+/// Configure `zebrad` to debug-enable the mempool based on `mempool_behavior`,
+/// then check the logs for the expected `mempool_behavior`.
 ///
 /// If `stop_regex` is encountered before the process exits, kills the
 /// process, and mark the test as successful, even if `height` has not
@@ -982,10 +1002,20 @@ fn sync_until(
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
-    // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
+
+    // Download the parameters at launch, if we're going to need them later.
+    if height > network.mandatory_checkpoint_height() {
+        config.consensus.debug_skip_parameter_preload = false;
+    }
+
+    // Use the default lookahead limit if we're syncing lots of blocks.
+    // (Most tests use a smaller limit to minimise redundant block downloads.)
+    if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
+        config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+    }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
         reuse_tempdir.replace_config(&mut config)?
@@ -1051,7 +1081,15 @@ fn sync_until(
 fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
     config.state.cache_dir = "/zebrad-cache".into();
+
+    // To get to the mandatory checkpoint, we need to sync lots of blocks.
+    // (Most tests use a smaller limit to minimise redundant block downloads.)
+    //
+    // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
+    // But the extra downloaded blocks shouldn't slow down the test that much,
+    // and testing with the defaults gives us better test coverage.
     config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+
     Ok(config)
 }
 
@@ -1115,6 +1153,10 @@ fn create_cached_database(network: Network) -> Result<()> {
         true,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure pre-cached databases finish before the mandatory checkpoint
+            //
+            // TODO: this check passes even if we reach the mandatory checkpoint,
+            //       because we sync finalized state, then non-finalized state.
+            //       Instead, fail if we see "best non-finalized chain root" in the logs.
             test_child.expect_stdout_line_matches("CommitFinalized request")?;
             Ok(())
         },
