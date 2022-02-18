@@ -1,4 +1,9 @@
 //! The primary implementation of the `zebra_state::Service` built upon rocksdb
+//!
+//! # Correctness
+//!
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
     borrow::Borrow,
@@ -25,7 +30,7 @@ use crate::{
     service::{
         check,
         finalized_state::{
-            disk_db::{ReadDisk, WriteDisk},
+            disk_db::{DiskDb, ReadDisk, WriteDisk},
             disk_format::{FromDisk, IntoDisk, TransactionLocation},
         },
         QueuedFinalized,
@@ -52,7 +57,7 @@ pub struct FinalizedState {
     /// as a break in the graph.
     max_queued_height: f64,
 
-    db: rocksdb::DB,
+    db: DiskDb,
     ephemeral: bool,
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
@@ -62,48 +67,7 @@ pub struct FinalizedState {
 
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
-        let (path, db_options) = config.db_config(network);
-        // Note: The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-        // be incremented each time the database format (column, serialization, etc) changes.
-        let column_families = vec![
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("block_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "sapling_note_commitment_tree",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "orchard_note_commitment_tree",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
-        ];
-        let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
-
-        let db = match db_result {
-            Ok(d) => {
-                tracing::info!("Opened Zebra state cache at {}", path.display());
-                d
-            }
-            // TODO: provide a different hint if the disk is full, see #1623
-            Err(e) => panic!(
-                "Opening database {:?} failed: {:?}. \
-                 Hint: Check if another zebrad process is running. \
-                 Try changing the state cache_dir in the Zebra config.",
-                path, e,
-            ),
-        };
+        let db = DiskDb::new(config, network);
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
@@ -114,17 +78,11 @@ impl FinalizedState {
             network,
         };
 
-        // TODO: remove these extra logs once bugs like #2905 are fixed
-        tracing::info!("reading cached tip height");
         if let Some(tip_height) = new_state.finalized_tip_height() {
-            tracing::info!(?tip_height, "loaded cached tip height");
-
             if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
                     .debug_stop_at_height
                     .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
-
-                tracing::info!("reading cached tip hash");
                 let tip_hash = new_state.finalized_tip_hash();
 
                 if tip_height > debug_stop_at_height {
@@ -145,7 +103,6 @@ impl FinalizedState {
 
                 // RocksDB can do a cleanup when column families are opened.
                 // So we want to drop it before we exit.
-                tracing::info!("closing cached state");
                 std::mem::drop(new_state);
 
                 Self::exit_process();
