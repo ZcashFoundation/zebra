@@ -53,7 +53,7 @@ const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 /// This is actually a bijective map, but since it is read-only, we use a
 /// BTreeMap, and do the value uniqueness check on initialisation.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct CheckpointList(BTreeMap<block::Height, block::Hash>);
+pub struct CheckpointList(BTreeMap<block::Height, block::Hash>);
 
 impl FromStr for CheckpointList {
     type Err = BoxError;
