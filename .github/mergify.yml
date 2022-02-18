@@ -3,6 +3,8 @@ queue_rules:
     speculative_checks: 2
     batch_size: 2
     conditions:
+      - allow_inplace_checks=False
+      - allow_checks_interruption=False
       - check-success=Test all
       - check-success=Test with fake activation heights
       - check-success=Test full validation sync from cached state
@@ -18,6 +20,8 @@ queue_rules:
     speculative_checks: 2
     batch_size: 3
     conditions:
+      - allow_inplace_checks=False
+      - allow_checks_interruption=False
       - check-success=Test all
       - check-success=Test with fake activation heights
       - check-success=Test full validation sync from cached state
@@ -33,6 +37,8 @@ queue_rules:
     speculative_checks: 2
     batch_size: 4
     conditions:
+      - allow_inplace_checks=False
+      - allow_checks_interruption=False
       - check-success=Test all
       - check-success=Test with fake activation heights
       - check-success=Test full validation sync from cached state
@@ -55,8 +61,6 @@ pull_request_rules:
           - "label~=^P-Critical"
           - "label~=^P-High"
       - label!=do-not-merge
-      - allow_inplace_checks=False
-      - allow_checks_interruption=False
     actions:
       queue:
         name: urgent
@@ -70,8 +74,6 @@ pull_request_rules:
       - base=main
       - "label~=^P-Medium"
       - label!=do-not-merge
-      - allow_inplace_checks=False
-      - allow_checks_interruption=False
     actions:
       queue:
         name: medium
@@ -84,8 +86,6 @@ pull_request_rules:
       - -draft
       - base=main
       - label!=do-not-merge
-      - allow_inplace_checks=False
-      - allow_checks_interruption=False
       # This queue handles Low, Optional, and PRs with no priority label,
       # including automated dependabot PRs.
       #
