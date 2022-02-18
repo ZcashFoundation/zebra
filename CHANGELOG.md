@@ -4,6 +4,98 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.5) - 2022-02-18
+
+Zebra's latest beta brings better networking, documents more consensus rules and
+improves the CI pipelines. All notable changes are outlined below.
+
+### Added
+
+- Estimate network chain tip height based on local node time and current best tip (#3492)
+- Add extra integer lints, and partially fix some code (#3409)
+- Prepare for changes in ZIP-244 (#3415, #3446)
+- Support large block heights (#3401)
+- Check coinbase data is at least 2 bytes long (#3542)
+- Ignore non-verack and non-version messages in handshake (#3522)
+- Allow forcing zebrad to use color output (#3547)
+
+#### Tests
+
+- Add a test for peerset broadcast panic (#3470)
+- Add PeerSet readiness and request future cancel-safety tests (#3252)
+- Add full chain synchronization acceptance tests (#3543)
+- Add chain tip estimate test: log chain progress while Zebra is syncing (#3495)
+
+#### Networking
+
+- Avoid repeated requests to peers after partial responses or errors (#3505)
+- Send notfound when Zebra doesn't have a block or transaction (#3466)
+- Route peer requests based on missing inventory (#3465)
+- Create an API for a missing inventory registry, but don't register any missing inventory yet (#3255)
+
+#### Documentation
+
+- Document consensus rules from 3.9 Nullifier Sets (#3521)
+- Update README goals and performance troubleshooting (#3525)
+- Document consensus rules from 4.5 Output Descriptions (#3462)
+- Document shielded pools consensus rules from 7.1.2 Transaction Consensus Rules (#3486)
+- Document Transaction encodings: sprout fields (#3499)
+- Document Transaction encodings: transparent fields (#3498)
+- Document Transaction encodings: orchard fields (#3507)
+- Document Transaction encodings: sapling fields (#3501)
+- Document Transaction encodings: header fields (#3491)
+- Document consensus rules from 4.4 Spend Descriptions (#3460)
+- Document consensus rules from 4.3 JoinSplit Descriptions (#3452)
+- Document Transaction consensus rules: Size rules (#3461)
+- Document Transaction consensus rules: Coinbase rules (#3464)
+- Document Transaction consensus rules: Header rules (#3456)
+
+### Changed
+
+- Reduce log level of components (#3418, #3437)
+- Change Type To Force Consensus Rule Validation (#3544)
+- Split The Database Module (#3568)
+- Dockerize Tests And Run Sync In Detached Mode (#3459)
+- Improve Docker And Gcloud Usage Without Cloud Build (#3431)
+- Make better use of variables, secrets and versions (#3393)
+
+### Removed
+
+- Remove founders reward code (#3430)
+
+### Fixed
+
+- Generate Well-Formed Finalsaplingroot In Arbitrary Implementation (#3573)
+- Rename some lightwalletd database types (#3567)
+
+#### Networking
+
+- Allow more inbound than outbound connections (#3527)
+- Only send responded updates on handshake/ping/pong (#3463)
+- Increase state concurrency and syncer lookahead (#3455)
+- Add a send timeout to outbound peer messages (#3417)
+
+#### Tests
+
+- Make Full Sync Test More Accurate (#3555)
+- Create Disk From Image Before Mounting (#3550)
+- Simplify Resource Conflict Test To Avoid Ci Failures (#3537)
+- Make Full Sync Test More Efficient (#3562)
+- Evaluate "if" conditions correctly and use last disk SHA (#3556)
+
+#### CI
+
+- Make The Purpose Of Each Sync Test Clearer (#3574)
+- Delete A Redundant "Test All" Job (#3552)
+- Allow Branches With Dots In The Name (#3557)
+- Allow Unprivileged Runs Of Clippy (#3558)
+- New Lints In Nightly Rust (#3541)
+- Typo In Paths Filtering Keyword (#3516)
+- Do Not Wait For Deprecated Cloud Build (#3509)
+- Restrict Merges With Unresolved Threads (#3453)
+- Put PRs With No Priority Label In The Low Priority Queue (#3454)
+- Temporarily allow forked repos to run PR workflows (#3503)
+
 ## [Zebra 1.0.0-beta.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.4) - 2022-01-26
 
 Zebra's latest beta improves the networking code and fixes some bugs. A couple of fixed bugs had
