@@ -3,28 +3,46 @@ queue_rules:
     speculative_checks: 2
     batch_size: 2
     conditions:
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=Coverage (+nightly)
+      - check-success=Test all
+      - check-success=Test with fake activation heights
+      - check-success=Test full validation sync from cached state
+      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
+      - check-success=Test stable on ubuntu-latest
+      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on windows-latest
+      - check-success=Coverage nightly
+      - check-success=Clippy
+      - check-success=Rustfmt
 
   - name: medium
     speculative_checks: 2
     batch_size: 3
     conditions:
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=Coverage (+nightly)
+      - check-success=Test all
+      - check-success=Test with fake activation heights
+      - check-success=Test full validation sync from cached state
+      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
+      - check-success=Test stable on ubuntu-latest
+      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on windows-latest
+      - check-success=Coverage nightly
+      - check-success=Clippy
+      - check-success=Rustfmt
 
   - name: low
     speculative_checks: 2
     batch_size: 4
     conditions:
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=Coverage (+nightly)
+      - check-success=Test all
+      - check-success=Test with fake activation heights
+      - check-success=Test full validation sync from cached state
+      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
+      - check-success=Test stable on ubuntu-latest
+      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on windows-latest
+      - check-success=Coverage nightly
+      - check-success=Clippy
+      - check-success=Rustfmt
 
 pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
