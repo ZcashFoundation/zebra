@@ -49,19 +49,24 @@ mod tests;
 
 /// The finalized part of the chain state, stored in the db.
 pub struct FinalizedState {
+    /// The underlying database.
+    db: DiskDb,
+
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
+
     /// A metric tracking the maximum height that's currently in `queued_by_prev_hash`
     ///
     /// Set to `f64::NAN` if `queued_by_prev_hash` is empty, because grafana shows NaNs
     /// as a break in the graph.
     max_queued_height: f64,
 
-    db: DiskDb,
-    ephemeral: bool,
+    /// The configured stop height.
+    ///
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 
+    /// The configured network.
     network: Network,
 }
 
@@ -73,7 +78,6 @@ impl FinalizedState {
             queued_by_prev_hash: HashMap::new(),
             max_queued_height: f64::NAN,
             db,
-            ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             network,
         };
@@ -462,6 +466,7 @@ impl FinalizedState {
 
         tracing::trace!(?source, "committed block from");
 
+        // TODO: move this check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(height) {
             tracing::info!(?source, "committed block from");
             tracing::info!(
@@ -470,7 +475,7 @@ impl FinalizedState {
                 "stopping at configured height, flushing database to disk"
             );
 
-            self.shutdown();
+            self.db.shutdown();
 
             // TODO: replace with a graceful shutdown (#1678)
             Self::exit_process();
@@ -711,32 +716,6 @@ impl FinalizedState {
         }
     }
 
-    /// If the database is `ephemeral`, delete it.
-    fn delete_ephemeral(&self) {
-        if self.ephemeral {
-            let path = self.db.path();
-            tracing::info!(cache_path = ?path, "removing temporary database files");
-
-            // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
-            // but the Zcash blockchain might not fit in memory. So we just
-            // delete the database files instead.
-            //
-            // We'd like to call `DB::destroy` here, but calling destroy on a
-            // live DB is undefined behaviour:
-            // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
-            //
-            // So we assume that all the database files are under `path`, and
-            // delete them using standard filesystem APIs. Deleting open files
-            // might cause errors on non-Unix platforms, so we ignore the result.
-            // (The OS will delete them eventually anyway.)
-            let res = std::fs::remove_dir_all(path);
-
-            // TODO: downgrade to debug once bugs like #2905 are fixed
-            //       but leave any errors at "info" level
-            tracing::info!(?res, "removed temporary database files");
-        }
-    }
-
     /// Returns the `Path` where the files used by this database are located.
     #[allow(dead_code)]
     pub fn path(&self) -> &Path {
@@ -793,60 +772,6 @@ impl FinalizedState {
         }
 
         self.db.write(batch).unwrap();
-    }
-
-    /// Shut down the database, cleaning up background tasks and ephemeral data.
-    fn shutdown(&mut self) {
-        // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
-        //
-        // Zebra's data should be fine if we don't clean up, because:
-        // - the database flushes regularly anyway
-        // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
-        // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
-        tracing::info!("flushing database to disk");
-        self.db.flush().expect("flush is successful");
-
-        // But we should call `cancel_all_background_work` before Zebra exits.
-        // If we don't, we see these kinds of errors:
-        // ```
-        // pthread lock: Invalid argument
-        // pure virtual method called
-        // terminate called without an active exception
-        // pthread destroy mutex: Device or resource busy
-        // Aborted (core dumped)
-        // ```
-        //
-        // The RocksDB wiki says:
-        // > Q: Is it safe to close RocksDB while another thread is issuing read, write or manual compaction requests?
-        // >
-        // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
-        // > You can speed up the waiting by calling CancelAllBackgroundWork().
-        //
-        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-        tracing::info!("stopping background database tasks");
-        self.db.cancel_all_background_work(true);
-
-        // We'd like to drop the database before deleting its files,
-        // because that closes the column families and the database correctly.
-        // But Rust's ownership rules make that difficult,
-        // so we just flush and delete ephemeral data instead.
-        //
-        // The RocksDB wiki says:
-        // > rocksdb::DB instances need to be destroyed before your main function exits.
-        // > RocksDB instances usually depend on some internal static variables.
-        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
-        //
-        // https://github.com/facebook/rocksdb/wiki/Known-Issues
-        //
-        // But our current code doesn't seem to cause any issues.
-        // We might want to explicitly drop the database as part of graceful shutdown (#1678).
-        self.delete_ephemeral();
-    }
-}
-
-impl Drop for FinalizedState {
-    fn drop(&mut self) {
-        self.shutdown();
     }
 }
 

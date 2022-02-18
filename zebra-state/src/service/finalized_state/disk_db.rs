@@ -9,7 +9,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::fmt::Debug;
+use std::{fmt::Debug, path::Path};
 
 use rlimit::increase_nofile_limit;
 
@@ -22,7 +22,15 @@ use crate::{
 
 /// Wrapper struct to ensure low-level disk reads go through
 /// the correct API.
-pub struct DiskDb(rocksdb::DB);
+pub struct DiskDb {
+    /// The inner RocksDB database.
+    db: rocksdb::DB,
+
+    /// The configured temporary database setting.
+    ///
+    /// If true, the database files are deleted on drop.
+    ephemeral: bool,
+}
 
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
 /// defined format
@@ -87,7 +95,7 @@ impl ReadDisk for DiskDb {
         // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
         let value_bytes = self
-            .0
+            .db
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur");
 
@@ -102,7 +110,7 @@ impl ReadDisk for DiskDb {
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
-        self.0
+        self.db
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur")
             .is_some()
@@ -162,9 +170,13 @@ impl DiskDb {
         let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
 
         match db_result {
-            Ok(d) => {
-                tracing::info!("Opened Zebra state cache at {}", path.display());
-                DiskDb(d)
+            Ok(db) => {
+                info!("Opened Zebra state cache at {}", path.display());
+
+                DiskDb {
+                    db,
+                    ephemeral: config.ephemeral,
+                }
             }
             // TODO: provide a different hint if the disk is full, see #1623
             Err(e) => panic!(
@@ -174,6 +186,11 @@ impl DiskDb {
                 path, e,
             ),
         }
+    }
+
+    /// Returns the `Path` where the files used by this database are located.
+    pub fn path(&self) -> &Path {
+        self.db.path()
     }
 
     /// Returns the database options for the finalized state database
@@ -281,5 +298,87 @@ impl DiskDb {
         }
 
         current_limit
+    }
+
+    /// Shut down the database, cleaning up background tasks and ephemeral data.
+    ///
+    /// TODO: make private after the stop height check has moved to the syncer (#3442)
+    pub(crate) fn shutdown(&mut self) {
+        // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
+        //
+        // Zebra's data should be fine if we don't clean up, because:
+        // - the database flushes regularly anyway
+        // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
+        // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
+        info!("flushing database to disk");
+        self.db.flush().expect("flush is successful");
+
+        // But we should call `cancel_all_background_work` before Zebra exits.
+        // If we don't, we see these kinds of errors:
+        // ```
+        // pthread lock: Invalid argument
+        // pure virtual method called
+        // terminate called without an active exception
+        // pthread destroy mutex: Device or resource busy
+        // Aborted (core dumped)
+        // ```
+        //
+        // The RocksDB wiki says:
+        // > Q: Is it safe to close RocksDB while another thread is issuing read, write or manual compaction requests?
+        // >
+        // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
+        // > You can speed up the waiting by calling CancelAllBackgroundWork().
+        //
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        info!("stopping background database tasks");
+        self.db.cancel_all_background_work(true);
+
+        // We'd like to drop the database before deleting its files,
+        // because that closes the column families and the database correctly.
+        // But Rust's ownership rules make that difficult,
+        // so we just flush and delete ephemeral data instead.
+        //
+        // The RocksDB wiki says:
+        // > rocksdb::DB instances need to be destroyed before your main function exits.
+        // > RocksDB instances usually depend on some internal static variables.
+        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
+        //
+        // https://github.com/facebook/rocksdb/wiki/Known-Issues
+        //
+        // But our current code doesn't seem to cause any issues.
+        // We might want to explicitly drop the database as part of graceful shutdown (#1678).
+        self.delete_ephemeral();
+    }
+
+    /// If the database is `ephemeral`, delete it.
+    fn delete_ephemeral(&self) {
+        if self.ephemeral {
+            let path = self.path();
+            info!(cache_path = ?path, "removing temporary database files");
+
+            // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
+            // but the Zcash blockchain might not fit in memory. So we just
+            // delete the database files instead.
+            //
+            // We'd like to call `DB::destroy` here, but calling destroy on a
+            // live DB is undefined behaviour:
+            // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
+            //
+            // So we assume that all the database files are under `path`, and
+            // delete them using standard filesystem APIs. Deleting open files
+            // might cause errors on non-Unix platforms, so we ignore the result.
+            // (The OS will delete them eventually anyway.)
+            let res = std::fs::remove_dir_all(path);
+
+            // TODO: downgrade to debug once bugs like #2905 are fixed
+            //       but leave any errors at "info" level
+            info!(?res, "removed temporary database files");
+        }
+    }
+}
+
+impl Drop for DiskDb {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
