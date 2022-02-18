@@ -1,4 +1,13 @@
-//! The primary implementation of the `zebra_state::Service` built upon rocksdb
+//! The primary implementation of the `zebra_state::Service` built upon rocksdb.
+//!
+//! Zebra's database is implemented in 4 layers:
+//! - [`FinalizedState`]: queues, validates, and commits blocks, using...
+//! - [`zebra_db`]: reads and writes [`zebra_chain`] types to the database, using...
+//! - [`disk_db`]: reads and writes format-specific types to the database, using...
+//! - [`disk_format`]: converts types to raw database bytes.
+//!
+//! These layers allow us to split [`zebra_chain`] types for efficient database storage.
+//! They reduce the risk of data corruption bugs, runtime inconsistencies, and panics.
 //!
 //! # Correctness
 //!
@@ -15,31 +24,26 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative,
     block::{self, Block},
-    history_tree::{HistoryTree, NonEmptyHistoryTree},
-    orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
-    sapling, sprout,
-    transaction::{self, Transaction},
     transparent,
-    value_balance::ValueBalance,
 };
 
 use crate::{
     service::{
         check,
         finalized_state::{
-            disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-            disk_format::{FromDisk, TransactionLocation},
+            disk_db::{DiskDb, DiskWriteBatch, WriteDisk},
+            disk_format::TransactionLocation,
         },
         QueuedFinalized,
     },
-    BoxError, Config, FinalizedBlock, HashOrHeight,
+    BoxError, Config, FinalizedBlock,
 };
 
 mod disk_db;
 mod disk_format;
+mod zebra_db;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -118,19 +122,29 @@ impl FinalizedState {
         new_state
     }
 
-    /// Stop the process if `block_height` is greater than or equal to the
-    /// configured stop height.
-    fn is_at_stop_height(&self, block_height: block::Height) -> bool {
-        let debug_stop_at_height = match self.debug_stop_at_height {
-            Some(debug_stop_at_height) => debug_stop_at_height,
-            None => return false,
-        };
+    /// Returns the `Path` where the files used by this database are located.
+    #[allow(dead_code)]
+    pub fn path(&self) -> &Path {
+        self.db.path()
+    }
 
-        if block_height < debug_stop_at_height {
-            return false;
-        }
+    /// Returns the hash of the current finalized tip block.
+    pub fn finalized_tip_hash(&self) -> block::Hash {
+        self.tip()
+            .map(|(_, hash)| hash)
+            // if the state is empty, return the genesis previous block hash
+            .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
+    }
 
-        true
+    /// Returns the height of the current finalized tip block.
+    pub fn finalized_tip_height(&self) -> Option<block::Height> {
+        self.tip().map(|(height, _)| height)
+    }
+
+    /// Returns the tip block, if there is one.
+    pub fn tip_block(&self) -> Option<Arc<Block>> {
+        let (height, _hash) = self.tip()?;
+        self.block(height.into())
     }
 
     /// Queue a finalized block to be committed to the state.
@@ -180,17 +194,43 @@ impl FinalizedState {
         highest_queue_commit
     }
 
-    /// Returns the hash of the current finalized tip block.
-    pub fn finalized_tip_hash(&self) -> block::Hash {
-        self.tip()
-            .map(|(_, hash)| hash)
-            // if the state is empty, return the genesis previous block hash
-            .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
-    }
+    /// Commit a finalized block to the state.
+    ///
+    /// It's the caller's responsibility to ensure that blocks are committed in
+    /// order. This function is called by [`queue`], which ensures order.
+    /// It is intentionally not exposed as part of the public API of the
+    /// [`FinalizedState`].
+    fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
+        let (finalized, rsp_tx) = queued_block;
+        let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
 
-    /// Returns the height of the current finalized tip block.
-    pub fn finalized_tip_height(&self) -> Option<block::Height> {
-        self.tip().map(|(height, _)| height)
+        let block_result = if result.is_ok() {
+            metrics::counter!("state.checkpoint.finalized.block.count", 1);
+            metrics::gauge!(
+                "state.checkpoint.finalized.block.height",
+                finalized.height.0 as _
+            );
+
+            // This height gauge is updated for both fully verified and checkpoint blocks.
+            // These updates can't conflict, because the state makes sure that blocks
+            // are committed in order.
+            metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
+            metrics::counter!("zcash.chain.verified.block.total", 1);
+
+            Ok(finalized)
+        } else {
+            metrics::counter!("state.checkpoint.error.block.count", 1);
+            metrics::gauge!(
+                "state.checkpoint.error.block.height",
+                finalized.height.0 as _
+            );
+
+            Err(())
+        };
+
+        let _ = rsp_tx.send(result.map_err(Into::into));
+
+        block_result
     }
 
     /// Immediately commit `finalized` to the finalized state.
@@ -238,7 +278,7 @@ impl FinalizedState {
         let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
-        if self.db.is_empty(hash_by_height) {
+        if self.is_empty() {
             assert_eq!(
                 GENESIS_PREVIOUS_BLOCK_HASH, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {}",
@@ -300,7 +340,7 @@ impl FinalizedState {
         // If the closure returns an error it will be propagated and the batch will not be written
         // to the BD afterwards.
         let prepare_commit = || -> Result<DiskWriteBatch, BoxError> {
-            let mut batch = DiskWriteBatch::new();
+            let mut batch = disk_db::DiskWriteBatch::new();
 
             // Index the block
             batch.zs_insert(hash_by_height, height, hash);
@@ -458,7 +498,6 @@ impl FinalizedState {
 
         tracing::trace!(?source, "committed block from");
 
-        // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(height) {
             tracing::info!(?source, "committed block from");
             tracing::info!(
@@ -469,10 +508,26 @@ impl FinalizedState {
 
             self.db.shutdown();
 
+            // TODO: replace with a graceful shutdown (#1678)
             Self::exit_process();
         }
 
         result.map_err(Into::into)
+    }
+
+    /// Stop the process if `block_height` is greater than or equal to the
+    /// configured stop height.
+    fn is_at_stop_height(&self, block_height: block::Height) -> bool {
+        let debug_stop_at_height = match self.debug_stop_at_height {
+            Some(debug_stop_at_height) => debug_stop_at_height,
+            None => return false,
+        };
+
+        if block_height < debug_stop_at_height {
+            return false;
+        }
+
+        true
     }
 
     /// Exit the host process.
@@ -491,235 +546,6 @@ impl FinalizedState {
         let _ = stderr().lock().flush();
 
         std::process::exit(0);
-    }
-
-    /// Commit a finalized block to the state.
-    ///
-    /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`queue`], which ensures order.
-    /// It is intentionally not exposed as part of the public API of the
-    /// [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
-        let (finalized, rsp_tx) = queued_block;
-        let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
-
-        let block_result = if result.is_ok() {
-            metrics::counter!("state.checkpoint.finalized.block.count", 1);
-            metrics::gauge!(
-                "state.checkpoint.finalized.block.height",
-                finalized.height.0 as _
-            );
-
-            // This height gauge is updated for both fully verified and checkpoint blocks.
-            // These updates can't conflict, because the state makes sure that blocks
-            // are committed in order.
-            metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
-            metrics::counter!("zcash.chain.verified.block.total", 1);
-
-            Ok(finalized)
-        } else {
-            metrics::counter!("state.checkpoint.error.block.count", 1);
-            metrics::gauge!(
-                "state.checkpoint.error.block.height",
-                finalized.height.0 as _
-            );
-
-            Err(())
-        };
-
-        let _ = rsp_tx.send(result.map_err(Into::into));
-
-        block_result
-    }
-
-    /// Returns the tip height and hash if there is one.
-    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db
-            .reverse_iterator(hash_by_height)
-            .next()
-            .map(|(height_bytes, hash_bytes)| {
-                let height = block::Height::from_bytes(height_bytes);
-                let hash = block::Hash::from_bytes(hash_bytes);
-
-                (height, hash)
-            })
-    }
-
-    /// Returns the tip block, if there is one.
-    pub fn tip_block(&self) -> Option<Arc<Block>> {
-        let (height, _hash) = self.tip()?;
-        self.block(height.into())
-    }
-
-    /// Returns the height of the given block if it exists.
-    pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        self.db.zs_get(height_by_hash, &hash)
-    }
-
-    /// Returns the given block if it exists.
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = self.db.cf_handle("block_by_height").unwrap();
-        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
-
-        self.db.zs_get(block_by_height, &height)
-    }
-
-    /// Returns the `transparent::Output` pointed to by the given
-    /// `transparent::OutPoint` if it is present.
-    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
-        self.db.zs_get(utxo_by_outpoint, outpoint)
-    }
-
-    /// Returns `true` if the finalized state contains `sprout_nullifier`.
-    pub fn contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
-        let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
-        self.db.zs_contains(sprout_nullifiers, &sprout_nullifier)
-    }
-
-    /// Returns `true` if the finalized state contains `sapling_nullifier`.
-    pub fn contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
-        let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
-        self.db.zs_contains(sapling_nullifiers, &sapling_nullifier)
-    }
-
-    /// Returns `true` if the finalized state contains `orchard_nullifier`.
-    pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
-        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
-        self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
-    }
-
-    /// Returns `true` if the finalized state contains `sprout_anchor`.
-    #[allow(unused)]
-    pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-        self.db.zs_contains(sprout_anchors, &sprout_anchor)
-    }
-
-    /// Returns `true` if the finalized state contains `sapling_anchor`.
-    pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
-        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
-        self.db.zs_contains(sapling_anchors, &sapling_anchor)
-    }
-
-    /// Returns `true` if the finalized state contains `orchard_anchor`.
-    pub fn contains_orchard_anchor(&self, orchard_anchor: &orchard::tree::Root) -> bool {
-        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
-        self.db.zs_contains(orchard_anchors, &orchard_anchor)
-    }
-
-    /// Returns the finalized hash for a given `block::Height` if it is present.
-    pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db.zs_get(hash_by_height, &height)
-    }
-
-    /// Returns the given transaction if it exists.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        self.db
-            .zs_get(tx_by_hash, &hash)
-            .map(|TransactionLocation { index, height }| {
-                let block = self
-                    .block(height.into())
-                    .expect("block will exist if TransactionLocation does");
-
-                block.transactions[index as usize].clone()
-            })
-    }
-
-    /// Returns the Sprout note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
-    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
-        let height = match self.finalized_tip_height() {
-            Some(h) => h,
-            None => return Default::default(),
-        };
-
-        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-
-        self.db
-            .zs_get(sprout_note_commitment_tree, &height)
-            .expect("Sprout note commitment tree must exist if there is a finalized tip")
-    }
-
-    /// Returns the Sprout note commitment tree matching the given anchor.
-    ///
-    /// This is used for interstitial tree building, which is unique to Sprout.
-    pub fn sprout_note_commitment_tree_by_anchor(
-        &self,
-        sprout_anchor: &sprout::tree::Root,
-    ) -> Option<sprout::tree::NoteCommitmentTree> {
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-
-        self.db.zs_get(sprout_anchors, sprout_anchor)
-    }
-
-    /// Returns the Sapling note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
-    pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
-        let height = match self.finalized_tip_height() {
-            Some(h) => h,
-            None => return Default::default(),
-        };
-
-        let sapling_note_commitment_tree =
-            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-        self.db
-            .zs_get(sapling_note_commitment_tree, &height)
-            .expect("Sapling note commitment tree must exist if there is a finalized tip")
-    }
-
-    /// Returns the Orchard note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
-    pub fn orchard_note_commitment_tree(&self) -> orchard::tree::NoteCommitmentTree {
-        let height = match self.finalized_tip_height() {
-            Some(h) => h,
-            None => return Default::default(),
-        };
-
-        let orchard_note_commitment_tree =
-            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        self.db
-            .zs_get(orchard_note_commitment_tree, &height)
-            .expect("Orchard note commitment tree must exist if there is a finalized tip")
-    }
-
-    /// Returns the ZIP-221 history tree of the finalized tip or `None`
-    /// if it does not exist yet in the state (pre-Heartwood).
-    pub fn history_tree(&self) -> HistoryTree {
-        match self.finalized_tip_height() {
-            Some(height) => {
-                let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
-                let history_tree: Option<NonEmptyHistoryTree> =
-                    self.db.zs_get(history_tree_cf, &height);
-                if let Some(non_empty_tree) = history_tree {
-                    HistoryTree::from(non_empty_tree)
-                } else {
-                    Default::default()
-                }
-            }
-            None => Default::default(),
-        }
-    }
-
-    /// Returns the `Path` where the files used by this database are located.
-    #[allow(dead_code)]
-    pub fn path(&self) -> &Path {
-        self.db.path()
-    }
-
-    /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
-    pub fn current_value_pool(&self) -> ValueBalance<NonNegative> {
-        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
-        self.db
-            .zs_get(value_pool_cf, &())
-            .unwrap_or_else(ValueBalance::zero)
     }
 }
 
