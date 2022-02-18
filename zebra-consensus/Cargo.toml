@@ -30,7 +30,7 @@ futures-util = "0.3.19"
 metrics = "0.17.1"
 thiserror = "1.0.30"
 tokio = { version = "1.16.1", features = ["time", "sync", "tracing"] }
-tower = { version = "0.4.11", features = ["timeout", "util", "buffer"] }
+tower = { version = "0.4.12", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
 
