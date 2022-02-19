@@ -132,10 +132,30 @@ fn block_commitment_is_valid_for_chain_history(
         block::Commitment::PreSaplingReserved(_)
         | block::Commitment::FinalSaplingRoot(_)
         | block::Commitment::ChainHistoryActivationReserved => {
-            // No contextual checks needed for those.
+            // # Consensus
+            //
+            // > [Sapling and Blossom only, pre-Heartwood] hashLightClientRoot MUST
+            // > be LEBS2OSP_{256}(rt^{Sapling}) where rt^{Sapling} is the root of
+            // > the Sapling note commitment tree for the final Sapling treestate of
+            // > this block .
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#blockheader
+            //
+            // We don't need to validate this rule since we checkpoint on Canopy.
+            //
+            // We also don't need to do anything in the other cases.
             Ok(())
         }
         block::Commitment::ChainHistoryRoot(actual_history_tree_root) => {
+            // # Consensus
+            //
+            // > [Heartwood and Canopy only, pre-NU5] hashLightClientRoot MUST be set to the
+            // > hashChainHistoryRoot for this block , as specified in [ZIP-221].
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#blockheader
+            //
+            // The network is checked by [`Block::commitment`] above; it will only
+            // return the chain history root if it's Heartwood or Canopy.
             let history_tree_root = history_tree
                 .hash()
                 .expect("the history tree of the previous block must exist since the current block has a ChainHistoryRoot");
@@ -151,6 +171,13 @@ fn block_commitment_is_valid_for_chain_history(
             }
         }
         block::Commitment::ChainHistoryBlockTxAuthCommitment(actual_hash_block_commitments) => {
+            // # Consensus
+            //
+            // > [NU5 onward] hashBlockCommitments MUST be set to the value of
+            // > hashBlockCommitments for this block, as specified in [ZIP-244].
+            //
+            // The network is checked by [`Block::commitment`] above; it will only
+            // return the block commitments if it's NU5 onward.
             let history_tree_root = history_tree
                 .hash()
                 .expect("the history tree of the previous block must exist since the current block has a ChainHistoryBlockTxAuthCommitment");
