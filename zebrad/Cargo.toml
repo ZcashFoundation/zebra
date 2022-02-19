@@ -13,6 +13,7 @@ default-run = "zebrad"
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus/" }
 zebra-network = { path = "../zebra-network" }
+zebra-rpc = { path = "../zebra-rpc" }
 zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
@@ -49,6 +50,9 @@ sentry = { version = "0.23.0", default-features = false, features = ["backtrace"
 sentry-tracing = "0.23.0"
 
 rand = "0.8.5"
+
+jsonrpc-core = "18.0.0"
+jsonrpc-http-server = "18.0.0"
 
 [build-dependencies]
 vergen = { version = "6.0.2", default-features = false, features = ["cargo", "git"] }

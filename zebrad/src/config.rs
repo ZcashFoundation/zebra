@@ -12,7 +12,7 @@ use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
 use zebra_state::Config as StateSection;
 
-use crate::components::{mempool::Config as MempoolSection, sync};
+use crate::components::{mempool::Config as MempoolSection, rpc::Config as RpcSection, sync};
 
 /// Configuration for `zebrad`.
 ///
@@ -42,6 +42,9 @@ pub struct ZebradConfig {
 
     /// Mempool configuration
     pub mempool: MempoolSection,
+
+    /// RPC configuration
+    pub rpc: RpcSection,
 }
 
 /// Tracing configuration section.

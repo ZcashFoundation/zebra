@@ -70,6 +70,7 @@ use crate::{
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
+        rpc::RpcServer,
         sync::{self, SyncStatus},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
@@ -188,6 +189,8 @@ impl StartCmd {
                 .in_current_span(),
         );
 
+        let rpc_task_handle = tokio::spawn(RpcServer::new(config.rpc).in_current_span());
+
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
@@ -198,6 +201,7 @@ impl StartCmd {
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
+        pin!(rpc_task_handle);
 
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
@@ -271,6 +275,7 @@ impl StartCmd {
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
+        rpc_task_handle.abort();
 
         // startup tasks
         groth16_download_handle.abort();
