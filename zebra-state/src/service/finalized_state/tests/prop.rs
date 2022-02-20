@@ -1,3 +1,5 @@
+//! Randomised property tests for the finalized state.
+
 use std::env;
 
 use zebra_chain::{block::Height, parameters::NetworkUpgrade};

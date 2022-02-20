@@ -27,7 +27,7 @@ toml = "0.5"
 hyper = { version = "0.14.17", features = ["full"] }
 futures = "0.3"
 tokio = { version = "1.16.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tower = { version = "0.4.11", features = ["hedge", "limit"] }
+tower = { version = "0.4.12", features = ["hedge", "limit"] }
 pin-project = "1.0.7"
 
 color-eyre = { version = "0.5.11", features = ["issue-url"] }
@@ -49,6 +49,7 @@ atty = "0.2.14"
 sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
 sentry-tracing = "0.23.0"
 
+num-integer = "0.1.44"
 rand = "0.8.5"
 
 jsonrpc-core = "18.0.0"

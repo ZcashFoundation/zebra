@@ -17,7 +17,7 @@ env:
 
 jobs:
   test:
-    name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
+    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     # The large timeout is to accommodate:
     # - Windows builds (75 minutes, typically 30-50 minutes)
     # - parameter downloads (40 minutes, but only when the cache expires)
@@ -117,7 +117,7 @@ jobs:
           args: --verbose --package zebrad --test acceptance sync_large_checkpoints_ -- --ignored
 
   test-fake-activation-heights:
-    name: Build (+${{ matrix.rust }}) zebra-state with fake activation heights on ubuntu-latest
+    name: Test ${{ matrix.rust }} zebra-state with fake activation heights on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
     strategy:
@@ -158,7 +158,7 @@ jobs:
           args: --verbose --package zebra-state --lib -- with_fake_activation_heights
 
   build-chain-no-features:
-    name: Build (+${{ matrix.rust }}) zebra-chain w/o features on ubuntu-latest
+    name: Build ${{ matrix.rust }} zebra-chain w/o features on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
     strategy:
@@ -188,7 +188,7 @@ jobs:
         run: cargo build --verbose --no-default-features
 
   build:
-    name: Build (+stable) on ubuntu-latest
+    name: Build stable on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
@@ -224,7 +224,7 @@ jobs:
           args: --verbose --release
 
   cargo-deny:
-    name: Check deny.toml crate dependencies and validate licenses
+    name: Check deny.toml ${{ matrix.checks }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
