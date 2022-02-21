@@ -61,10 +61,16 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-para
 ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
+ARG RUN_TESTS=1
+ENV RUN_TESTS ${RUN_TESTS}
+
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 
-ENTRYPOINT ["cargo" "test" "--locked" "--release" "--features" "enable-sentry"]
-CMD [ "--test" "acceptance" "--" "--nocapture" "--ignored" "full_sync_mainnet"]
+COPY ./docker/entrypoint.sh /
+RUN chmod u+x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD [ "cargo"]
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
