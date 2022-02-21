@@ -28,8 +28,8 @@ impl RpcServer {
             io.extend_with(RpcImpl.to_delegate());
 
             let server = ServerBuilder::new(io)
-                // TODO: use the same tokio executor as the rest of Zebra
-                //.event_loop_executor(tokio::runtime::Handle::current())
+                // use the same tokio executor as the rest of Zebra
+                .event_loop_executor(tokio::runtime::Handle::current())
                 .threads(1)
                 // TODO: disable this security check if we see errors from lightwalletd.
                 //.allowed_hosts(DomainsValidation::Disabled)
