@@ -29,7 +29,7 @@ env:
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   ZONE: us-central1-a
-  MACHINE_TYPE: c2-standard-8
+  MACHINE_TYPE: c2-standard-16
   IMAGE_NAME: zebrad-test
 
 jobs:
@@ -412,7 +412,7 @@ jobs:
         run: |
           gcloud compute instances create-with-container "sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
-          --boot-disk-type pd-ssd \
+          --boot-disk-type pd-extreme \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -425,7 +425,7 @@ jobs:
           --container-arg="enable-sentry" \
           --container-arg="--test" \
           --container-arg="acceptance" \
-          --container-arg=-- \
+          --container-arg="'--'" \
           --container-arg="--nocapture" \
           --container-arg="--ignored" \
           --container-arg="full_sync_mainnet" \
