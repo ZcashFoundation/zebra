@@ -16,8 +16,11 @@ pub struct RpcServer {}
 impl RpcServer {
     /// Start a new RPC server endpoint
     pub async fn new(config: Config) -> Self {
-        if config.listen {
-            info!("Trying to open RPC endpoint at {}...", config.listen_addr);
+        if config.listen_addr.is_some() {
+            info!(
+                "Trying to open RPC endpoint at {}...",
+                config.listen_addr.unwrap()
+            );
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
@@ -31,7 +34,7 @@ impl RpcServer {
                 // TODO: disable this security check if we see errors from lightwalletd.
                 //.allowed_hosts(DomainsValidation::Disabled)
                 .request_middleware(FixHttpRequestMiddleware)
-                .start_http(&config.listen_addr)
+                .start_http(&config.listen_addr.unwrap())
                 .expect("Unable to start RPC server");
 
             info!("Opened RPC endpoint at {}", server.address());

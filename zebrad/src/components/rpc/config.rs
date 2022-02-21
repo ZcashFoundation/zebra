@@ -8,20 +8,20 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// Turn on/off the RPC server
-    pub listen: bool,
-
-    /// IP address and port for the RPC server
-    pub listen_addr: SocketAddr,
+    /// IP address and port for the RPC server.
+    ///
+    /// Note: RPC server will not start if this is `None`.
+    pub listen_addr: Option<SocketAddr>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            listen: false,
-            listen_addr: "127.0.0.1:8232"
-                .parse()
-                .expect("Hardcoded address should be parseable"),
+            listen_addr: Some(
+                "127.0.0.1:8232"
+                    .parse()
+                    .expect("Hardcoded address should be parseable"),
+            ),
         }
     }
 }
