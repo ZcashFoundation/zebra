@@ -1,6 +1,8 @@
 //! An RPC endpoint.
 
 use futures::TryStreamExt;
+use tracing_futures::Instrument;
+
 use hyper::{body::Bytes, Body};
 use jsonrpc_core;
 use jsonrpc_http_server::{RequestMiddleware, ServerBuilder};
@@ -15,7 +17,7 @@ pub struct RpcServer {}
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub async fn new(config: Config) -> Self {
+    pub fn spawn(config: Config) -> tokio::task::JoinHandle<()> {
         if config.listen_addr.is_some() {
             info!(
                 "Trying to open RPC endpoint at {}...",
@@ -39,9 +41,12 @@ impl RpcServer {
 
             info!("Opened RPC endpoint at {}", server.address());
 
-            server.wait();
+            // The server is a blocking task, so we need to spawn it on a blocking thread.
+            tokio::task::spawn_blocking(|| server.wait())
+        } else {
+            // There is no RPC port, so the RPC task does nothing.
+            tokio::task::spawn(futures::future::pending().in_current_span())
         }
-        RpcServer {}
     }
 }
 

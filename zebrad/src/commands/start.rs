@@ -195,7 +195,7 @@ impl StartCmd {
                 .in_current_span(),
         );
 
-        let rpc_task_handle = tokio::spawn(RpcServer::new(config.rpc).in_current_span());
+        let rpc_task_handle = RpcServer::spawn(config.rpc);
 
         info!("spawned initial Zebra tasks");
 
