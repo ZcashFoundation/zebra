@@ -249,6 +249,13 @@ impl StartCmd {
                     Ok(())
                 }
 
+                rpc_result = &mut rpc_task_handle => {
+                    rpc_result
+                        .expect("unexpected panic in the rpc task");
+                    info!("rpc task exited");
+                    Ok(())
+                }
+
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.
                 groth16_download_result = &mut groth16_download_handle_fused => {
                     groth16_download_result
