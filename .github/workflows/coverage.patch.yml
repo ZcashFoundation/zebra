@@ -12,7 +12,7 @@ on:
 
 jobs:
   coverage:
-    name: Coverage (+nightly)
+    name: Coverage nightly
     # The large timeout is to accommodate:
     # - nightly builds (75 minutes, typically 30-50 minutes)
     # - parameter downloads (40 minutes, but only when the cache expires)
