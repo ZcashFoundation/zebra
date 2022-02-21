@@ -1,10 +1,5 @@
 //! The primary implementation of the `zebra_state::Service` built upon rocksdb
 
-mod disk_format;
-
-#[cfg(test)]
-mod tests;
-
 use std::{
     borrow::Borrow,
     collections::HashMap,
@@ -26,11 +21,26 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-use crate::{service::check, BoxError, Config, FinalizedBlock, HashOrHeight};
+use crate::{
+    service::{
+        check,
+        finalized_state::{
+            disk_db::{ReadDisk, WriteDisk},
+            disk_format::{FromDisk, IntoDisk, TransactionLocation},
+        },
+        QueuedFinalized,
+    },
+    BoxError, Config, FinalizedBlock, HashOrHeight,
+};
 
-use self::disk_format::{DiskDeserialize, DiskSerialize, FromDisk, IntoDisk, TransactionLocation};
+mod disk_db;
+mod disk_format;
 
-use super::QueuedFinalized;
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+
+#[cfg(test)]
+mod tests;
 
 /// The finalized part of the chain state, stored in the db.
 pub struct FinalizedState {

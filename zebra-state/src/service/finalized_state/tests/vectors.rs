@@ -1,3 +1,5 @@
+//! Fixed test vectors for the finalized state.
+
 use halo2::arithmetic::FieldExt;
 use halo2::pasta::pallas;
 use hex::FromHex;

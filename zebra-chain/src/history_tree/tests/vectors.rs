@@ -62,7 +62,7 @@ fn push_and_prune_for_network_upgrade(
 
     // Build initial history tree tree with only the first block
     let first_sapling_root =
-        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+        sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
         network,
         first_block,
@@ -91,11 +91,11 @@ fn push_and_prune_for_network_upgrade(
     assert_eq!(second_commitment, Commitment::ChainHistoryRoot(first_root));
 
     // Append second block to history tree
-    let second_sapling_root = sapling::tree::Root(
+    let second_sapling_root = sapling::tree::Root::try_from(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
-    );
+    )?;
     tree.push(second_block, &second_sapling_root, &Default::default())
         .unwrap();
 
@@ -139,7 +139,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     // This tree will not match the actual tree (which has all the blocks since the previous
     // network upgrade), so we won't be able to check if its root is correct.
     let sapling_root_prev =
-        sapling::tree::Root(**sapling_roots.get(&height).expect("test vector exists"));
+        sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
         network,
         block_prev,
@@ -162,11 +162,11 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
 
     // Append block to history tree. This must trigger a upgrade of the tree,
     // which should be recreated.
-    let activation_sapling_root = sapling::tree::Root(
+    let activation_sapling_root = sapling::tree::Root::try_from(
         **sapling_roots
             .get(&(height + 1))
             .expect("test vector exists"),
-    );
+    )?;
     tree.push(
         activation_block,
         &activation_sapling_root,

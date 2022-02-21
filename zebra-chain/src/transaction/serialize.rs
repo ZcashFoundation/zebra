@@ -207,32 +207,18 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
         //
-        // # Consensus
+        // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
         //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
+        // Validated in [`crate::sapling::tree::Root::zcash_deserialize`].
         let shared_anchor = if spends_count > 0 {
-            Some(reader.read_32_bytes()?.into())
+            Some((&mut reader).zcash_deserialize_into()?)
         } else {
             None
         };
 
         // Denoted as `vSpendProofsSapling` in the spec.
-        //
-        // # Consensus
-        //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is `ZKSpend.Proof`, described in
-        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
-        // It is not enforced here; this just reads 192 bytes.
-        // The type is validated when validating the proof, see
-        // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
         //
         // # Consensus
         //

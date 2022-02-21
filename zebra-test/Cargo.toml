@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -16,7 +16,7 @@ rand = "0.8"
 regex = "1.5.4"
 
 tokio = { version = "1.16.1", features = ["full"] }
-tower = { version = "0.4.11", features = ["util"] }
+tower = { version = "0.4.12", features = ["util"] }
 futures = "0.3.21"
 
 color-eyre = "0.5.11"
