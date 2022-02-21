@@ -48,6 +48,16 @@ pub trait Rpc {
     ///       note any other lightwalletd changes
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+
+    /// Send a raw signed transaction.
+    ///
+    /// Sends the raw bytes of a signed transaction to the network, if the transaction is valid.
+    ///
+    /// See Zcashd's RPC
+    /// [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html) documentation
+    /// for more information.
+    #[rpc(name = "sendrawtransaction")]
+    fn send_raw_transaction(&self, raw_transaction_hex: String) -> Result<SentTransactionHash>;
 }
 
 /// RPC method implementations.
@@ -74,6 +84,10 @@ impl Rpc for RpcImpl {
 
         Ok(response)
     }
+
+    fn send_raw_transaction(&self, raw_transaction_hex: String) -> Result<SentTransactionHash> {
+        todo!();
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -89,3 +103,9 @@ pub struct GetBlockChainInfo {
     chain: String,
     // TODO: add other fields used by lightwalletd (#3143)
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Response to a `sendrawtransaction` RPC request.
+///
+/// A JSON string with the transaction hash in hexadecimal.
+pub struct SentTransactionHash(String);
