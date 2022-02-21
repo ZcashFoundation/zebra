@@ -7,7 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Zebra 1.0.0-beta.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.5) - 2022-02-18
 
 Zebra's latest beta brings better networking, documents more consensus rules and
-improves the CI pipelines. All notable changes are outlined below.
+improves the CI pipelines.
+
+
 
 ### Added
 
@@ -35,6 +37,8 @@ improves the CI pipelines. All notable changes are outlined below.
 
 #### Documentation
 
+- Document consensus rules from 7.3 Spend Description Encoding and Consensus (#3575)
+- Document second part of consensus rules from 7.6 Block Header Encoding and Consensus (#3566)
 - Document consensus rules from 3.9 Nullifier Sets (#3521)
 - Update README goals and performance troubleshooting (#3525)
 - Document consensus rules from 4.5 Output Descriptions (#3462)
@@ -65,6 +69,7 @@ improves the CI pipelines. All notable changes are outlined below.
 
 ### Fixed
 
+- Use the new `increase_nofile_limit` function from `rlimit` 0.7.0 (#3539)
 - Generate Well-Formed Finalsaplingroot In Arbitrary Implementation (#3573)
 - Rename some lightwalletd database types (#3567)
 
@@ -85,6 +90,7 @@ improves the CI pipelines. All notable changes are outlined below.
 
 #### CI
 
+- Improve test requirements and merge conditions for Mergify (#3580)
 - Make The Purpose Of Each Sync Test Clearer (#3574)
 - Delete A Redundant "Test All" Job (#3552)
 - Allow Branches With Dots In The Name (#3557)
