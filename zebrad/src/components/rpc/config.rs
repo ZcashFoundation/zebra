@@ -11,17 +11,15 @@ pub struct Config {
     /// IP address and port for the RPC server.
     ///
     /// Note: RPC server will not start if this is `None`.
+    ///
+    // The recommended ports for the RPC server is:
+    /// - Mainnet: 8232
+    /// - Testnet: 83232
     pub listen_addr: Option<SocketAddr>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            listen_addr: Some(
-                "127.0.0.1:8232"
-                    .parse()
-                    .expect("Hardcoded address should be parseable"),
-            ),
-        }
+        Self { listen_addr: None }
     }
 }
