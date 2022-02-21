@@ -3,7 +3,7 @@
 use futures::TryStreamExt;
 use hyper::{body::Bytes, Body};
 use jsonrpc_core;
-use jsonrpc_http_server::{DomainsValidation, RequestMiddleware, ServerBuilder};
+use jsonrpc_http_server::{RequestMiddleware, ServerBuilder};
 
 use zebra_rpc::rpc::{Rpc, RpcImpl};
 
@@ -28,8 +28,8 @@ impl RpcServer {
                 // TODO: use the same tokio executor as the rest of Zebra
                 //.event_loop_executor(tokio::runtime::Handle::current())
                 .threads(1)
-                // TODO: if we enable this security check, does lightwalletd still work?
-                .allowed_hosts(DomainsValidation::Disabled)
+                // TODO: disable this security check if we see errors from lightwalletd.
+                //.allowed_hosts(DomainsValidation::Disabled)
                 .request_middleware(FixHttpRequestMiddleware)
                 .start_http(&config.listen_addr)
                 .expect("Unable to start RPC server");
@@ -88,8 +88,8 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
         });
 
         jsonrpc_http_server::RequestMiddlewareAction::Proceed {
-            // TODO: if we enable this security check, does lightwalletd still work?
-            should_continue_on_invalid_cors: true,
+            // TODO: disable this security check if we see errors from lightwalletd.
+            should_continue_on_invalid_cors: false,
             request,
         }
     }
