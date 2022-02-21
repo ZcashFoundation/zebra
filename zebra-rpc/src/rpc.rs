@@ -11,6 +11,10 @@ pub trait Rpc {
     /// getinfo
     #[rpc(name = "getinfo")]
     fn getinfo(&self) -> Result<GetInfo>;
+
+    /// getblockchaininfo
+    #[rpc(name = "getblockchaininfo")]
+    fn getblockchaininfo(&self) -> Result<GetBlockChainInfo>;
 }
 
 /// RPC method implementations.
@@ -25,6 +29,15 @@ impl Rpc for RpcImpl {
 
         Ok(info)
     }
+
+    fn getblockchaininfo(&self) -> Result<GetBlockChainInfo> {
+        // TODO: dummy output data, fix in the context of #3143
+        let response = GetBlockChainInfo {
+            chain: "main".to_string(),
+        };
+
+        Ok(response)
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -32,4 +45,11 @@ impl Rpc for RpcImpl {
 pub struct GetInfo {
     build: String,
     subversion: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Response to a `getblockchaininfo` RPC request.
+pub struct GetBlockChainInfo {
+    chain: String,
+    // TODO: add other fields used by lightwalletd (#3143)
 }
