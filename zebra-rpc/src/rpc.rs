@@ -5,7 +5,7 @@ use jsonrpc_core;
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
 
-#[rpc]
+#[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
     /// getinfo

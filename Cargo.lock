@@ -160,7 +160,7 @@ checksum = "82afccf16bae03285ee6746d08364dc99b80bf20b397b40231d73db76ee47cc5"
 dependencies = [
  "derive_builder",
  "directories",
- "futures 0.3.21",
+ "futures",
  "serde",
  "thiserror",
  "tor-chanmgr",
@@ -725,7 +725,7 @@ dependencies = [
  "once_cell",
  "owo-colors 1.3.0",
  "tracing-error",
- "url 2.2.0",
+ "url",
 ]
 
 [[package]]
@@ -1440,7 +1440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ece68d15c92e84fa4f19d3780f1294e5ca82a78a6d515f1efaabcc144688be00"
 dependencies = [
  "matches",
- "percent-encoding 2.1.0",
+ "percent-encoding",
 ]
 
 [[package]]
@@ -1472,12 +1472,6 @@ name = "funty"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1847abb9cb65d566acd5942e94aea9c8f547ad02c98e1649326fc0e8910b8b1e"
-
-[[package]]
-name = "futures"
-version = "0.1.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a471a38ef8ed83cd6e40aa59c1ffe17db6855c18e3604d9c4ed8c08ebc28678"
 
 [[package]]
 name = "futures"
@@ -1519,7 +1513,6 @@ dependencies = [
  "futures-core",
  "futures-task",
  "futures-util",
- "num_cpus",
 ]
 
 [[package]]
@@ -1557,7 +1550,6 @@ version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b7abd5d659d9b90c8cba917f6ec750a74e2dc23902ef9cd4cc8c8b22e6036a"
 dependencies = [
- "futures 0.1.31",
  "futures-channel",
  "futures-core",
  "futures-io",
@@ -1654,7 +1646,7 @@ dependencies = [
  "libc",
  "libgit2-sys",
  "log",
- "url 2.2.0",
+ "url",
 ]
 
 [[package]]
@@ -1929,17 +1921,6 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "idna"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38f09e0f0b1fb55fdee1f17470ad800da77af5186a1a76c026b679358b7e844e"
-dependencies = [
- "matches",
- "unicode-bidi",
- "unicode-normalization",
-]
-
-[[package]]
-name = "idna"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02e2673c30ee86b5b96a9cb52ad15718aa1f966f5ab9ad54a8b95d5ca33120a9"
@@ -2054,44 +2035,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpc-client-transports"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2b99d4207e2a04fb4581746903c2bb7eb376f88de9c699d0f3e10feeac0cd3a"
-dependencies = [
- "derive_more",
- "futures 0.3.21",
- "jsonrpc-core",
- "jsonrpc-pubsub",
- "log",
- "serde",
- "serde_json",
- "url 1.7.2",
-]
-
-[[package]]
 name = "jsonrpc-core"
 version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
 dependencies = [
- "futures 0.3.21",
+ "futures",
  "futures-executor",
  "futures-util",
  "log",
  "serde",
  "serde_derive",
  "serde_json",
-]
-
-[[package]]
-name = "jsonrpc-core-client"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b51da17abecbdab3e3d4f26b01c5ec075e88d3abe3ab3b05dc9aa69392764ec0"
-dependencies = [
- "futures 0.3.21",
- "jsonrpc-client-transports",
 ]
 
 [[package]]
@@ -2112,7 +2067,7 @@ version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1dea6e07251d9ce6a552abfb5d7ad6bc290a4596c8dcc3d795fae2bbdc1f3ff"
 dependencies = [
- "futures 0.3.21",
+ "futures",
  "hyper",
  "jsonrpc-core",
  "jsonrpc-server-utils",
@@ -2123,28 +2078,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpc-pubsub"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "240f87695e6c6f62fb37f05c02c04953cf68d6408b8c1c89de85c7a0125b1011"
-dependencies = [
- "futures 0.3.21",
- "jsonrpc-core",
- "lazy_static",
- "log",
- "parking_lot",
- "rand 0.7.3",
- "serde",
-]
-
-[[package]]
 name = "jsonrpc-server-utils"
 version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa4fdea130485b572c39a460d50888beb00afb3e35de23ccd7fad8ff19f0e0d4"
 dependencies = [
  "bytes",
- "futures 0.3.21",
+ "futures",
  "globset",
  "jsonrpc-core",
  "lazy_static",
@@ -2886,12 +2826,6 @@ dependencies = [
 
 [[package]]
 name = "percent-encoding"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831"
-
-[[package]]
-name = "percent-encoding"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
@@ -3069,7 +3003,7 @@ checksum = "a63d25391d04a097954b76aba742b6b5b74f213dfe3dbaeeb36e8ddc1c657f0b"
 dependencies = [
  "atomic",
  "crossbeam-queue 0.3.3",
- "futures 0.3.21",
+ "futures",
  "pin-project 1.0.7",
  "static_assertions",
  "thiserror",
@@ -3493,7 +3427,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mime",
- "percent-encoding 2.1.0",
+ "percent-encoding",
  "pin-project-lite",
  "rustls 0.20.2",
  "rustls-pemfile",
@@ -3502,7 +3436,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-rustls",
- "url 2.2.0",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -3912,7 +3846,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "url 2.2.0",
+ "url",
  "uuid",
 ]
 
@@ -4563,7 +4497,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae5a2add018f57300b060a496edae72a538dfc55d1136024f2dc5c9b95cb3c76"
 dependencies = [
  "async-trait",
- "futures 0.3.21",
+ "futures",
  "thiserror",
  "tor-linkspec",
  "tor-llcrypto",
@@ -4592,7 +4526,7 @@ dependencies = [
  "async-trait",
  "bounded-vec-deque",
  "derive_builder",
- "futures 0.3.21",
+ "futures",
  "humantime-serde",
  "itertools 0.10.3",
  "pin-project 1.0.7",
@@ -4648,7 +4582,7 @@ checksum = "2dd32caaeeb2d67a4e93851c41a87be214c1d241e800932dbfea8a9622fa4088"
 dependencies = [
  "async-compression",
  "base64",
- "futures 0.3.21",
+ "futures",
  "hex",
  "http",
  "httparse",
@@ -4674,7 +4608,7 @@ dependencies = [
  "derive_builder",
  "digest",
  "fslock",
- "futures 0.3.21",
+ "futures",
  "hex",
  "humantime-serde",
  "itertools 0.10.3",
@@ -4706,7 +4640,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66f560eb3a180180913b8deb6ed3421b067cb3ce831a444db515c3463f146274"
 dependencies = [
  "derive_builder",
- "futures 0.3.21",
+ "futures",
  "humantime-serde",
  "itertools 0.10.3",
  "pin-project 1.0.7",
@@ -4837,7 +4771,7 @@ dependencies = [
  "coarsetime",
  "crypto-mac",
  "digest",
- "futures 0.3.21",
+ "futures",
  "generic-array",
  "hkdf",
  "hmac",
@@ -4877,7 +4811,7 @@ checksum = "8935238722b33676922c70eb4e1eef408ef9d413e57cf1cb05ca237ae04353e3"
 dependencies = [
  "async-trait",
  "async_executors",
- "futures 0.3.21",
+ "futures",
  "native-tls",
  "pin-project 1.0.7",
  "tokio",
@@ -4919,7 +4853,7 @@ version = "0.2.20"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
- "futures 0.3.21",
+ "futures",
  "futures-core",
  "pin-project 1.0.7",
  "rand 0.8.5",
@@ -5207,25 +5141,14 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "url"
-version = "1.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd4e7c0d531266369519a4aa4f399d748bd37043b00bde1e4ff1f60a120b355a"
-dependencies = [
- "idna 0.1.5",
- "matches",
- "percent-encoding 1.0.1",
-]
-
-[[package]]
-name = "url"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5909f2b0817350449ed73e8bcd81c8c3c8d9a7a5d8acba4b27db277f1868976e"
 dependencies = [
  "form_urlencoded",
- "idna 0.2.0",
+ "idna",
  "matches",
- "percent-encoding 2.1.0",
+ "percent-encoding",
  "serde",
 ]
 
@@ -5649,7 +5572,7 @@ dependencies = [
  "ed25519-zebra",
  "equihash",
  "fpe",
- "futures 0.3.21",
+ "futures",
  "group",
  "halo2",
  "hex",
@@ -5698,7 +5621,7 @@ dependencies = [
  "color-eyre",
  "dirs",
  "displaydoc",
- "futures 0.3.21",
+ "futures",
  "futures-util",
  "halo2",
  "hex",
@@ -5738,7 +5661,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "futures 0.3.21",
+ "futures",
  "hex",
  "lazy_static",
  "metrics",
@@ -5769,7 +5692,6 @@ name = "zebra-rpc"
 version = "1.0.0-beta.0"
 dependencies = [
  "jsonrpc-core",
- "jsonrpc-core-client",
  "jsonrpc-derive",
  "serde",
 ]
@@ -5796,7 +5718,7 @@ dependencies = [
  "color-eyre",
  "dirs",
  "displaydoc",
- "futures 0.3.21",
+ "futures",
  "halo2",
  "hex",
  "itertools 0.10.3",
@@ -5826,7 +5748,7 @@ name = "zebra-test"
 version = "1.0.0-beta.4"
 dependencies = [
  "color-eyre",
- "futures 0.3.21",
+ "futures",
  "hex",
  "lazy_static",
  "once_cell",
@@ -5868,7 +5790,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "dirs",
- "futures 0.3.21",
+ "futures",
  "gumdrop",
  "hyper",
  "indexmap",

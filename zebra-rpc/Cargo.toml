@@ -10,7 +10,6 @@ edition = "2021"
 [dependencies]
 
 jsonrpc-core = "18.0.0"
-jsonrpc-core-client = "18.0.0"
 jsonrpc-derive = "18.0.0"
 
 serde = { version = "1", features = ["serde_derive"] }
