@@ -417,7 +417,7 @@ jobs:
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
+          --container-env=ZEBRA_SKIP_IPV6_TESTS=1,TEST_FULL_SYNC=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
