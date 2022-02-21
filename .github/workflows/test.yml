@@ -426,7 +426,6 @@ jobs:
           --container-arg="--test" \
           --container-arg="acceptance" \
           --container-arg="'--'" \
-          --container-arg="--nocapture" \
           --container-arg="--ignored" \
           --container-arg="full_sync_mainnet" \
           --container-env=ZEBRA_SKIP_IPV6_TESTS=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
