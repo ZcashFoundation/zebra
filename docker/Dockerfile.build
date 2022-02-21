@@ -63,7 +63,8 @@ ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
 
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 
-CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
+ENTRYPOINT ["cargo" "test" "--locked" "--release" "--features" "enable-sentry"]
+CMD [ "--test" "acceptance" "--" "--nocapture" "--ignored" "full_sync_mainnet"]
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
