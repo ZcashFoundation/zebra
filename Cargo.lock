@@ -2378,9 +2378,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "multiset"
-version = "0.0.5"
-source = "git+https://github.com/jmitchell/multiset?rev=91ef8550b518f75ae87ae0d8771150f259fd34d5#91ef8550b518f75ae87ae0d8771150f259fd34d5"
+name = "mset"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05d1cf737c48148e9956a9ea00710258dcf2a7afdedc34a2c672a44866f618dc"
 
 [[package]]
 name = "native-tls"
@@ -5617,7 +5618,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "metrics",
- "multiset",
+ "mset",
  "once_cell",
  "proptest",
  "proptest-derive",
