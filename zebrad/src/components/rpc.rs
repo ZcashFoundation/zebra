@@ -106,7 +106,10 @@ impl FixHttpRequestMiddleware {
         // - at the end of a list;
         // with no spaces (lightwalletd format), and spaces after separators (example format).
         //
-        // TODO: replace this with a regular expression if we see errors from lightwalletd.
+        // TODO: if we see errors from lightwalletd, make this replacement more accurate:
+        //     - use a partial JSON fragment parser
+        //     - combine the whole request into a single buffer, and use a JSON parser
+        //     - use a regular expression
         data.replace("\"jsonrpc\":\"1.0\",", "")
             .replace("\"jsonrpc\": \"1.0\",", "")
             .replace(",\"jsonrpc\":\"1.0\"", "")
