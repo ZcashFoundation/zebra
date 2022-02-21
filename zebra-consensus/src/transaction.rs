@@ -936,7 +936,7 @@ where
                 //
                 // https://zips.z.cash/protocol/protocol.pdf#actiondesc
                 //
-                // This is validated by the verifier, inside the `redpallas` crate.
+                // This is validated by the verifier, inside the `redpallas` module.
                 // It calls [`pallas::Affine::from_bytes`] to parse R and
                 // that enforces the canonical encoding.
                 //

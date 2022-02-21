@@ -81,7 +81,7 @@ impl ZcashDeserialize for Action {
             // https://zips.z.cash/protocol/protocol.pdf#concretespendauthsig
             // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
             // This only reads the 32-byte buffer. The type is enforced
-            // on signature verification; see zebra-chain/src/primitives/redpallas/batch.rs
+            // on signature verification; see [`redpallas::batch`]
             rk: reader.read_32_bytes()?.into(),
             // Type is `{0 .. 𝑞_ℙ − 1}`. Note that the second rule quoted above
             // is also enforced here and it is technically redundant with the first.
