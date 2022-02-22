@@ -7,7 +7,7 @@ use hyper::{body::Bytes, Body};
 use jsonrpc_core;
 use jsonrpc_http_server::{RequestMiddleware, ServerBuilder};
 
-use zebra_rpc::rpc::{Rpc, RpcImpl};
+use zebra_rpc::methods::{Rpc, RpcImpl};
 
 pub mod config;
 pub use config::Config;
