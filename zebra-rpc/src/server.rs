@@ -53,7 +53,7 @@ impl RpcServer {
     }
 }
 
-/// HTTP [`RequestMiddleware`] with compatibility wrokarounds.
+/// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
 /// This middleware makes the following changes to requests:
 ///
@@ -63,6 +63,12 @@ impl RpcServer {
 /// because the "jsonrpc" field was only added in JSON-RPC 2.0.
 ///
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
+///
+/// ## Security
+///
+/// Any user-specified data in RPC requests is hex or base58check encoded.
+/// We assume lightwalletd validates data encodings before sending it on to Zebra.
+/// So any fixes Zebra performs won't change user-specified data.
 //
 // TODO: put this HTTP middleware in a separate module
 #[derive(Copy, Clone, Debug)]
@@ -118,6 +124,9 @@ impl FixHttpRequestMiddleware {
         //     - use a partial JSON fragment parser
         //     - combine the whole request into a single buffer, and use a JSON parser
         //     - use a regular expression
+        //
+        // We could also just handle the exact lightwalletd format,
+        // by replacing `{"jsonrpc":"1.0",` with `{`.
         data.replace("\"jsonrpc\":\"1.0\",", "")
             .replace("\"jsonrpc\": \"1.0\",", "")
             .replace(",\"jsonrpc\":\"1.0\"", "")
