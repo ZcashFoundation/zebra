@@ -18,7 +18,8 @@ use crate::{
 };
 
 /// Zebra RPC Server
-pub struct RpcServer {}
+#[derive(Clone, Debug)]
+pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
@@ -67,7 +68,7 @@ impl RpcServer {
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
 //
 // TODO: put this HTTP middleware in a separate module
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 pub struct FixHttpRequestMiddleware;
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
