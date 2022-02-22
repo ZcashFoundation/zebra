@@ -31,8 +31,8 @@ impl Rpc for RpcImpl {
     fn get_info(&self) -> Result<GetInfo> {
         // TODO: dummy output data, fix in the context of #3142
         let response = GetInfo {
-            build: "Zebra v1.0.0 ...".into(),
-            subversion: "/Zebra:1.0.0-beta.4/".into(),
+            build: "TODO: Zebra v1.0.0 ...".into(),
+            subversion: "TODO: /Zebra:1.0.0-beta.../".into(),
         };
 
         Ok(response)
@@ -41,7 +41,7 @@ impl Rpc for RpcImpl {
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
         // TODO: dummy output data, fix in the context of #3143
         let response = GetBlockChainInfo {
-            chain: "main".to_string(),
+            chain: "TODO: main".to_string(),
         };
 
         Ok(response)
