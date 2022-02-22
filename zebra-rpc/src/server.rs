@@ -43,10 +43,18 @@ impl RpcServer {
                 .start_http(&listen_addr)
                 .expect("Unable to start RPC server");
 
-            info!("Opened RPC endpoint at {}", server.address());
-
             // The server is a blocking task, so we need to spawn it on a blocking thread.
-            tokio::task::spawn_blocking(|| server.wait())
+            let span = Span::current();
+            let server = move || {
+                span.in_scope(|| {
+                    info!("Opened RPC endpoint at {}", server.address());
+
+                    server.wait();
+
+                    info!("Stopping RPC endpoint");
+                })
+            };
+            tokio::task::spawn_blocking(server)
         } else {
             // There is no RPC port, so the RPC task does nothing.
             tokio::task::spawn(futures::future::pending().in_current_span())
