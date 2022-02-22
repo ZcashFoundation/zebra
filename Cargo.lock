@@ -2058,9 +2058,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.113"
+version = "0.2.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
+checksum = "e74d72e0f9b65b5b4ca49a346af3976df0f9c61d550727f349ecd559f251a26c"
 
 [[package]]
 name = "libgit2-sys"
@@ -2378,9 +2378,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "multiset"
-version = "0.0.5"
-source = "git+https://github.com/jmitchell/multiset?rev=91ef8550b518f75ae87ae0d8771150f259fd34d5#91ef8550b518f75ae87ae0d8771150f259fd34d5"
+name = "mset"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05d1cf737c48148e9956a9ea00710258dcf2a7afdedc34a2c672a44866f618dc"
 
 [[package]]
 name = "native-tls"
@@ -3399,9 +3400,9 @@ dependencies = [
 
 [[package]]
 name = "rlimit"
-version = "0.5.4"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81a9ed03edbed449d6897c2092c71ab5f7b5fb80f6f0b1a3ed6d40a6f9fc0720"
+checksum = "347703a5ae47adf1e693144157be231dde38c72bd485925cae7407ad3e52480b"
 dependencies = [
  "libc",
 ]
@@ -4755,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4775,7 +4776,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "futures-core",
  "pin-project 0.4.28",
@@ -5450,7 +5451,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "aes",
  "bech32",
@@ -5509,7 +5510,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5551,7 +5552,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "arti-client",
  "bitflags",
@@ -5590,7 +5591,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5603,7 +5604,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "bincode",
  "chrono",
@@ -5617,7 +5618,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "metrics",
- "multiset",
+ "mset",
  "once_cell",
  "proptest",
  "proptest-derive",
@@ -5637,7 +5638,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "color-eyre",
  "futures",
@@ -5660,7 +5661,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "color-eyre",
  "hex",
@@ -5675,7 +5676,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 dependencies = [
  "abscissa_core",
  "atty",
