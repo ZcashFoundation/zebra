@@ -81,6 +81,9 @@ ARG NETWORK=Mainnet
 ARG TEST_FULL_SYNC
 ENV TEST_FULL_SYNC ${TEST_FULL_SYNC:-1}
 
+ARG RUN_TESTS
+ENV RUN_TESTS ${RUN_TESTS:-1}
+
 RUN set -ex; \
   { \
     echo "[consensus]"; \
