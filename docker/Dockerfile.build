@@ -84,21 +84,6 @@ ENV TEST_FULL_SYNC ${TEST_FULL_SYNC:-1}
 ARG RUN_TESTS
 ENV RUN_TESTS ${RUN_TESTS:-1}
 
-RUN set -ex; \
-  { \
-    echo "[consensus]"; \
-    echo "checkpoint_sync = ${CHECKPOINT_SYNC}"; \
-    echo "[metrics]"; \
-    echo "endpoint_addr = '0.0.0.0:9999'"; \
-    echo "[network]"; \
-    echo "network = '${NETWORK}'"; \
-    echo "[state]"; \
-    echo "cache_dir = '/zebrad-cache'"; \
-    echo "[tracing]"; \
-    echo "force_use_color = true"; \
-    echo "endpoint_addr = '0.0.0.0:3000'"; \
-  } > "zebrad.toml"
-
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "cargo"]
 
