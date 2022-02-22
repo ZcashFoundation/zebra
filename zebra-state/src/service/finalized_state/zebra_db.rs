@@ -361,13 +361,7 @@ impl DiskWriteBatch {
         // but it ignores the genesis UTXO and value pool updates.
         //
         // TODO: commit transaction data but not UTXOs in the next PR.
-        if self.prepare_genesis_batch(
-            db,
-            &finalized,
-            &sprout_note_commitment_tree,
-            &sapling_note_commitment_tree,
-            &orchard_note_commitment_tree,
-        ) {
+        if self.prepare_genesis_batch(db, &finalized) {
             return Ok(self);
         }
 
@@ -402,15 +396,7 @@ impl DiskWriteBatch {
     /// If `finalized.block` is not a genesis block, does nothing.
     ///
     /// This method never returns an error.
-    #[allow(clippy::too_many_arguments)]
-    pub fn prepare_genesis_batch(
-        &mut self,
-        db: &DiskDb,
-        finalized: &FinalizedBlock,
-        sprout_note_commitment_tree: &sprout::tree::NoteCommitmentTree,
-        sapling_note_commitment_tree: &sapling::tree::NoteCommitmentTree,
-        orchard_note_commitment_tree: &orchard::tree::NoteCommitmentTree,
-    ) -> bool {
+    pub fn prepare_genesis_batch(&mut self, db: &DiskDb, finalized: &FinalizedBlock) -> bool {
         let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
@@ -425,17 +411,17 @@ impl DiskWriteBatch {
             self.zs_insert(
                 sprout_note_commitment_tree_cf,
                 height,
-                sprout_note_commitment_tree,
+                sprout::tree::NoteCommitmentTree::default(),
             );
             self.zs_insert(
                 sapling_note_commitment_tree_cf,
                 height,
-                sapling_note_commitment_tree,
+                sapling::tree::NoteCommitmentTree::default(),
             );
             self.zs_insert(
                 orchard_note_commitment_tree_cf,
                 height,
-                orchard_note_commitment_tree,
+                orchard::tree::NoteCommitmentTree::default(),
             );
 
             return true;
