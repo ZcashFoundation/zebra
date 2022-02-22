@@ -390,7 +390,7 @@ jobs:
   test-full-sync:
     name: Test full Mainnet sync
     runs-on: ubuntu-latest
-    needs: [ build]
+    # needs: [ build]
     steps:
       - uses: actions/checkout@v2.4.0
         with:
