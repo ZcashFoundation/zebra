@@ -15,15 +15,22 @@ Binaries are easier to use if they are located in your system execution path.
 This software will output a list of zcash block hashes that are used as zebra checkpoints. To create checkpoints a synchronized instance of `zcashd` is needed and a `zcash-cli` wallet connected to it must be available locally. For more information about how to create a checkpoint list please check [here](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
 
 
-This is a standalone rust binary, can be compiled as:
+This is a standalone rust binary, you can compile it using:
 
-```
+```sh
 cargo build --release --bin zebra-checkpoints
 ```
 
-After built check the program help with:
-
+Then update the checkpoints using these commands:
+```sh
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee /dev/stderr >> zebra-consensus/src/checkpoint/main-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee /dev/stderr >> zebra-consensus/src/checkpoint/test-checkpoints.txt &
+wait
 ```
+
+You can see all the `zebra-checkpoints` options using:
+
+```sh
 ./target/release/zebra-checkpoints --help
 ```
 
@@ -31,7 +38,7 @@ After built check the program help with:
 
 Given a block hash the script will get additional information using `zcash-cli`.
 
-```
+```sh
 $ echo "00000001f53a5e284393dfecf2a2405f62c07e2503047a28e2d1b6e76b25f863" | zebrad-hash-lookup
 high: 3299
 time: 2016-11-02T13:24:26Z
@@ -48,7 +55,7 @@ The program is designed to filter the output from the zebra terminal or log file
 
 Assuming `zebrad`, `zclash-cli`, `zebrad-hash-lookup` and `zebrad-log-filter` are in your path the program can used as:
 
-```
+```sh
 $ zebrad -v start | zebrad-log-filter
 ...
 block::Hash("
