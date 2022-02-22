@@ -32,6 +32,10 @@ pub struct DiskDb {
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
+///
+/// [`rocksdb::WriteBatch`] is a batched set of database updates,
+/// which must be written to the database using `DiskDb::write(batch)`.
+#[must_use = "batches must be written to the database"]
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
