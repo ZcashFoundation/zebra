@@ -316,7 +316,6 @@ impl DiskWriteBatch {
     ///
     /// # Errors
     ///
-    /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
@@ -335,10 +334,6 @@ impl DiskWriteBatch {
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
         let block_by_height = db.cf_handle("block_by_height").unwrap();
-
-        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         let FinalizedBlock {
             block,
@@ -361,6 +356,67 @@ impl DiskWriteBatch {
         // > (There is one such zero-valued output, on each of Testnet and Mainnet.)
         //
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        //
+        // By returning early, Zebra commits the genesis block and transaction data,
+        // but it ignores the genesis UTXO and value pool updates.
+        //
+        // TODO: commit transaction data but not UTXOs in the next PR.
+        if self.prepare_genesis_batch(
+            db,
+            &finalized,
+            &sprout_note_commitment_tree,
+            &sapling_note_commitment_tree,
+            &orchard_note_commitment_tree,
+        ) {
+            return Ok(self);
+        }
+
+        self.prepare_transaction_batch(
+            db,
+            &finalized,
+            &mut sprout_note_commitment_tree,
+            &mut sapling_note_commitment_tree,
+            &mut orchard_note_commitment_tree,
+        )?
+        .prepare_history_batch(
+            db,
+            finalized,
+            network,
+            current_tip_height,
+            all_utxos_spent_by_block,
+            sprout_note_commitment_tree,
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            history_tree,
+            current_value_pool,
+        )
+    }
+
+    /// If `finalized.block` is a genesis block,
+    /// prepare a database batch that finishes intializing the database,
+    /// and return `true` (without actually writing anything).
+    ///
+    /// Since the genesis block's transactions are skipped,
+    /// the returned genesis batch should be written to the database immediately.
+    ///
+    /// If `finalized.block` is not a genesis block, does nothing.
+    ///
+    /// This method never returns an error.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_genesis_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &FinalizedBlock,
+        sprout_note_commitment_tree: &sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: &sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: &orchard::tree::NoteCommitmentTree,
+    ) -> bool {
+        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
+
+        let FinalizedBlock { block, height, .. } = finalized;
+
         if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
             // Insert empty note commitment trees. Note that these can't be
             // used too early (e.g. the Orchard tree before Nu5 activates)
@@ -381,28 +437,11 @@ impl DiskWriteBatch {
                 height,
                 orchard_note_commitment_tree,
             );
-            return Ok(self);
+
+            return true;
         }
 
-        self.prepare_transaction_batch(
-            db,
-            finalized.clone(),
-            &mut sprout_note_commitment_tree,
-            &mut sapling_note_commitment_tree,
-            &mut orchard_note_commitment_tree,
-        )?
-        .prepare_history_batch(
-            db,
-            finalized,
-            network,
-            current_tip_height,
-            all_utxos_spent_by_block,
-            sprout_note_commitment_tree,
-            sapling_note_commitment_tree,
-            orchard_note_commitment_tree,
-            history_tree,
-            current_value_pool,
-        )
+        false
     }
 
     /// Prepare a database batch containing `finalized.block.transactions`,
@@ -413,12 +452,11 @@ impl DiskWriteBatch {
     ///
     /// # Errors
     ///
-    /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from updating note commitment trees
     pub fn prepare_transaction_batch(
         mut self,
         db: &DiskDb,
-        finalized: FinalizedBlock,
+        finalized: &FinalizedBlock,
         sprout_note_commitment_tree: &mut sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: &mut sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: &mut orchard::tree::NoteCommitmentTree,
@@ -443,7 +481,7 @@ impl DiskWriteBatch {
             self.zs_insert(utxo_by_outpoint, outpoint, utxo);
         }
 
-        // Index each transaction, spent inputs, nullifiers
+        // Index each transaction's spent inputs and nullifiers
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
             .iter()
@@ -451,7 +489,7 @@ impl DiskWriteBatch {
             .enumerate()
         {
             let transaction_location = TransactionLocation {
-                height,
+                height: *height,
                 index: transaction_index
                     .try_into()
                     .expect("no more than 4 billion transactions per block"),
@@ -508,7 +546,6 @@ impl DiskWriteBatch {
     ///
     /// # Errors
     ///
-    /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from updating history tree or value pools
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_history_batch(
