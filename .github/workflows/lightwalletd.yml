@@ -1,0 +1,36 @@
+name: lightwalletd-ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
+      - '.github/workflows/ci.yml'
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: full
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [ '1.11', '1.17' ]
+    name: Go ${{ matrix.go }} sample
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go }}
+      - run: |
+          apt-get install make
+          make
+          ./lightwalletd --no-tls-very-insecure --zcash-conf-path ~/.zcash/zcash.conf --data-dir . --log-file /dev/stdout
+
+
