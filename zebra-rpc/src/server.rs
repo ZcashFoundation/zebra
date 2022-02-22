@@ -1,16 +1,17 @@
 //! An RPC endpoint.
 
 use futures::TryStreamExt;
+use tracing::*;
 use tracing_futures::Instrument;
 
 use hyper::{body::Bytes, Body};
 use jsonrpc_core;
 use jsonrpc_http_server::{RequestMiddleware, ServerBuilder};
 
-use zebra_rpc::methods::{Rpc, RpcImpl};
-
-pub mod config;
-pub use config::Config;
+use crate::{
+    config::Config,
+    methods::{Rpc, RpcImpl},
+};
 
 /// Zebra RPC Server
 pub struct RpcServer {}

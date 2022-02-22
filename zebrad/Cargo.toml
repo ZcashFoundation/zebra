@@ -52,9 +52,6 @@ sentry-tracing = "0.23.0"
 num-integer = "0.1.44"
 rand = "0.8.5"
 
-jsonrpc-core = "18.0.0"
-jsonrpc-http-server = "18.0.0"
-
 [build-dependencies]
 vergen = { version = "6.0.2", default-features = false, features = ["cargo", "git"] }
 

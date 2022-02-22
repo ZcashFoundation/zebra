@@ -9,7 +9,6 @@ pub mod inbound;
 #[allow(missing_docs)]
 pub mod mempool;
 pub mod metrics;
-pub mod rpc;
 #[allow(missing_docs)]
 pub mod sync;
 #[allow(missing_docs)]

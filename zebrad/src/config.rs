@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
+use zebra_rpc::config::Config as RpcSection;
 use zebra_state::Config as StateSection;
 
-use crate::components::{mempool::Config as MempoolSection, rpc::Config as RpcSection, sync};
+use crate::components::{mempool::Config as MempoolSection, sync};
 
 /// Configuration for `zebrad`.
 ///

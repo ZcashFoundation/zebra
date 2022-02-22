@@ -5691,9 +5691,15 @@ dependencies = [
 name = "zebra-rpc"
 version = "1.0.0-beta.0"
 dependencies = [
+ "futures",
+ "hyper",
  "jsonrpc-core",
  "jsonrpc-derive",
+ "jsonrpc-http-server",
  "serde",
+ "tokio",
+ "tracing",
+ "tracing-futures",
 ]
 
 [[package]]
@@ -5795,8 +5801,6 @@ dependencies = [
  "hyper",
  "indexmap",
  "inferno",
- "jsonrpc-core",
- "jsonrpc-http-server",
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",

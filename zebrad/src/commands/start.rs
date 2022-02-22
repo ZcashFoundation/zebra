@@ -72,11 +72,12 @@ use zebra_chain::{
 };
 use zebra_consensus::CheckpointList;
 
+use zebra_rpc::server::RpcServer;
+
 use crate::{
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
-        rpc::RpcServer,
         sync::{self, SyncStatus},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
