@@ -308,7 +308,7 @@ impl FinalizedState {
 }
 
 impl DiskWriteBatch {
-    /// Prepare a database batch containing a `finalized` block,
+    /// Prepare a database batch containing `finalized.block`,
     /// and return it (without actually writing anything).
     ///
     /// If this method returns an error, it will be propagated,
@@ -317,9 +317,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from writing to the DB
-    /// - Propagates any errors from updating history and note commitment trees
-    ///
-    /// TODO: split up this function in the next PR.
+    /// - Propagates any errors from updating history tree, note commitment trees, or value pools
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         mut self,
@@ -327,49 +325,35 @@ impl DiskWriteBatch {
         finalized: FinalizedBlock,
         network: Network,
         current_tip_height: Option<Height>,
-        mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         mut sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         mut sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         mut orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
-        mut history_tree: HistoryTree,
+        history_tree: HistoryTree,
         current_value_pool: ValueBalance<NonNegative>,
     ) -> Result<DiskWriteBatch, BoxError> {
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
         let block_by_height = db.cf_handle("block_by_height").unwrap();
-        let tx_by_hash = db.cf_handle("tx_by_hash").unwrap();
-        let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
-
-        let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
-        let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
-        let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
-
-        let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
-        let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
-        let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();
 
         let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
-        let history_tree_cf = db.cf_handle("history_tree").unwrap();
-
-        let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
         let FinalizedBlock {
             block,
             hash,
             height,
-            new_outputs,
-            transaction_hashes,
-        } = finalized;
+            ..
+        } = &finalized;
 
         // The block has passed contextual validation, so update the metrics
-        FinalizedState::block_precommit_metrics(&block, hash, height);
+        FinalizedState::block_precommit_metrics(block, *hash, *height);
 
         // Index the block
         self.zs_insert(hash_by_height, height, hash);
         self.zs_insert(height_by_hash, hash, height);
-        self.zs_insert(block_by_height, height, &block);
+        self.zs_insert(block_by_height, height, block);
 
         // # Consensus
         //
@@ -399,6 +383,60 @@ impl DiskWriteBatch {
             );
             return Ok(self);
         }
+
+        self.prepare_transaction_batch(
+            db,
+            finalized.clone(),
+            &mut sprout_note_commitment_tree,
+            &mut sapling_note_commitment_tree,
+            &mut orchard_note_commitment_tree,
+        )?
+        .prepare_history_batch(
+            db,
+            finalized,
+            network,
+            current_tip_height,
+            all_utxos_spent_by_block,
+            sprout_note_commitment_tree,
+            sapling_note_commitment_tree,
+            orchard_note_commitment_tree,
+            history_tree,
+            current_value_pool,
+        )
+    }
+
+    /// Prepare a database batch containing `finalized.block.transactions`,
+    /// and return it (without actually writing anything).
+    ///
+    /// If this method returns an error, it will be propagated,
+    /// and the batch should not be written to the database.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    /// - Propagates any errors from updating note commitment trees
+    pub fn prepare_transaction_batch(
+        mut self,
+        db: &DiskDb,
+        finalized: FinalizedBlock,
+        sprout_note_commitment_tree: &mut sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: &mut sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: &mut orchard::tree::NoteCommitmentTree,
+    ) -> Result<DiskWriteBatch, BoxError> {
+        let tx_by_hash = db.cf_handle("tx_by_hash").unwrap();
+        let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
+
+        let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
+        let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
+        let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
+
+        let FinalizedBlock {
+            block,
+            height,
+            new_outputs,
+            transaction_hashes,
+            ..
+        } = finalized;
 
         // Index all new transparent outputs
         for (outpoint, utxo) in new_outputs.borrow().iter() {
@@ -453,6 +491,56 @@ impl DiskWriteBatch {
                 orchard_note_commitment_tree.append(*orchard_note_commitment)?;
             }
         }
+
+        Ok(self)
+    }
+
+    /// Prepare a database batch containing whole-chain updates from `finalized.block`,
+    /// and return it (without actually writing anything).
+    ///
+    /// Includes the following updates:
+    /// - shielded note commitment trees
+    /// - chain history tree
+    /// - chain value pools
+    ///
+    /// If this method returns an error, it will be propagated,
+    /// and the batch should not be written to the database.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    /// - Propagates any errors from updating history tree or value pools
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_history_batch(
+        mut self,
+        db: &DiskDb,
+        finalized: FinalizedBlock,
+        network: Network,
+        current_tip_height: Option<Height>,
+        mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        mut history_tree: HistoryTree,
+        current_value_pool: ValueBalance<NonNegative>,
+    ) -> Result<DiskWriteBatch, BoxError> {
+        let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
+        let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
+        let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();
+
+        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+
+        let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
+
+        let FinalizedBlock {
+            block,
+            height,
+            new_outputs,
+            ..
+        } = finalized;
 
         let sprout_root = sprout_note_commitment_tree.root();
         let sapling_root = sapling_note_commitment_tree.root();
