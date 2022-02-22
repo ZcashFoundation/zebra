@@ -24,11 +24,8 @@ pub struct RpcServer;
 impl RpcServer {
     /// Start a new RPC server endpoint
     pub fn spawn(config: Config) -> tokio::task::JoinHandle<()> {
-        if config.listen_addr.is_some() {
-            info!(
-                "Trying to open RPC endpoint at {}...",
-                config.listen_addr.unwrap()
-            );
+        if let Some(listen_addr) = config.listen_addr {
+            info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
@@ -42,7 +39,7 @@ impl RpcServer {
                 // TODO: disable this security check if we see errors from lightwalletd.
                 //.allowed_hosts(DomainsValidation::Disabled)
                 .request_middleware(FixHttpRequestMiddleware)
-                .start_http(&config.listen_addr.unwrap())
+                .start_http(&listen_addr)
                 .expect("Unable to start RPC server");
 
             info!("Opened RPC endpoint at {}", server.address());
