@@ -1,4 +1,9 @@
 //! The primary implementation of the `zebra_state::Service` built upon rocksdb
+//!
+//! # Correctness
+//!
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
     borrow::Borrow,
@@ -25,8 +30,8 @@ use crate::{
     service::{
         check,
         finalized_state::{
-            disk_db::{ReadDisk, WriteDisk},
-            disk_format::{FromDisk, IntoDisk, TransactionLocation},
+            disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+            disk_format::{FromDisk, TransactionLocation},
         },
         QueuedFinalized,
     },
@@ -44,87 +49,44 @@ mod tests;
 
 /// The finalized part of the chain state, stored in the db.
 pub struct FinalizedState {
+    /// The underlying database.
+    db: DiskDb,
+
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
+
     /// A metric tracking the maximum height that's currently in `queued_by_prev_hash`
     ///
     /// Set to `f64::NAN` if `queued_by_prev_hash` is empty, because grafana shows NaNs
     /// as a break in the graph.
     max_queued_height: f64,
 
-    db: rocksdb::DB,
-    ephemeral: bool,
+    /// The configured stop height.
+    ///
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 
+    /// The configured network.
     network: Network,
 }
 
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
-        let (path, db_options) = config.db_config(network);
-        // Note: The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-        // be incremented each time the database format (column, serialization, etc) changes.
-        let column_families = vec![
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("block_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "sapling_note_commitment_tree",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "orchard_note_commitment_tree",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
-        ];
-        let db_result = rocksdb::DB::open_cf_descriptors(&db_options, &path, column_families);
-
-        let db = match db_result {
-            Ok(d) => {
-                tracing::info!("Opened Zebra state cache at {}", path.display());
-                d
-            }
-            // TODO: provide a different hint if the disk is full, see #1623
-            Err(e) => panic!(
-                "Opening database {:?} failed: {:?}. \
-                 Hint: Check if another zebrad process is running. \
-                 Try changing the state cache_dir in the Zebra config.",
-                path, e,
-            ),
-        };
+        let db = DiskDb::new(config, network);
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
             max_queued_height: f64::NAN,
             db,
-            ephemeral: config.ephemeral,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             network,
         };
 
-        // TODO: remove these extra logs once bugs like #2905 are fixed
-        tracing::info!("reading cached tip height");
         if let Some(tip_height) = new_state.finalized_tip_height() {
-            tracing::info!(?tip_height, "loaded cached tip height");
-
             if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
                     .debug_stop_at_height
                     .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
-
-                tracing::info!("reading cached tip hash");
                 let tip_hash = new_state.finalized_tip_hash();
 
                 if tip_height > debug_stop_at_height {
@@ -145,7 +107,6 @@ impl FinalizedState {
 
                 // RocksDB can do a cleanup when column families are opened.
                 // So we want to drop it before we exit.
-                tracing::info!("closing cached state");
                 std::mem::drop(new_state);
 
                 Self::exit_process();
@@ -232,14 +193,6 @@ impl FinalizedState {
         self.tip().map(|(height, _)| height)
     }
 
-    fn is_empty(&self, cf: &rocksdb::ColumnFamily) -> bool {
-        // use iterator to check if it's empty
-        !self
-            .db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .valid()
-    }
-
     /// Immediately commit `finalized` to the finalized state.
     ///
     /// This can be called either by the non-finalized state (when finalizing
@@ -285,7 +238,7 @@ impl FinalizedState {
         let tip_chain_value_pool = self.db.cf_handle("tip_chain_value_pool").unwrap();
 
         // Assert that callers (including unit tests) get the chain order correct
-        if self.is_empty(hash_by_height) {
+        if self.db.is_empty(hash_by_height) {
             assert_eq!(
                 GENESIS_PREVIOUS_BLOCK_HASH, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {}",
@@ -346,8 +299,8 @@ impl FinalizedState {
         // the genesis case.
         // If the closure returns an error it will be propagated and the batch will not be written
         // to the BD afterwards.
-        let prepare_commit = || -> Result<rocksdb::WriteBatch, BoxError> {
-            let mut batch = rocksdb::WriteBatch::default();
+        let prepare_commit = || -> Result<DiskWriteBatch, BoxError> {
+            let mut batch = DiskWriteBatch::new();
 
             // Index the block
             batch.zs_insert(hash_by_height, height, hash);
@@ -413,7 +366,7 @@ impl FinalizedState {
                             if let Some(utxo) = self.utxo(outpoint) {
                                 all_utxos_spent_by_block.insert(*outpoint, utxo);
                             }
-                            batch.delete_cf(utxo_by_outpoint, outpoint.as_bytes());
+                            batch.zs_delete(utxo_by_outpoint, outpoint);
                         }
                         // Coinbase inputs represent new coins,
                         // so there are no UTXOs to mark as spent.
@@ -505,6 +458,7 @@ impl FinalizedState {
 
         tracing::trace!(?source, "committed block from");
 
+        // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(height) {
             tracing::info!(?source, "committed block from");
             tracing::info!(
@@ -513,9 +467,8 @@ impl FinalizedState {
                 "stopping at configured height, flushing database to disk"
             );
 
-            self.shutdown();
+            self.db.shutdown();
 
-            // TODO: replace with a graceful shutdown (#1678)
             Self::exit_process();
         }
 
@@ -525,7 +478,8 @@ impl FinalizedState {
     /// Exit the host process.
     ///
     /// Designed for debugging and tests.
-    /// TODO: replace with a graceful shutdown (#1678)
+    ///
+    /// TODO: move the stop height check to the syncer (#3442)
     fn exit_process() -> ! {
         tracing::info!("exiting Zebra");
 
@@ -582,7 +536,7 @@ impl FinalizedState {
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db
-            .iterator_cf(hash_by_height, rocksdb::IteratorMode::End)
+            .reverse_iterator(hash_by_height)
             .next()
             .map(|(height_bytes, hash_bytes)| {
                 let height = block::Height::from_bytes(height_bytes);
@@ -754,32 +708,6 @@ impl FinalizedState {
         }
     }
 
-    /// If the database is `ephemeral`, delete it.
-    fn delete_ephemeral(&self) {
-        if self.ephemeral {
-            let path = self.db.path();
-            tracing::info!(cache_path = ?path, "removing temporary database files");
-
-            // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
-            // but the Zcash blockchain might not fit in memory. So we just
-            // delete the database files instead.
-            //
-            // We'd like to call `DB::destroy` here, but calling destroy on a
-            // live DB is undefined behaviour:
-            // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
-            //
-            // So we assume that all the database files are under `path`, and
-            // delete them using standard filesystem APIs. Deleting open files
-            // might cause errors on non-Unix platforms, so we ignore the result.
-            // (The OS will delete them eventually anyway.)
-            let res = std::fs::remove_dir_all(path);
-
-            // TODO: downgrade to debug once bugs like #2905 are fixed
-            //       but leave any errors at "info" level
-            tracing::info!(?res, "removed temporary database files");
-        }
-    }
-
     /// Returns the `Path` where the files used by this database are located.
     #[allow(dead_code)]
     pub fn path(&self) -> &Path {
@@ -792,104 +720,6 @@ impl FinalizedState {
         self.db
             .zs_get(value_pool_cf, &())
             .unwrap_or_else(ValueBalance::zero)
-    }
-
-    /// Allow to set up a fake value pool in the database for testing purposes.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    #[allow(dead_code)]
-    pub fn set_current_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
-        let mut batch = rocksdb::WriteBatch::default();
-        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
-        batch.zs_insert(value_pool_cf, (), fake_value_pool);
-        self.db.write(batch).unwrap();
-    }
-
-    /// Artificially prime the note commitment tree anchor sets with anchors
-    /// referenced in a block, for testing purposes _only_.
-    #[cfg(test)]
-    pub fn populate_with_anchors(&self, block: &Block) {
-        let mut batch = rocksdb::WriteBatch::default();
-
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
-        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
-
-        for transaction in block.transactions.iter() {
-            // Sprout
-            for joinsplit in transaction.sprout_groth16_joinsplits() {
-                batch.zs_insert(
-                    sprout_anchors,
-                    joinsplit.anchor,
-                    sprout::tree::NoteCommitmentTree::default(),
-                );
-            }
-
-            // Sapling
-            for anchor in transaction.sapling_anchors() {
-                batch.zs_insert(sapling_anchors, anchor, ());
-            }
-
-            // Orchard
-            if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-                batch.zs_insert(orchard_anchors, orchard_shielded_data.shared_anchor, ());
-            }
-        }
-
-        self.db.write(batch).unwrap();
-    }
-
-    /// Shut down the database, cleaning up background tasks and ephemeral data.
-    fn shutdown(&mut self) {
-        // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
-        //
-        // Zebra's data should be fine if we don't clean up, because:
-        // - the database flushes regularly anyway
-        // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
-        // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
-        tracing::info!("flushing database to disk");
-        self.db.flush().expect("flush is successful");
-
-        // But we should call `cancel_all_background_work` before Zebra exits.
-        // If we don't, we see these kinds of errors:
-        // ```
-        // pthread lock: Invalid argument
-        // pure virtual method called
-        // terminate called without an active exception
-        // pthread destroy mutex: Device or resource busy
-        // Aborted (core dumped)
-        // ```
-        //
-        // The RocksDB wiki says:
-        // > Q: Is it safe to close RocksDB while another thread is issuing read, write or manual compaction requests?
-        // >
-        // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
-        // > You can speed up the waiting by calling CancelAllBackgroundWork().
-        //
-        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-        tracing::info!("stopping background database tasks");
-        self.db.cancel_all_background_work(true);
-
-        // We'd like to drop the database before deleting its files,
-        // because that closes the column families and the database correctly.
-        // But Rust's ownership rules make that difficult,
-        // so we just flush and delete ephemeral data instead.
-        //
-        // The RocksDB wiki says:
-        // > rocksdb::DB instances need to be destroyed before your main function exits.
-        // > RocksDB instances usually depend on some internal static variables.
-        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
-        //
-        // https://github.com/facebook/rocksdb/wiki/Known-Issues
-        //
-        // But our current code doesn't seem to cause any issues.
-        // We might want to explicitly drop the database as part of graceful shutdown (#1678).
-        self.delete_ephemeral();
-    }
-}
-
-impl Drop for FinalizedState {
-    fn drop(&mut self) {
-        self.shutdown();
     }
 }
 
