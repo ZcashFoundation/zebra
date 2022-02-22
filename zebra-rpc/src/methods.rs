@@ -1,4 +1,10 @@
 //! Zebra supported RPC methods.
+//!
+//! Based on the [`zcashd` RPC methods](https://zcash.github.io/rpc/)
+//! as used by `lightwalletd.`
+//!
+//! Some parts of the `zcashd` RPC documentation are outdated.
+//! So this implementation follows the `lightwalletd` client implementation.
 
 use jsonrpc_core::{self, Result};
 use jsonrpc_derive::rpc;

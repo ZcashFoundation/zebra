@@ -1,4 +1,4 @@
-//! User-configurable RPC parameters.
+//! User-configurable RPC settings.
 
 use std::net::SocketAddr;
 

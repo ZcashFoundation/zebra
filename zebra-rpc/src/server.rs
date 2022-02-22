@@ -1,4 +1,8 @@
-//! An RPC endpoint.
+//! A JSON-RPC 1.0 & 2.0 endpoint for Zebra.
+//!
+//! This endpoint is compatible with clients that incorrectly send
+//! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
+//! such as `lightwalletd`.
 
 use futures::TryStreamExt;
 use tracing::*;
