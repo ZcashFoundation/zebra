@@ -142,6 +142,8 @@ impl FinalizedState {
         self.db.zs_contains(orchard_anchors, &orchard_anchor)
     }
 
+    // Read chain history methods
+
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
@@ -201,8 +203,6 @@ impl FinalizedState {
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
-    // Read chain methods
-
     /// Returns the ZIP-221 history tree of the finalized tip or `None`
     /// if it does not exist yet in the state (pre-Heartwood).
     pub fn history_tree(&self) -> HistoryTree {
@@ -229,7 +229,7 @@ impl FinalizedState {
             .unwrap_or_else(ValueBalance::zero)
     }
 
-    // Metrics methods
+    // Update metrics methods - used when writing
 
     /// Update metrics before committing a block.
     fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
@@ -307,14 +307,12 @@ impl FinalizedState {
     }
 }
 
-// Write methods
-
 impl DiskWriteBatch {
     /// Prepare a database batch containing a `finalized` block,
     /// and return it (without actually writing anything).
     ///
     /// If this method returns an error, it will be propagated,
-    /// and the batch will not be written to the database.
+    /// and the batch should not be written to the database.
     ///
     /// # Errors
     ///
