@@ -32,13 +32,13 @@ After built check the program help with:
 Given a block hash the script will get additional information using `zcash-cli`.
 
 ```
-$ echo "00000001f53a5e284393dfecf2a2405f62c07e2503047a28e2d1b6e76b25f863" | zebrad-hash-lookup 
+$ echo "00000001f53a5e284393dfecf2a2405f62c07e2503047a28e2d1b6e76b25f863" | zebrad-hash-lookup
 high: 3299
 time: 2016-11-02T13:24:26Z
 hash: 00000001f53a5e284393dfecf2a2405f62c07e2503047a28e2d1b6e76b25f863
 prev: 00000001dbbb8b26eb92003086c5bd854e16d9f16e2e5b4fcc007b6b0ae57be3
 next: 00000001ff3ac2b4ccb57d9fd2d1187475156489ae22337ca866bbafe62991a2
-$ 
+$
 ```
 This program is commonly used as part of `zebrad-log-filter` where hashes will be captured from `zebrad` output.
 
@@ -49,7 +49,7 @@ The program is designed to filter the output from the zebra terminal or log file
 Assuming `zebrad`, `zclash-cli`, `zebrad-hash-lookup` and `zebrad-log-filter` are in your path the program can used as:
 
 ```
-$ zebrad -v start | zebrad-log-filter 
+$ zebrad -v start | zebrad-log-filter
 ...
 block::Hash("
 high: 2800
