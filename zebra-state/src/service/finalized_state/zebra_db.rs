@@ -319,7 +319,7 @@ impl DiskWriteBatch {
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
-        mut self,
+        &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
         network: Network,
@@ -330,7 +330,7 @@ impl DiskWriteBatch {
         mut orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
         current_value_pool: ValueBalance<NonNegative>,
-    ) -> Result<DiskWriteBatch, BoxError> {
+    ) -> Result<(), BoxError> {
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
         let block_by_height = db.cf_handle("block_by_height").unwrap();
@@ -362,17 +362,18 @@ impl DiskWriteBatch {
         //
         // TODO: commit transaction data but not UTXOs in the next PR.
         if self.prepare_genesis_batch(db, &finalized) {
-            return Ok(self);
+            return Ok(());
         }
 
-        self.prepare_transaction_batch(
+        self.prepare_transaction_index_batch(
             db,
             &finalized,
             &mut sprout_note_commitment_tree,
             &mut sapling_note_commitment_tree,
             &mut orchard_note_commitment_tree,
-        )?
-        .prepare_history_batch(
+        )?;
+
+        self.prepare_history_batch(
             db,
             finalized,
             network,
@@ -430,7 +431,7 @@ impl DiskWriteBatch {
         false
     }
 
-    /// Prepare a database batch containing `finalized.block.transactions`,
+    /// Prepare a database batch containing `finalized.block`'s transaction indexes,
     /// and return it (without actually writing anything).
     ///
     /// If this method returns an error, it will be propagated,
@@ -439,35 +440,24 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating note commitment trees
-    pub fn prepare_transaction_batch(
-        mut self,
+    pub fn prepare_transaction_index_batch(
+        &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
         sprout_note_commitment_tree: &mut sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: &mut sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: &mut orchard::tree::NoteCommitmentTree,
-    ) -> Result<DiskWriteBatch, BoxError> {
+    ) -> Result<(), BoxError> {
         let tx_by_hash = db.cf_handle("tx_by_hash").unwrap();
-        let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
-
-        let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
-        let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
-        let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
 
         let FinalizedBlock {
             block,
             height,
-            new_outputs,
             transaction_hashes,
             ..
         } = finalized;
 
-        // Index all new transparent outputs
-        for (outpoint, utxo) in new_outputs.borrow().iter() {
-            self.zs_insert(utxo_by_outpoint, outpoint, utxo);
-        }
-
-        // Index each transaction's spent inputs and nullifiers
+        // Index each transaction hash
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
             .iter()
@@ -482,41 +472,112 @@ impl DiskWriteBatch {
             };
             self.zs_insert(tx_by_hash, transaction_hash, transaction_location);
 
-            // Mark all transparent inputs as spent.
-            //
-            // Coinbase inputs represent new coins,
-            // so there are no UTXOs to mark as spent.
-            for outpoint in transaction
-                .inputs()
-                .iter()
-                .flat_map(|input| input.outpoint())
-            {
-                self.zs_delete(utxo_by_outpoint, outpoint);
-            }
+            self.prepare_nullifier_batch(db, transaction)?;
 
-            // Mark sprout, sapling and orchard nullifiers as spent
-            for sprout_nullifier in transaction.sprout_nullifiers() {
-                self.zs_insert(sprout_nullifiers, sprout_nullifier, ());
-            }
-            for sapling_nullifier in transaction.sapling_nullifiers() {
-                self.zs_insert(sapling_nullifiers, sapling_nullifier, ());
-            }
-            for orchard_nullifier in transaction.orchard_nullifiers() {
-                self.zs_insert(orchard_nullifiers, orchard_nullifier, ());
-            }
-
-            for sprout_note_commitment in transaction.sprout_note_commitments() {
-                sprout_note_commitment_tree.append(*sprout_note_commitment)?;
-            }
-            for sapling_note_commitment in transaction.sapling_note_commitments() {
-                sapling_note_commitment_tree.append(*sapling_note_commitment)?;
-            }
-            for orchard_note_commitment in transaction.orchard_note_commitments() {
-                orchard_note_commitment_tree.append(*orchard_note_commitment)?;
-            }
+            DiskWriteBatch::update_note_commitment_trees(
+                transaction,
+                sprout_note_commitment_tree,
+                sapling_note_commitment_tree,
+                orchard_note_commitment_tree,
+            )?;
         }
 
-        Ok(self)
+        self.prepare_transparent_outputs_batch(db, finalized)
+    }
+
+    /// Prepare a database batch containing `finalized.block`'s UTXO changes,
+    /// and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - This method doesn't currently return any errors, but it might in future
+    pub fn prepare_transparent_outputs_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &FinalizedBlock,
+    ) -> Result<(), BoxError> {
+        let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
+
+        let FinalizedBlock {
+            block, new_outputs, ..
+        } = finalized;
+
+        // Index all new transparent outputs, before deleting any we've spent
+        for (outpoint, utxo) in new_outputs.borrow().iter() {
+            self.zs_insert(utxo_by_outpoint, outpoint, utxo);
+        }
+
+        // Mark all transparent inputs as spent.
+        //
+        // Coinbase inputs represent new coins,
+        // so there are no UTXOs to mark as spent.
+        for outpoint in block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs())
+            .flat_map(|input| input.outpoint())
+        {
+            self.zs_delete(utxo_by_outpoint, outpoint);
+        }
+
+        Ok(())
+    }
+
+    /// Prepare a database batch containing `finalized.block`'s nullifiers,
+    /// and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - This method doesn't currently return any errors, but it might in future
+    pub fn prepare_nullifier_batch(
+        &mut self,
+        db: &DiskDb,
+        transaction: &Transaction,
+    ) -> Result<(), BoxError> {
+        let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
+        let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
+        let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
+
+        // Mark sprout, sapling and orchard nullifiers as spent
+        for sprout_nullifier in transaction.sprout_nullifiers() {
+            self.zs_insert(sprout_nullifiers, sprout_nullifier, ());
+        }
+        for sapling_nullifier in transaction.sapling_nullifiers() {
+            self.zs_insert(sapling_nullifiers, sapling_nullifier, ());
+        }
+        for orchard_nullifier in transaction.orchard_nullifiers() {
+            self.zs_insert(orchard_nullifiers, orchard_nullifier, ());
+        }
+
+        Ok(())
+    }
+
+    /// Updates the supplied note commitment trees.
+    ///
+    /// If this method returns an error, it will be propagated,
+    /// and the batch should not be written to the database.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from updating note commitment trees
+    pub fn update_note_commitment_trees(
+        transaction: &Transaction,
+        sprout_note_commitment_tree: &mut sprout::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: &mut sapling::tree::NoteCommitmentTree,
+        orchard_note_commitment_tree: &mut orchard::tree::NoteCommitmentTree,
+    ) -> Result<(), BoxError> {
+        // Update the note commitment trees
+        for sprout_note_commitment in transaction.sprout_note_commitments() {
+            sprout_note_commitment_tree.append(*sprout_note_commitment)?;
+        }
+        for sapling_note_commitment in transaction.sapling_note_commitments() {
+            sapling_note_commitment_tree.append(*sapling_note_commitment)?;
+        }
+        for orchard_note_commitment in transaction.orchard_note_commitments() {
+            orchard_note_commitment_tree.append(*orchard_note_commitment)?;
+        }
+
+        Ok(())
     }
 
     /// Prepare a database batch containing whole-chain updates from `finalized.block`,
@@ -535,7 +596,7 @@ impl DiskWriteBatch {
     /// - Propagates any errors from updating history tree or value pools
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_history_batch(
-        mut self,
+        &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
         network: Network,
@@ -546,7 +607,7 @@ impl DiskWriteBatch {
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         mut history_tree: HistoryTree,
         current_value_pool: ValueBalance<NonNegative>,
-    ) -> Result<DiskWriteBatch, BoxError> {
+    ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();
@@ -613,6 +674,6 @@ impl DiskWriteBatch {
         let new_pool = current_value_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
         self.zs_insert(tip_chain_value_pool, (), new_pool);
 
-        Ok(self)
+        Ok(())
     }
 }

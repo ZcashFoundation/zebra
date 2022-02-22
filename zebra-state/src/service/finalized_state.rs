@@ -336,10 +336,10 @@ impl FinalizedState {
             .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
             .collect();
 
-        let batch = disk_db::DiskWriteBatch::new();
+        let mut batch = disk_db::DiskWriteBatch::new();
 
         // In case of errors, propagate and do not write the batch.
-        let batch = batch.prepare_block_batch(
+        batch.prepare_block_batch(
             &self.db,
             finalized,
             self.network,
