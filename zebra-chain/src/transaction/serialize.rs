@@ -207,13 +207,11 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
         //
-        // # Consensus
+        // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
         //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
+        // Validated in [`crate::sapling::tree::Root::zcash_deserialize`].
         let shared_anchor = if spends_count > 0 {
             Some((&mut reader).zcash_deserialize_into()?)
         } else {
@@ -221,18 +219,6 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         };
 
         // Denoted as `vSpendProofsSapling` in the spec.
-        //
-        // # Consensus
-        //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is `ZKSpend.Proof`, described in
-        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
-        // It is not enforced here; this just reads 192 bytes.
-        // The type is validated when validating the proof, see
-        // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
         //
         // # Consensus
         //
@@ -402,19 +388,36 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
             return Ok(None);
         }
 
+        // # Consensus
+        //
+        // > Elements of an Action description MUST be canonical encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+        //
+        // Some Action elements are validated in this function; they are described below.
+
         // Denoted as `flagsOrchard` in the spec.
+        // Consensus: type of each flag is 𝔹, i.e. a bit. This is enforced implicitly
+        // in [`Flags::zcash_deserialized`].
         let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `anchorOrchard` in the spec.
+        // Consensus: type is `{0 .. 𝑞_ℙ − 1}`. See [`orchard::tree::Root::zcash_deserialize`].
         let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
+        // Consensus: type is `ZKAction.Proof`, i.e. a byte sequence.
+        // https://zips.z.cash/protocol/protocol.pdf#halo2encoding
         let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
+        // Consensus: this validates the `spendAuthSig` elements, whose type is
+        // SpendAuthSig^{Orchard}.Signature, i.e.
+        // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
+        // See [`Signature::zcash_deserialize`].
         let sigs: Vec<Signature<SpendAuth>> =
             zcash_deserialize_external_count(actions.len(), &mut reader)?;
 

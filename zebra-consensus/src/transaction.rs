@@ -907,8 +907,10 @@ where
             for authorized_action in orchard_shielded_data.actions.iter().cloned() {
                 let (action, spend_auth_sig) = authorized_action.into_parts();
 
-                // Consensus rule: The proof 𝜋 MUST be valid given a primary
-                // input (cv, rtOrchard, nf, rk, cm𝑥, enableSpends, enableOutputs)
+                // # Consensus
+                //
+                // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
+                // > nf, rk, cm_x, enableSpends, enableOutputs)
                 //
                 // https://zips.z.cash/protocol/protocol.pdf#actiondesc
                 //
@@ -922,9 +924,21 @@ where
                         .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
                 );
 
-                // Consensus rule: The spend authorization signature
-                // MUST be a valid SpendAuthSig signature over
-                // SigHash using rk as the validating key.
+                // # Consensus
+                //
+                // > - Let SigHash be the SIGHASH transaction hash of this transaction, not
+                // >   associated with an input, as defined in § 4.10 using SIGHASH_ALL.
+                // > - The spend authorization signature MUST be a valid SpendAuthSig^{Orchard}
+                // >   signature over SigHash using rk as the validating key — i.e.
+                // >   SpendAuthSig^{Orchard}.Validate_{rk}(SigHash, spendAuthSig) = 1.
+                // >   As specified in § 5.4.7, validation of the 𝑅 component of the
+                // >   signature prohibits non-canonical encodings.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+                //
+                // This is validated by the verifier, inside the [`primitives::redpallas`] module.
+                // It calls [`pallas::Affine::from_bytes`] to parse R and
+                // that enforces the canonical encoding.
                 //
                 // Queue the validation of the RedPallas spend
                 // authorization signature for each Action

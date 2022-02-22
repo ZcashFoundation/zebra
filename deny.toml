@@ -46,9 +46,6 @@ skip-tree = [
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
 
-    # ticket #2998: hdrhistogram dependencies
-    { name = "hdrhistogram", version = "=6.3.4" },
-
     # ticket #3061: reqwest and minreq dependencies
     { name = "webpki-roots", version = "=0.18.0" },
 
@@ -58,6 +55,12 @@ skip-tree = [
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
     # alternative: downgrade Zebra to `bigint`
     { name = "bigint", version = "=4.4.3" },
+
+    # upgrade sentry, metrics-exporter-prometheus, reqwest, hyper,
+    # which needs #2953: upgrade tracing to the latest major version
+    #
+    # also wait for tower-test and tokio-test to upgrade
+    { name = "tokio-util", version = "=0.6.9" },
 
     # recent major version bumps
     # we should re-check these dependencies in February 2022
@@ -90,9 +93,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     # ticket #2982: librustzcash and orchard git versions
     "https://github.com/str4d/redjubjub",
-
-    # ticket #2523: replace unmaintained multiset
-    "https://github.com/jmitchell/multiset",
 ]
 
 [sources.allow-org]
