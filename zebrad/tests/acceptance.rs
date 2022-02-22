@@ -781,8 +781,10 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
-        true,
         MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -798,8 +800,10 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
-        true,
         MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -822,8 +826,10 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
-        true,
         MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -834,8 +840,10 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
-        false,
         MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        false,
     )?;
 
     Ok(())
@@ -851,8 +859,10 @@ fn activate_mempool_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
-        true,
         MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -871,8 +881,10 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
-        true,
         MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -881,8 +893,10 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         "previous state height is greater than the stop height",
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
-        false,
         MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        false,
     )?;
 
     Ok(())
@@ -903,8 +917,10 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
-        true,
         MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -948,8 +964,13 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
             SYNC_FINISHED_REGEX,
             Duration::from_secs(60 * timeout_minutes),
             None,
-            true,
             MempoolBehavior::ShouldAutomaticallyActivate,
+            // Use checkpoints to increase full sync performance, and test default Zebra behaviour.
+            // (After the changes to the default config in #2368.)
+            //
+            // TODO: if full validation performance improves, do another test with checkpoint_sync off
+            true,
+            true,
         )
         .map(|_| ())
     } else {
@@ -964,33 +985,48 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
     }
 }
 
-/// Sync `network` until `zebrad` reaches `height`, and ensure that
-/// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
-/// use it as the test's temporary directory.
-///
-/// If `check_legacy_chain` is true,
-/// make sure the logs contain the legacy chain check.
-///
-/// Configure `zebrad` to debug-enable the mempool based on `mempool_behavior`,
-/// then check the logs for the expected `mempool_behavior`.
+/// Sync on `network` until `zebrad` reaches `height`, or until it logs `stop_regex`.
 ///
 /// If `stop_regex` is encountered before the process exits, kills the
 /// process, and mark the test as successful, even if `height` has not
-/// been reached.
+/// been reached. To disable the height limit, and just stop at `stop_regex`,
+/// use `Height::MAX` for the `height`.
 ///
-/// On success, returns the associated `TempDir`. Returns an error if
-/// the child exits or `timeout` elapses before `regex` is found.
+/// # Test Settings
+///
+/// If `reuse_tempdir` is supplied, use it as the test's temporary directory.
+///
+/// If `height` is higher than the mandatory checkpoint,
+/// configures `zebrad` to preload the Zcash parameters.
+/// If it is lower, skips the parameter preload.
+///
+/// Configures `zebrad` to debug-enable the mempool based on `mempool_behavior`,
+/// then check the logs for the expected `mempool_behavior`.
+///
+/// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
+/// If it is false, only use the mandatory checkpoints.
+///
+/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
 /// If your test environment does not have network access, skip
 /// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+///
+/// # Test Status
+///
+/// On success, returns the associated `TempDir`. Returns an error if
+/// the child exits or `timeout` elapses before `stop_regex` is found.
+#[allow(clippy::too_many_arguments)]
 fn sync_until(
     height: Height,
     network: Network,
     stop_regex: &str,
     timeout: Duration,
+    // Test Settings
+    // TODO: turn these into an argument struct
     reuse_tempdir: impl Into<Option<TempDir>>,
-    check_legacy_chain: bool,
     mempool_behavior: MempoolBehavior,
+    checkpoint_sync: bool,
+    check_legacy_chain: bool,
 ) -> Result<TempDir> {
     zebra_test::init();
 
@@ -1005,6 +1041,7 @@ fn sync_until(
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
+    config.consensus.checkpoint_sync = checkpoint_sync;
 
     // Download the parameters at launch, if we're going to need them later.
     if height > network.mandatory_checkpoint_height() {
@@ -1095,16 +1132,34 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 
 /// Create or update a cached state for `network`, stopping at `height`.
 ///
+/// # Test Settings
+///
+/// If `debug_skip_parameter_preload` is true, configures `zebrad` to preload the Zcash parameters.
+/// If it is false, skips the parameter preload.
+///
+/// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
+/// If it is false, only use the mandatory checkpoints.
+///
+/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
+///
 /// Callers can supply an extra `test_child_predicate`, which is called on
 /// the `TestChild` between the startup checks, and the final
 /// `STOP_AT_HEIGHT_REGEX` check.
 ///
 /// The `TestChild` is spawned with a timeout, so the predicate should use
 /// `expect_stdout_line_matches` or `expect_stderr_line_matches`.
+///
+/// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+///
+/// # Test Status
+///
+/// Returns an error if the child exits or the fixed timeout elapses
+/// before `STOP_AT_HEIGHT_REGEX` is found.
 fn create_cached_database_height<P>(
     network: Network,
     height: Height,
     debug_skip_parameter_preload: bool,
+    checkpoint_sync: bool,
     test_child_predicate: impl Into<Option<P>>,
 ) -> Result<()>
 where
@@ -1120,6 +1175,7 @@ where
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
+    config.consensus.checkpoint_sync = checkpoint_sync;
 
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
@@ -1151,6 +1207,8 @@ fn create_cached_database(network: Network) -> Result<()> {
         network,
         height,
         true,
+        // Use checkpoints to increase sync performance while caching the database
+        true,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure pre-cached databases finish before the mandatory checkpoint
             //
@@ -1168,6 +1226,8 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
+        false,
+        // Test full validation by turning checkpoints off
         false,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure cached database tests finish after the mandatory checkpoint,
