@@ -45,8 +45,19 @@ ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
-ARG RUST_BACKTRACE=1
-ENV RUST_BACKTRACE ${RUST_BACKTRACE}
+ARG RUST_BACKTRACE
+ENV RUST_BACKTRACE ${RUST_BACKTRACE:-1}
+
+# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS
+ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
+
+# Use default checkpoint sync and network values if none is provided
+ARG CHECKPOINT_SYNC
+ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
+
+ARG NETWORK
+ENV NETWORK ${NETWORK:-Mainnet}
 
 COPY . .
 # Build zebra
@@ -56,13 +67,6 @@ FROM builder AS tester
 # Pre-download Zcash Sprout and Sapling parameters
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
-
-# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
-ARG ZEBRA_SKIP_IPV6_TESTS=1
-ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
-
-ARG RUN_TESTS=1
-ENV RUN_TESTS ${RUN_TESTS}
 
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 
@@ -80,9 +84,6 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-para
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
-
-ARG CHECKPOINT_SYNC=true
-ARG NETWORK=Mainnet
 
 RUN set -ex; \
   { \
