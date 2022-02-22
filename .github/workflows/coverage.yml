@@ -5,6 +5,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'codecov.yml'
+      - '.github/workflows/coverage.yml'
   pull_request:
     paths:
       - '**/*.rs'
