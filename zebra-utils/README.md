@@ -12,13 +12,14 @@ Binaries are easier to use if they are located in your system execution path.
 
 ### zebra-checkpoints
 
-This software will output a list of zcash block hashes that are used as zebra checkpoints. To create checkpoints a synchronized instance of `zcashd` is needed and a `zcash-cli` wallet connected to it must be available locally. For more information about how to create a checkpoint list please check [here](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+This command generates a list of zebra checkpoints, and writes them to standard output. Each checkpoint consists of a block height and hash.
 
+To create checkpoints, you need a synchronized instance of `zcashd`, and the `zcash-cli` RPC client.
 
-This is a standalone rust binary, you can compile it using:
+`zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
 ```sh
-cargo build --release --bin zebra-checkpoints
+cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-checkpoints
 ```
 
 Then update the checkpoints using these commands:
@@ -33,6 +34,8 @@ You can see all the `zebra-checkpoints` options using:
 ```sh
 ./target/release/zebra-checkpoints --help
 ```
+
+For more details, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
 
 ### zebrad-hash-lookup
 
