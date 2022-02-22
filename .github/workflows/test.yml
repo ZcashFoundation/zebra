@@ -390,7 +390,7 @@ jobs:
   test-full-sync:
     name: Test full Mainnet sync
     runs-on: ubuntu-latest
-    # needs: [ build]
+    needs: [ build]
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -413,7 +413,7 @@ jobs:
           gcloud compute instances create-with-container "sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-extreme \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:f7014c1 \
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
