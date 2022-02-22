@@ -10,11 +10,16 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// IP address and port for the RPC server.
     ///
-    /// Note: RPC server will not start if this is `None`.
+    /// Note: The RPC server is disabled by default.
+    /// To enable the RPC server, set a listen address in the config:
+    /// ```toml
+    /// [rpc]
+    /// listen_addr = '127.0.0.1:8232'
+    /// ```
     ///
     /// The recommended ports for the RPC server are:
-    /// - Mainnet: Some(127.0.0.1:8232)
-    /// - Testnet: Some(127.0.0.1:18232)
+    /// - Mainnet: 127.0.0.1:8232
+    /// - Testnet: 127.0.0.1:18232
     ///
     /// # Security
     ///
