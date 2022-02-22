@@ -323,8 +323,10 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: FinalizedBlock,
         network: Network,
+        // TODO: move to the argument struct for all the note commitment trees & history
         current_tip_height: Option<Height>,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        // TODO: make an argument struct for all the note commitment trees & history
         mut sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         mut sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         mut orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
@@ -375,14 +377,19 @@ impl DiskWriteBatch {
 
         self.prepare_history_batch(
             db,
-            finalized,
+            &finalized,
             network,
             current_tip_height,
-            all_utxos_spent_by_block,
             sprout_note_commitment_tree,
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             history_tree,
+        )?;
+
+        self.prepare_chain_value_pools_batch(
+            db,
+            finalized,
+            all_utxos_spent_by_block,
             current_value_pool,
         )
     }
@@ -598,15 +605,14 @@ impl DiskWriteBatch {
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
-        finalized: FinalizedBlock,
+        finalized: &FinalizedBlock,
         network: Network,
+        // TODO: make an argument struct for all the note commitment trees & history
         current_tip_height: Option<Height>,
-        mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         mut history_tree: HistoryTree,
-        current_value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
@@ -617,14 +623,7 @@ impl DiskWriteBatch {
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
-
-        let FinalizedBlock {
-            block,
-            height,
-            new_outputs,
-            ..
-        } = finalized;
+        let FinalizedBlock { block, height, .. } = finalized;
 
         let sprout_root = sprout_note_commitment_tree.root();
         let sapling_root = sapling_note_commitment_tree.root();
@@ -667,6 +666,31 @@ impl DiskWriteBatch {
         if let Some(history_tree) = history_tree.as_ref() {
             self.zs_insert(history_tree_cf, height, history_tree);
         }
+
+        Ok(())
+    }
+
+    /// Prepare a database batch containing the chain value pool update from `finalized.block`,
+    /// and return it (without actually writing anything).
+    ///
+    /// If this method returns an error, it will be propagated,
+    /// and the batch should not be written to the database.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from updating value pools
+    pub fn prepare_chain_value_pools_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: FinalizedBlock,
+        mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        current_value_pool: ValueBalance<NonNegative>,
+    ) -> Result<(), BoxError> {
+        let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
+
+        let FinalizedBlock {
+            block, new_outputs, ..
+        } = finalized;
 
         // Some utxos are spent in the same block so they will be in `new_outputs`.
         all_utxos_spent_by_block.extend(new_outputs);
