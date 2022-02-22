@@ -229,7 +229,7 @@ jobs:
     strategy:
       matrix:
         checks:
-          - bans 
+          - bans
           - sources
 
     # Prevent sudden announcement of a new advisory from failing ci:
@@ -244,3 +244,10 @@ jobs:
       with:
         command: check ${{ matrix.checks }}
         args: --all-features --workspace
+
+    # this check runs with optional features off
+    # so we expect some warnings about "skip tree root was not found"
+    - uses: EmbarkStudios/cargo-deny-action@v1
+      with:
+        command: check ${{ matrix.checks }}
+        args: --workspace
