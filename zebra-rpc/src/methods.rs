@@ -1,36 +1,44 @@
 //! Zebra supported RPC methods.
 
-use jsonrpc_core;
-
-use jsonrpc_core::Result;
+use jsonrpc_core::{self, Result};
 use jsonrpc_derive::rpc;
 
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
     /// getinfo
+    ///
+    /// TODO: explain what the method does
+    ///       link to the zcashd RPC reference
+    ///       list the arguments and fields that lightwalletd uses
+    ///       note any other lightwalletd changes
     #[rpc(name = "getinfo")]
-    fn getinfo(&self) -> Result<GetInfo>;
+    fn get_info(&self) -> Result<GetInfo>;
 
     /// getblockchaininfo
+    ///
+    /// TODO: explain what the method does
+    ///       link to the zcashd RPC reference
+    ///       list the arguments and fields that lightwalletd uses
+    ///       note any other lightwalletd changes
     #[rpc(name = "getblockchaininfo")]
-    fn getblockchaininfo(&self) -> Result<GetBlockChainInfo>;
+    fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
 }
 
 /// RPC method implementations.
 pub struct RpcImpl;
 impl Rpc for RpcImpl {
-    fn getinfo(&self) -> Result<GetInfo> {
+    fn get_info(&self) -> Result<GetInfo> {
         // TODO: dummy output data, fix in the context of #3142
-        let info = GetInfo {
+        let response = GetInfo {
             build: "Zebra v1.0.0 ...".into(),
             subversion: "/Zebra:1.0.0-beta.4/".into(),
         };
 
-        Ok(info)
+        Ok(response)
     }
 
-    fn getblockchaininfo(&self) -> Result<GetBlockChainInfo> {
+    fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
         // TODO: dummy output data, fix in the context of #3143
         let response = GetBlockChainInfo {
             chain: "main".to_string(),
@@ -41,7 +49,7 @@ impl Rpc for RpcImpl {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-/// Return structure of a `getinfo` RPC method.
+/// Response to a `getinfo` RPC request.
 pub struct GetInfo {
     build: String,
     subversion: String,
