@@ -161,7 +161,7 @@ jobs:
       # only run this job if the database format might have changed
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v14.4
+        uses: tj-actions/changed-files@v16
         with:
           files: |
             /zebra-state/**/constants.rs
