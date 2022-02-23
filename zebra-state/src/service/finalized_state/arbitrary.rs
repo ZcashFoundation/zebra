@@ -96,7 +96,7 @@ where
 
 impl FinalizedState {
     /// Allow to set up a fake value pool in the database for testing purposes.
-    pub fn set_current_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
+    pub fn set_finalized_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
         let mut batch = DiskWriteBatch::new();
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
 
