@@ -5,6 +5,7 @@ rustflags = [
 
     # High-risk code
     "-Dunsafe_code",
+    "-Dnon_ascii_idents",
 
     # Potential bugs
     #
