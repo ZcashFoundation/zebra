@@ -9,11 +9,11 @@ publish = false
 
 [dependencies]
 structopt = "0.3.26"
-color-eyre = "0.5.11"
-hex = "0.4"
-serde_json = "1.0"
-tracing-error = { version = "0.1.2", features = ["traced-error"] }
-tracing-subscriber = { version = "0.2.25", features = ["tracing-log"] }
+color-eyre = "0.6.0"
+hex = "0.4.3"
+serde_json = "1.0.79"
+tracing-error = { version = "0.2.0", features = ["traced-error"] }
+tracing-subscriber = { version = "0.3.9", features = ["tracing-log"] }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus" }
