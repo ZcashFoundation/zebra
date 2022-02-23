@@ -32,6 +32,7 @@ use crate::{
         inbound::{Inbound, InboundSetupData},
         mempool::{
             self as mp, gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool,
+            UnboxMempoolError,
         },
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -490,10 +491,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     assert_eq!(queued_responses.len(), 1);
     assert_eq!(
-        queued_responses[0],
-        Err(mp::MempoolError::StorageEffectsChain(
-            mp::SameEffectsChainRejectionError::Expired
-        ))
+        queued_responses
+            .into_iter()
+            .next()
+            .unwrap()
+            .unbox_mempool_error(),
+        mp::MempoolError::StorageEffectsChain(mp::SameEffectsChainRejectionError::Expired)
     );
 
     // Test transaction 2 is gossiped

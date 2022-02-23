@@ -11,6 +11,7 @@ use zebra_consensus::transaction as tx;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
+use super::UnboxMempoolError;
 use crate::components::{
     mempool::{self, storage::tests::unmined_transactions_in_blocks, *},
     sync::RecentSyncLengths,
@@ -228,15 +229,12 @@ async fn mempool_queue_single() -> Result<(), Report> {
     let mut in_mempool_count = 0;
     let mut evicted_count = 0;
     for response in queued_responses {
-        match response {
-            Ok(_) => panic!("all transactions should have been rejected"),
-            Err(e) => match e {
-                MempoolError::StorageEffectsChain(
-                    SameEffectsChainRejectionError::RandomlyEvicted,
-                ) => evicted_count += 1,
-                MempoolError::InMempool => in_mempool_count += 1,
-                _ => panic!("transaction should not be rejected with reason {:?}", e),
-            },
+        match response.unbox_mempool_error() {
+            MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::RandomlyEvicted) => {
+                evicted_count += 1
+            }
+            MempoolError::InMempool => in_mempool_count += 1,
+            error => panic!("transaction should not be rejected with reason {:?}", error),
         }
     }
     assert_eq!(in_mempool_count, transactions.len() - 1);
@@ -339,8 +337,16 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
     };
+
     assert_eq!(queued_responses.len(), 1);
-    assert_eq!(queued_responses[0], Err(MempoolError::Disabled));
+    assert_eq!(
+        queued_responses
+            .into_iter()
+            .next()
+            .unwrap()
+            .unbox_mempool_error(),
+        MempoolError::Disabled
+    );
 
     Ok(())
 }
@@ -588,10 +594,12 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(matches!(
-        queued_responses[0],
-        Err(MempoolError::StorageExactTip(
-            ExactTipRejectionError::FailedVerification(_)
-        ))
+        queued_responses
+            .into_iter()
+            .next()
+            .unwrap()
+            .unbox_mempool_error(),
+        MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
     ));
 
     Ok(())
