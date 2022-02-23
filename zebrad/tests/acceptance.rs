@@ -1471,7 +1471,7 @@ async fn rpc_endpoint() -> Result<()> {
     config.rpc.listen_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(&["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -1494,9 +1494,10 @@ async fn rpc_endpoint() -> Result<()> {
 
     // Test rpc endpoint response
     assert!(res.status().is_success());
+
     let body = to_bytes(res).await;
-    let response_bytes = body.expect("a response as bytes");
-    let response_string = format!("{:?}", response_bytes);
+    let (body, mut child) = child.kill_on_error(body)?;
+    let response_string = format!("{:?}", body);
 
     // The `getinfo` RPC method returns the software version,
     // this will always have `Zebra` as part of the response.
@@ -1509,6 +1510,11 @@ async fn rpc_endpoint() -> Result<()> {
 
     // Make sure RPC server was started
     output.stdout_line_contains(format!("Opened RPC endpoint at {}", endpoint).as_str())?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
