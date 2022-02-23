@@ -27,7 +27,10 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::Path, path::PathBuf,
+    time::Duration,
+};
 
 use zebra_chain::{
     block::Height,
@@ -1446,6 +1449,154 @@ async fn tracing_endpoint() -> Result<()> {
 
     // [Note on port conflict](#Note on port conflict)
     output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+// TODO: RPC endpoint and port conflict tests (#3165)
+
+/// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
+///
+/// This test doesn't work on Windows, and it is ignored by default on other platforms.
+#[test]
+#[ignore]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_integration() -> Result<()> {
+    zebra_test::init();
+
+    // Launch zebrad
+
+    // [Note on port conflict](#Note on port conflict)
+    let listen_port = random_known_port();
+    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
+    let listen_addr = SocketAddr::new(listen_ip, listen_port);
+
+    // Write a configuration that has the rpc listen_addr option set
+    // TODO: split this config into another function?
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(listen_addr);
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut zebrad = dir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
+
+    // Wait until `zebrad` has opened the RPC endpoint
+    zebrad
+        .expect_stdout_line_matches(format!("Opened RPC endpoint at {}", listen_addr).as_str())?;
+
+    // Launch lightwalletd
+    // TODO: split this into another function
+
+    // Write a fake zcashd configuration that has the rpcbind and rpcport options set
+    // TODO: split this into another function
+    let dir = testdir()?;
+    let lightwalletd_config = format!(
+        "\
+        rpcbind={}\n\
+        rpcport={}\n\
+        ",
+        listen_ip, listen_port
+    );
+
+    use std::fs;
+    use std::io::Write;
+
+    let path = dir.path().to_owned();
+
+    // TODO: split this into another function
+    if !config.state.ephemeral {
+        let cache_dir = path.join("state");
+        fs::create_dir_all(&cache_dir)?;
+    } else {
+        fs::create_dir_all(&path)?;
+    }
+
+    let config_file = path.join("lightwalletd-zcash.conf");
+    fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
+
+    let result = {
+        let default_config_path = path.join("lightwalletd-zcash.conf");
+
+        assert!(
+            default_config_path.exists(),
+            "lightwalletd requires a config"
+        );
+
+        dir.spawn_child_with_command(
+            "lightwalletd",
+            &[
+                // the fake zcashd conf we just wrote
+                "--zcash-conf-path",
+                default_config_path
+                    .as_path()
+                    .to_str()
+                    .expect("Path is valid Unicode"),
+                // the lightwalletd cache directory
+                //
+                // TODO: create a sub-directory for lightwalletd
+                "--data-dir",
+                path.to_str().expect("Path is valid Unicode"),
+                // log to standard output
+                "--log-file",
+                "/dev/stdout",
+                // randomise wallet client ports
+                "--grpc-bind-addr",
+                "127.0.0.1:0",
+                "--http-bind-addr",
+                "127.0.0.1:0",
+                // don't require a TLS certificate
+                "--no-tls-very-insecure",
+            ],
+        )
+    };
+
+    let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
+    let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
+
+    // Wait until `lightwalletd` has launched
+    let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    // Check that `lightwalletd` is calling the expected Zebra RPCs
+    //
+    // TODO: add extra checks when we add new Zebra RPCs
+
+    // get_blockchain_info
+    let result = lightwalletd.expect_stdout_line_matches("Got sapling height");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    // Check that `lightwalletd` got to the first unimplemented Zebra RPC
+    //
+    // TODO: update the missing method name when we add a new Zebra RPC
+
+    let result = lightwalletd
+        .expect_stdout_line_matches("Method not found.*error zcashd getbestblockhash rpc");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    let result = lightwalletd.expect_stdout_line_matches(
+        "Lightwalletd died with a Fatal error. Check logfile for details",
+    );
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    // Cleanup both processes
+
+    let result = lightwalletd.kill();
+    let (_, mut zebrad) = zebrad.kill_on_error(result)?;
+    zebrad.kill()?;
+
+    let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
+    let zebrad_output = zebrad.wait_with_output()?.assert_failure()?;
+
+    // If the test fails here, see the [note on port conflict](#Note on port conflict)
+    //
+    // TODO: change lightwalletd to `assert_was_killed` when enough RPCs are implemented
+    lightwalletd_output
+        .assert_was_not_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    zebrad_output
         .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
