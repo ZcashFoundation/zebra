@@ -33,13 +33,13 @@ pin-project = "1.0.10"
 color-eyre = { version = "0.5.11", features = ["issue-url"] }
 thiserror = "1.0.30"
 
-tracing-futures = "0.2"
 tracing-flame = "0.1.0"
 tracing-journald = "0.1.0"
 tracing-subscriber = { version = "0.2.25", features = ["tracing-log"] }
 tracing-error = "0.1.2"
 metrics = "0.17.1"
 metrics-exporter-prometheus = "0.7.0"
+tracing-futures = "0.2.5"
 tracing = "0.1.31"
 
 dirs = "4.0.0"

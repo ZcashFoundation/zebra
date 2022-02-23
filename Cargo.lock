@@ -5760,7 +5760,7 @@ dependencies = [
  "tor-rtcompat",
  "tower",
  "tracing",
- "tracing-error 0.1.2",
+ "tracing-error 0.2.0",
  "tracing-futures",
  "zebra-chain",
  "zebra-test",
