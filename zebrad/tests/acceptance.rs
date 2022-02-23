@@ -1392,6 +1392,64 @@ async fn tracing_endpoint() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn rpc_endpoint() -> Result<()> {
+    use hyper::Client;
+
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let endpoint = format!("127.0.0.1:{}", port);
+    let url = format!("http://{}", endpoint);
+
+    // Write a configuration that has RPC listen_addr set
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(endpoint.parse().unwrap());
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut child = dir.spawn_child(&["start"])?;
+
+    // Run `zebrad` for a few seconds before testing the endpoint
+    // Since we're an async function, we have to use a sleep future, not thread sleep.
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    // Create an http client
+    let client = Client::new();
+
+    // Create a request to call `getinfo` RPC method
+    let req = hyper::Request::builder()
+        .method(hyper::Method::POST)
+        .uri(url)
+        .header("content-type", "application/json")
+        .body(hyper::Body::from(
+            r#"{"jsonrpc": "2.0", "method": "getinfo", "id":123}"#,
+        ))?;
+
+    // Make the call to the RPC endpoint
+    let res = client.request(req).await?;
+
+    // Test rpc endpoint response
+    assert!(res.status().is_success());
+    let body = hyper::body::to_bytes(res).await;
+    let response_bytes = body.expect("a response as bytes");
+    let response_string = format!("{:?}", response_bytes);
+
+    // The `getinfo` RPC method returns the software version,
+    // this will always have `Zebra` as part of the response.
+    assert!(response_string.contains("Zebra"));
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure RPC server was started
+    output.stdout_line_contains(format!("Opened RPC endpoint at {}", endpoint).as_str())?;
+
+    Ok(())
+}
+
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
