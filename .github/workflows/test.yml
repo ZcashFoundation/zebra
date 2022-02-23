@@ -29,7 +29,7 @@ env:
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   ZONE: us-central1-a
-  MACHINE_TYPE: c2d-standard-112
+  MACHINE_TYPE: c2d-standard-8
   IMAGE_NAME: zebrad-test
 
 jobs:
