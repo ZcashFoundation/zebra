@@ -7,6 +7,7 @@ use proptest::{
     prelude::*,
 };
 use tokio::time;
+use tower::BoxError;
 
 use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 use zebra_network as zn;
@@ -310,8 +311,13 @@ async fn crawler_iteration(
 async fn respond_to_queue_request(
     mempool: &mut MockMempool,
     expected_transaction_ids: HashSet<UnminedTxId>,
-    response: Vec<Result<(), MempoolError>>,
+    response: impl IntoIterator<Item = Result<(), MempoolError>>,
 ) -> Result<(), TestCaseError> {
+    let response = response
+        .into_iter()
+        .map(|result| result.map_err(BoxError::from))
+        .collect();
+
     mempool
         .expect_request_that(|req| {
             if let mempool::Request::Queue(req) = req {

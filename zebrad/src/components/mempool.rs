@@ -66,7 +66,7 @@ pub use storage::{
 };
 
 #[cfg(test)]
-pub use storage::tests::unmined_transactions_in_blocks;
+pub use self::{storage::tests::unmined_transactions_in_blocks, tests::UnboxMempoolError};
 
 use downloads::{
     Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
@@ -105,7 +105,7 @@ pub enum Response {
     /// The transaction may also fail download or verification later.
     ///
     /// Each result matches the request at the corresponding vector index.
-    Queued(Vec<Result<(), MempoolError>>),
+    Queued(Vec<Result<(), BoxError>>),
 
     /// Confirms that the mempool has checked for recently verified transactions.
     CheckedForVerifiedTransactions,
@@ -440,13 +440,14 @@ impl Service<Request> for Mempool {
 
                 // Queue mempool candidates
                 Request::Queue(gossiped_txs) => {
-                    let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
+                    let rsp: Vec<Result<(), BoxError>> = gossiped_txs
                         .into_iter()
-                        .map(|gossiped_tx| {
+                        .map(|gossiped_tx| -> Result<(), MempoolError> {
                             storage.should_download_or_verify(gossiped_tx.id())?;
                             tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
                             Ok(())
                         })
+                        .map(|result| result.map_err(BoxError::from))
                         .collect();
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
@@ -473,8 +474,10 @@ impl Service<Request> for Mempool {
                     Request::Queue(gossiped_txs) => Response::Queued(
                         // Special case; we can signal the error inside the response,
                         // because the inbound service ignores inner errors.
-                        iter::repeat(Err(MempoolError::Disabled))
+                        iter::repeat(MempoolError::Disabled)
                             .take(gossiped_txs.len())
+                            .map(BoxError::from)
+                            .map(Err)
                             .collect(),
                     ),
 
