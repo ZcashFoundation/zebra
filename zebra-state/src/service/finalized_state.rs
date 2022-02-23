@@ -343,7 +343,6 @@ impl FinalizedState {
             &self.db,
             finalized,
             self.network,
-            self.finalized_tip_height(),
             all_utxos_spent_by_block,
             self.note_commitment_trees(),
             history_tree,

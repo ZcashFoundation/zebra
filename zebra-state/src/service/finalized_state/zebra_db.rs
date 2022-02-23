@@ -13,7 +13,7 @@ use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, Block},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
@@ -25,14 +25,12 @@ use zebra_chain::{
 
 use crate::{
     service::finalized_state::{
-        disk_db::{DiskDb, ReadDisk, WriteDisk},
+        disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{FromDisk, TransactionLocation},
         FinalizedBlock, FinalizedState,
     },
     BoxError, HashOrHeight,
 };
-
-use super::disk_db::DiskWriteBatch;
 
 /// An argument wrapper struct for note commitment trees.
 #[derive(Clone, Debug)]
@@ -341,13 +339,11 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: FinalizedBlock,
         network: Network,
-        // TODO: move to the argument struct for all the note commitment trees & history
-        current_tip_height: Option<Height>,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
-        // TODO: make an argument struct for all the note commitment trees & history
+        // TODO: make an argument struct for all the current note commitment trees & history
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
-        current_value_pool: ValueBalance<NonNegative>,
+        value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
@@ -389,17 +385,11 @@ impl DiskWriteBatch {
             db,
             &finalized,
             network,
-            current_tip_height,
             note_commitment_trees,
             history_tree,
         )?;
 
-        self.prepare_chain_value_pools_batch(
-            db,
-            finalized,
-            all_utxos_spent_by_block,
-            current_value_pool,
-        )
+        self.prepare_chain_value_pools_batch(db, finalized, all_utxos_spent_by_block, value_pool)
     }
 
     /// If `finalized.block` is a genesis block,
@@ -607,7 +597,6 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
         network: Network,
         // TODO: make an argument struct for all the note commitment trees & history
-        current_tip_height: Option<Height>,
         note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
     ) -> Result<(), BoxError> {
@@ -632,6 +621,7 @@ impl DiskWriteBatch {
         self.zs_insert(orchard_anchors, orchard_root, ());
 
         // Update the trees in state
+        let current_tip_height = *height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(sprout_note_commitment_tree_cf, h);
             self.zs_delete(sapling_note_commitment_tree_cf, h);
@@ -660,7 +650,6 @@ impl DiskWriteBatch {
             db,
             finalized,
             network,
-            current_tip_height,
             sapling_root,
             orchard_root,
             history_tree,
@@ -676,13 +665,11 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Returns any errors from updating the history tree
-    #[allow(clippy::too_many_arguments)]
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
         network: Network,
-        current_tip_height: Option<Height>,
         sapling_root: sapling::tree::Root,
         orchard_root: orchard::tree::Root,
         mut history_tree: HistoryTree,
@@ -694,6 +681,7 @@ impl DiskWriteBatch {
         history_tree.push(network, block.clone(), sapling_root, orchard_root)?;
 
         // Update the tree in state
+        let current_tip_height = *height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(history_tree_cf, h);
         }
@@ -722,7 +710,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: FinalizedBlock,
         mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
-        current_value_pool: ValueBalance<NonNegative>,
+        value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
@@ -733,7 +721,7 @@ impl DiskWriteBatch {
         // Some utxos are spent in the same block so they will be in `new_outputs`.
         all_utxos_spent_by_block.extend(new_outputs);
 
-        let new_pool = current_value_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
+        let new_pool = value_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
         self.zs_insert(tip_chain_value_pool, (), new_pool);
 
         Ok(())
