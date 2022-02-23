@@ -23,13 +23,16 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{AddressBook, InventoryResponse, Request, Response};
+use zebra_node_services::mempool;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
         inbound::{Inbound, InboundSetupData},
-        mempool::{self, gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool},
+        mempool::{
+            self as mp, gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool,
+        },
         sync::{self, BlockGossipError, SyncStatus},
     },
     BoxError,
@@ -481,15 +484,15 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .unwrap();
 
     let queued_responses = match response {
-        mempool::Response::Queued(queue_responses) => queue_responses,
+        mp::Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
     };
 
     assert_eq!(queued_responses.len(), 1);
     assert_eq!(
         queued_responses[0],
-        Err(mempool::MempoolError::StorageEffectsChain(
-            mempool::SameEffectsChainRejectionError::Expired
+        Err(mp::MempoolError::StorageEffectsChain(
+            mp::SameEffectsChainRejectionError::Expired
         ))
     );
 
@@ -675,7 +678,7 @@ async fn setup(
         BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
         zebra_network::Request,
     >,
-    Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
+    Buffer<BoxService<mempool::Request, mp::Response, BoxError>, mempool::Request>,
     Vec<Arc<Block>>,
     Vec<VerifiedUnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
@@ -750,7 +753,7 @@ async fn setup(
     committed_blocks.push(block_one);
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
-        &mempool::Config::default(),
+        &mp::Config::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),

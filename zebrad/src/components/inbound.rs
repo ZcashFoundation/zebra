@@ -33,10 +33,11 @@ use zebra_network::{
     constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     AddressBook, InventoryResponse,
 };
+use zebra_node_services::mempool;
 
 // Re-use the syncer timeouts for consistency.
 use super::{
-    mempool, mempool as mp,
+    mempool as mp,
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
@@ -52,7 +53,7 @@ use downloads::Downloads as BlockDownloads;
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
-type Mempool = Buffer<BoxService<mp::Request, mp::Response, mp::BoxError>, mp::Request>;
+type Mempool = Buffer<BoxService<mempool::Request, mp::Response, mp::BoxError>, mempool::Request>;
 type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
 type GossipedBlockDownloads =
     BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<BlockVerifier>, State>;
@@ -394,7 +395,7 @@ impl Service<zn::Request> for Inbound {
                 let request = mempool::Request::TransactionsById(req_tx_ids.clone());
                 mempool.clone().oneshot(request).map_ok(move |resp| {
                     let transactions = match resp {
-                        mempool::Response::Transactions(transactions) => transactions,
+                        mp::Response::Transactions(transactions) => transactions,
                         _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
                     };
 
@@ -447,8 +448,8 @@ impl Service<zn::Request> for Inbound {
             }
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
-                    mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
-                    mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
+                    mp::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
+                    mp::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
                     _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                 })
                     .boxed()
