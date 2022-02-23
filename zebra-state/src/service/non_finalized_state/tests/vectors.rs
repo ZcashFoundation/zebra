@@ -190,7 +190,7 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-    finalized_state.set_current_value_pool(fake_value_pool);
+    finalized_state.set_finalized_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
     state.commit_block(block2.clone().prepare(), &finalized_state)?;
@@ -241,7 +241,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-    finalized_state.set_current_value_pool(fake_value_pool);
+    finalized_state.set_finalized_value_pool(fake_value_pool);
 
     assert_eq!(0, state.chain_set.len());
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
@@ -288,7 +288,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-    finalized_state.set_current_value_pool(fake_value_pool);
+    finalized_state.set_finalized_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(long_chain_block1.prepare(), &finalized_state)?;
@@ -335,7 +335,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-    finalized_state.set_current_value_pool(fake_value_pool);
+    finalized_state.set_finalized_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(long_chain_block1.prepare(), &finalized_state)?;
@@ -380,7 +380,7 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-    finalized_state.set_current_value_pool(fake_value_pool);
+    finalized_state.set_finalized_value_pool(fake_value_pool);
 
     state.commit_new_chain(block1.prepare(), &finalized_state)?;
     state.commit_block(less_work_child.prepare(), &finalized_state)?;

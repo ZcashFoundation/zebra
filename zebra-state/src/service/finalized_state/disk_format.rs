@@ -1,4 +1,4 @@
-//! Module defining the serialization format for finalized data.
+//! Serialization formats for finalized data.
 //!
 //! # Correctness
 //!

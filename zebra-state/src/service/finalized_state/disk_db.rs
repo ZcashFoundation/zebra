@@ -1,7 +1,7 @@
-//! Module defining access to RocksDB via accessor traits.
+//! Provides low-level access to RocksDB using some database-specific types.
 //!
 //! This module makes sure that:
-//! - all disk writes happen inside a RocksDB transaction, and
+//! - all disk writes happen inside a RocksDB transaction ([`WriteBatch`]), and
 //! - format-specific invariants are maintained.
 //!
 //! # Correctness
