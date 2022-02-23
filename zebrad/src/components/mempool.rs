@@ -37,6 +37,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
+use zebra_node_services::mempool::Gossip;
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -68,7 +69,7 @@ pub use storage::{
 pub use storage::tests::unmined_transactions_in_blocks;
 
 use downloads::{
-    Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;

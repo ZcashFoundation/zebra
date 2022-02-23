@@ -7,3 +7,4 @@ edition = "2021"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 [dependencies]
+zebra-chain = { path = "../zebra-chain" }
