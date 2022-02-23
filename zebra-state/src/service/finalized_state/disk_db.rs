@@ -273,30 +273,43 @@ impl DiskDb {
     ///
     /// If the open file limit can not be increased to `MIN_OPEN_FILE_LIMIT`.
     fn increase_open_file_limit() -> u64 {
-        // `increase_nofile_limit` doesn't do anything on Windows in rlimit 0.7.0.
+        // Zebra mainly uses TCP sockets (`zebra-network`) and low-level files
+        // (`zebra-state` database).
         //
-        // On Windows, the default limit is:
-        // - 512 high-level stream I/O files (via the C standard functions), and
-        // - 8192 low-level I/O files (via the Unix C functions).
+        // On Unix-based platforms, `increase_nofile_limit` changes the limit for
+        // both database files and TCP connections.
+        //
+        // But it doesn't do anything on Windows in rlimit 0.7.0.
+        //
+        // On Windows, the default limits are:
+        // - 512 high-level stream I/O files (via the C standard functions),
+        // - 8192 low-level I/O files (via the Unix C functions), and
+        // - 1000 TCP Control Block entries (network connections).
+        //
         // https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks
+        // http://smallvoid.com/article/winnt-tcpip-max-limit.html
         //
-        // If we need more high-level I/O files on Windows,
-        // use `setmaxstdio` and `getmaxstdio` from the `rlimit` crate:
-        // https://docs.rs/rlimit/latest/rlimit/#windows
+        // `zebra-state`'s `IDEAL_OPEN_FILE_LIMIT` is much less than
+        // the Windows low-level I/O file limit.
         //
-        // Then panic if `setmaxstdio` fails to set the minimum value,
-        // and `getmaxstdio` is below the minimum value.
+        // The [`setmaxstdio` and `getmaxstdio`](https://docs.rs/rlimit/latest/rlimit/#windows)
+        // functions from the `rlimit` crate only change the high-level I/O file limit.
+        //
+        // `zebra-network`'s default connection limit is much less than
+        // the TCP Control Block limit on Windows.
 
         // We try setting the ideal limit, then the minimum limit.
         let current_limit = match increase_nofile_limit(DiskDb::IDEAL_OPEN_FILE_LIMIT) {
             Ok(current_limit) => current_limit,
             Err(limit_error) => {
+                // These errors can happen due to sandboxing or unsupported system calls,
+                // even if the file limit is high enough.
                 info!(
-                ?limit_error,
-                min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
-                ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
-                "unable to increase the open file limit, \
-                 assuming Zebra can open a minimum number of files"
+                    ?limit_error,
+                    min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
+                    ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
+                    "unable to increase the open file limit, \
+                     assuming Zebra can open a minimum number of files"
                 );
 
                 return DiskDb::MIN_OPEN_FILE_LIMIT;
