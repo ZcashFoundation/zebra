@@ -385,7 +385,7 @@ impl DiskWriteBatch {
 
         self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
 
-        self.prepare_history_batch(
+        self.prepare_note_commitment_batch(
             db,
             &finalized,
             network,
@@ -592,21 +592,16 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// Prepare a database batch containing whole-chain updates from `finalized.block`,
-    /// and return it (without actually writing anything).
-    ///
-    /// Includes the following updates:
-    /// - shielded note commitment trees
-    /// - chain history tree
-    /// - chain value pools
+    /// Prepare a database batch containing the note commitment and history tree updates
+    /// from `finalized.block`, and return it (without actually writing anything).
     ///
     /// If this method returns an error, it will be propagated,
     /// and the batch should not be written to the database.
     ///
     /// # Errors
     ///
-    /// - Propagates any errors from updating history tree or value pools
-    pub fn prepare_history_batch(
+    /// - Propagates any errors from updating the history tree
+    pub fn prepare_note_commitment_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
@@ -614,7 +609,7 @@ impl DiskWriteBatch {
         // TODO: make an argument struct for all the note commitment trees & history
         current_tip_height: Option<Height>,
         note_commitment_trees: NoteCommitmentTrees,
-        mut history_tree: HistoryTree,
+        history_tree: HistoryTree,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
@@ -623,15 +618,12 @@ impl DiskWriteBatch {
         let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
-        let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let FinalizedBlock { block, height, .. } = finalized;
+        let FinalizedBlock { height, .. } = finalized;
 
         let sprout_root = note_commitment_trees.sprout.root();
         let sapling_root = note_commitment_trees.sapling.root();
         let orchard_root = note_commitment_trees.orchard.root();
-
-        history_tree.push(network, block.clone(), sapling_root, orchard_root)?;
 
         // Compute the new anchors and index them
         // Note: if the root hasn't changed, we write the same value again.
@@ -644,7 +636,6 @@ impl DiskWriteBatch {
             self.zs_delete(sprout_note_commitment_tree_cf, h);
             self.zs_delete(sapling_note_commitment_tree_cf, h);
             self.zs_delete(orchard_note_commitment_tree_cf, h);
-            self.zs_delete(history_tree_cf, h);
         }
 
         self.zs_insert(
@@ -665,6 +656,51 @@ impl DiskWriteBatch {
             note_commitment_trees.orchard,
         );
 
+        self.prepare_history_batch(
+            db,
+            finalized,
+            network,
+            current_tip_height,
+            sapling_root,
+            orchard_root,
+            history_tree,
+        )
+    }
+
+    /// Prepare a database batch containing the history tree updates
+    /// from `finalized.block`, and return it (without actually writing anything).
+    ///
+    /// If this method returns an error, it will be propagated,
+    /// and the batch should not be written to the database.
+    ///
+    /// # Errors
+    ///
+    /// - Returns any errors from updating the history tree
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_history_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &FinalizedBlock,
+        network: Network,
+        current_tip_height: Option<Height>,
+        sapling_root: sapling::tree::Root,
+        orchard_root: orchard::tree::Root,
+        mut history_tree: HistoryTree,
+    ) -> Result<(), BoxError> {
+        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+
+        let FinalizedBlock { block, height, .. } = finalized;
+
+        history_tree.push(network, block.clone(), sapling_root, orchard_root)?;
+
+        // Update the tree in state
+        if let Some(h) = current_tip_height {
+            self.zs_delete(history_tree_cf, h);
+        }
+
+        // TODO: just store a single history tree, using `()` as the key,
+        //       and remove the delete (like the chain value pool balances).
+        //       This requires a database version update.
         if let Some(history_tree) = history_tree.as_ref() {
             self.zs_insert(history_tree_cf, height, history_tree);
         }
