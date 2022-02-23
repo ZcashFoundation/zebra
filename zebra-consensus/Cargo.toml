@@ -10,28 +10,28 @@ default = []
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-blake2b_simd = "0.5.11"
+blake2b_simd = "1.0.0"
 bellman = "0.11.1"
 bls12_381 = "0.6.0"
 jubjub = "0.8.0"
-rand = "0.8"
+rand = { version = "0.8.5", package = "rand" }
 
 halo2 = "=0.1.0-beta.1"
 
 chrono = "0.4.19"
 dirs = "4.0.0"
-displaydoc = "0.2.2"
+displaydoc = "0.2.3"
 lazy_static = "1.4.0"
-once_cell = "1.9"
-serde = { version = "1", features = ["serde_derive"] }
+once_cell = "1.9.0"
+serde = { version = "1.0.136", features = ["serde_derive"] }
 
 futures = "0.3.21"
-futures-util = "0.3.19"
-metrics = "0.17.1"
+futures-util = "0.3.21"
+metrics = "0.18.0"
 thiserror = "1.0.30"
-tokio = { version = "1.16.1", features = ["time", "sync", "tracing"] }
+tokio = { version = "1.17.0", features = ["time", "sync", "tracing"] }
 tower = { version = "0.4.12", features = ["timeout", "util", "buffer"] }
-tracing = "0.1.29"
+tracing = "0.1.31"
 tracing-futures = "0.2.5"
 
 # TODO: replace with upstream orchard (#3056)
