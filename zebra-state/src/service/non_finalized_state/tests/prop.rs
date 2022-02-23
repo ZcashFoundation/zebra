@@ -466,7 +466,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
         let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-        finalized_state.set_current_value_pool(fake_value_pool);
+        finalized_state.set_finalized_value_pool(fake_value_pool);
 
         // use `valid_count` as the number of valid blocks before an invalid block
         let valid_tip_height = chain[valid_count - 1].height;
