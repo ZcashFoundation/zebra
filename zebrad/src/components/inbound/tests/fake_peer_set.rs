@@ -31,8 +31,8 @@ use crate::{
     components::{
         inbound::{Inbound, InboundSetupData},
         mempool::{
-            self as mp, gossip_mempool_transaction_id, unmined_transactions_in_blocks, Mempool,
-            UnboxMempoolError,
+            gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
+            Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
         },
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -496,7 +496,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .next()
             .unwrap()
             .unbox_mempool_error(),
-        mp::MempoolError::StorageEffectsChain(mp::SameEffectsChainRejectionError::Expired)
+        MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::Expired)
     );
 
     // Test transaction 2 is gossiped
@@ -756,7 +756,7 @@ async fn setup(
     committed_blocks.push(block_one);
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
-        &mp::Config::default(),
+        &MempoolConfig::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),

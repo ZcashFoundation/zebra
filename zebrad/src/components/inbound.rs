@@ -19,7 +19,7 @@ use futures::{
     stream::Stream,
 };
 use tokio::sync::oneshot::{self, error::TryRecvError};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, BoxError, Service, ServiceExt};
 
 use zebra_network as zn;
 use zebra_state as zs;
@@ -36,10 +36,7 @@ use zebra_network::{
 use zebra_node_services::mempool;
 
 // Re-use the syncer timeouts for consistency.
-use super::{
-    mempool as mp,
-    sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
-};
+use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 use InventoryResponse::*;
 
@@ -53,8 +50,7 @@ use downloads::Downloads as BlockDownloads;
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
-type Mempool =
-    Buffer<BoxService<mempool::Request, mempool::Response, mp::BoxError>, mempool::Request>;
+type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
 type BlockVerifier = Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>;
 type GossipedBlockDownloads =
     BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<BlockVerifier>, State>;

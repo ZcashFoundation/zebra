@@ -29,7 +29,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     components::{
         inbound::{Inbound, InboundSetupData},
-        mempool::{self as mp, gossip_mempool_transaction_id, Mempool},
+        mempool::{gossip_mempool_transaction_id, Config as MempoolConfig, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
     BoxError,
@@ -698,7 +698,7 @@ async fn setup(
         .service(BoxService::new(mock_tx_verifier.clone()));
 
     // Mempool
-    let mempool_config = mp::Config::default();
+    let mempool_config = MempoolConfig::default();
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &mempool_config,
         peer_set.clone(),
