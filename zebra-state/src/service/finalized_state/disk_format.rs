@@ -1,4 +1,9 @@
-//! Module defining the serialization format for finalized data.
+//! Serialization formats for finalized data.
+//!
+//! # Correctness
+//!
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
 

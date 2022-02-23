@@ -72,6 +72,8 @@ use zebra_chain::{
 };
 use zebra_consensus::CheckpointList;
 
+use zebra_rpc::server::RpcServer;
+
 use crate::{
     components::{
         inbound::{self, InboundSetupData},
@@ -194,6 +196,8 @@ impl StartCmd {
                 .in_current_span(),
         );
 
+        let rpc_task_handle = RpcServer::spawn(config.rpc);
+
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
@@ -204,6 +208,7 @@ impl StartCmd {
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
+        pin!(rpc_task_handle);
 
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
@@ -245,6 +250,13 @@ impl StartCmd {
                     Ok(())
                 }
 
+                rpc_result = &mut rpc_task_handle => {
+                    rpc_result
+                        .expect("unexpected panic in the rpc task");
+                    info!("rpc task exited");
+                    Ok(())
+                }
+
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.
                 groth16_download_result = &mut groth16_download_handle_fused => {
                     groth16_download_result
@@ -277,6 +289,7 @@ impl StartCmd {
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
+        rpc_task_handle.abort();
 
         // startup tasks
         groth16_download_handle.abort();

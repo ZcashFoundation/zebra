@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
+use zebra_rpc::config::Config as RpcSection;
 use zebra_state::Config as StateSection;
 
 use crate::components::{mempool::Config as MempoolSection, sync};
@@ -42,6 +43,9 @@ pub struct ZebradConfig {
 
     /// Mempool configuration
     pub mempool: MempoolSection,
+
+    /// RPC configuration
+    pub rpc: RpcSection,
 }
 
 /// Tracing configuration section.
