@@ -7,7 +7,10 @@ use zebra_chain::transaction::{UnminedTx, UnminedTxId};
 /// A gossiped transaction, which can be the transaction itself or just its ID.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Gossip {
+    /// Just the ID of an unmined transaction.
     Id(UnminedTxId),
+
+    /// The full contents of an unmined transaction.
     Tx(UnminedTx),
 }
 
