@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.4"
+version = "1.0.0-beta.5"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -17,22 +17,17 @@ futures = "0.3.21"
 hex = "0.4.3"
 lazy_static = "1.4.0"
 metrics = "0.17.1"
-# TODO: this crate is not maintained anymore. Replace it?
-# https://github.com/ZcashFoundation/zebra/issues/2523
-#
-# Pinned to a commit which includes bug fix https://github.com/jmitchell/multiset/pull/21
-# The fix should be included in multiset 0.0.6.
-multiset = { git = "https://github.com/jmitchell/multiset", rev = "91ef8550b518f75ae87ae0d8771150f259fd34d5" }
+mset = "0.1.0"
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 regex = "1"
-rlimit = "0.5.4"
+rlimit = "0.7.0"
 rocksdb = "0.17.0"
 serde = { version = "1", features = ["serde_derive"] }
 tempfile = "3.3.0"
 thiserror = "1.0.30"
 tokio = { version = "1.16.1", features = ["sync"] }
-tower = { version = "0.4.11", features = ["buffer", "util"] }
+tower = { version = "0.4.12", features = ["buffer", "util"] }
 tracing = "0.1"
 
 zebra-chain = { path = "../zebra-chain" }

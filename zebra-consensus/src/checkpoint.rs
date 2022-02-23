@@ -42,7 +42,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use list::CheckpointList;
+pub use list::CheckpointList;
 use types::{Progress, Progress::*};
 use types::{TargetHeight, TargetHeight::*};
 

@@ -1,4 +1,10 @@
-//! Module defining exactly how to move types in and out of rocksdb
+//! Serialization formats for finalized data.
+//!
+//! # Correctness
+//!
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! be incremented each time the database format (column, serialization, etc) changes.
+
 use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
 
 use bincode::Options;
@@ -15,6 +21,9 @@ use zebra_chain::{
     sprout, transaction, transparent,
     value_balance::ValueBalance,
 };
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransactionLocation {
@@ -376,208 +385,5 @@ impl FromDisk for NonEmptyHistoryTree {
             parts.current_height,
         )
         .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
-
-/// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
-/// defined format
-pub trait DiskSerialize {
-    /// Serialize and insert the given key and value into a rocksdb column family,
-    /// overwriting any existing `value` for `key`.
-    fn zs_insert<K, V>(&mut self, cf: &rocksdb::ColumnFamily, key: K, value: V)
-    where
-        K: IntoDisk + Debug,
-        V: IntoDisk;
-
-    /// Remove the given key form rocksdb column family if it exists.
-    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
-    where
-        K: IntoDisk + Debug;
-}
-
-impl DiskSerialize for rocksdb::WriteBatch {
-    fn zs_insert<K, V>(&mut self, cf: &rocksdb::ColumnFamily, key: K, value: V)
-    where
-        K: IntoDisk + Debug,
-        V: IntoDisk,
-    {
-        let key_bytes = key.as_bytes();
-        let value_bytes = value.as_bytes();
-        self.put_cf(cf, key_bytes, value_bytes);
-    }
-
-    fn zs_delete<K>(&mut self, cf: &rocksdb::ColumnFamily, key: K)
-    where
-        K: IntoDisk + Debug,
-    {
-        let key_bytes = key.as_bytes();
-        self.delete_cf(cf, key_bytes);
-    }
-}
-
-/// Helper trait for retrieving values from rocksdb column familys with a consistently
-/// defined format
-pub trait DiskDeserialize {
-    /// Returns the value for `key` in the rocksdb column family `cf`, if present.
-    fn zs_get<K, V>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> Option<V>
-    where
-        K: IntoDisk,
-        V: FromDisk;
-
-    /// Check if a rocksdb column family `cf` contains the serialized form of `key`.
-    fn zs_contains<K>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> bool
-    where
-        K: IntoDisk;
-}
-
-impl DiskDeserialize for rocksdb::DB {
-    fn zs_get<K, V>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> Option<V>
-    where
-        K: IntoDisk,
-        V: FromDisk,
-    {
-        let key_bytes = key.as_bytes();
-
-        // We use `get_pinned_cf` to avoid taking ownership of the serialized
-        // value, because we're going to deserialize it anyways, which avoids an
-        // extra copy
-        let value_bytes = self
-            .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur");
-
-        value_bytes.map(V::from_bytes)
-    }
-
-    fn zs_contains<K>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> bool
-    where
-        K: IntoDisk,
-    {
-        let key_bytes = key.as_bytes();
-
-        // We use `get_pinned_cf` to avoid taking ownership of the serialized
-        // value, because we don't use the value at all. This avoids an extra copy.
-        self.get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur")
-            .is_some()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::{arbitrary::any, prelude::*};
-
-    impl Arbitrary for TransactionLocation {
-        type Parameters = ();
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (any::<block::Height>(), any::<u32>())
-                .prop_map(|(height, index)| Self { height, index })
-                .boxed()
-        }
-
-        type Strategy = BoxedStrategy<Self>;
-    }
-
-    fn round_trip<T>(input: T) -> T
-    where
-        T: IntoDisk + FromDisk,
-    {
-        let bytes = input.as_bytes();
-        T::from_bytes(bytes)
-    }
-
-    fn assert_round_trip<T>(input: T)
-    where
-        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
-    {
-        let before = input.clone();
-        let after = round_trip(input);
-        assert_eq!(before, after);
-    }
-
-    fn round_trip_ref<T>(input: &T) -> T
-    where
-        T: IntoDisk + FromDisk,
-    {
-        let bytes = input.as_bytes();
-        T::from_bytes(bytes)
-    }
-
-    fn assert_round_trip_ref<T>(input: &T)
-    where
-        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
-    {
-        let before = input;
-        let after = round_trip_ref(input);
-        assert_eq!(before, &after);
-    }
-
-    fn round_trip_arc<T>(input: Arc<T>) -> T
-    where
-        T: IntoDisk + FromDisk,
-    {
-        let bytes = input.as_bytes();
-        T::from_bytes(bytes)
-    }
-
-    fn assert_round_trip_arc<T>(input: Arc<T>)
-    where
-        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
-    {
-        let before = input.clone();
-        let after = round_trip_arc(input);
-        assert_eq!(*before, after);
-    }
-
-    /// The round trip test covers types that are used as value field in a rocksdb
-    /// column family. Only these types are ever deserialized, and so they're the only
-    /// ones that implement both `IntoDisk` and `FromDisk`.
-    fn assert_value_properties<T>(input: T)
-    where
-        T: IntoDisk + FromDisk + Clone + PartialEq + std::fmt::Debug,
-    {
-        assert_round_trip_ref(&input);
-        assert_round_trip_arc(Arc::new(input.clone()));
-        assert_round_trip(input);
-    }
-
-    #[test]
-    fn roundtrip_transaction_location() {
-        zebra_test::init();
-        proptest!(|(val in any::<TransactionLocation>())| assert_value_properties(val));
-    }
-
-    #[test]
-    fn roundtrip_block_hash() {
-        zebra_test::init();
-        proptest!(|(val in any::<block::Hash>())| assert_value_properties(val));
-    }
-
-    #[test]
-    fn roundtrip_block_height() {
-        zebra_test::init();
-        proptest!(|(val in any::<block::Height>())| assert_value_properties(val));
-    }
-
-    #[test]
-    fn roundtrip_block() {
-        zebra_test::init();
-
-        proptest!(|(val in any::<Block>())| assert_value_properties(val));
-    }
-
-    #[test]
-    fn roundtrip_transparent_output() {
-        zebra_test::init();
-
-        proptest!(|(val in any::<transparent::Utxo>())| assert_value_properties(val));
-    }
-
-    #[test]
-    fn roundtrip_value_balance() {
-        zebra_test::init();
-
-        proptest!(|(val in any::<ValueBalance::<NonNegative>>())| assert_value_properties(val));
     }
 }

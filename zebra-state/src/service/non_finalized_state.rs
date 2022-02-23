@@ -175,7 +175,7 @@ impl NonFinalizedState {
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
-            finalized_state.current_value_pool(),
+            finalized_state.finalized_value_pool(),
         );
         let (height, hash) = (prepared.height, prepared.hash);
 
