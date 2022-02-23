@@ -1536,6 +1536,33 @@ fn zebra_tracing_conflict() -> Result<()> {
     Ok(())
 }
 
+/// Start 2 zebrad nodes using the same RPC listener port, but different
+/// state directories and Zcash listener ports. The first node should get
+/// exclusive use of the port. The second node will panic.
+#[test]
+fn zebra_rpc_conflict() -> Result<()> {
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{}", port);
+
+    // Write a configuration that has our created RPC listen_addr
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(listen_addr.parse().unwrap());
+    let dir1 = testdir()?.with_config(&mut config)?;
+    let regex1 = regex::escape(&format!(r"Opened RPC endpoint at {}", listen_addr));
+
+    // From another folder create a configuration with the same endpoint.
+    // `rpc.listen_addr` will be the same in the 2 nodes.
+    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    let dir2 = testdir()?.with_config(&mut config)?;
+
+    check_config_conflict(dir1, regex1.as_str(), dir2, "Unable to start RPC server")?;
+
+    Ok(())
+}
+
 /// Start 2 zebrad nodes using the same state directory, but different Zcash
 /// listener ports. The first node should get exclusive access to the database.
 /// The second node will panic with the Zcash state conflict hint added in #1535.
