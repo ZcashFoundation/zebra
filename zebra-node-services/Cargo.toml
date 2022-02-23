@@ -8,3 +8,5 @@ repository = "https://github.com/ZcashFoundation/zebra"
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
+
+tower = "0.4.12"

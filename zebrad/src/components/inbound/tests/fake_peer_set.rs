@@ -485,7 +485,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .unwrap();
 
     let queued_responses = match response {
-        mp::Response::Queued(queue_responses) => queue_responses,
+        mempool::Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
     };
 
@@ -681,7 +681,7 @@ async fn setup(
         BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
         zebra_network::Request,
     >,
-    Buffer<BoxService<mempool::Request, mp::Response, BoxError>, mempool::Request>,
+    Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Vec<Arc<Block>>,
     Vec<VerifiedUnminedTx>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,

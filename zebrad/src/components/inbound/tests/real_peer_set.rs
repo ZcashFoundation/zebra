@@ -617,7 +617,7 @@ async fn setup(
         BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
         zebra_network::Request,
     >,
-    Buffer<BoxService<mempool::Request, mp::Response, BoxError>, mempool::Request>,
+    Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
     MockService<Arc<Block>, block::Hash, PanicAssertion, VerifyChainError>,

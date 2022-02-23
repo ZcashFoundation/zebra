@@ -30,14 +30,10 @@ use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
-use zebra_chain::{
-    block::Height,
-    chain_tip::ChainTip,
-    transaction::{UnminedTx, UnminedTxId},
-};
+use zebra_chain::{block::Height, chain_tip::ChainTip, transaction::UnminedTxId};
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
-use zebra_node_services::mempool::Request;
+use zebra_node_services::mempool::{Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -79,37 +75,6 @@ type TxVerifier = Buffer<
     transaction::Request,
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
-
-/// A response to a mempool service request.
-///
-/// Responses can read the current set of mempool transactions,
-/// check the queued status of transactions to be downloaded and verified, or
-/// confirm that the mempool has been checked for newly verified transactions.
-#[derive(Debug)]
-pub enum Response {
-    /// Returns all transaction IDs from the mempool.
-    TransactionIds(HashSet<UnminedTxId>),
-
-    /// Returns matching transactions from the mempool.
-    ///
-    /// Since the [`TransactionsById`] request is unique,
-    /// the response transactions are also unique.
-    Transactions(Vec<UnminedTx>),
-
-    /// Returns matching cached rejected transaction IDs from the mempool,
-    RejectedTransactionIds(HashSet<UnminedTxId>),
-
-    /// Returns a list of queue results.
-    ///
-    /// These are the results of the initial queue checks.
-    /// The transaction may also fail download or verification later.
-    ///
-    /// Each result matches the request at the corresponding vector index.
-    Queued(Vec<Result<(), BoxError>>),
-
-    /// Confirms that the mempool has checked for recently verified transactions.
-    CheckedForVerifiedTransactions,
-}
 
 /// The state of the mempool.
 ///
