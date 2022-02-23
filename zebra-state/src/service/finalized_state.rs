@@ -345,9 +345,7 @@ impl FinalizedState {
             self.network,
             self.finalized_tip_height(),
             all_utxos_spent_by_block,
-            self.sprout_note_commitment_tree(),
-            self.sapling_note_commitment_tree(),
-            self.orchard_note_commitment_tree(),
+            self.note_commitment_trees(),
             history_tree,
             self.finalized_value_pool(),
         )?;

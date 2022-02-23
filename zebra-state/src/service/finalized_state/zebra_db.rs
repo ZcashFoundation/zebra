@@ -34,6 +34,14 @@ use crate::{
 
 use super::disk_db::DiskWriteBatch;
 
+/// An argument wrapper struct for note commitment trees.
+#[derive(Clone, Debug)]
+pub struct NoteCommitmentTrees {
+    sprout: sprout::tree::NoteCommitmentTree,
+    sapling: sapling::tree::NoteCommitmentTree,
+    orchard: orchard::tree::NoteCommitmentTree,
+}
+
 impl FinalizedState {
     // Read block methods
 
@@ -203,6 +211,16 @@ impl FinalizedState {
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
+    /// Returns the shielded note commitment trees of the finalized tip
+    /// or the empty trees if the state is empty.
+    pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree(),
+            sapling: self.sapling_note_commitment_tree(),
+            orchard: self.orchard_note_commitment_tree(),
+        }
+    }
+
     /// Returns the ZIP-221 history tree of the finalized tip or `None`
     /// if it does not exist yet in the state (pre-Heartwood).
     pub fn history_tree(&self) -> HistoryTree {
@@ -327,9 +345,7 @@ impl DiskWriteBatch {
         current_tip_height: Option<Height>,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         // TODO: make an argument struct for all the note commitment trees & history
-        mut sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
-        mut sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
-        mut orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
         current_value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
@@ -367,22 +383,14 @@ impl DiskWriteBatch {
             return Ok(());
         }
 
-        self.prepare_transaction_index_batch(
-            db,
-            &finalized,
-            &mut sprout_note_commitment_tree,
-            &mut sapling_note_commitment_tree,
-            &mut orchard_note_commitment_tree,
-        )?;
+        self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
 
         self.prepare_history_batch(
             db,
             &finalized,
             network,
             current_tip_height,
-            sprout_note_commitment_tree,
-            sapling_note_commitment_tree,
-            orchard_note_commitment_tree,
+            note_commitment_trees,
             history_tree,
         )?;
 
@@ -451,9 +459,7 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        sprout_note_commitment_tree: &mut sprout::tree::NoteCommitmentTree,
-        sapling_note_commitment_tree: &mut sapling::tree::NoteCommitmentTree,
-        orchard_note_commitment_tree: &mut orchard::tree::NoteCommitmentTree,
+        note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         let tx_by_hash = db.cf_handle("tx_by_hash").unwrap();
 
@@ -481,12 +487,7 @@ impl DiskWriteBatch {
 
             self.prepare_nullifier_batch(db, transaction)?;
 
-            DiskWriteBatch::update_note_commitment_trees(
-                transaction,
-                sprout_note_commitment_tree,
-                sapling_note_commitment_tree,
-                orchard_note_commitment_tree,
-            )?;
+            DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
         }
 
         self.prepare_transparent_outputs_batch(db, finalized)
@@ -569,19 +570,23 @@ impl DiskWriteBatch {
     /// - Propagates any errors from updating note commitment trees
     pub fn update_note_commitment_trees(
         transaction: &Transaction,
-        sprout_note_commitment_tree: &mut sprout::tree::NoteCommitmentTree,
-        sapling_note_commitment_tree: &mut sapling::tree::NoteCommitmentTree,
-        orchard_note_commitment_tree: &mut orchard::tree::NoteCommitmentTree,
+        note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         // Update the note commitment trees
         for sprout_note_commitment in transaction.sprout_note_commitments() {
-            sprout_note_commitment_tree.append(*sprout_note_commitment)?;
+            note_commitment_trees
+                .sprout
+                .append(*sprout_note_commitment)?;
         }
         for sapling_note_commitment in transaction.sapling_note_commitments() {
-            sapling_note_commitment_tree.append(*sapling_note_commitment)?;
+            note_commitment_trees
+                .sapling
+                .append(*sapling_note_commitment)?;
         }
         for orchard_note_commitment in transaction.orchard_note_commitments() {
-            orchard_note_commitment_tree.append(*orchard_note_commitment)?;
+            note_commitment_trees
+                .orchard
+                .append(*orchard_note_commitment)?;
         }
 
         Ok(())
@@ -601,7 +606,6 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree or value pools
-    #[allow(clippy::too_many_arguments)]
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
@@ -609,9 +613,7 @@ impl DiskWriteBatch {
         network: Network,
         // TODO: make an argument struct for all the note commitment trees & history
         current_tip_height: Option<Height>,
-        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
-        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
-        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+        note_commitment_trees: NoteCommitmentTrees,
         mut history_tree: HistoryTree,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
@@ -625,15 +627,15 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { block, height, .. } = finalized;
 
-        let sprout_root = sprout_note_commitment_tree.root();
-        let sapling_root = sapling_note_commitment_tree.root();
-        let orchard_root = orchard_note_commitment_tree.root();
+        let sprout_root = note_commitment_trees.sprout.root();
+        let sapling_root = note_commitment_trees.sapling.root();
+        let orchard_root = note_commitment_trees.orchard.root();
 
         history_tree.push(network, block.clone(), sapling_root, orchard_root)?;
 
         // Compute the new anchors and index them
         // Note: if the root hasn't changed, we write the same value again.
-        self.zs_insert(sprout_anchors, sprout_root, &sprout_note_commitment_tree);
+        self.zs_insert(sprout_anchors, sprout_root, &note_commitment_trees.sprout);
         self.zs_insert(sapling_anchors, sapling_root, ());
         self.zs_insert(orchard_anchors, orchard_root, ());
 
@@ -648,19 +650,19 @@ impl DiskWriteBatch {
         self.zs_insert(
             sprout_note_commitment_tree_cf,
             height,
-            sprout_note_commitment_tree,
+            note_commitment_trees.sprout,
         );
 
         self.zs_insert(
             sapling_note_commitment_tree_cf,
             height,
-            sapling_note_commitment_tree,
+            note_commitment_trees.sapling,
         );
 
         self.zs_insert(
             orchard_note_commitment_tree_cf,
             height,
-            orchard_note_commitment_tree,
+            note_commitment_trees.orchard,
         );
 
         if let Some(history_tree) = history_tree.as_ref() {
