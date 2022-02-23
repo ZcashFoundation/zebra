@@ -1457,7 +1457,7 @@ async fn tracing_endpoint() -> Result<()> {
 
 #[tokio::test]
 async fn rpc_endpoint() -> Result<()> {
-    use hyper::Client;
+    use hyper::{body::to_bytes, Body, Client, Method, Request};
 
     zebra_test::init();
 
@@ -1481,11 +1481,11 @@ async fn rpc_endpoint() -> Result<()> {
     let client = Client::new();
 
     // Create a request to call `getinfo` RPC method
-    let req = hyper::Request::builder()
-        .method(hyper::Method::POST)
+    let req = Request::builder()
+        .method(Method::POST)
         .uri(url)
         .header("content-type", "application/json")
-        .body(hyper::Body::from(
+        .body(Body::from(
             r#"{"jsonrpc": "2.0", "method": "getinfo", "id":123}"#,
         ))?;
 
@@ -1494,7 +1494,7 @@ async fn rpc_endpoint() -> Result<()> {
 
     // Test rpc endpoint response
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await;
+    let body = to_bytes(res).await;
     let response_bytes = body.expect("a response as bytes");
     let response_string = format!("{:?}", response_bytes);
 
