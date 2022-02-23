@@ -1461,6 +1461,7 @@ async fn tracing_endpoint() -> Result<()> {
 ///
 /// This test doesn't work on Windows, and it is ignored by default on other platforms.
 #[test]
+#[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
     zebra_test::init();
