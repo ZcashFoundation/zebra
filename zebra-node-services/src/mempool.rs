@@ -8,6 +8,9 @@ use zebra_chain::transaction::{UnminedTx, UnminedTxId};
 
 use crate::BoxError;
 
+mod gossip;
+pub use self::gossip::Gossip;
+
 /// A mempool service request.
 ///
 /// Requests can query the current set of mempool transactions,
@@ -56,38 +59,6 @@ pub enum Request {
     /// too many slots are reserved but unused:
     /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
     CheckForVerifiedTransactions,
-}
-
-/// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug, Eq, PartialEq)]
-pub enum Gossip {
-    /// Just the ID of an unmined transaction.
-    Id(UnminedTxId),
-
-    /// The full contents of an unmined transaction.
-    Tx(UnminedTx),
-}
-
-impl Gossip {
-    /// Return the [`UnminedTxId`] of a gossiped transaction.
-    pub fn id(&self) -> UnminedTxId {
-        match self {
-            Gossip::Id(txid) => *txid,
-            Gossip::Tx(tx) => tx.id,
-        }
-    }
-}
-
-impl From<UnminedTxId> for Gossip {
-    fn from(txid: UnminedTxId) -> Self {
-        Gossip::Id(txid)
-    }
-}
-
-impl From<UnminedTx> for Gossip {
-    fn from(tx: UnminedTx) -> Self {
-        Gossip::Tx(tx)
-    }
 }
 
 /// A response to a mempool service request.
