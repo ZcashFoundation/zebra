@@ -20,6 +20,9 @@ use crate::{
     Config,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod tests;
+
 /// Wrapper struct to ensure low-level database access goes through the correct API.
 pub struct DiskDb {
     /// The inner RocksDB database.
