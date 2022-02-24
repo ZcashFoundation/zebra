@@ -123,6 +123,8 @@ trait ZebradTestDirExt
 where
     Self: AsRef<Path> + Sized,
 {
+    // Zebra methods
+
     /// Spawn `zebrad` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
     /// child process.
@@ -130,7 +132,7 @@ where
     /// If there is a config in the test directory, pass it to `zebrad`.
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
 
-    /// Create a config file and use it for all subsequently spawned processes.
+    /// Create a config file and use it for all subsequently spawned `zebrad` processes.
     /// Returns an error if the config already exists.
     ///
     /// If needed:
@@ -139,14 +141,14 @@ where
     fn with_config(self, config: &mut ZebradConfig) -> Result<Self>;
 
     /// Create a config file with the exact contents of `config`, and use it for
-    /// all subsequently spawned processes. Returns an error if the config
+    /// all subsequently spawned `zebrad` processes. Returns an error if the config
     /// already exists.
     ///
     /// If needed:
     ///   - recursively create directories for the config and state
     fn with_exact_config(self, config: &ZebradConfig) -> Result<Self>;
 
-    /// Overwrite any existing config file, and use the newly written config for
+    /// Overwrite any existing `zebrad` config file, and use the newly written config for
     /// all subsequently spawned processes.
     ///
     /// If needed:
@@ -154,13 +156,13 @@ where
     ///   - set `config.cache_dir` based on `self`
     fn replace_config(self, config: &mut ZebradConfig) -> Result<Self>;
 
-    /// `cache_dir` config update helper.
+    /// `cache_dir` config update helper for `zebrad`.
     ///
     /// If needed:
     ///   - set the cache_dir in the config.
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self>;
 
-    /// Config writing helper.
+    /// Config writing helper for `zebrad`.
     ///
     /// If needed:
     ///   - recursively create directories for the config and state,
