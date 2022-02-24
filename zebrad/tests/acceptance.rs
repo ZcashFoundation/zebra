@@ -1475,6 +1475,8 @@ fn lightwalletd_integration() -> Result<()> {
             "skipped lightwalletd integration test, \
              set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
         );
+
+        return Ok(());
     }
 
     // Launch zebrad
