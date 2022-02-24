@@ -6,7 +6,15 @@
 //! - the bytes in each key and value
 //!
 //! These tests currently use fixed test vectors.
-//! TODO: test shielded data, and data activated in Overwinter and later network upgrades
+//!
+//! # Fixing Test Failures
+//!
+//! If this test fails, run `cargo insta review` to update the test snapshots,
+//! then commit the `test_*.snap` files using git.
+//!
+//! # TODO
+//!
+//! Test shielded data, and data activated in Overwinter and later network upgrades.
 
 use zebra_chain::parameters::Network::*;
 
@@ -24,5 +32,8 @@ fn test_raw_rocksdb_column_family_data() {
     // because we always access them by name.
     cf_names.sort();
 
+    // This snapshot contains the `default` column family, but it is not used by Zebra.
     insta::assert_ron_snapshot!(cf_names);
+
+    // TODO: snapshot the data as well
 }
