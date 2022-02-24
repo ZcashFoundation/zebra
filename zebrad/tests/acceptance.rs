@@ -933,6 +933,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn full_sync_mainnet() {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
@@ -944,6 +945,7 @@ fn full_sync_mainnet() {
 #[test]
 #[ignore]
 fn full_sync_testnet() {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
