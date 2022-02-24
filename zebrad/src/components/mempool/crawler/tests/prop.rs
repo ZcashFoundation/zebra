@@ -7,7 +7,6 @@ use proptest::{
     prelude::*,
 };
 use tokio::time;
-use tower::BoxError;
 
 use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 use zebra_network as zn;
@@ -15,14 +14,17 @@ use zebra_node_services::mempool::Gossip;
 use zebra_state::ChainTipSender;
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
-use crate::components::{
-    mempool::{
-        self,
-        crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
-        error::MempoolError,
-        Config,
+use crate::{
+    components::{
+        mempool::{
+            self,
+            crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
+            error::MempoolError,
+            Config,
+        },
+        sync::RecentSyncLengths,
     },
-    sync::RecentSyncLengths,
+    BoxError,
 };
 
 /// The number of iterations to crawl while testing.

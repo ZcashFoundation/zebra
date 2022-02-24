@@ -19,7 +19,7 @@ use futures::{
     stream::Stream,
 };
 use tokio::sync::oneshot::{self, error::TryRecvError};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, BoxError, Service, ServiceExt};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
 use zebra_network as zn;
 use zebra_state as zs;
@@ -37,6 +37,7 @@ use zebra_node_services::mempool;
 
 // Re-use the syncer timeouts for consistency.
 use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+use crate::BoxError;
 
 use InventoryResponse::*;
 

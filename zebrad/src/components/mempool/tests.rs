@@ -1,11 +1,14 @@
 use std::pin::Pin;
 
-use tower::{BoxError, ServiceExt};
+use tower::ServiceExt;
 
 use super::{
     error::MempoolError, storage::Storage, ActiveState, InboundTxDownloads, Mempool, Request,
 };
-use crate::components::sync::{RecentSyncLengths, SyncStatus};
+use crate::{
+    components::sync::{RecentSyncLengths, SyncStatus},
+    BoxError,
+};
 
 mod prop;
 mod vector;
