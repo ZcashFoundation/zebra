@@ -50,9 +50,19 @@ pub static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 
 static INIT: Once = Once::new();
 
-/// Initialize globals for tests such as the tracing subscriber and panic / error
-/// reporting hooks
+/// Initialize global and thread-specific settings for tests,
+/// such as tracing configs, panic hooks, and `cargo insta` settings.
+///
+/// This function should be called at the start of every test.
 pub fn init() {
+    // Per-thread
+
+    let mut settings = insta::Settings::clone_current();
+    settings.set_prepend_module_to_snapshot(false);
+    settings.bind_to_thread();
+
+    // Globals
+
     INIT.call_once(|| {
         let fmt_layer = fmt::layer().with_target(false);
         // Use the RUST_LOG env var, or by default:
