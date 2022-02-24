@@ -1458,6 +1458,7 @@ async fn tracing_endpoint() -> Result<()> {
 #[tokio::test]
 async fn rpc_endpoint() -> Result<()> {
     use hyper::{body::to_bytes, Body, Client, Method, Request};
+    use serde_json::Value;
 
     zebra_test::init();
 
@@ -1486,7 +1487,7 @@ async fn rpc_endpoint() -> Result<()> {
         .uri(url)
         .header("content-type", "application/json")
         .body(Body::from(
-            r#"{"jsonrpc": "2.0", "method": "getinfo", "id":123}"#,
+            r#"{"jsonrpc": "1.0", "method": "getinfo", "id":123}"#,
         ))?;
 
     // Make the call to the RPC endpoint
@@ -1497,11 +1498,14 @@ async fn rpc_endpoint() -> Result<()> {
 
     let body = to_bytes(res).await;
     let (body, mut child) = child.kill_on_error(body)?;
-    let response_string = format!("{:?}", body);
 
-    // The `getinfo` RPC method returns the software version,
-    // this will always have `Zebra` as part of the response.
-    assert!(response_string.contains("Zebra"));
+    // The `getinfo` RPC method returns the software version in the `build` field
+    // of the response. This will always have the string `Zebra` in it.
+    let parsed: Value = serde_json::from_slice(&body)?;
+    assert!(parsed["result"]["build"]
+        .as_str()
+        .unwrap()
+        .contains("Zebra"));
 
     child.kill()?;
 
