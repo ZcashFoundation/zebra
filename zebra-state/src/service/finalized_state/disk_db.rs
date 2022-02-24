@@ -198,11 +198,16 @@ impl DiskDb {
             Ok(db) => {
                 info!("Opened Zebra state cache at {}", path.display());
 
-                DiskDb {
+                let db = DiskDb {
                     db,
                     ephemeral: config.ephemeral,
-                }
+                };
+
+                db.assert_default_is_empty();
+
+                db
             }
+
             // TODO: provide a different hint if the disk is full, see #1623
             Err(e) => panic!(
                 "Opening database {:?} failed: {:?}. \
@@ -212,6 +217,8 @@ impl DiskDb {
             ),
         }
     }
+
+    // Read methods
 
     /// Returns the `Path` where the files used by this database are located.
     pub fn path(&self) -> &Path {
@@ -243,11 +250,15 @@ impl DiskDb {
         !self.forward_iterator(cf_handle).valid()
     }
 
+    // Write methods
+
     /// Writes `batch` to the database.
     pub fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         // TODO: move writing to the database to a blocking thread (#2188)
         self.db.write(batch.batch)
     }
+
+    // Private methods
 
     /// Returns the database options for the finalized state database.
     fn options() -> rocksdb::Options {
@@ -374,6 +385,8 @@ impl DiskDb {
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
     ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self) {
+        self.assert_default_is_empty();
+
         // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
         //
         // Zebra's data should be fine if we don't clean up, because:
@@ -443,6 +456,20 @@ impl DiskDb {
             // TODO: downgrade to debug once bugs like #2905 are fixed
             //       but leave any errors at "info" level
             info!(?res, "removed temporary database files");
+        }
+    }
+
+    /// Check that the "default" column family is empty.
+    ///
+    /// # Panics
+    ///
+    /// If Zebra has a bug where it is storing data in the wrong column family.
+    fn assert_default_is_empty(&self) {
+        if let Some(default_cf) = self.cf_handle("default") {
+            assert!(
+                self.is_empty(default_cf),
+                "Zebra should not store data in the 'default' column family"
+            );
         }
     }
 }
