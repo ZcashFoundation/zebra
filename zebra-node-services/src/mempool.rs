@@ -4,9 +4,9 @@
 
 use std::collections::HashSet;
 
-use tower::BoxError;
-
 use zebra_chain::transaction::{UnminedTx, UnminedTxId};
+
+use crate::BoxError;
 
 /// A mempool service request.
 ///
