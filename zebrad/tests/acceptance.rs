@@ -1487,7 +1487,7 @@ async fn rpc_endpoint() -> Result<()> {
         .uri(url)
         .header("content-type", "application/json")
         .body(Body::from(
-            r#"{"jsonrpc": "1.0", "method": "getinfo", "id":123}"#,
+            r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#,
         ))?;
 
     // Make the call to the RPC endpoint
