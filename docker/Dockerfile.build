@@ -42,7 +42,7 @@ RUN apt-get -qq update && \
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
 #
 # TODO: remove native CPU instruction optimisation, it stops the docker image running on older machines
-ENV RUSTFLAGS "-C opt-level=z -C target-cpu=native"
+ENV RUSTFLAGS "-C opt-level=z -Z tune-cpu=native"
 ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
