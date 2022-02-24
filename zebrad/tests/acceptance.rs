@@ -27,7 +27,10 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::Path, path::PathBuf,
+    time::Duration,
+};
 
 use zebra_chain::{
     block::Height,
@@ -169,6 +172,26 @@ where
     ///
     /// Then write out the config.
     fn write_config_helper(self, config: &ZebradConfig) -> Result<Self>;
+
+    // lightwalletd methods
+
+    /// Spawn `lightwalletd` with `args` as a child process in this test directory,
+    /// potentially taking ownership of the tempdir for the duration of the
+    /// child process.
+    ///
+    /// By default, launch a working test instance with logging, and avoid port conflicts.
+    ///
+    /// # Panics
+    ///
+    /// If there is no lightwalletd config in the test directory.
+    fn spawn_lightwalletd_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+
+    /// Create a config file and use it for all subsequently spawned `lightwalletd` processes.
+    /// Returns an error if the config already exists.
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config
+    fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self>;
 }
 
 impl<T> ZebradTestDirExt for T
@@ -176,8 +199,8 @@ where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
-        let path = self.as_ref();
-        let default_config_path = path.join("zebrad.toml");
+        let dir = self.as_ref();
+        let default_config_path = dir.join("zebrad.toml");
 
         if default_config_path.exists() {
             let mut extra_args: Vec<_> = vec![
@@ -246,6 +269,70 @@ where
 
         let config_file = dir.join("zebrad.toml");
         fs::File::create(config_file)?.write_all(toml::to_string(&config)?.as_bytes())?;
+
+        Ok(self)
+    }
+
+    fn spawn_lightwalletd_child(self, args: &[&str]) -> Result<TestChild<Self>> {
+        let dir = self.as_ref().to_owned();
+        let default_config_path = dir.join("lightwalletd-zcash.conf");
+
+        assert!(
+            default_config_path.exists(),
+            "lightwalletd requires a config"
+        );
+
+        // By default, launch a working test instance with logging,
+        // and avoid port conflicts.
+        let mut extra_args: Vec<_> = vec![
+            // the fake zcashd conf we just wrote
+            "--zcash-conf-path",
+            default_config_path
+                .as_path()
+                .to_str()
+                .expect("Path is valid Unicode"),
+            // the lightwalletd cache directory
+            //
+            // TODO: create a sub-directory for lightwalletd
+            "--data-dir",
+            dir.to_str().expect("Path is valid Unicode"),
+            // log to standard output
+            //
+            // TODO: if lightwalletd needs to run on Windows,
+            //       work out how to log to the terminal on all platforms
+            "--log-file",
+            "/dev/stdout",
+            // let the OS choose a random available wallet client port
+            "--grpc-bind-addr",
+            "127.0.0.1:0",
+            "--http-bind-addr",
+            "127.0.0.1:0",
+            // don't require a TLS certificate for the HTTP server
+            "--no-tls-very-insecure",
+        ];
+        extra_args.extend_from_slice(args);
+
+        self.spawn_child_with_command("lightwalletd", &extra_args)
+    }
+
+    fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {
+        use std::fs;
+        use std::io::Write;
+
+        let lightwalletd_config = format!(
+            "\
+            rpcbind={}\n\
+            rpcport={}\n\
+            ",
+            zebra_rpc_listener.ip(),
+            zebra_rpc_listener.port(),
+        );
+
+        let dir = self.as_ref();
+        fs::create_dir_all(dir)?;
+
+        let config_file = dir.join("lightwalletd-zcash.conf");
+        fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
 
         Ok(self)
     }
@@ -1466,8 +1553,6 @@ async fn tracing_endpoint() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
-    use std::net::SocketAddr;
-
     zebra_test::init();
 
     // Skip the test unless we specifically asked for it
@@ -1488,86 +1573,29 @@ fn lightwalletd_integration() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     let listen_port = random_known_port();
     let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
-    let listen_addr = SocketAddr::new(listen_ip, listen_port);
+    let zebra_rpc_listener = SocketAddr::new(listen_ip, listen_port);
 
     // Write a configuration that has the rpc listen_addr option set
     // TODO: split this config into another function?
     let mut config = default_test_config()?;
-    config.rpc.listen_addr = Some(listen_addr);
+    config.rpc.listen_addr = Some(zebra_rpc_listener);
 
-    let dir = testdir()?.with_config(&mut config)?;
-    let mut zebrad = dir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
+    let zdir = testdir()?.with_config(&mut config)?;
+    let mut zebrad = zdir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
 
     // Wait until `zebrad` has opened the RPC endpoint
-    zebrad
-        .expect_stdout_line_matches(format!("Opened RPC endpoint at {}", listen_addr).as_str())?;
+    zebrad.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", zebra_rpc_listener).as_str(),
+    )?;
 
     // Launch lightwalletd
-    // TODO: split this into another function
 
     // Write a fake zcashd configuration that has the rpcbind and rpcport options set
-    // TODO: split this into another function
-    let dir = testdir()?;
-    let lightwalletd_config = format!(
-        "\
-        rpcbind={}\n\
-        rpcport={}\n\
-        ",
-        listen_ip, listen_port
-    );
+    let ldir = testdir()?;
+    let ldir = ldir.with_lightwalletd_config(zebra_rpc_listener)?;
 
-    use std::fs;
-    use std::io::Write;
-
-    let path = dir.path().to_owned();
-
-    // TODO: split this into another function
-    if !config.state.ephemeral {
-        let cache_dir = path.join("state");
-        fs::create_dir_all(&cache_dir)?;
-    } else {
-        fs::create_dir_all(&path)?;
-    }
-
-    let config_file = path.join("lightwalletd-zcash.conf");
-    fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
-
-    let result = {
-        let default_config_path = path.join("lightwalletd-zcash.conf");
-
-        assert!(
-            default_config_path.exists(),
-            "lightwalletd requires a config"
-        );
-
-        dir.spawn_child_with_command(
-            "lightwalletd",
-            &[
-                // the fake zcashd conf we just wrote
-                "--zcash-conf-path",
-                default_config_path
-                    .as_path()
-                    .to_str()
-                    .expect("Path is valid Unicode"),
-                // the lightwalletd cache directory
-                //
-                // TODO: create a sub-directory for lightwalletd
-                "--data-dir",
-                path.to_str().expect("Path is valid Unicode"),
-                // log to standard output
-                "--log-file",
-                "/dev/stdout",
-                // randomise wallet client ports
-                "--grpc-bind-addr",
-                "127.0.0.1:0",
-                "--http-bind-addr",
-                "127.0.0.1:0",
-                // don't require a TLS certificate
-                "--no-tls-very-insecure",
-            ],
-        )
-    };
-
+    // Launch the lightwalletd process
+    let result = ldir.spawn_lightwalletd_child(&[]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
     let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
 
