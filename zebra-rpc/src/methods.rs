@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
-use jsonrpc_core::{self, Result};
+use jsonrpc_core::{self, BoxFuture, Result};
 use jsonrpc_derive::rpc;
 use tower::buffer::Buffer;
 
@@ -59,7 +59,10 @@ pub trait Rpc {
     /// [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html) documentation
     /// for more information.
     #[rpc(name = "sendrawtransaction")]
-    fn send_raw_transaction(&self, raw_transaction_hex: String) -> Result<SentTransactionHash>;
+    fn send_raw_transaction(
+        &self,
+        raw_transaction_hex: String,
+    ) -> BoxFuture<Result<SentTransactionHash>>;
 }
 
 /// RPC method implementations.
@@ -113,7 +116,10 @@ where
         Ok(response)
     }
 
-    fn send_raw_transaction(&self, raw_transaction_hex: String) -> Result<SentTransactionHash> {
+    fn send_raw_transaction(
+        &self,
+        raw_transaction_hex: String,
+    ) -> BoxFuture<Result<SentTransactionHash>> {
         todo!();
     }
 }
