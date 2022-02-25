@@ -1063,56 +1063,71 @@ fn sync_until(
     let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
 
     let network = format!("network: {},", network);
-    child.expect_stdout_line_matches(&network)?;
 
-    if check_legacy_chain {
-        child.expect_stdout_line_matches("starting legacy chain check")?;
-        child.expect_stdout_line_matches("no legacy chain found")?;
-    }
+    if mempool_behavior.require_activation() {
+        // require that the mempool activated,
+        // checking logs as they arrive
 
-    if mempool_behavior.is_forced_activation() {
-        child.expect_stdout_line_matches("enabling mempool for debugging")?;
+        child.expect_stdout_line_matches(&network)?;
+
+        if check_legacy_chain {
+            child.expect_stdout_line_matches("starting legacy chain check")?;
+            child.expect_stdout_line_matches("no legacy chain found")?;
+        }
+
+        // before the stop regex, expect mempool activation
+        if mempool_behavior.require_forced_activation() {
+            child.expect_stdout_line_matches("enabling mempool for debugging")?;
+        }
         child.expect_stdout_line_matches("activating mempool")?;
 
-        // make sure zebra is running with the mempool
-        child.expect_stdout_line_matches("verified checkpoint range")?;
-    }
+        // then wait for the stop log, which must happen after the mempool becomes active
+        child.expect_stdout_line_matches(stop_regex)?;
 
-    child.expect_stdout_line_matches(stop_regex)?;
+        // make sure the child process is dead
+        // if it has already exited, ignore that error
+        let _ = child.kill();
 
-    // make sure mempool behaves as expected when we don't explicitly enable it
-    if !mempool_behavior.is_forced_activation() {
-        // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
-        // the error is delayed until the test timeout, or until the child reaches the stop height and exits.
-        let mempool_is_activated = child
-            .expect_stdout_line_matches("activating mempool")
-            .is_ok();
+        Ok(child.dir)
+    } else {
+        // Require that the mempool didn't activate,
+        // checking the entire `zebrad` output after it exits.
+        //
+        // # Correctness
+        //
+        // Unlike the other mempool behaviours, `zebrad` must stop after logging the stop regex,
+        // without being killed by [`sync_until`] test harness.
+        //
+        // Since it needs to collect all the output,
+        // the test harness can't kill `zebrad` after it logs the `stop_regex`.
+        assert!(
+            height.0 < 2_000_000,
+            "zebrad must exit by itself, so we can collect all the output",
+        );
+        let output = child.wait_with_output()?;
 
-        let mempool_check = match mempool_behavior {
-            MempoolBehavior::ShouldAutomaticallyActivate if !mempool_is_activated => {
-                Some("mempool did not activate as expected")
-            }
-            MempoolBehavior::ShouldNotActivate if mempool_is_activated => Some(
-                "unexpected mempool activation: \
-                mempool should not activate while syncing lots of blocks",
-            ),
-            MempoolBehavior::ForceActivationAt(_) => unreachable!("checked by outer if condition"),
-            _ => None,
-        };
+        output.stdout_line_contains(&network)?;
 
-        if let Some(error) = mempool_check {
-            // if the mempool does not behave as expected, we panic and kill the test process.
-            // but we also need to kill the `zebrad` child before the test panics.
-            child.kill()?;
-            panic!("{error}")
+        if check_legacy_chain {
+            output.stdout_line_contains("starting legacy chain check")?;
+            output.stdout_line_contains("no legacy chain found")?;
         }
+
+        // check it did not activate or use the mempool
+        assert!(output.stdout_line_contains("activating mempool").is_err());
+        assert!(output
+            .stdout_line_contains("sending mempool transaction broadcast")
+            .is_err());
+
+        // check it logged the stop regex before exiting
+        output.stdout_line_matches(stop_regex)?;
+
+        // check exited by itself, successfully
+        output.assert_was_not_killed()?;
+        let output = output.assert_success()?;
+
+        Ok(output.dir.expect("wait_with_output sets dir"))
     }
-
-    // make sure the child process is dead
-    // if it has already exited, ignore that error
-    let _ = child.kill();
-
-    Ok(child.dir)
 }
 
 fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
@@ -1816,12 +1831,26 @@ where
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
 enum MempoolBehavior {
     /// The mempool should be forced to activate at a certain height, for debug purposes.
+    ///
+    /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
+    /// then the `stop_regex`.
     ForceActivationAt(Height),
 
     /// The mempool should be automatically activated.
+    ///
+    /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
+    /// then the `stop_regex`.
     ShouldAutomaticallyActivate,
 
     /// The mempool should not become active during the test.
+    ///
+    /// # Correctness
+    ///
+    /// Unlike the other mempool behaviours, `zebrad` must stop after logging the stop regex,
+    /// without being killed by [`sync_until`] test harness.
+    ///
+    /// Since it needs to collect all the output,
+    /// the test harness can't kill `zebrad` after it logs the `stop_regex`.
     ShouldNotActivate,
 }
 
@@ -1836,8 +1865,25 @@ impl MempoolBehavior {
         }
     }
 
+    /// Returns `true` if the mempool should activate,
+    /// either by forced or automatic activation.
+    pub fn require_activation(&self) -> bool {
+        self.require_forced_activation() || self.require_automatic_activation()
+    }
+
     /// Returns `true` if the mempool should be forcefully activated at a specified height.
-    pub fn is_forced_activation(&self) -> bool {
+    pub fn require_forced_activation(&self) -> bool {
         matches!(self, MempoolBehavior::ForceActivationAt(_))
+    }
+
+    /// Returns `true` if the mempool should automatically activate.
+    pub fn require_automatic_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ShouldAutomaticallyActivate)
+    }
+
+    /// Returns `true` if the mempool should not activate.
+    #[allow(dead_code)]
+    pub fn require_no_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ShouldNotActivate)
     }
 }
