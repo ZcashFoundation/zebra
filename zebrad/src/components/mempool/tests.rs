@@ -2,8 +2,13 @@ use std::pin::Pin;
 
 use tower::ServiceExt;
 
-use super::{storage::Storage, ActiveState, InboundTxDownloads, Mempool, Request};
-use crate::components::sync::{RecentSyncLengths, SyncStatus};
+use super::{
+    error::MempoolError, storage::Storage, ActiveState, InboundTxDownloads, Mempool, Request,
+};
+use crate::{
+    components::sync::{RecentSyncLengths, SyncStatus},
+    BoxError,
+};
 
 mod prop;
 mod vector;
@@ -46,5 +51,43 @@ impl Mempool {
         self.oneshot(Request::CheckForVerifiedTransactions)
             .await
             .expect("unexpected failure when checking for verified transactions");
+    }
+}
+
+/// Helper trait to extract the [`MempoolError`] from a [`BoxError`].
+pub trait UnboxMempoolError {
+    /// Extract and unbox the [`MempoolError`] stored inside `self`.
+    ///
+    /// # Panics
+    ///
+    /// If the `boxed_error` is not a boxed [`MempoolError`].
+    fn unbox_mempool_error(self) -> MempoolError;
+}
+
+impl UnboxMempoolError for MempoolError {
+    fn unbox_mempool_error(self) -> MempoolError {
+        self
+    }
+}
+
+impl UnboxMempoolError for BoxError {
+    fn unbox_mempool_error(self) -> MempoolError {
+        self.downcast::<MempoolError>()
+            .expect("error is not an expected `MempoolError`")
+            // TODO: use `Box::into_inner` when it becomes stabilized.
+            .as_ref()
+            .clone()
+    }
+}
+
+impl<T, E> UnboxMempoolError for Result<T, E>
+where
+    E: UnboxMempoolError,
+{
+    fn unbox_mempool_error(self) -> MempoolError {
+        match self {
+            Ok(_) => panic!("expected a mempool error, but got a success instead"),
+            Err(error) => error.unbox_mempool_error(),
+        }
     }
 }
