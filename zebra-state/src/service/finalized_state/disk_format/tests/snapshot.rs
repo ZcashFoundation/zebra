@@ -62,7 +62,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
 
     // Assert that empty databases are the same, regardless of the network.
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix("empty");
+    settings.set_snapshot_suffix("no_blocks");
 
     settings.bind(|| snapshot_raw_rocksdb_column_family_data(&state.db, &cf_names));
 
@@ -88,7 +88,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
             .expect("test block is valid");
 
         let mut settings = insta::Settings::clone_current();
-        settings.set_snapshot_suffix(format!("{}-{}", net_suffix, height));
+        settings.set_snapshot_suffix(format!("{}_{}", net_suffix, height));
 
         settings.bind(|| snapshot_raw_rocksdb_column_family_data(&state.db, &cf_names));
     }
