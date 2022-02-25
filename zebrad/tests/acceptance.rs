@@ -1046,6 +1046,9 @@ fn sync_until(
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
     config.consensus.checkpoint_sync = checkpoint_sync;
 
+    // Temporary concurrency change to test full sync speeds (#3582)
+    config.sync.max_concurrent_block_requests = 30;
+
     // Download the parameters at launch, if we're going to need them later.
     if height > network.mandatory_checkpoint_height() {
         config.consensus.debug_skip_parameter_preload = false;
