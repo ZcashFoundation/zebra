@@ -66,16 +66,15 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
 
     settings.bind(|| snapshot_raw_rocksdb_column_family_data(&state.db, &cf_names));
 
-    // Snapshot data for:
+    // Snapshot raw database data for:
     // - mainnet and testnet
     // - genesis, block 1, and block 2
-    //
-    // We limit the number of blocks, because the serialized data is a few kilobytes per block.
     let blocks = match network {
         Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
         Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
     };
 
+    // We limit the number of blocks, because the serialized data is a few kilobytes per block.
     for height in 0..=2 {
         let block: Arc<Block> = blocks
             .get(&height)
