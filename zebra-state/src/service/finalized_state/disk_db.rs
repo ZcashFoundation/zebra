@@ -203,7 +203,7 @@ impl DiskDb {
                     ephemeral: config.ephemeral,
                 };
 
-                db.assert_default_is_empty();
+                db.assert_default_cf_is_empty();
 
                 db
             }
@@ -385,7 +385,7 @@ impl DiskDb {
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
     ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self) {
-        self.assert_default_is_empty();
+        self.assert_default_cf_is_empty();
 
         // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
         //
@@ -464,7 +464,7 @@ impl DiskDb {
     /// # Panics
     ///
     /// If Zebra has a bug where it is storing data in the wrong column family.
-    fn assert_default_is_empty(&self) {
+    fn assert_default_cf_is_empty(&self) {
         if let Some(default_cf) = self.cf_handle("default") {
             assert!(
                 self.is_empty(default_cf),
