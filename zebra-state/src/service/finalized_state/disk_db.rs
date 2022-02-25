@@ -32,6 +32,10 @@ pub struct DiskDb {
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
+///
+/// [`rocksdb::WriteBatch`] is a batched set of database updates,
+/// which must be written to the database using `DiskDb::write(batch)`.
+#[must_use = "batches must be written to the database"]
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
@@ -99,6 +103,8 @@ impl ReadDisk for DiskDb {
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
+        //
+        // TODO: move disk reads to a blocking thread (#2188)
         let value_bytes = self
             .db
             .get_pinned_cf(cf, key_bytes)
@@ -115,6 +121,8 @@ impl ReadDisk for DiskDb {
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
+        //
+        // TODO: move disk reads to a blocking thread (#2188)
         self.db
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur")
@@ -213,11 +221,15 @@ impl DiskDb {
     }
 
     /// Returns an iterator over the keys in `cf_name`, starting from the first key.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn forward_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
         self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::Start)
     }
 
     /// Returns a reverse iterator over the keys in `cf_name`, starting from the last key.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn reverse_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
         self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::End)
     }
