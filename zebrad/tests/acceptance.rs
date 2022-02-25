@@ -54,6 +54,10 @@ use zebrad::{
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 
+/// The amount of time we wait between launching two
+/// conflicting nodes.
+const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
+
 /// Returns a config with:
 /// - a Zcash listener on an unused port on IPv4 localhost, and
 /// - an ephemeral state,
@@ -1839,6 +1843,9 @@ where
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
+
+    // Wait a bit before launching the second node.
+    std::thread::sleep(BETWEEN_NODES_DELAY);
 
     // Spawn the second node
     let node2 = second_dir.spawn_child(&["start"]);
