@@ -16,10 +16,16 @@
 //!
 //! Test shielded data, and data activated in Overwinter and later network upgrades.
 
-use zebra_chain::parameters::Network::*;
+use std::sync::Arc;
+
+use zebra_chain::{
+    block::Block,
+    parameters::Network::{self, *},
+    serialization::ZcashDeserializeInto,
+};
 
 use crate::{
-    service::finalized_state::{disk_db::DiskDb, FinalizedState},
+    service::finalized_state::{disk_db::DiskDb, disk_format::tests::KV, FinalizedState},
     Config,
 };
 
@@ -27,49 +33,97 @@ use crate::{
 ///
 /// These snapshots contain the `default` column family, but it is not used by Zebra.
 #[test]
-fn test_raw_rocksdb_column_family_data() {
+fn test_raw_rocksdb_column_families() {
     zebra_test::init();
 
-    let state = FinalizedState::new(&Config::ephemeral(), Mainnet);
+    test_raw_rocksdb_column_families_with_network(Mainnet);
+    test_raw_rocksdb_column_families_with_network(Testnet);
+}
+
+/// Snapshot raw column families for `network`.
+///
+/// See [`test_raw_rocksdb_column_families`].
+fn test_raw_rocksdb_column_families_with_network(network: Network) {
+    let mut net_suffix = network.to_string();
+    net_suffix.make_ascii_lowercase();
+
+    let mut state = FinalizedState::new(&Config::ephemeral(), Mainnet);
 
     // Snapshot the column family names
-
     let mut cf_names = state.db.list_cf().expect("empty database is valid");
 
     // The order that RocksDB returns column families is irrelevant,
     // because we always access them by name.
     cf_names.sort();
 
+    // Assert that column family names are the same, regardless of the network.
+    // Later, we check they are also the same regardless of the block height.
     insta::assert_ron_snapshot!("column_family_names", cf_names);
 
-    // TODO: repeat for genesis, block 1, block 2,
+    // Assert that empty databases are the same, regardless of the network.
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix("empty");
+
+    settings.bind(|| snapshot_raw_rocksdb_column_family_data(&state.db, &cf_names));
+
+    // Snapshot data for:
+    // - mainnet and testnet
+    // - genesis, block 1, and block 2
     //
-    // https://docs.rs/insta/latest/insta/macro.with_settings.html
-    // https://docs.rs/insta/latest/insta/struct.Settings.html#method.set_snapshot_suffix
-    snapshot_raw_rocksdb_column_family_data(&state.db, cf_names);
+    // We limit the number of blocks, because the serialized data is a few kilobytes per block.
+    let blocks = match network {
+        Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
+        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+    };
+
+    for height in 0..=2 {
+        let block: Arc<Block> = blocks
+            .get(&height)
+            .expect("block height has test data")
+            .zcash_deserialize_into()
+            .expect("test data deserializes");
+
+        state
+            .commit_finalized_direct(block.into(), "snapshot tests")
+            .expect("test block is valid");
+
+        let mut settings = insta::Settings::clone_current();
+        settings.set_snapshot_suffix(format!("{}-{}", net_suffix, height));
+
+        settings.bind(|| snapshot_raw_rocksdb_column_family_data(&state.db, &cf_names));
+    }
 }
 
 /// Snapshot the data in each column family, using `cargo insta` and RON serialization.
-fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: Vec<String>) {
+fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[String]) {
     let mut new_cf_names = db.list_cf().expect("empty database is valid");
     new_cf_names.sort();
 
-    // Check there are no extra column families
+    // Assert that column family names are the same, regardless of the network or block height.
     assert_eq!(
         original_cf_names, new_cf_names,
-        "unexpected extra column families"
+        "unexpected extra column families",
     );
 
     // Now run the data snapshots
     for cf_name in original_cf_names {
         let cf_handle = db
-            .cf_handle(&cf_name)
-            .expect("RocksDB provided correct names");
+            .cf_handle(cf_name)
+            .expect("RocksDB API provides correct names");
 
         let mut cf_iter = db.forward_iterator(cf_handle);
-        let cf_data: Vec<_> = cf_iter.by_ref().collect();
 
-        insta::assert_ron_snapshot!(format!("{}_raw_data", cf_name), cf_data);
+        // The default raw data serialization is very verbose, so we hex-encode the bytes.
+        let cf_data: Vec<KV> = cf_iter
+            .by_ref()
+            .map(|(key, value)| KV::new(key, value))
+            .collect();
+
+        if cf_name == "default" {
+            assert_eq!(cf_data.len(), 0, "default column family is never used");
+        } else {
+            insta::assert_ron_snapshot!(format!("{}_raw_data", cf_name), cf_data);
+        }
 
         assert_eq!(
             cf_iter.status(),
