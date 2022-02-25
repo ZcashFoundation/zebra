@@ -1472,11 +1472,10 @@ async fn rpc_endpoint() -> Result<()> {
     config.rpc.listen_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let mut child = dir.spawn_child(&["start"])?;
 
-    // Run `zebrad` for a few seconds before testing the endpoint
-    // Since we're an async function, we have to use a sleep future, not thread sleep.
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    // Wait until port is open.
+    child.expect_stdout_line_matches(format!("Opened RPC endpoint at {}", endpoint).as_str())?;
 
     // Create an http client
     let client = Client::new();
@@ -1511,9 +1510,6 @@ async fn rpc_endpoint() -> Result<()> {
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    // Make sure RPC server was started
-    output.stdout_line_contains(format!("Opened RPC endpoint at {}", endpoint).as_str())?;
 
     // [Note on port conflict](#Note on port conflict)
     output
