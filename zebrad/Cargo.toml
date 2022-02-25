@@ -30,7 +30,7 @@ tokio = { version = "1.16.1", features = ["time", "rt-multi-thread", "macros", "
 tower = { version = "0.4.12", features = ["hedge", "limit"] }
 pin-project = "1.0.7"
 
-color-eyre = { version = "0.5.11", features = ["issue-url"] }
+color-eyre = { version = "0.6.1", features = ["issue-url"] }
 thiserror = "1"
 
 tracing = "0.1"
