@@ -105,6 +105,8 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
         "unexpected extra column families",
     );
 
+    let mut empty_column_families = Vec::new();
+
     // Now run the data snapshots
     for cf_name in original_cf_names {
         let cf_handle = db
@@ -121,6 +123,9 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
 
         if cf_name == "default" {
             assert_eq!(cf_data.len(), 0, "default column family is never used");
+        } else if cf_data.is_empty() {
+            // distinguish column family names from empty column families
+            empty_column_families.push(format!("{}: no entries", cf_name));
         } else {
             insta::assert_ron_snapshot!(format!("{}_raw_data", cf_name), cf_data);
         }
@@ -131,4 +136,6 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             "unexpected column family iterator error",
         );
     }
+
+    insta::assert_ron_snapshot!("empty_column_families", empty_column_families);
 }
