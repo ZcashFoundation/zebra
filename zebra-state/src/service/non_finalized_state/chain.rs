@@ -6,7 +6,7 @@ use std::{
     ops::Deref,
 };
 
-use multiset::HashMultiSet;
+use mset::MultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
@@ -60,7 +60,7 @@ pub struct Chain {
     pub(crate) history_tree: HistoryTree,
 
     /// The Sprout anchors created by `blocks`.
-    pub(crate) sprout_anchors: HashMultiSet<sprout::tree::Root>,
+    pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
     /// The Sprout anchors created by each block in `blocks`.
     pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
     /// The Sprout note commitment tree for each anchor.
@@ -68,11 +68,11 @@ pub struct Chain {
     pub(crate) sprout_trees_by_anchor:
         HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
     /// The Sapling anchors created by `blocks`.
-    pub(crate) sapling_anchors: HashMultiSet<sapling::tree::Root>,
+    pub(crate) sapling_anchors: MultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
     pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// The Orchard anchors created by `blocks`.
-    pub(crate) orchard_anchors: HashMultiSet<orchard::tree::Root>,
+    pub(crate) orchard_anchors: MultiSet<orchard::tree::Root>,
     /// The Orchard anchors created by each block in `blocks`.
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
@@ -119,12 +119,12 @@ impl Chain {
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             spent_utxos: Default::default(),
-            sprout_anchors: HashMultiSet::new(),
+            sprout_anchors: MultiSet::new(),
             sprout_anchors_by_height: Default::default(),
             sprout_trees_by_anchor: Default::default(),
-            sapling_anchors: HashMultiSet::new(),
+            sapling_anchors: MultiSet::new(),
             sapling_anchors_by_height: Default::default(),
-            orchard_anchors: HashMultiSet::new(),
+            orchard_anchors: MultiSet::new(),
             orchard_anchors_by_height: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),

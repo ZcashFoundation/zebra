@@ -471,7 +471,7 @@ proptest! {
 
         let (mut state_service, _, _) = StateService::new(Config::ephemeral(), network);
 
-        prop_assert_eq!(state_service.disk.current_value_pool(), ValueBalance::zero());
+        prop_assert_eq!(state_service.disk.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
             state_service.mem.best_chain().map(|chain| chain.chain_value_pools).unwrap_or_else(ValueBalance::zero),
             ValueBalance::zero()
@@ -495,7 +495,7 @@ proptest! {
             state_service.queue_and_commit_finalized(block.clone());
 
             prop_assert_eq!(
-                state_service.disk.current_value_pool(),
+                state_service.disk.finalized_value_pool(),
                 expected_finalized_value_pool.clone()?.constrain()?
             );
 
@@ -504,7 +504,7 @@ proptest! {
             let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
             expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
             prop_assert_eq!(
-                state_service.disk.current_value_pool(),
+                state_service.disk.finalized_value_pool(),
                 expected_transparent_pool
             );
         }
