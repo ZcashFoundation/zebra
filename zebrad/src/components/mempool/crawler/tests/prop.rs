@@ -10,18 +10,21 @@ use tokio::time;
 
 use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 use zebra_network as zn;
+use zebra_node_services::mempool::Gossip;
 use zebra_state::ChainTipSender;
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
-use crate::components::{
-    mempool::{
-        self,
-        crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
-        downloads::Gossip,
-        error::MempoolError,
-        Config,
+use crate::{
+    components::{
+        mempool::{
+            self,
+            crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
+            error::MempoolError,
+            Config,
+        },
+        sync::RecentSyncLengths,
     },
-    sync::RecentSyncLengths,
+    BoxError,
 };
 
 /// The number of iterations to crawl while testing.
@@ -310,8 +313,13 @@ async fn crawler_iteration(
 async fn respond_to_queue_request(
     mempool: &mut MockMempool,
     expected_transaction_ids: HashSet<UnminedTxId>,
-    response: Vec<Result<(), MempoolError>>,
+    response: impl IntoIterator<Item = Result<(), MempoolError>>,
 ) -> Result<(), TestCaseError> {
+    let response = response
+        .into_iter()
+        .map(|result| result.map_err(BoxError::from))
+        .collect();
+
     mempool
         .expect_request_that(|req| {
             if let mempool::Request::Queue(req) = req {
