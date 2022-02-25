@@ -8,6 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+zebra-chain = { path = "../zebra-chain" }
 zebra-node-services = { path = "../zebra-node-services" }
 
 zebra-network = { path = "../zebra-network" }
@@ -27,6 +28,7 @@ tower = "0.4.12"
 tracing = "0.1"
 tracing-futures = "0.2"
 
+hex = "0.4.3"
 serde = { version = "1", features = ["serde_derive"] }
 
 [dev-dependencies]

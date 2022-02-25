@@ -5700,6 +5700,7 @@ name = "zebra-rpc"
 version = "1.0.0-beta.0"
 dependencies = [
  "futures",
+ "hex",
  "hyper",
  "jsonrpc-core",
  "jsonrpc-derive",
@@ -5709,6 +5710,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-futures",
+ "zebra-chain",
  "zebra-network",
  "zebra-node-services",
  "zebra-test",

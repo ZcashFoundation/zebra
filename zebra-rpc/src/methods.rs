@@ -6,10 +6,13 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
-use jsonrpc_core::{self, BoxFuture, Result};
+use futures::FutureExt;
+use hex::FromHex;
+use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tower::buffer::Buffer;
+use tower::{buffer::Buffer, ServiceExt};
 
+use zebra_chain::{serialization::ZcashDeserialize, transaction::Transaction};
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
 
@@ -120,7 +123,47 @@ where
         &self,
         raw_transaction_hex: String,
     ) -> BoxFuture<Result<SentTransactionHash>> {
-        todo!();
+        let mempool = self.mempool.clone();
+
+        async move {
+            let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
+                Error::invalid_params("raw transaction is not specified as a hex string")
+            })?;
+            let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
+                .map_err(|_| Error::invalid_params("raw transaction is invalid"))?;
+
+            let transaction_hash = raw_transaction.hash();
+
+            let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
+            let request = mempool::Request::Queue(vec![transaction_parameter]);
+
+            let response = mempool.oneshot(request).await.map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
+            let queue_results = match response {
+                mempool::Response::Queued(results) => results,
+                _ => unreachable!("incorrect response variant from mempool service"),
+            };
+
+            assert_eq!(
+                queue_results.len(),
+                1,
+                "mempool service returned more results than expected"
+            );
+
+            match &queue_results[0] {
+                Ok(()) => Ok(SentTransactionHash(transaction_hash.to_string())),
+                Err(error) => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                }),
+            }
+        }
+        .boxed()
     }
 }
 
