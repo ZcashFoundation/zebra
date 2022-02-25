@@ -18,7 +18,10 @@
 
 use zebra_chain::parameters::Network::*;
 
-use crate::{service::finalized_state::FinalizedState, Config};
+use crate::{
+    service::finalized_state::{disk_db::DiskDb, FinalizedState},
+    Config,
+};
 
 /// Snapshot test for RocksDB column families, and their key-value data.
 ///
@@ -27,18 +30,11 @@ use crate::{service::finalized_state::FinalizedState, Config};
 fn test_raw_rocksdb_column_family_data() {
     zebra_test::init();
 
-    let empty_state = FinalizedState::new(&Config::ephemeral(), Mainnet);
-    let db = empty_state.db;
-
-    // TODO: repeat for genesis, block 1, block 2,
-    //       asserting that the column family names remain the same each time
-    //
-    // https://docs.rs/insta/latest/insta/macro.with_settings.html
-    // https://docs.rs/insta/latest/insta/struct.Settings.html#method.set_snapshot_suffix
+    let state = FinalizedState::new(&Config::ephemeral(), Mainnet);
 
     // Snapshot the column family names
 
-    let mut cf_names = db.list_cf().expect("empty database is valid");
+    let mut cf_names = state.db.list_cf().expect("empty database is valid");
 
     // The order that RocksDB returns column families is irrelevant,
     // because we always access them by name.
@@ -46,9 +42,26 @@ fn test_raw_rocksdb_column_family_data() {
 
     insta::assert_ron_snapshot!("column_family_names", cf_names);
 
-    // Snapshot the data in each column family
+    // TODO: repeat for genesis, block 1, block 2,
+    //
+    // https://docs.rs/insta/latest/insta/macro.with_settings.html
+    // https://docs.rs/insta/latest/insta/struct.Settings.html#method.set_snapshot_suffix
+    snapshot_raw_rocksdb_column_family_data(&state.db, cf_names);
+}
 
-    for cf_name in cf_names {
+/// Snapshot the data in each column family, using `cargo insta` and RON serialization.
+fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: Vec<String>) {
+    let mut new_cf_names = db.list_cf().expect("empty database is valid");
+    new_cf_names.sort();
+
+    // Check there are no extra column families
+    assert_eq!(
+        original_cf_names, new_cf_names,
+        "unexpected extra column families"
+    );
+
+    // Now run the data snapshots
+    for cf_name in original_cf_names {
         let cf_handle = db
             .cf_handle(&cf_name)
             .expect("RocksDB provided correct names");
