@@ -1,7 +1,0 @@
----
-source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 117
-expression: cf_data
-
----
-[]
