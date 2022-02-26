@@ -57,7 +57,7 @@ jobs:
       with:
         target: builder
         context: .
-        file: ./docker/Dockerfile.params
+        file: ./docker/zcash-params/Dockerfile
         tags: |
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}

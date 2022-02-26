@@ -63,7 +63,7 @@ jobs:
       with:
         target: builder
         context: .
-        file: ./zebra/docker/Dockerfile.lightwalletd
+        file: ./zebra/docker/zcash-lightwalletd/Dockerfile
         tags: |
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
