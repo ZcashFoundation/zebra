@@ -4,6 +4,7 @@ ARG LWD_HTTP_PORT=9068
 ##
 ## Build
 ##
+
 FROM golang:1.17 AS build
 
 # Create and change to the app directory.
