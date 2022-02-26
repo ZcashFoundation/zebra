@@ -1,7 +1,6 @@
 ARG ZCASHD_CONF_PATH=/etc/zcash.conf
 ARG LWD_GRPC_PORT=9067
 ARG LWD_HTTP_PORT=9068
-
 ##
 ## Build
 ##
