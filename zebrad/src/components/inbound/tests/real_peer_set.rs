@@ -22,13 +22,14 @@ use zebra_network::{
     connect_isolated_tcp_direct_with_inbound, types::InventoryHash, Config as NetworkConfig,
     InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
+use zebra_node_services::mempool;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
         inbound::{Inbound, InboundSetupData},
-        mempool::{self, gossip_mempool_transaction_id, Mempool},
+        mempool::{gossip_mempool_transaction_id, Config as MempoolConfig, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
     BoxError,
@@ -697,7 +698,7 @@ async fn setup(
         .service(BoxService::new(mock_tx_verifier.clone()));
 
     // Mempool
-    let mempool_config = mempool::Config::default();
+    let mempool_config = MempoolConfig::default();
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &mempool_config,
         peer_set.clone(),

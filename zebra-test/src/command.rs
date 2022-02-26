@@ -382,11 +382,17 @@ impl<T> TestChild<T> {
 }
 
 pub struct TestOutput<T> {
+    /// The test directory for this test output.
+    ///
+    /// Keeps the test dir around from `TestChild`,
+    /// so it doesn't get deleted during `wait_with_output`.
     #[allow(dead_code)]
-    // this just keeps the test dir around from `TestChild` so it doesn't get
-    // deleted during `wait_with_output`
-    dir: Option<T>,
+    pub dir: Option<T>,
+
+    /// The test command for this test output.
     pub cmd: String,
+
+    /// The test exit status, standard out, and standard error.
     pub output: Output,
 }
 

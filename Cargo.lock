@@ -5689,6 +5689,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zebra-node-services"
+version = "1.0.0-beta.5"
+dependencies = [
+ "zebra-chain",
+]
+
+[[package]]
 name = "zebra-rpc"
 version = "1.0.0-beta.0"
 dependencies = [
@@ -5832,6 +5839,7 @@ dependencies = [
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",
+ "zebra-node-services",
  "zebra-rpc",
  "zebra-state",
  "zebra-test",
