@@ -52,7 +52,7 @@ use zebrad::{
 ///
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
-const LAUNCH_DELAY: Duration = Duration::from_secs(10);
+const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
 /// The amount of time we wait between launching two
 /// conflicting nodes.
