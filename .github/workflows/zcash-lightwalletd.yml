@@ -10,6 +10,7 @@ on:
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
+      - '/docker/zcash-lightwalletd/Dockerfile'
       - '.github/workflows/zcash-lightwalletd.yml'
 
 env:

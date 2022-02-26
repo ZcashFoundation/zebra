@@ -17,7 +17,7 @@ on:
       - '**/*.txt'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
-      - 'docker/**'
+      - '/docker/**'
       - '.github/workflows/test.yml'
 
 env:
