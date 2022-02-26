@@ -56,7 +56,7 @@ const LAUNCH_DELAY: Duration = Duration::from_secs(10);
 
 /// The amount of time we wait between launching two
 /// conflicting nodes.
-const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
+const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
 
 /// Returns a config with:
 /// - a Zcash listener on an unused port on IPv4 localhost, and
