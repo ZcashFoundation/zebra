@@ -4,6 +4,7 @@
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
 
+use std::sync::Mutex;
 use tracing::*;
 use tracing_futures::Instrument;
 
@@ -22,9 +23,14 @@ pub mod compatibility;
 #[derive(Clone, Debug)]
 pub struct RpcServer;
 
+lazy_static::lazy_static! {
+    /// Storage for the application version string coming from zebrad.
+    pub static ref APP_VERSION: Mutex<Vec<u8>> = Mutex::new(vec![]);
+}
+
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn(config: Config) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(config: Config, app_version: String) -> tokio::task::JoinHandle<()> {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
@@ -54,6 +60,12 @@ impl RpcServer {
                     info!("Stopping RPC endpoint");
                 })
             };
+
+            APP_VERSION
+                .lock()
+                .expect("mutex should be unpoisoned")
+                .append(&mut app_version.as_bytes().to_vec());
+
             tokio::task::spawn_blocking(server)
         } else {
             // There is no RPC port, so the RPC task does nothing.

@@ -5704,6 +5704,7 @@ dependencies = [
  "jsonrpc-core",
  "jsonrpc-derive",
  "jsonrpc-http-server",
+ "lazy_static",
  "serde",
  "tokio",
  "tracing",
