@@ -79,7 +79,7 @@ pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GA
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_LOOKAHEAD_LIMIT`] for details.
-pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 5;
+pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 7;
 
 /// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
 ///
