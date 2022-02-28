@@ -27,10 +27,7 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{
-    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::Path, path::PathBuf,
-    time::Duration,
-};
+use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -1474,12 +1471,28 @@ async fn tracing_endpoint() -> Result<()> {
 
 /// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
 ///
-/// This test doesn't work on Windows, and it is ignored by default on other platforms.
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
-#[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
+    use std::net::SocketAddr;
+
     zebra_test::init();
+
+    // Skip the test unless we specifically asked for it
+    //
+    // TODO: check if the lightwalletd binary is in the PATH?
+    //       (this doesn't seem to be implemented in the standard library)
+    if env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
+        tracing::info!(
+            "skipped lightwalletd integration test, \
+             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
+        );
+
+        return Ok(());
+    }
 
     // Launch zebrad
 

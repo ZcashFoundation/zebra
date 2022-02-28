@@ -30,13 +30,10 @@ use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
-use zebra_chain::{
-    block::Height,
-    chain_tip::ChainTip,
-    transaction::{UnminedTx, UnminedTxId},
-};
+use zebra_chain::{block::Height, chain_tip::ChainTip, transaction::UnminedTxId};
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
+use zebra_node_services::mempool::{Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -65,10 +62,10 @@ pub use storage::{
 };
 
 #[cfg(test)]
-pub use storage::tests::unmined_transactions_in_blocks;
+pub use self::{storage::tests::unmined_transactions_in_blocks, tests::UnboxMempoolError};
 
 use downloads::{
-    Downloads as TxDownloads, Gossip, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -78,87 +75,6 @@ type TxVerifier = Buffer<
     transaction::Request,
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
-
-/// A mempool service request.
-///
-/// Requests can query the current set of mempool transactions,
-/// queue transactions to be downloaded and verified, or
-/// run the mempool to check for newly verified transactions.
-///
-/// Requests can't modify the mempool directly,
-/// because all mempool transactions must be verified.
-#[derive(Debug, Eq, PartialEq)]
-#[allow(dead_code)]
-pub enum Request {
-    /// Query all transaction IDs in the mempool.
-    TransactionIds,
-
-    /// Query matching  transactions in the mempool,
-    /// using a unique set of [`UnminedTxId`]s.
-    TransactionsById(HashSet<UnminedTxId>),
-
-    /// Query matching cached rejected transaction IDs in the mempool,
-    /// using a unique set of [`UnminedTxId`]s.
-    RejectedTransactionIds(HashSet<UnminedTxId>),
-
-    /// Queue a list of gossiped transactions or transaction IDs, or
-    /// crawled transaction IDs.
-    ///
-    /// The transaction downloader checks for duplicates across IDs and transactions.
-    Queue(Vec<Gossip>),
-
-    /// Check for newly verified transactions.
-    ///
-    /// The transaction downloader does not push transactions into the mempool.
-    /// So a task should send this request regularly (every 5-10 seconds).
-    ///
-    /// These checks also happen for other request variants,
-    /// but we can't rely on peers to send queries regularly,
-    /// and crawler queue requests depend on peer responses.
-    /// Also, crawler requests aren't frequent enough for transaction propagation.
-    ///
-    /// # Correctness
-    ///
-    /// This request is required to avoid hangs in the mempool.
-    ///
-    /// The queue checker task can't call `poll_ready` directly on the [`Mempool`] service,
-    /// because the mempool service is wrapped in a `Buffer`.
-    /// Calling [`Buffer::poll_ready`] reserves a buffer slot, which can cause hangs when
-    /// too many slots are reserved but unused:
-    /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
-    CheckForVerifiedTransactions,
-}
-
-/// A response to a mempool service request.
-///
-/// Responses can read the current set of mempool transactions,
-/// check the queued status of transactions to be downloaded and verified, or
-/// confirm that the mempool has been checked for newly verified transactions.
-#[derive(Debug)]
-pub enum Response {
-    /// Returns all transaction IDs from the mempool.
-    TransactionIds(HashSet<UnminedTxId>),
-
-    /// Returns matching transactions from the mempool.
-    ///
-    /// Since the [`TransactionsById`] request is unique,
-    /// the response transactions are also unique.
-    Transactions(Vec<UnminedTx>),
-
-    /// Returns matching cached rejected transaction IDs from the mempool,
-    RejectedTransactionIds(HashSet<UnminedTxId>),
-
-    /// Returns a list of queue results.
-    ///
-    /// These are the results of the initial queue checks.
-    /// The transaction may also fail download or verification later.
-    ///
-    /// Each result matches the request at the corresponding vector index.
-    Queued(Vec<Result<(), MempoolError>>),
-
-    /// Confirms that the mempool has checked for recently verified transactions.
-    CheckedForVerifiedTransactions,
-}
 
 /// The state of the mempool.
 ///
@@ -489,13 +405,14 @@ impl Service<Request> for Mempool {
 
                 // Queue mempool candidates
                 Request::Queue(gossiped_txs) => {
-                    let rsp: Vec<Result<(), MempoolError>> = gossiped_txs
+                    let rsp: Vec<Result<(), BoxError>> = gossiped_txs
                         .into_iter()
-                        .map(|gossiped_tx| {
+                        .map(|gossiped_tx| -> Result<(), MempoolError> {
                             storage.should_download_or_verify(gossiped_tx.id())?;
                             tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
                             Ok(())
                         })
+                        .map(|result| result.map_err(BoxError::from))
                         .collect();
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
@@ -522,8 +439,10 @@ impl Service<Request> for Mempool {
                     Request::Queue(gossiped_txs) => Response::Queued(
                         // Special case; we can signal the error inside the response,
                         // because the inbound service ignores inner errors.
-                        iter::repeat(Err(MempoolError::Disabled))
+                        iter::repeat(MempoolError::Disabled)
                             .take(gossiped_txs.len())
+                            .map(BoxError::from)
+                            .map(Err)
                             .collect(),
                     ),
 
