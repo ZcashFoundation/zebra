@@ -54,7 +54,7 @@ static INIT: Once = Once::new();
 /// reporting hooks
 pub fn init() {
     panic!("deliberately fail all the tests");
-    
+
     INIT.call_once(|| {
         let fmt_layer = fmt::layer().with_target(false);
         // Use the RUST_LOG env var, or by default:
