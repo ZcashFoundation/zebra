@@ -332,7 +332,7 @@ where
         fs::create_dir_all(dir)?;
 
         let config_file = dir.join("lightwalletd-zcash.conf");
-        fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
+        fs::write(config_file, lightwalletd_config.as_bytes())?;
 
         Ok(self)
     }
