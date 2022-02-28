@@ -4,7 +4,6 @@
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
 
-use std::sync::Mutex;
 use tracing::*;
 use tracing_futures::Instrument;
 
@@ -23,21 +22,19 @@ pub mod compatibility;
 #[derive(Clone, Debug)]
 pub struct RpcServer;
 
-lazy_static::lazy_static! {
-    /// Storage for the application version string coming from zebrad.
-    pub static ref APP_VERSION: Mutex<Vec<u8>> = Mutex::new(vec![]);
-}
-
 impl RpcServer {
     /// Start a new RPC server endpoint
     pub fn spawn(config: Config, app_version: String) -> tokio::task::JoinHandle<()> {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
+            // Initialize the rpc methods with the zebra version
+            let rpc_impl = RpcImpl { app_version };
+
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
                 jsonrpc_core::IoHandler::with_compatibility(jsonrpc_core::Compatibility::Both);
-            io.extend_with(RpcImpl.to_delegate());
+            io.extend_with(rpc_impl.to_delegate());
 
             let server = ServerBuilder::new(io)
                 // use the same tokio executor as the rest of Zebra
@@ -60,11 +57,6 @@ impl RpcServer {
                     info!("Stopping RPC endpoint");
                 })
             };
-
-            APP_VERSION
-                .lock()
-                .expect("mutex should be unpoisoned")
-                .append(&mut app_version.as_bytes().to_vec());
 
             tokio::task::spawn_blocking(server)
         } else {

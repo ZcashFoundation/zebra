@@ -9,7 +9,6 @@
 use jsonrpc_core::{self, Result};
 use jsonrpc_derive::rpc;
 
-use crate::server::APP_VERSION;
 use zebra_network::constants::USER_AGENT;
 
 #[rpc(server)]
@@ -48,17 +47,15 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
-pub struct RpcImpl;
+
+pub struct RpcImpl {
+    /// Zebra's application version.
+    pub app_version: String,
+}
 impl Rpc for RpcImpl {
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
-            build: String::from_utf8(
-                APP_VERSION
-                    .lock()
-                    .expect("mutex should be unpoisoned")
-                    .to_vec(),
-            )
-            .expect("app version should be valid utf8"),
+            build: self.app_version.clone(),
             subversion: USER_AGENT.into(),
         };
 
