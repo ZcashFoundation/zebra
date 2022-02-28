@@ -14,11 +14,14 @@ use zcash_script::{
     zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
     zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
     zcash_script_error_t_zcash_script_ERR_TX_INDEX,
+    zcash_script_error_t_zcash_script_ERR_TX_INVALID_SCRIPT,
     zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
 };
 
 use zebra_chain::{
-    parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
+    parameters::{ConsensusBranchId, Network},
+    serialization::ZcashSerialize,
+    transaction::Transaction,
     transparent,
 };
 
@@ -38,6 +41,9 @@ pub enum Error {
     /// tx is an invalid size for it's protocol
     #[non_exhaustive]
     TxSizeMismatch,
+    /// script is invalid
+    #[non_exhaustive]
+    TxInvalidScript,
     /// encountered unknown error kind from zcash_script: {0}
     #[non_exhaustive]
     Unknown(zcash_script_error_t),
@@ -51,6 +57,7 @@ impl From<zcash_script_error_t> for Error {
             zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE => Error::TxDeserialize,
             zcash_script_error_t_zcash_script_ERR_TX_INDEX => Error::TxIndex,
             zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
+            zcash_script_error_t_zcash_script_ERR_TX_INVALID_SCRIPT => Error::TxInvalidScript,
             unknown => Error::Unknown(unknown),
         }
     }
@@ -226,6 +233,49 @@ impl CachedFfiTransaction {
             Err(Error::from(err))
         }
     }
+
+    /// Returns the destination address of the transparent output at `output_index`.
+    pub fn transparent_output_address(
+        &self,
+        network: Network,
+        output_index: usize,
+    ) -> Result<transparent::Address, Error> {
+        let mut err = 0;
+        let mut addr_type = 0;
+
+        // This conversion is useful on some platforms, but not others.
+        #[allow(clippy::useless_conversion)]
+        let n_out = output_index
+            .try_into()
+            .expect("transaction indexes are much less than c_uint::MAX");
+
+        let address_hash = unsafe {
+            zcash_script::zcash_script_transparent_output_address_precomputed(
+                self.precomputed,
+                n_out,
+                &mut addr_type,
+                &mut err,
+            )
+        };
+
+        if err == zcash_script_error_t_zcash_script_ERR_OK {
+            if addr_type == zcash_script::zcash_script_type_t_zcash_script_TYPE_P2PKH {
+                Ok(transparent::Address::from_pub_key_hash(
+                    network,
+                    address_hash.value,
+                ))
+            } else if addr_type == zcash_script::zcash_script_type_t_zcash_script_TYPE_P2SH {
+                Ok(transparent::Address::from_script_hash(
+                    network,
+                    address_hash.value,
+                ))
+            } else {
+                unreachable!("only P2PKH and P2SH are recognized by zcash_script");
+            }
+        } else {
+            Err(Error::from(err))
+        }
+    }
 }
 
 // # SAFETY
@@ -279,7 +329,9 @@ mod tests {
     use std::convert::TryInto;
     use std::sync::Arc;
     use zebra_chain::{
-        parameters::NetworkUpgrade::*, serialization::ZcashDeserializeInto, transparent,
+        parameters::{Network, NetworkUpgrade::*},
+        serialization::ZcashDeserializeInto,
+        transparent,
     };
     use zebra_test::prelude::*;
 
@@ -323,6 +375,35 @@ mod tests {
 
         let cached_tx = super::CachedFfiTransaction::new(transaction, Vec::new());
         assert_eq!(cached_tx.legacy_sigop_count()?, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_transparent_output_address() -> Result<()> {
+        zebra_test::init();
+
+        let transaction =
+            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+
+        // Hashes were extracted from the transaction (parsed with zebra-chain,
+        // then manually extracted from lock_script).
+        // Final expected values were generated with https://secretscan.org/PrivateKeyHex,
+        // by filling field 4 with the prefix followed by the address hash.
+        // Refer to <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
+        // for the prefixes.
+
+        // Script hash 1b8a9bda4b62cd0d0582b55455d0778c86f8628f
+        let cached_tx = super::CachedFfiTransaction::new(transaction, vec![]);
+        let addr = cached_tx.transparent_output_address(Network::Mainnet, 0)?;
+        assert_eq!(addr.to_string(), "t3M5FDmPfWNRG3HRLddbicsuSCvKuk9hxzZ");
+        let addr = cached_tx.transparent_output_address(Network::Testnet, 0)?;
+        assert_eq!(addr.to_string(), "t294SGSVoNq2daz15ZNbmAW65KQZ5e3nN5G");
+        // Public key hash e4ff5512ffafe9287992a1cd177ca6e408e03003
+        let addr = cached_tx.transparent_output_address(Network::Mainnet, 1)?;
+        assert_eq!(addr.to_string(), "t1ekRwsd4LaSsd6NXgsx66q2HxQWTLCF44y");
+        let addr = cached_tx.transparent_output_address(Network::Testnet, 1)?;
+        assert_eq!(addr.to_string(), "tmWbBGi7TjExNmLZyMcFpxVh3ZPbGrpbX3H");
 
         Ok(())
     }

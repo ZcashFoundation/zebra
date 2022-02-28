@@ -192,6 +192,22 @@ impl ToAddressWithNetwork for PublicKey {
 }
 
 impl Address {
+    /// Create an address for the given public key hash and network.
+    pub fn from_pub_key_hash(network: Network, pub_key_hash: [u8; 20]) -> Self {
+        Self::PayToPublicKeyHash {
+            network,
+            pub_key_hash,
+        }
+    }
+
+    /// Create an address for the given script hash and network.
+    pub fn from_script_hash(network: Network, script_hash: [u8; 20]) -> Self {
+        Self::PayToScriptHash {
+            network,
+            script_hash,
+        }
+    }
+
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
     /// addresses.
