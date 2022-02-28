@@ -273,7 +273,7 @@ where
         Ok(self)
     }
 
-    fn spawn_lightwalletd_child(self, args: &[&str]) -> Result<TestChild<Self>> {
+    fn spawn_lightwalletd_child(self, extra_args: &[&str]) -> Result<TestChild<Self>> {
         let dir = self.as_ref().to_owned();
         let default_config_path = dir.join("lightwalletd-zcash.conf");
 
@@ -284,7 +284,7 @@ where
 
         // By default, launch a working test instance with logging,
         // and avoid port conflicts.
-        let mut extra_args: Vec<_> = vec![
+        let mut args: Vec<_> = vec![
             // the fake zcashd conf we just wrote
             "--zcash-conf-path",
             default_config_path
@@ -310,9 +310,9 @@ where
             // don't require a TLS certificate for the HTTP server
             "--no-tls-very-insecure",
         ];
-        extra_args.extend_from_slice(args);
+        args.extend_from_slice(extra_args);
 
-        self.spawn_child_with_command("lightwalletd", &extra_args)
+        self.spawn_child_with_command("lightwalletd", &args)
     }
 
     fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {
