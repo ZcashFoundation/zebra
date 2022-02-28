@@ -55,7 +55,6 @@ COPY --from=build $ZCASHD_CONF_PATH ./
 
 EXPOSE 9067
 EXPOSE 9068
-EXPOSE 8232
 
 ENTRYPOINT ["lightwalletd"]
 CMD ["--no-tls-very-insecure", "--grpc-bind-addr=0.0.0.0:9067",  "--http-bind-addr=0.0.0.0:9068", "--log-file=/dev/stdout", "--log-level=7"]
