@@ -18,7 +18,7 @@ pub trait Rpc {
     ///
     /// Returns software information from the RPC server running Zebra.
     ///
-    /// zcadhd reference: <https://zcash.github.io/rpc/getinfo.html>
+    /// zcashd reference: <https://zcash.github.io/rpc/getinfo.html>
     ///
     /// Result:
     /// {
@@ -33,6 +33,7 @@ pub trait Rpc {
     /// show the fields we are exposing. However, this fields are part of the output
     /// as shown in the following zcashd code:
     /// <https://github.com/zcash/zcash/blob/v4.6.0-1/src/rpc/misc.cpp#L86-L87>
+    /// Zcash open ticket to add this fields to the docs: <https://github.com/zcash/zcash/issues/5606>
     #[rpc(name = "getinfo")]
     fn get_info(&self) -> Result<GetInfo>;
 
