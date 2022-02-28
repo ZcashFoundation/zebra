@@ -153,6 +153,9 @@ impl StartCmd {
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
             .service(mempool);
 
+        // Launch RPC server
+        let rpc_task_handle = RpcServer::spawn(config.rpc);
+
         let setup_data = InboundSetupData {
             address_book,
             block_download_peer_set: peer_set.clone(),
@@ -196,19 +199,17 @@ impl StartCmd {
                 .in_current_span(),
         );
 
-        let rpc_task_handle = RpcServer::spawn(config.rpc);
-
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
 
         // ongoing tasks
+        pin!(rpc_task_handle);
         pin!(syncer_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
-        pin!(rpc_task_handle);
 
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
@@ -219,6 +220,13 @@ impl StartCmd {
             let mut exit_when_task_finishes = true;
 
             let result = select! {
+                rpc_result = &mut rpc_task_handle => {
+                    rpc_result
+                        .expect("unexpected panic in the rpc task");
+                    info!("rpc task exited");
+                    Ok(())
+                }
+
                 sync_result = &mut syncer_task_handle => sync_result
                     .expect("unexpected panic in the syncer task")
                     .map(|_| info!("syncer task exited")),
@@ -247,13 +255,6 @@ impl StartCmd {
                     progress_result
                         .expect("unexpected panic in the chain progress task");
                     info!("chain progress task exited");
-                    Ok(())
-                }
-
-                rpc_result = &mut rpc_task_handle => {
-                    rpc_result
-                        .expect("unexpected panic in the rpc task");
-                    info!("rpc task exited");
                     Ok(())
                 }
 
