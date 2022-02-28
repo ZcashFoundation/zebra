@@ -30,7 +30,10 @@ mod tests;
 
 use crate::{
     amount::{Amount, NonNegative},
-    block, transaction,
+    block,
+    parameters::Network,
+    primitives::zcash_primitives,
+    transaction,
 };
 
 use std::{collections::HashMap, fmt, iter};
@@ -302,5 +305,12 @@ impl Output {
     /// This amount is subtracted from the transaction value pool by this output.
     pub fn value(&self) -> Amount<NonNegative> {
         self.value
+    }
+
+    /// Return the destination address from a transparent output.
+    ///
+    /// Returns None if the address type is not valid or unrecognized.
+    pub fn address(&self, network: Network) -> Option<Address> {
+        zcash_primitives::transparent_output_address(self, network)
     }
 }
