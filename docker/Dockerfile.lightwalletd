@@ -45,6 +45,7 @@ CMD ["--no-tls-very-insecure", "--grpc-bind-addr=0.0.0.0:9067",  "--http-bind-ad
 FROM debian:bullseye-slim as runtime
 
 ARG ZCASHD_CONF_PATH
+# Maintain backward compatibility with mainstream repo using this ARGs in docker-compose
 ARG LWD_GRPC_PORT
 ARG LWD_HTTP_PORT
 
