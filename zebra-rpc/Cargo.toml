@@ -26,3 +26,7 @@ tracing = "0.1"
 tracing-futures = "0.2"
 
 serde = { version = "1", features = ["serde_derive"] }
+
+[dev-dependencies]
+
+zebra-test = { path = "../zebra-test/" }

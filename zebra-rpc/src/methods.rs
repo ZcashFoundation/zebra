@@ -11,6 +11,9 @@ use jsonrpc_derive::rpc;
 
 use zebra_network::constants::USER_AGENT;
 
+#[cfg(test)]
+mod tests;
+
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
