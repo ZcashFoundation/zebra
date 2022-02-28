@@ -1759,6 +1759,7 @@ fn zebra_tracing_conflict() -> Result<()> {
 /// state directories and Zcash listener ports. The first node should get
 /// exclusive use of the port. The second node will panic.
 #[test]
+#[cfg(not(target_os = "windows"))]
 fn zebra_rpc_conflict() -> Result<()> {
     zebra_test::init();
 
