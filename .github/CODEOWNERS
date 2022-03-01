@@ -39,4 +39,4 @@ codecov.yml                             @ZcashFoundation/devops-reviewers
 
 # Unsafe Code
 # To be reviewed by Teor, Janito, Conrado, or Marek.
-/zebra-script/                          @ZcashFoundation/unsafe-reviewers
+/zebra-script/                          @ZcashFoundation/unsafe-rust-reviewers
