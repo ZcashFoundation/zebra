@@ -5707,6 +5707,7 @@ dependencies = [
  "jsonrpc-http-server",
  "proptest",
  "serde",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
