@@ -1466,7 +1466,7 @@ async fn rpc_endpoint() -> Result<()> {
 
     zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
-        return;
+        return Ok(());
     }
 
     // [Note on port conflict](#Note on port conflict)
