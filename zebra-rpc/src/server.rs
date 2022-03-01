@@ -4,7 +4,7 @@
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
 
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, util::BoxService};
 use tracing::*;
 use tracing_futures::Instrument;
 

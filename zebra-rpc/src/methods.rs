@@ -7,10 +7,10 @@
 //! So this implementation follows the `lightwalletd` client implementation.
 
 use futures::FutureExt;
-use jsonrpc_core::{self, BoxFuture, Result};
+use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 
-use tower::{buffer::Buffer, util::BoxService, ServiceExt};
+use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::block::Height;
 use zebra_network::constants::USER_AGENT;
@@ -77,8 +77,10 @@ pub trait Rpc {
 pub struct RpcImpl {
     /// Zebra's application version.
     pub app_version: String,
+    /// Zebra's running state service.
     pub state_service: State,
 }
+
 impl Rpc for RpcImpl {
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
@@ -99,21 +101,28 @@ impl Rpc for RpcImpl {
     }
 
     fn get_block(&self, height: Height) -> BoxFuture<Result<GetBlock>> {
-        let state = self.state_service.clone();
+        let mut state = self.state_service.clone();
 
         async move {
-            let res = state
-                .oneshot(zebra_state::Request::Block(
+            let response = state
+                .ready()
+                .await
+                .expect("State service should be always ready")
+                .call(zebra_state::Request::Block(
                     zebra_state::HashOrHeight::Height(height),
                 ))
                 .await
-                .map_err(|error| error.to_string());
+                .expect("Request always results in a no error response (check)");
 
-            match res.unwrap() {
+            match response {
                 zebra_state::Response::Block(Some(block)) => Ok(GetBlock {
                     data: block.to_string(),
                 }),
-                _ => unreachable!("whatever"),
+                _ => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Block not found".to_string(),
+                    data: None,
+                }),
             }
         }
         .boxed()
