@@ -5708,6 +5708,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-futures",
+ "zebra-network",
+ "zebra-test",
 ]
 
 [[package]]
