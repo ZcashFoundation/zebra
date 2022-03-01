@@ -317,7 +317,6 @@ where
 
     fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {
         use std::fs;
-        use std::io::Write;
 
         let lightwalletd_config = format!(
             "\
