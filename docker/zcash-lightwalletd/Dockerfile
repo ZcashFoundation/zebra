@@ -1,10 +1,10 @@
 ARG ZCASHD_CONF_PATH=/etc/zcash.conf
 ARG LWD_GRPC_PORT=9067
 ARG LWD_HTTP_PORT=9068
+
 ##
 ## Build
 ##
-
 FROM golang:1.17 AS build
 
 # Create and change to the app directory.
