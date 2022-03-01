@@ -1,0 +1,41 @@
+# These owners will be the default owners for everything in
+# the repo. Unless a later match takes precedence,
+# @global-owner1 and @global-owner2 will be requested for
+# review when someone opens a pull request.
+*       @ZcashFoundation/network-owners @ZcashFoundation/cryptographic-owners
+
+# Network and Async Code
+# To be reviewed by Teor, Janito, or Alfredo.
+/tower-batch/                           @ZcashFoundation/network-owners
+/tower-fallback/                        @ZcashFoundation/network-owners
+/zebra-consensus/                       @ZcashFoundation/network-owners
+/zebra-network/                         @ZcashFoundation/network-owners
+/zebra-state/                           @ZcashFoundation/network-owners
+/zebra-tests/src/mock_service.rs        @ZcashFoundation/network-owners
+/zebra-tests/src/service_extensions.rs  @ZcashFoundation/network-owners
+/zebra-tests/src/transcript.rs          @ZcashFoundation/network-owners
+/zebra-utils/                           @ZcashFoundation/network-owners
+/zebrad/src/commands/                   @ZcashFoundation/network-owners
+/zebrad/src/components/                 @ZcashFoundation/network-owners
+
+# Cryptographic Code
+# To be reviewed by Deirdre, Conrado, or Marek.
+/zebra-consensus/src/primitives/        @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/primitives/            @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/orchard/               @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/sapling/               @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/sprout/                @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/transparent/           @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/history_tree.rs        @ZcashFoundation/cryptographic-owners
+/zebra-chain/src/history_tree/          @ZcashFoundation/cryptographic-owners
+
+# Devops Code
+# To be reviewed by Gustavo, Deirdre, Teor, or Conrado.
+/.github/                               @ZcashFoundation/devops-owners
+/docker/                                @ZcashFoundation/devops-owners
+cloudbuild.yaml                         @ZcashFoundation/devops-owners
+codecov.yml                             @ZcashFoundation/devops-owners
+
+# Unsafe Code
+# To be reviewed by Teor, Janito, Conrado, or Marek.
+/zebra-script/                          @ZcashFoundation/unsafe-owners
