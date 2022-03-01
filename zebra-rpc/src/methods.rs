@@ -6,10 +6,19 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
-use jsonrpc_core::{self, Result};
+use futures::FutureExt;
+use jsonrpc_core::{self, BoxFuture, Result};
 use jsonrpc_derive::rpc;
 
+use tower::{buffer::Buffer, util::BoxService, ServiceExt};
+
+use zebra_chain::block::Height;
 use zebra_network::constants::USER_AGENT;
+
+type State = Buffer<
+    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
+    zebra_state::Request,
+>;
 
 #[cfg(test)]
 mod tests;
@@ -48,6 +57,19 @@ pub trait Rpc {
     ///       note any other lightwalletd changes
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+
+    /// getblock
+    ///
+    /// Returns ...
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/getblock.html>
+    ///
+    /// Result:
+    /// {
+    ///      "data": String, // Add comment
+    /// }
+    #[rpc(name = "getblock")]
+    fn get_block(&self, height: Height) -> BoxFuture<Result<GetBlock>>;
 }
 
 /// RPC method implementations.
@@ -55,6 +77,7 @@ pub trait Rpc {
 pub struct RpcImpl {
     /// Zebra's application version.
     pub app_version: String,
+    pub state_service: State,
 }
 impl Rpc for RpcImpl {
     fn get_info(&self) -> Result<GetInfo> {
@@ -74,6 +97,27 @@ impl Rpc for RpcImpl {
 
         Ok(response)
     }
+
+    fn get_block(&self, height: Height) -> BoxFuture<Result<GetBlock>> {
+        let state = self.state_service.clone();
+
+        async move {
+            let res = state
+                .oneshot(zebra_state::Request::Block(
+                    zebra_state::HashOrHeight::Height(height),
+                ))
+                .await
+                .map_err(|error| error.to_string());
+
+            match res.unwrap() {
+                zebra_state::Response::Block(Some(block)) => Ok(GetBlock {
+                    data: block.to_string(),
+                }),
+                _ => unreachable!("whatever"),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -88,4 +132,10 @@ pub struct GetInfo {
 pub struct GetBlockChainInfo {
     chain: String,
     // TODO: add other fields used by lightwalletd (#3143)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Response to a `getblock` RPC request.
+pub struct GetBlock {
+    data: String,
 }

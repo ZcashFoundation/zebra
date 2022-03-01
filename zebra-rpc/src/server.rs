@@ -4,6 +4,7 @@
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
 
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 use tracing::*;
 use tracing_futures::Instrument;
 
@@ -18,18 +19,30 @@ use crate::{
 
 pub mod compatibility;
 
+type State = Buffer<
+    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
+    zebra_state::Request,
+>;
+
 /// Zebra RPC Server
 #[derive(Clone, Debug)]
 pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn(config: Config, app_version: String) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(
+        config: Config,
+        app_version: String,
+        state_service: State,
+    ) -> tokio::task::JoinHandle<()> {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl { app_version };
+            let rpc_impl = RpcImpl {
+                app_version,
+                state_service,
+            };
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =

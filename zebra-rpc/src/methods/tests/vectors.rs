@@ -7,8 +7,11 @@ use zebra_network::constants::USER_AGENT;
 fn rpc_getinfo() {
     zebra_test::init();
 
+    let state_service = zebra_state::init_test(zebra_chain::parameters::Network::Mainnet);
+
     let rpc = RpcImpl {
         app_version: "Zebra version test".to_string(),
+        state_service,
     };
 
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");

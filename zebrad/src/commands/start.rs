@@ -159,7 +159,7 @@ impl StartCmd {
             block_download_peer_set: peer_set.clone(),
             block_verifier: chain_verifier,
             mempool: mempool.clone(),
-            state,
+            state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
         };
         setup_tx
@@ -197,7 +197,7 @@ impl StartCmd {
                 .in_current_span(),
         );
 
-        let rpc_task_handle = RpcServer::spawn(config.rpc, app_version().to_string());
+        let rpc_task_handle = RpcServer::spawn(config.rpc, app_version().to_string(), state);
 
         info!("spawned initial Zebra tasks");
 
