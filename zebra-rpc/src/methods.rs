@@ -9,15 +9,34 @@
 use jsonrpc_core::{self, Result};
 use jsonrpc_derive::rpc;
 
+use zebra_network::constants::USER_AGENT;
+
+#[cfg(test)]
+mod tests;
+
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
     /// getinfo
     ///
-    /// TODO: explain what the method does
-    ///       link to the zcashd RPC reference
-    ///       list the arguments and fields that lightwalletd uses
-    ///       note any other lightwalletd changes
+    /// Returns software information from the RPC server running Zebra.
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/getinfo.html>
+    ///
+    /// Result:
+    /// {
+    ///      "build": String, // Full application version
+    ///      "subversion", String, // Zebra user agent
+    /// }
+    ///
+    /// Note 1: We only expose 2 fields as they are the only ones needed for
+    /// lightwalletd: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95>
+    ///
+    /// Note 2: <https://zcash.github.io/rpc/getinfo.html> is outdated so it does not
+    /// show the fields we are exposing. However, this fields are part of the output
+    /// as shown in the following zcashd code:
+    /// <https://github.com/zcash/zcash/blob/v4.6.0-1/src/rpc/misc.cpp#L86-L87>
+    /// Zcash open ticket to add this fields to the docs: <https://github.com/zcash/zcash/issues/5606>
     #[rpc(name = "getinfo")]
     fn get_info(&self) -> Result<GetInfo>;
 
@@ -32,13 +51,16 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
-pub struct RpcImpl;
+
+pub struct RpcImpl {
+    /// Zebra's application version.
+    pub app_version: String,
+}
 impl Rpc for RpcImpl {
     fn get_info(&self) -> Result<GetInfo> {
-        // TODO: dummy output data, fix in the context of #3142
         let response = GetInfo {
-            build: "TODO: Zebra v1.0.0 ...".into(),
-            subversion: "TODO: /Zebra:1.0.0-beta.../".into(),
+            build: self.app_version.clone(),
+            subversion: USER_AGENT.into(),
         };
 
         Ok(response)
