@@ -55,7 +55,9 @@ static INIT: Once = Once::new();
 ///
 /// This function should be called at the start of every test.
 pub fn init() {
-    // Per-thread
+    // Per-test
+
+    // Settings for threads that snapshots data using `insta`
 
     let mut settings = insta::Settings::clone_current();
     settings.set_prepend_module_to_snapshot(false);
