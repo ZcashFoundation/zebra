@@ -4,11 +4,11 @@
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
 
-use tracing::*;
-use tracing_futures::Instrument;
-
 use jsonrpc_core;
 use jsonrpc_http_server::ServerBuilder;
+use tower::buffer::Buffer;
+use tracing::*;
+use tracing_futures::Instrument;
 
 use zebra_node_services::{mempool, BoxError};
 
@@ -29,13 +29,12 @@ impl RpcServer {
     pub fn spawn<Mempool>(
         config: Config,
         app_version: String,
-        mempool: Mempool,
+        mempool: Buffer<Mempool, mempool::Request>,
     ) -> tokio::task::JoinHandle<()>
     where
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
-            + Send
-            + Sync
             + 'static,
+        Mempool::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);

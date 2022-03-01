@@ -8,6 +8,7 @@
 
 use jsonrpc_core::{self, Result};
 use jsonrpc_derive::rpc;
+use tower::buffer::Buffer;
 
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
@@ -62,25 +63,25 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
-pub struct RpcImpl<Mempool> {
+pub struct RpcImpl<Mempool>
+where
+    Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
+{
     /// Zebra's application version.
     app_version: String,
 
     /// A handle to the mempool service.
     ///
     /// Used when sending raw transactions.
-    mempool: Mempool,
+    mempool: Buffer<Mempool, mempool::Request>,
 }
 
 impl<Mempool> RpcImpl<Mempool>
 where
-    Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
-        + Send
-        + Sync
-        + 'static,
+    Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
 {
     /// Create a new instance of the RPC handler.
-    pub fn new(app_version: String, mempool: Mempool) -> Self {
+    pub fn new(app_version: String, mempool: Buffer<Mempool, mempool::Request>) -> Self {
         RpcImpl {
             app_version,
             mempool,
@@ -90,10 +91,9 @@ where
 
 impl<Mempool> Rpc for RpcImpl<Mempool>
 where
-    Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
-        + Send
-        + Sync
-        + 'static,
+    Mempool:
+        tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
+    Mempool::Future: Send,
 {
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
