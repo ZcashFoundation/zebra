@@ -1465,7 +1465,6 @@ async fn rpc_endpoint() -> Result<()> {
     use serde_json::Value;
 
     zebra_test::init();
-    
     if zebra_test::net::zebra_skip_network_tests() {
         return;
     }
