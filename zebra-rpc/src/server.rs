@@ -10,6 +10,8 @@ use tracing_futures::Instrument;
 use jsonrpc_core;
 use jsonrpc_http_server::ServerBuilder;
 
+use zebra_node_services::{mempool, BoxError};
+
 use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
@@ -24,12 +26,22 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn(config: Config, app_version: String) -> tokio::task::JoinHandle<()> {
+    pub fn spawn<Mempool>(
+        config: Config,
+        app_version: String,
+        mempool: Mempool,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+            + Send
+            + Sync
+            + 'static,
+    {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl { app_version };
+            let rpc_impl = RpcImpl::new(app_version, mempool);
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =

@@ -8,6 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+zebra-node-services = { path = "../zebra-node-services" }
 
 zebra-network = { path = "../zebra-network" }
 
@@ -21,6 +22,7 @@ jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 
 tokio = { version = "1.16.1", features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tower = "0.4.12"
 
 tracing = "0.1"
 tracing-futures = "0.2"

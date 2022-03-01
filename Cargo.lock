@@ -5706,9 +5706,11 @@ dependencies = [
  "jsonrpc-http-server",
  "serde",
  "tokio",
+ "tower",
  "tracing",
  "tracing-futures",
  "zebra-network",
+ "zebra-node-services",
  "zebra-test",
 ]
 

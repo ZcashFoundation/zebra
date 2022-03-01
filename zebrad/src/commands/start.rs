@@ -185,7 +185,7 @@ impl StartCmd {
             chain_tip_change,
         );
 
-        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool);
+        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
 
         let tx_gossip_task_handle = tokio::spawn(
             mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set)
@@ -197,7 +197,7 @@ impl StartCmd {
                 .in_current_span(),
         );
 
-        let rpc_task_handle = RpcServer::spawn(config.rpc, app_version().to_string());
+        let rpc_task_handle = RpcServer::spawn(config.rpc, app_version().to_string(), mempool);
 
         info!("spawned initial Zebra tasks");
 
