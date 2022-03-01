@@ -41,9 +41,9 @@ pub enum Error {
     /// tx is an invalid size for it's protocol
     #[non_exhaustive]
     TxSizeMismatch,
-    /// script is invalid
+    /// output script type was not recognized
     #[non_exhaustive]
-    TxInvalidScript,
+    TxInvalidOutputScriptType,
     /// encountered unknown error kind from zcash_script: {0}
     #[non_exhaustive]
     Unknown(zcash_script_error_t),
@@ -57,7 +57,9 @@ impl From<zcash_script_error_t> for Error {
             zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE => Error::TxDeserialize,
             zcash_script_error_t_zcash_script_ERR_TX_INDEX => Error::TxIndex,
             zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
-            zcash_script_error_t_zcash_script_ERR_TX_INVALID_SCRIPT => Error::TxInvalidScript,
+            zcash_script_error_t_zcash_script_ERR_TX_INVALID_SCRIPT => {
+                Error::TxInvalidOutputScriptType
+            }
             unknown => Error::Unknown(unknown),
         }
     }
