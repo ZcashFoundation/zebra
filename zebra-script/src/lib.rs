@@ -249,6 +249,10 @@ impl CachedFfiTransaction {
             .try_into()
             .expect("transaction indexes are much less than c_uint::MAX");
 
+        // SAFETY:
+        // `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
+        // `n_out` is checked by the called function.
+        // All other arguments are local stack references, which are always valid.
         let address_hash = unsafe {
             zcash_script::zcash_script_transparent_output_address_precomputed(
                 self.precomputed,
