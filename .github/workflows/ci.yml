@@ -234,7 +234,7 @@ jobs:
           - licenses
 
     # Prevent sudden announcement of a new advisory from failing ci:
-    continue-on-error: ${{ matrix.checks == 'advisories' }} || ${{ matrix.checks == 'licenses'}}
+    continue-on-error: ${{ matrix.checks == 'advisories' || matrix.checks == 'licenses'}}
 
     steps:
     - uses: actions/checkout@v2
