@@ -27,7 +27,7 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, net::SocketAddr, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
