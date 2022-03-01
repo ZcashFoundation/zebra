@@ -5705,6 +5705,7 @@ dependencies = [
  "jsonrpc-core",
  "jsonrpc-derive",
  "jsonrpc-http-server",
+ "proptest",
  "serde",
  "tokio",
  "tower",

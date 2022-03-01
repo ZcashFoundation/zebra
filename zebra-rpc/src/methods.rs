@@ -181,7 +181,7 @@ pub struct GetBlockChainInfo {
     // TODO: add other fields used by lightwalletd (#3143)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 /// Response to a `sendrawtransaction` RPC request.
 ///
 /// A JSON string with the transaction hash in hexadecimal.
