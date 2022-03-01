@@ -1,3 +1,4 @@
+use jsonrpc_core::{Error, ErrorCode};
 use proptest::prelude::*;
 use tower::buffer::Buffer;
 
@@ -42,6 +43,45 @@ proptest! {
                 .expect("Sending raw transactions should not panic");
 
             prop_assert_eq!(result, Ok(hash));
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test that the method rejects non-hexadecimal characters.
+    ///
+    /// Try to call `send_raw_transaction` using a string parameter that has at least one
+    /// non-hexadecimal character, and check that it fails with an expected error.
+    #[test]
+    fn non_hexadecimal_string_results_in_an_error(non_hex_string in ".*[^0-9A-Fa-f].*") {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
+
+        runtime.block_on(async move {
+            let mut mempool = MockService::build().for_prop_tests();
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1));
+
+            let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
+
+            mempool.expect_no_requests().await?;
+
+            let result = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        ..
+                    })
+                ),
+                "Result is not an invalid parameters error: {result:?}"
+            );
 
             Ok::<_, TestCaseError>(())
         })?;
