@@ -35,6 +35,10 @@
 /docker/                                @ZcashFoundation/devops-reviewers
 cloudbuild.yaml                         @ZcashFoundation/devops-reviewers
 codecov.yml                             @ZcashFoundation/devops-reviewers
+.dockerignore                           @ZcashFoundation/devops-reviewers
+codecov.yml                             @ZcashFoundation/devops-reviewers
+firebase.json                           @ZcashFoundation/devops-reviewers
+katex-header.html                       @ZcashFoundation/devops-reviewers
 
 # Unsafe Code
 # To be reviewed by Teor, Janito, Conrado, or Marek.
