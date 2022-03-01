@@ -107,7 +107,7 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace --no-fail-fast -- --include-ignored
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --verbose --locked --release --features enable-sentry --workspace -- --include-ignored
 
   test-fake-activation-heights:
     name: Test with fake activation heights
@@ -125,9 +125,9 @@ jobs:
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib --no-fail-fast -- with_fake_activation_heights
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --verbose --locked --release --package zebra-state --lib -- with_fake_activation_heights
         env:
-          TEST_FAKE_ACTIVATION_HEIGHTS: '1'
+          TEST_FAKE_ACTIVATION_HEIGHTS: ''
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state
   test-empty-sync:
@@ -146,7 +146,7 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ --no-fail-fast -- --ignored
+          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --verbose --locked --release --features enable-sentry --test acceptance -- --ignored sync_large_checkpoints_
 
   regenerate-stateful-disks:
     name: Regenerate stateful disks
@@ -201,7 +201,7 @@ jobs:
           --container-tty \
           --container-command="cargo" \
           --container-arg="test" \
-          --container-arg="--locked" \
+          --container-arg="--verbose --locked" \
           --container-arg="--release" \
           --container-arg="--features" \
           --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.lower_net_name }}" \
@@ -337,7 +337,7 @@ jobs:
           --container-tty \
           --container-command="cargo" \
           --container-arg="test" \
-          --container-arg="--locked" \
+          --container-arg="--verbose --locked" \
           --container-arg="--release" \
           --container-arg="--features" \
           --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.lower_net_name }}" \
