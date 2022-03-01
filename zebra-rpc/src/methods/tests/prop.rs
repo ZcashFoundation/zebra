@@ -3,7 +3,7 @@ use proptest::prelude::*;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    serialization::ZcashSerialize,
+    serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{Transaction, UnminedTx},
 };
 use zebra_node_services::mempool;
@@ -65,6 +65,47 @@ proptest! {
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1));
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
+
+            mempool.expect_no_requests().await?;
+
+            let result = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        ..
+                    })
+                ),
+                "Result is not an invalid parameters error: {result:?}"
+            );
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test that the method rejects an input that's not a transaction.
+    ///
+    /// Try to call `send_raw_transaction` using random bytes that fail to deserialize as a
+    /// transaction, and check that it fails with an expected error.
+    #[test]
+    fn invalid_transaction_results_in_an_error(random_bytes in any::<Vec<u8>>()) {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
+
+        prop_assume!(Transaction::zcash_deserialize(&*random_bytes).is_err());
+
+        runtime.block_on(async move {
+            let mut mempool = MockService::build().for_prop_tests();
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1));
+
+            let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
 
             mempool.expect_no_requests().await?;
 
