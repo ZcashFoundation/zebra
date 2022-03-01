@@ -28,16 +28,17 @@ RUN apt-get -qq update && \
 
 # Install google OS Config agent
 RUN if [ "$(uname -m)" != "aarch64" ]; then \
-    apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends \
-    curl \
-    lsb-release \
-    ; \
-    echo "deb http://packages.cloud.google.com/apt google-compute-engine-$(lsb_release -cs)-stable main" > /etc/apt/sources.list.d/google-compute-engine.list && \
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
-    apt-get -qq update  && \
-    apt-get -qq install -y --no-install-recommends google-osconfig-agent && \
-    ; fi && \
+      apt-get -qq update && \
+      apt-get -qq install -y --no-install-recommends \
+      curl \
+      lsb-release \
+      && \
+      echo "deb http://packages.cloud.google.com/apt google-compute-engine-$(lsb_release -cs)-stable main" > /etc/apt/sources.list.d/google-compute-engine.list && \
+      curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+      apt-get -qq update  && \
+      apt-get -qq install -y --no-install-recommends google-osconfig-agent && \
+    ; fi \
+    && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
