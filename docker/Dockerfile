@@ -14,6 +14,7 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 COPY --from=planner /app/recipe.json recipe.json
 
 # Install zebra build deps
@@ -36,8 +37,8 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
       echo "deb http://packages.cloud.google.com/apt google-compute-engine-$(lsb_release -cs)-stable main" > /etc/apt/sources.list.d/google-compute-engine.list && \
       curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
       apt-get -qq update  && \
-      apt-get -qq install -y --no-install-recommends google-osconfig-agent && \
-    ; fi \
+      apt-get -qq install -y --no-install-recommends google-osconfig-agent; \
+    fi \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
