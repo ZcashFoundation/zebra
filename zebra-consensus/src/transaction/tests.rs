@@ -1,3 +1,5 @@
+//! Tests for Zcash transaction consensus checks.
+
 use std::{
     cmp::max,
     collections::HashMap,
@@ -28,7 +30,7 @@ use zebra_chain::{
 
 use super::{check, Request, Verifier};
 
-use crate::{error::TransactionError, script};
+use crate::error::TransactionError;
 use color_eyre::eyre::Report;
 
 #[cfg(test)]
@@ -214,7 +216,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
 
     insert_fake_orchard_shielded_data(&mut transaction);
 
-    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok(),);
+    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok());
 }
 
 #[test]
@@ -249,8 +251,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 
     for (network, blocks) in networks {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         let transaction = fake_v5_transactions_for_network(network, blocks)
             .rev()
@@ -303,8 +304,7 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
     };
 
     let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let transaction = fake_v5_transactions_for_network(network, blocks)
         .rev()
@@ -365,8 +365,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -380,6 +379,227 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
     assert_eq!(
         result.expect("unexpected error response").tx_id(),
         transaction_hash
+    );
+}
+
+/// Tests if a non-coinbase V4 transaction with the last valid expiry height is
+/// accepted.
+#[tokio::test]
+async fn v4_transaction_with_last_valid_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: block_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+}
+
+/// Tests if a coinbase V4 transaction with an expiry height lower than the
+/// block height is accepted.
+///
+/// Note that an expiry height lower than the block height is considered
+/// *expired* for *non-coinbase* transactions.
+#[tokio::test]
+async fn v4_coinbase_transaction_with_low_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // This is a correct expiry height for coinbase V4 transactions.
+    let expiry_height = (block_height - 1).expect("original block height is too small");
+
+    // Create a coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+}
+
+/// Tests if an expired non-coinbase V4 transaction is rejected.
+#[tokio::test]
+async fn v4_transaction_with_too_low_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // This expiry height is too low so that the tx should seem expired to the verifier.
+    let expiry_height = (block_height - 1).expect("original block height is too small");
+
+    // Create a non-coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::ExpiredTransaction {
+            expiry_height,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
+/// Tests if a non-coinbase V4 transaction with an expiry height exceeding the
+/// maximum is rejected.
+#[tokio::test]
+async fn v4_transaction_with_exceeding_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = block::Height::MAX;
+
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // This expiry height exceeds the maximum defined by the specification.
+    let expiry_height = block::Height(500_000_000);
+
+    // Create a non-coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::MaximumExpiryHeight {
+            expiry_height,
+            is_coinbase: false,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
+/// Tests if a coinbase V4 transaction with an expiry height exceeding the
+/// maximum is rejected.
+#[tokio::test]
+async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = block::Height::MAX;
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // This expiry height exceeds the maximum defined by the specification.
+    let expiry_height = block::Height(500_000_000);
+
+    // Create a coinbase V4 tx.
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::MaximumExpiryHeight {
+            expiry_height,
+            is_coinbase: true,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
     );
 }
 
@@ -412,8 +632,7 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -463,8 +682,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -514,8 +732,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -569,7 +786,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, &[], None);
 
         match &mut transaction {
             Transaction::V4 {
@@ -581,8 +798,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         let result = verifier
             .oneshot(Request::Block {
@@ -641,7 +857,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(network_upgrade, HashType::ALL, None);
+        let sighash = transaction.sighash(network_upgrade, HashType::ALL, &[], None);
 
         match &mut transaction {
             Transaction::V4 {
@@ -653,8 +869,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         let result = verifier
             .oneshot(Request::Block {
@@ -708,8 +923,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -723,6 +937,277 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
     assert_eq!(
         result.expect("unexpected error response").tx_id(),
         transaction_hash
+    );
+}
+
+/// Tests if a non-coinbase V5 transaction with the last valid expiry height is
+/// accepted.
+#[tokio::test]
+async fn v5_transaction_with_last_valid_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Testnet, state_service);
+
+    let block_height = NetworkUpgrade::Nu5
+        .activation_height(Network::Testnet)
+        .expect("Nu5 activation height for testnet is specified");
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Create a non-coinbase V5 tx with the last valid expiry height.
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: block_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+}
+
+/// Tests that a coinbase V5 transaction is accepted only if its expiry height
+/// is equal to the height of the block the transaction belongs to.
+#[tokio::test]
+async fn v5_coinbase_transaction_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Testnet, state_service);
+
+    let block_height = NetworkUpgrade::Nu5
+        .activation_height(Network::Testnet)
+        .expect("Nu5 activation height for testnet is specified");
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // Create a coinbase V5 tx with an expiry height that matches the height of
+    // the block. Note that this is the only valid expiry height for a V5
+    // coinbase tx.
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: block_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+
+    // Increment the expiry height so that it becomes invalid.
+    let new_expiry_height = (block_height + 1).expect("transaction block height is too large");
+    let mut new_transaction = transaction.clone();
+
+    *new_transaction.expiry_height_mut() = new_expiry_height;
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height: Some(new_expiry_height),
+            block_height,
+            transaction_hash: new_transaction.hash(),
+        })
+    );
+
+    // Decrement the expiry height so that it becomes invalid.
+    let new_expiry_height = (block_height - 1).expect("transaction block height is too low");
+    let mut new_transaction = transaction.clone();
+
+    *new_transaction.expiry_height_mut() = new_expiry_height;
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height: Some(new_expiry_height),
+            block_height,
+            transaction_hash: new_transaction.hash(),
+        })
+    );
+}
+
+/// Tests if an expired non-coinbase V5 transaction is rejected.
+#[tokio::test]
+async fn v5_transaction_with_too_low_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Testnet, state_service);
+
+    let block_height = NetworkUpgrade::Nu5
+        .activation_height(Network::Testnet)
+        .expect("Nu5 activation height for testnet is specified");
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // This expiry height is too low so that the tx should seem expired to the verifier.
+    let expiry_height = (block_height - 1).expect("original block height is too small");
+
+    // Create a non-coinbase V5 tx.
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::ExpiredTransaction {
+            expiry_height,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
+/// Tests if a non-coinbase V5 transaction with an expiry height exceeding the
+/// maximum is rejected.
+#[tokio::test]
+async fn v5_transaction_with_exceeding_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = block::Height::MAX;
+
+    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // This expiry height exceeds the maximum defined by the specification.
+    let expiry_height = block::Height(500_000_000);
+
+    // Create a non-coinbase V5 tx.
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(known_utxos),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::MaximumExpiryHeight {
+            expiry_height,
+            is_coinbase: false,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
+    );
+}
+
+/// Tests if a coinbase V5 transaction with an expiry height exceeding the
+/// maximum is rejected.
+#[tokio::test]
+async fn v5_coinbase_transaction_with_exceeding_expiry_height() {
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(Network::Mainnet, state_service);
+
+    let block_height = block::Height::MAX;
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // This expiry height exceeds the maximum defined by the specification.
+    let expiry_height = block::Height(500_000_000);
+
+    // Create a coinbase V4 tx.
+    let transaction = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+
+    let result = verifier
+        .oneshot(Request::Block {
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: block_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        Err(TransactionError::MaximumExpiryHeight {
+            expiry_height,
+            is_coinbase: true,
+            block_height,
+            transaction_hash: transaction.hash(),
+        })
     );
 }
 
@@ -758,8 +1243,7 @@ async fn v5_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -811,8 +1295,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -864,8 +1347,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -910,8 +1392,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -984,8 +1465,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     // Initialize the verifier
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let script_verifier = script::Verifier::new(state_service);
-    let verifier = Verifier::new(network, script_verifier);
+    let verifier = Verifier::new(network, state_service);
 
     // Test the transaction verifier
     let result = verifier
@@ -1022,8 +1502,7 @@ fn v4_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1067,8 +1546,7 @@ fn v4_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1114,8 +1592,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1162,8 +1639,7 @@ fn v5_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1210,8 +1686,7 @@ fn v5_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -1274,8 +1749,7 @@ fn v5_with_duplicate_orchard_action() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = Verifier::new(network, script_verifier);
+        let verifier = Verifier::new(network, state_service);
 
         // Test the transaction verifier
         let result = verifier

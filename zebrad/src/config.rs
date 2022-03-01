@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use zebra_consensus::Config as ConsensusSection;
 use zebra_network::Config as NetworkSection;
+use zebra_rpc::config::Config as RpcSection;
 use zebra_state::Config as StateSection;
 
 use crate::components::{mempool::Config as MempoolSection, sync};
@@ -42,6 +43,9 @@ pub struct ZebradConfig {
 
     /// Mempool configuration
     pub mempool: MempoolSection,
+
+    /// RPC configuration
+    pub rpc: RpcSection,
 }
 
 /// Tracing configuration section.
@@ -56,6 +60,14 @@ pub struct TracingSection {
     /// Defaults to `true`, which automatically enables colored output to
     /// terminals.
     pub use_color: bool,
+
+    /// Whether to force the use of colored terminal output, even if it's not available.
+    ///
+    /// Will force Zebra to use colored terminal output even if it does not detect that the output
+    /// is a terminal that supports colors.
+    ///
+    /// Defaults to `false`, which keeps the behavior of `use_color`.
+    pub force_use_color: bool,
 
     /// The filter used for tracing events.
     ///
@@ -120,6 +132,7 @@ impl Default for TracingSection {
     fn default() -> Self {
         Self {
             use_color: true,
+            force_use_color: false,
             filter: None,
             endpoint_addr: None,
             flamegraph: None,

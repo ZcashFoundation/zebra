@@ -259,6 +259,24 @@ impl NetworkUpgrade {
         NetworkUpgrade::current(network, height).target_spacing()
     }
 
+    /// Returns all the target block spacings for `network` and the heights where they start.
+    pub fn target_spacings(network: Network) -> impl Iterator<Item = (block::Height, Duration)> {
+        [
+            (NetworkUpgrade::Genesis, PRE_BLOSSOM_POW_TARGET_SPACING),
+            (NetworkUpgrade::Blossom, POST_BLOSSOM_POW_TARGET_SPACING),
+        ]
+        .into_iter()
+        .map(move |(upgrade, spacing_seconds)| {
+            let activation_height = upgrade
+                .activation_height(network)
+                .expect("missing activation height for target spacing change");
+
+            let target_spacing = Duration::seconds(spacing_seconds);
+
+            (activation_height, target_spacing)
+        })
+    }
+
     /// Returns the minimum difficulty block spacing for `network` and `height`.
     /// Returns `None` if the testnet minimum difficulty consensus rule is not active.
     ///
@@ -312,7 +330,7 @@ impl NetworkUpgrade {
     ///
     /// `AveragingWindowTimespan` from the Zcash specification.
     pub fn averaging_window_timespan(&self) -> Duration {
-        self.target_spacing() * (POW_AVERAGING_WINDOW as _)
+        self.target_spacing() * POW_AVERAGING_WINDOW.try_into().expect("fits in i32")
     }
 
     /// Returns the averaging window timespan for `network` and `height`.

@@ -54,6 +54,7 @@ impl From<PreparedBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            time: block.header.time,
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }

@@ -1,38 +1,60 @@
 queue_rules:
   - name: urgent
+    allow_inplace_checks: False
+    allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 2
     conditions:
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
-      - check-success=Coverage (+nightly)
+      - check-success=Test all
+      - check-success=Test with fake activation heights
+      - check-success=Test full validation sync from cached state
+      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
+      - check-success=Test stable on ubuntu-latest
+      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on windows-latest
+      - check-success=Coverage nightly
+      - check-success=Clippy
+      - check-success=Rustfmt
 
   - name: medium
+    allow_inplace_checks: False
+    allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 3
     conditions:
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
-      - check-success=Coverage (+nightly)
+      - check-success=Test all
+      - check-success=Test with fake activation heights
+      - check-success=Test full validation sync from cached state
+      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
+      - check-success=Test stable on ubuntu-latest
+      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on windows-latest
+      - check-success=Coverage nightly
+      - check-success=Clippy
+      - check-success=Rustfmt
 
   - name: low
+    allow_inplace_checks: False
+    allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 4
     conditions:
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
-      - check-success=Coverage (+nightly)
+      - check-success=Test all
+      - check-success=Test with fake activation heights
+      - check-success=Test full validation sync from cached state
+      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
+      - check-success=Test stable on ubuntu-latest
+      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on windows-latest
+      - check-success=Coverage nightly
+      - check-success=Clippy
+      - check-success=Rustfmt
 
 pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - -draft
       - base=main
       - or:
@@ -47,6 +69,7 @@ pull_request_rules:
   - name: move to medium queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - -draft
       - base=main
       - "label~=^P-Medium"
@@ -59,26 +82,16 @@ pull_request_rules:
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
       - -draft
       - base=main
-      - or:
-          - "-label~=^P-Low"
-          - "-label~=^P-Optional"
       - label!=do-not-merge
+      # This queue handles Low, Optional, and PRs with no priority label,
+      # including automated dependabot PRs.
+      #
+      # We don't need to check priority labels here, because the rules are evaluated in order:
+      # https://docs.mergify.com/configuration/#pull-request-rules
     actions:
       queue:
         name: low
-        method: squash
-
-  - name: automatic merge for Dependabot pull requests
-    conditions:
-      - "#approved-reviews-by>=1"
-      - author~=^dependabot(|-preview)\[bot\]$
-      - check-success=Test (+stable) on ubuntu-latest
-      - check-success=Test (+stable) on macOS-latest
-      - check-success=Test (+stable) on windows-latest
-      - check-success=pull-request (zealous-zebra)
-      - check-success=Coverage (+nightly)
-    actions:
-      merge:
         method: squash

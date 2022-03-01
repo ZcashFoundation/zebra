@@ -191,9 +191,17 @@ impl Transaction {
         &self,
         network_upgrade: NetworkUpgrade,
         hash_type: sighash::HashType,
-        input: Option<(u32, transparent::Output)>,
+        all_previous_outputs: &[transparent::Output],
+        input: Option<usize>,
     ) -> SigHash {
-        sighash::SigHasher::new(self, hash_type, network_upgrade, input).sighash()
+        sighash::SigHasher::new(
+            self,
+            hash_type,
+            network_upgrade,
+            all_previous_outputs,
+            input,
+        )
+        .sighash()
     }
 
     /// Compute the authorizing data commitment of this transaction as specified
@@ -215,14 +223,6 @@ impl Transaction {
     // other properties
 
     /// Does this transaction have transparent or shielded inputs?
-    ///
-    /// "[Sapling onward] If effectiveVersion < 5, then at least one of tx_in_count,
-    /// nSpendsSapling, and nJoinSplit MUST be nonzero.
-    ///
-    /// [NU5 onward] If effectiveVersion ≥ 5 then this condition MUST hold:
-    /// tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1)."
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     pub fn has_transparent_or_shielded_inputs(&self) -> bool {
         !self.inputs().is_empty() || self.has_shielded_inputs()
     }
@@ -241,14 +241,6 @@ impl Transaction {
     }
 
     /// Does this transaction have transparent or shielded outputs?
-    ///
-    /// "[Sapling onward] If effectiveVersion < 5, then at least one of tx_out_count,
-    /// nOutputsSapling, and nJoinSplit MUST be nonzero.
-    ///
-    /// [NU5 onward] If effectiveVersion ≥ 5 then this condition MUST hold:
-    /// tx_out_count > 0 or nOutputsSapling > 0 or (nActionsOrchard > 0 and enableOutputsOrchard = 1)."
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     pub fn has_transparent_or_shielded_outputs(&self) -> bool {
         !self.outputs().is_empty() || self.has_shielded_outputs()
     }
@@ -267,11 +259,6 @@ impl Transaction {
     }
 
     /// Does this transaction has at least one flag when we have at least one orchard action?
-    ///
-    /// [NU5 onward] If effectiveVersion >= 5 and nActionsOrchard > 0, then at least one
-    /// of enableSpendsOrchard and enableOutputsOrchard MUST be 1.
-    ///
-    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     pub fn has_enough_orchard_flags(&self) -> bool {
         if self.version() < 5 || self.orchard_actions().count() == 0 {
             return true;

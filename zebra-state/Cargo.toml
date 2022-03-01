@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.5"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -13,26 +13,21 @@ bincode = "1"
 chrono = "0.4.19"
 dirs = "4.0.0"
 displaydoc = "0.2.2"
-futures = "0.3.19"
+futures = "0.3.21"
 hex = "0.4.3"
 lazy_static = "1.4.0"
 metrics = "0.17.1"
-# TODO: this crate is not maintained anymore. Replace it?
-# https://github.com/ZcashFoundation/zebra/issues/2523
-#
-# Pinned to a commit which includes bug fix https://github.com/jmitchell/multiset/pull/21
-# The fix should be included in multiset 0.0.6.
-multiset = { git = "https://github.com/jmitchell/multiset", rev = "91ef8550b518f75ae87ae0d8771150f259fd34d5" }
+mset = "0.1.0"
 proptest = { version = "0.10.1", optional = true }
-proptest-derive = { version = "0.3", optional = true }
+proptest-derive = { version = "0.3.0", optional = true }
 regex = "1"
-rlimit = "0.5.4"
+rlimit = "0.7.0"
 rocksdb = "0.17.0"
 serde = { version = "1", features = ["serde_derive"] }
 tempfile = "3.3.0"
 thiserror = "1.0.30"
-tokio = { version = "1.15.0", features = ["sync"] }
-tower = { version = "0.4.11", features = ["buffer", "util"] }
+tokio = { version = "1.16.1", features = ["sync"] }
+tower = { version = "0.4.12", features = ["buffer", "util"] }
 tracing = "0.1"
 
 zebra-chain = { path = "../zebra-chain" }
@@ -47,9 +42,9 @@ halo2 = "=0.1.0-beta.1"
 itertools = "0.10.3"
 jubjub = "0.8.0"
 proptest = "0.10.1"
-proptest-derive = "0.3"
+proptest-derive = "0.3.0"
 spandoc = "0.2"
-tokio = { version = "1.15.0", features = ["full"] }
+tokio = { version = "1.16.1", features = ["full"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

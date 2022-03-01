@@ -236,6 +236,9 @@ where
     /// The cached block chain state.
     state: ZS,
 
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: ZSTip,
+
     // Internal sync state
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
@@ -331,10 +334,11 @@ where
             downloads: Box::pin(Downloads::new(
                 block_network,
                 verifier,
-                latest_chain_tip,
+                latest_chain_tip.clone(),
                 config.sync.lookahead_limit,
             )),
             state,
+            latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
         };
@@ -354,7 +358,11 @@ where
 
         'sync: loop {
             if started_once {
-                tracing::info!(timeout = ?SYNC_RESTART_DELAY, "waiting to restart sync");
+                info!(
+                    timeout = ?SYNC_RESTART_DELAY,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "waiting to restart sync"
+                );
                 self.prospective_tips = HashSet::new();
                 self.downloads.cancel_all();
                 self.update_metrics();
@@ -363,9 +371,12 @@ where
                 started_once = true;
             }
 
-            tracing::info!("starting sync, obtaining new tips");
+            info!(
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "starting sync, obtaining new tips"
+            );
             if let Err(e) = self.obtain_tips().await {
-                tracing::warn!(?e, "error obtaining tips");
+                warn!(?e, "error obtaining tips");
                 continue 'sync;
             }
             self.update_metrics();
@@ -375,7 +386,7 @@ where
                 while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
                     match rsp {
                         Ok(hash) => {
-                            tracing::trace!(?hash, "verified and committed block to state");
+                            trace!(?hash, "verified and committed block to state");
                         }
                         Err(e) => {
                             if Self::should_restart_sync(e) {
@@ -399,16 +410,17 @@ where
                     );
                 }
                 while self.downloads.in_flight() > self.lookahead_limit {
-                    tracing::trace!(
+                    trace!(
                         tips.len = self.prospective_tips.len(),
                         in_flight = self.downloads.in_flight(),
                         lookahead_limit = self.lookahead_limit,
+                        state_tip = ?self.latest_chain_tip.best_tip_height(),
                         "waiting for pending blocks",
                     );
 
                     match self.downloads.next().await.expect("downloads is nonempty") {
                         Ok(hash) => {
-                            tracing::trace!(?hash, "verified and committed block to state");
+                            trace!(?hash, "verified and committed block to state");
                         }
 
                         Err(e) => {
@@ -421,21 +433,22 @@ where
                 }
 
                 // Once we're below the lookahead limit, we can keep extending the tips.
-                tracing::info!(
+                info!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
                     lookahead_limit = self.lookahead_limit,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
                     "extending tips",
                 );
 
                 if let Err(e) = self.extend_tips().await {
-                    tracing::warn!(?e, "error extending tips");
+                    warn!(?e, "error extending tips");
                     continue 'sync;
                 }
                 self.update_metrics();
             }
 
-            tracing::info!("exhausted prospective tip set");
+            info!("exhausted prospective tip set");
         }
     }
 
@@ -458,8 +471,11 @@ where
             })
             .map_err(|e| eyre!(e))?;
 
-        tracing::info!(tip = ?block_locator.first().unwrap(), "trying to obtain new chain tips");
-        tracing::debug!(?block_locator, "got block locator");
+        debug!(
+            tip = ?block_locator.first().expect("we have at least one block locator object"),
+            ?block_locator,
+            "got block locator and trying to obtain new chain tips"
+        );
 
         let mut requests = FuturesUnordered::new();
         for attempt in 0..FANOUT {
@@ -486,7 +502,7 @@ where
                 .map_err::<Report, _>(|e| eyre!(e))
             {
                 Ok(zn::Response::BlockHashes(hashes)) => {
-                    tracing::trace!(?hashes);
+                    trace!(?hashes);
 
                     // zcashd sometimes appends an unrelated hash at the start
                     // or end of its response.
@@ -512,7 +528,7 @@ where
                         }
                     }
 
-                    tracing::debug!(hashes.len = ?hashes.len(), ?first_unknown);
+                    debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
                     let unknown_hashes = if let Some(index) = first_unknown {
                         &hashes[index..]
@@ -520,7 +536,7 @@ where
                         continue;
                     };
 
-                    tracing::trace!(?unknown_hashes);
+                    trace!(?unknown_hashes);
 
                     let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
                         CheckedTip {
@@ -528,20 +544,20 @@ where
                             expected_next: end[1],
                         }
                     } else {
-                        tracing::debug!("discarding response that extends only one block");
+                        debug!("discarding response that extends only one block");
                         continue;
                     };
 
                     // Make sure we get the same tips, regardless of the
                     // order of peer responses
                     if !download_set.contains(&new_tip.expected_next) {
-                        tracing::debug!(?new_tip,
+                        debug!(?new_tip,
                                         "adding new prospective tip, and removing existing tips in the new block hash list");
                         self.prospective_tips
                             .retain(|t| !unknown_hashes.contains(&t.expected_next));
                         self.prospective_tips.insert(new_tip);
                     } else {
-                        tracing::debug!(
+                        debug!(
                             ?new_tip,
                             "discarding prospective tip: already in download set"
                         );
@@ -554,27 +570,27 @@ where
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
                     let new_hashes = new_download_len - prev_download_len;
-                    tracing::debug!(new_hashes, "added hashes to download set");
+                    debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count", new_hashes as f64);
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
-                Err(e) => tracing::debug!(?e),
+                Err(e) => debug!(?e),
             }
         }
 
-        tracing::debug!(?self.prospective_tips);
+        debug!(?self.prospective_tips);
 
         // Check that the new tips we got are actually unknown.
         for hash in &download_set {
-            tracing::debug!(?hash, "checking if state contains hash");
+            debug!(?hash, "checking if state contains hash");
             if self.state_contains(*hash).await? {
                 return Err(eyre!("queued download of hash behind our chain tip"));
             }
         }
 
         let new_downloads = download_set.len();
-        tracing::debug!(new_downloads, "queueing new downloads");
+        debug!(new_downloads, "queueing new downloads");
         metrics::gauge!("sync.obtain.queued.hash.count", new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
@@ -591,9 +607,9 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
-        tracing::info!(tips = ?tips.len(), "trying to extend chain tips");
+        debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
-            tracing::debug!(?tip, "asking peers to extend chain tip");
+            debug!(?tip, "asking peers to extend chain tip");
             let mut responses = FuturesUnordered::new();
             for attempt in 0..FANOUT {
                 if attempt > 0 {
@@ -617,8 +633,8 @@ where
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
                     Ok(zn::Response::BlockHashes(hashes)) => {
-                        tracing::debug!(first = ?hashes.first(), len = ?hashes.len());
-                        tracing::trace!(?hashes);
+                        debug!(first = ?hashes.first(), len = ?hashes.len());
+                        trace!(?hashes);
 
                         // zcashd sometimes appends an unrelated hash at the
                         // start or end of its response. Check the first hash
@@ -631,7 +647,7 @@ where
                             [first_hash, expected_hash, rest @ ..]
                                 if expected_hash == &tip.expected_next =>
                             {
-                                tracing::debug!(?first_hash,
+                                debug!(?first_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "unexpected first hash, but the second matches: using the hashes after the match");
@@ -640,14 +656,14 @@ where
                             // We ignore these responses
                             [] => continue,
                             [single_hash] => {
-                                tracing::debug!(?single_hash,
+                                debug!(?single_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response containing a single unexpected hash");
                                 continue;
                             }
                             [first_hash, second_hash, rest @ ..] => {
-                                tracing::debug!(?first_hash,
+                                debug!(?first_hash,
                                                 ?second_hash,
                                                 rest_len = ?rest.len(),
                                                 ?tip.expected_next,
@@ -672,22 +688,22 @@ where
                                 expected_next: end[1],
                             }
                         } else {
-                            tracing::debug!("discarding response that extends only one block");
+                            debug!("discarding response that extends only one block");
                             continue;
                         };
 
-                        tracing::trace!(?unknown_hashes);
+                        trace!(?unknown_hashes);
 
                         // Make sure we get the same tips, regardless of the
                         // order of peer responses
                         if !download_set.contains(&new_tip.expected_next) {
-                            tracing::debug!(?new_tip,
+                            debug!(?new_tip,
                                             "adding new prospective tip, and removing any existing tips in the new block hash list");
                             self.prospective_tips
                                 .retain(|t| !unknown_hashes.contains(&t.expected_next));
                             self.prospective_tips.insert(new_tip);
                         } else {
-                            tracing::debug!(
+                            debug!(
                                 ?new_tip,
                                 "discarding prospective tip: already in download set"
                             );
@@ -700,18 +716,18 @@ where
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
                         let new_hashes = new_download_len - prev_download_len;
-                        tracing::debug!(new_hashes, "added hashes to download set");
+                        debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count", new_hashes as f64);
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
-                    Err(e) => tracing::debug!(?e),
+                    Err(e) => debug!(?e),
                 }
             }
         }
 
         let new_downloads = download_set.len();
-        tracing::debug!(new_downloads, "queueing new downloads");
+        debug!(new_downloads, "queueing new downloads");
         metrics::gauge!("sync.extend.queued.hash.count", new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
@@ -734,15 +750,15 @@ where
         //
         // So we just download and verify the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
-            tracing::info!("starting genesis block download and verify");
+            info!("starting genesis block download and verify");
             self.downloads
                 .download_and_verify(self.genesis_hash)
                 .await
                 .map_err(|e| eyre!(e))?;
             match self.downloads.next().await.expect("downloads is nonempty") {
-                Ok(hash) => tracing::trace!(?hash, "verified and committed block to state"),
+                Ok(hash) => trace!(?hash, "verified and committed block to state"),
                 Err(e) => {
-                    tracing::warn!(?e, "could not download or verify genesis block, retrying");
+                    warn!(?e, "could not download or verify genesis block, retrying");
                     tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
                 }
             }
@@ -753,7 +769,7 @@ where
 
     /// Queue download and verify tasks for each block that isn't currently known to our node
     async fn request_blocks(&mut self, hashes: IndexSet<block::Hash>) -> Result<(), Report> {
-        tracing::debug!(hashes.len = hashes.len(), "requesting blocks");
+        debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
         }
@@ -801,7 +817,7 @@ where
             BlockDownloadVerifyError::Invalid(VerifyChainError::Checkpoint(
                 VerifyCheckpointError::AlreadyVerified { .. },
             )) => {
-                tracing::debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
                 false
             }
             BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
@@ -809,16 +825,16 @@ where
                     source: BlockError::AlreadyInChain(_, _),
                 },
             )) => {
-                tracing::debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
             BlockDownloadVerifyError::CancelledDuringDownload
             | BlockDownloadVerifyError::CancelledDuringVerification => {
-                tracing::debug!(error = ?e, "block verification was cancelled, continuing");
+                debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
             BlockDownloadVerifyError::BehindTipHeightLimit => {
-                tracing::debug!(
+                debug!(
                     error = ?e,
                     "block height is behind the current state tip, \
                      assuming the syncer will eventually catch up to the state, continuing"
@@ -831,15 +847,17 @@ where
                 VerifyBlockError::Commit(ref source),
             )) if format!("{:?}", source).contains("block is already committed to the state") => {
                 // TODO: improve this by checking the type (#2908)
-                tracing::debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
                 false
             }
             BlockDownloadVerifyError::DownloadFailed(ref source)
                 if format!("{:?}", source).contains("NotFound") =>
             {
+                // Covers both NotFoundResponse and NotFoundRegistry errors.
+                //
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
-                tracing::debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
                 false
             }
 
@@ -860,14 +878,14 @@ where
                     || err_str.contains("block is already committed to the state")
                     || err_str.contains("NotFound")
                 {
-                    tracing::error!(?e,
+                    error!(?e,
                         "a BlockDownloadVerifyError that should have been filtered out was detected, \
                         which possibly indicates a programming error in the downcast inside \
                         zebrad::components::sync::downloads::Downloads::download_and_verify"
                     )
                 }
 
-                tracing::warn!(?e, "error downloading and verifying block");
+                warn!(?e, "error downloading and verifying block");
                 true
             }
         }

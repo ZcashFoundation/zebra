@@ -27,7 +27,7 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -42,7 +42,7 @@ use zebra_test::{
 };
 use zebrad::{
     components::{mempool, sync},
-    config::{SyncSection, ZebradConfig},
+    config::{SyncSection, TracingSection, ZebradConfig},
 };
 
 /// The amount of time we wait after launching `zebrad`.
@@ -82,12 +82,22 @@ fn default_test_config() -> Result<ZebradConfig> {
         ..zebra_consensus::Config::default()
     };
 
+    let force_use_color = !matches!(
+        env::var("ZEBRA_FORCE_USE_COLOR"),
+        Err(env::VarError::NotPresent)
+    );
+    let tracing = TracingSection {
+        force_use_color,
+        ..TracingSection::default()
+    };
+
     let config = ZebradConfig {
         network,
         state: zebra_state::Config::ephemeral(),
         sync,
         mempool,
         consensus,
+        tracing,
         ..ZebradConfig::default()
     };
 
@@ -729,6 +739,15 @@ const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
+/// The text that should be logged when the initial sync finishes at the estimated chain tip.
+///
+/// This message is only logged if:
+/// - we have reached the estimated chain tip,
+/// - we have synced all known checkpoints,
+/// - the syncer has stopped downloading lots of blocks, and
+/// - we are regularly downloading some blocks via the syncer or block gossip.
+const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip, using gossiped blocks";
+
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
@@ -742,6 +761,15 @@ const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
 /// The maximum amount of time Zebra should take to sync a thousand blocks.
 const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// The test sync height where we switch to using the default lookahead limit.
+///
+/// Most tests only download a few blocks. So tests default to the minimum lookahead limit,
+/// to avoid downloading extra blocks, and slowing down the test.
+///
+/// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
+/// so that the sync is faster. This can increase the RAM needed for tests.
+const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height = Height(3 * sync::DEFAULT_LOOKAHEAD_LIMIT as u32);
+
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
 /// The first checkpoint contains a single genesis block.
@@ -753,8 +781,10 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
         true,
-        None,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -770,8 +800,10 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
         true,
-        None,
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -794,8 +826,10 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
         true,
-        None,
+        true,
     )?;
     // if stopping corrupts the rocksdb database, zebrad might hang or crash here
     // if stopping does not write the rocksdb database to disk, Zebra will
@@ -806,8 +840,10 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
         "state is already at the configured height",
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
         false,
-        None,
     )?;
 
     Ok(())
@@ -823,8 +859,10 @@ fn activate_mempool_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
         true,
-        Some(TINY_CHECKPOINT_TEST_HEIGHT),
+        true,
     )
     .map(|_tempdir| ())
 }
@@ -843,8 +881,10 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
         true,
-        None,
+        true,
     )?;
     // if this sync fails, see the failure notes in `restart_stop_at_height`
     sync_until(
@@ -853,8 +893,10 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
         "previous state height is greater than the stop height",
         STOP_ON_LOAD_TIMEOUT,
         reuse_tempdir,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
         false,
-        None,
     )?;
 
     Ok(())
@@ -875,40 +917,116 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         STOP_AT_HEIGHT_REGEX,
         LARGE_CHECKPOINT_TIMEOUT,
         None,
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
         true,
-        Some(TINY_CHECKPOINT_TEST_HEIGHT),
+        true,
     )
     .map(|_tempdir| ())
 }
 
-/// Sync `network` until `zebrad` reaches `height`, and ensure that
-/// the output contains `stop_regex`. If `reuse_tempdir` is supplied,
-/// use it as the test's temporary directory.
+/// Test if `zebrad` can fully sync the chain on mainnet.
 ///
-/// If `check_legacy_chain` is true,
-/// make sure the logs contain the legacy chain check.
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_mainnet() {
+    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
+}
+
+/// Test if `zebrad` can fully sync the chain on testnet.
 ///
-/// If `enable_mempool_at_height` is `Some(Height(_))`,
-/// configure `zebrad` to debug-enable the mempool at that height.
-/// Then check the logs for the mempool being enabled.
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_testnet() {
+    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
+}
+
+/// Sync `network` until the chain tip is reached, or a timeout elapses.
+///
+/// The timeout is specified using an environment variable, with the name configured by the
+/// `timeout_argument_name` parameter. The value of the environment variable must the number of
+/// minutes specified as an integer.
+fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Result<()> {
+    let timeout_argument: Option<u64> = env::var(timeout_argument_name)
+        .ok()
+        .and_then(|timeout_string| timeout_string.parse().ok());
+
+    if let Some(timeout_minutes) = timeout_argument {
+        sync_until(
+            Height::MAX,
+            network,
+            SYNC_FINISHED_REGEX,
+            Duration::from_secs(60 * timeout_minutes),
+            None,
+            MempoolBehavior::ShouldAutomaticallyActivate,
+            // Use checkpoints to increase full sync performance, and test default Zebra behaviour.
+            // (After the changes to the default config in #2368.)
+            //
+            // TODO: if full validation performance improves, do another test with checkpoint_sync off
+            true,
+            true,
+        )
+        .map(|_| ())
+    } else {
+        tracing::info!(
+            ?network,
+            "skipped full sync test, \
+             set the {:?} environmental variable to run the test",
+            timeout_argument_name,
+        );
+
+        Ok(())
+    }
+}
+
+/// Sync on `network` until `zebrad` reaches `height`, or until it logs `stop_regex`.
 ///
 /// If `stop_regex` is encountered before the process exits, kills the
 /// process, and mark the test as successful, even if `height` has not
-/// been reached.
+/// been reached. To disable the height limit, and just stop at `stop_regex`,
+/// use `Height::MAX` for the `height`.
 ///
-/// On success, returns the associated `TempDir`. Returns an error if
-/// the child exits or `timeout` elapses before `regex` is found.
+/// # Test Settings
+///
+/// If `reuse_tempdir` is supplied, use it as the test's temporary directory.
+///
+/// If `height` is higher than the mandatory checkpoint,
+/// configures `zebrad` to preload the Zcash parameters.
+/// If it is lower, skips the parameter preload.
+///
+/// Configures `zebrad` to debug-enable the mempool based on `mempool_behavior`,
+/// then check the logs for the expected `mempool_behavior`.
+///
+/// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
+/// If it is false, only use the mandatory checkpoints.
+///
+/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
 /// If your test environment does not have network access, skip
 /// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+///
+/// # Test Status
+///
+/// On success, returns the associated `TempDir`. Returns an error if
+/// the child exits or `timeout` elapses before `stop_regex` is found.
+#[allow(clippy::too_many_arguments)]
 fn sync_until(
     height: Height,
     network: Network,
     stop_regex: &str,
     timeout: Duration,
+    // Test Settings
+    // TODO: turn these into an argument struct
     reuse_tempdir: impl Into<Option<TempDir>>,
+    mempool_behavior: MempoolBehavior,
+    checkpoint_sync: bool,
     check_legacy_chain: bool,
-    enable_mempool_at_height: impl Into<Option<Height>>,
 ) -> Result<TempDir> {
     zebra_test::init();
 
@@ -917,14 +1035,24 @@ fn sync_until(
     }
 
     let reuse_tempdir = reuse_tempdir.into();
-    let enable_mempool_at_height = enable_mempool_at_height.into();
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config()?;
-    // TODO: add convenience methods?
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
-    config.mempool.debug_enable_at_height = enable_mempool_at_height.map(|height| height.0);
+    config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
+    config.consensus.checkpoint_sync = checkpoint_sync;
+
+    // Download the parameters at launch, if we're going to need them later.
+    if height > network.mandatory_checkpoint_height() {
+        config.consensus.debug_skip_parameter_preload = false;
+    }
+
+    // Use the default lookahead limit if we're syncing lots of blocks.
+    // (Most tests use a smaller limit to minimise redundant block downloads.)
+    if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
+        config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+    }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
         reuse_tempdir.replace_config(&mut config)?
@@ -935,54 +1063,99 @@ fn sync_until(
     let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
 
     let network = format!("network: {},", network);
-    child.expect_stdout_line_matches(&network)?;
 
-    if check_legacy_chain {
-        child.expect_stdout_line_matches("starting legacy chain check")?;
-        child.expect_stdout_line_matches("no legacy chain found")?;
-    }
+    if mempool_behavior.require_activation() {
+        // require that the mempool activated,
+        // checking logs as they arrive
 
-    if enable_mempool_at_height.is_some() {
-        child.expect_stdout_line_matches("enabling mempool for debugging")?;
+        child.expect_stdout_line_matches(&network)?;
+
+        if check_legacy_chain {
+            child.expect_stdout_line_matches("starting legacy chain check")?;
+            child.expect_stdout_line_matches("no legacy chain found")?;
+        }
+
+        // before the stop regex, expect mempool activation
+        if mempool_behavior.require_forced_activation() {
+            child.expect_stdout_line_matches("enabling mempool for debugging")?;
+        }
         child.expect_stdout_line_matches("activating mempool")?;
 
-        // make sure zebra is running with the mempool
-        child.expect_stdout_line_matches("verified checkpoint range")?;
-    }
+        // then wait for the stop log, which must happen after the mempool becomes active
+        child.expect_stdout_line_matches(stop_regex)?;
 
-    child.expect_stdout_line_matches(stop_regex)?;
+        // make sure the child process is dead
+        // if it has already exited, ignore that error
+        let _ = child.kill();
 
-    // make sure there is never a mempool if we don't explicitly enable it
-    if enable_mempool_at_height.is_none() {
-        // if there is no matching line, the `expect_stdout_line_matches` error kills the `zebrad` child.
-        // the error is delayed until the test timeout, or until the child reaches the stop height and exits.
-        let mempool_is_activated = child
-            .expect_stdout_line_matches("activating mempool")
-            .is_ok();
+        Ok(child.dir)
+    } else {
+        // Require that the mempool didn't activate,
+        // checking the entire `zebrad` output after it exits.
+        //
+        // # Correctness
+        //
+        // Unlike the other mempool behaviours, `zebrad` must stop after logging the stop regex,
+        // without being killed by [`sync_until`] test harness.
+        //
+        // Since it needs to collect all the output,
+        // the test harness can't kill `zebrad` after it logs the `stop_regex`.
+        assert!(
+            height.0 < 2_000_000,
+            "zebrad must exit by itself, so we can collect all the output",
+        );
+        let output = child.wait_with_output()?;
 
-        // if there is a matching line, we panic and kill the test process.
-        // but we also need to kill the `zebrad` child before the test panics.
-        if mempool_is_activated {
-            child.kill()?;
-            panic!("unexpected mempool activation: mempool should not activate while syncing lots of blocks")
+        output.stdout_line_contains(&network)?;
+
+        if check_legacy_chain {
+            output.stdout_line_contains("starting legacy chain check")?;
+            output.stdout_line_contains("no legacy chain found")?;
         }
+
+        // check it did not activate or use the mempool
+        assert!(output.stdout_line_contains("activating mempool").is_err());
+        assert!(output
+            .stdout_line_contains("sending mempool transaction broadcast")
+            .is_err());
+
+        // check it logged the stop regex before exiting
+        output.stdout_line_matches(stop_regex)?;
+
+        // check exited by itself, successfully
+        output.assert_was_not_killed()?;
+        let output = output.assert_success()?;
+
+        Ok(output.dir.expect("wait_with_output sets dir"))
     }
-
-    // make sure the child process is dead
-    // if it has already exited, ignore that error
-    let _ = child.kill();
-
-    Ok(child.dir)
 }
 
 fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
     config.state.cache_dir = "/zebrad-cache".into();
+
+    // To get to the mandatory checkpoint, we need to sync lots of blocks.
+    // (Most tests use a smaller limit to minimise redundant block downloads.)
+    //
+    // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
+    // But the extra downloaded blocks shouldn't slow down the test that much,
+    // and testing with the defaults gives us better test coverage.
     config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+
     Ok(config)
 }
 
 /// Create or update a cached state for `network`, stopping at `height`.
+///
+/// # Test Settings
+///
+/// If `debug_skip_parameter_preload` is true, configures `zebrad` to preload the Zcash parameters.
+/// If it is false, skips the parameter preload.
+///
+/// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
+/// If it is false, only use the mandatory checkpoints.
+///
+/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
 /// Callers can supply an extra `test_child_predicate`, which is called on
 /// the `TestChild` between the startup checks, and the final
@@ -990,10 +1163,18 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// The `TestChild` is spawned with a timeout, so the predicate should use
 /// `expect_stdout_line_matches` or `expect_stderr_line_matches`.
+///
+/// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+///
+/// # Test Status
+///
+/// Returns an error if the child exits or the fixed timeout elapses
+/// before `STOP_AT_HEIGHT_REGEX` is found.
 fn create_cached_database_height<P>(
     network: Network,
     height: Height,
     debug_skip_parameter_preload: bool,
+    checkpoint_sync: bool,
     test_child_predicate: impl Into<Option<P>>,
 ) -> Result<()>
 where
@@ -1009,6 +1190,7 @@ where
     config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
+    config.consensus.checkpoint_sync = checkpoint_sync;
 
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
@@ -1040,8 +1222,14 @@ fn create_cached_database(network: Network) -> Result<()> {
         network,
         height,
         true,
+        // Use checkpoints to increase sync performance while caching the database
+        true,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure pre-cached databases finish before the mandatory checkpoint
+            //
+            // TODO: this check passes even if we reach the mandatory checkpoint,
+            //       because we sync finalized state, then non-finalized state.
+            //       Instead, fail if we see "best non-finalized chain root" in the logs.
             test_child.expect_stdout_line_matches("CommitFinalized request")?;
             Ok(())
         },
@@ -1053,6 +1241,8 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
+        false,
+        // Test full validation by turning checkpoints off
         false,
         |test_child: &mut TestChild<PathBuf>| {
             // make sure cached database tests finish after the mandatory checkpoint,
@@ -1277,6 +1467,170 @@ async fn tracing_endpoint() -> Result<()> {
     Ok(())
 }
 
+// TODO: RPC endpoint and port conflict tests (#3165)
+
+/// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
+///
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_integration() -> Result<()> {
+    use std::net::SocketAddr;
+
+    zebra_test::init();
+
+    // Skip the test unless we specifically asked for it
+    //
+    // TODO: check if the lightwalletd binary is in the PATH?
+    //       (this doesn't seem to be implemented in the standard library)
+    if env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
+        tracing::info!(
+            "skipped lightwalletd integration test, \
+             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
+        );
+
+        return Ok(());
+    }
+
+    // Launch zebrad
+
+    // [Note on port conflict](#Note on port conflict)
+    let listen_port = random_known_port();
+    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
+    let listen_addr = SocketAddr::new(listen_ip, listen_port);
+
+    // Write a configuration that has the rpc listen_addr option set
+    // TODO: split this config into another function?
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(listen_addr);
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut zebrad = dir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
+
+    // Wait until `zebrad` has opened the RPC endpoint
+    zebrad
+        .expect_stdout_line_matches(format!("Opened RPC endpoint at {}", listen_addr).as_str())?;
+
+    // Launch lightwalletd
+    // TODO: split this into another function
+
+    // Write a fake zcashd configuration that has the rpcbind and rpcport options set
+    // TODO: split this into another function
+    let dir = testdir()?;
+    let lightwalletd_config = format!(
+        "\
+        rpcbind={}\n\
+        rpcport={}\n\
+        ",
+        listen_ip, listen_port
+    );
+
+    use std::fs;
+    use std::io::Write;
+
+    let path = dir.path().to_owned();
+
+    // TODO: split this into another function
+    if !config.state.ephemeral {
+        let cache_dir = path.join("state");
+        fs::create_dir_all(&cache_dir)?;
+    } else {
+        fs::create_dir_all(&path)?;
+    }
+
+    let config_file = path.join("lightwalletd-zcash.conf");
+    fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
+
+    let result = {
+        let default_config_path = path.join("lightwalletd-zcash.conf");
+
+        assert!(
+            default_config_path.exists(),
+            "lightwalletd requires a config"
+        );
+
+        dir.spawn_child_with_command(
+            "lightwalletd",
+            &[
+                // the fake zcashd conf we just wrote
+                "--zcash-conf-path",
+                default_config_path
+                    .as_path()
+                    .to_str()
+                    .expect("Path is valid Unicode"),
+                // the lightwalletd cache directory
+                //
+                // TODO: create a sub-directory for lightwalletd
+                "--data-dir",
+                path.to_str().expect("Path is valid Unicode"),
+                // log to standard output
+                "--log-file",
+                "/dev/stdout",
+                // randomise wallet client ports
+                "--grpc-bind-addr",
+                "127.0.0.1:0",
+                "--http-bind-addr",
+                "127.0.0.1:0",
+                // don't require a TLS certificate
+                "--no-tls-very-insecure",
+            ],
+        )
+    };
+
+    let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
+    let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
+
+    // Wait until `lightwalletd` has launched
+    let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    // Check that `lightwalletd` is calling the expected Zebra RPCs
+    //
+    // TODO: add extra checks when we add new Zebra RPCs
+
+    // get_blockchain_info
+    let result = lightwalletd.expect_stdout_line_matches("Got sapling height");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    // Check that `lightwalletd` got to the first unimplemented Zebra RPC
+    //
+    // TODO: update the missing method name when we add a new Zebra RPC
+
+    let result = lightwalletd
+        .expect_stdout_line_matches("Method not found.*error zcashd getbestblockhash rpc");
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    let result = lightwalletd.expect_stdout_line_matches(
+        "Lightwalletd died with a Fatal error. Check logfile for details",
+    );
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
+
+    // Cleanup both processes
+
+    let result = lightwalletd.kill();
+    let (_, mut zebrad) = zebrad.kill_on_error(result)?;
+    zebrad.kill()?;
+
+    let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
+    let zebrad_output = zebrad.wait_with_output()?.assert_failure()?;
+
+    // If the test fails here, see the [note on port conflict](#Note on port conflict)
+    //
+    // TODO: change lightwalletd to `assert_was_killed` when enough RPCs are implemented
+    lightwalletd_output
+        .assert_was_not_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    zebrad_output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
@@ -1420,10 +1774,10 @@ where
     U: ZebradTestDirExt,
 {
     // Start the first node
-    let node1 = first_dir.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(&["start"])?;
 
-    // Wait a bit to spawn the second node, we want the first fully started.
-    std::thread::sleep(LAUNCH_DELAY);
+    // Wait until node1 has used the conflicting resource.
+    node1.expect_stdout_line_matches(first_stdout_regex)?;
 
     // Spawn the second node
     let node2 = second_dir.spawn_child(&["start"]);
@@ -1433,14 +1787,7 @@ where
     // Second node is terminated by panic, no need to kill.
     std::thread::sleep(LAUNCH_DELAY);
     let node1_kill_res = node1.kill();
-    let (_, node2) = node2.kill_on_error(node1_kill_res)?;
-
-    // In node1 we want to check for the success regex
-    // If there are any errors, we also want to print the node2 output.
-    let output1 = node1.wait_with_output();
-    // This mut is only used on some platforms, due to #1781.
-    #[allow(unused_mut)]
-    let (output1, mut node2) = node2.kill_on_error(output1)?;
+    let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
 
     // node2 should have panicked due to a conflict. Kill it here anyway, so it
     // doesn't outlive the test on error.
@@ -1455,22 +1802,21 @@ where
             .kill_on_error::<(), _>(Err(eyre!(
                 "conflicted node2 was still running, but the test expected a panic"
             )))
-            .context_from(&output1)
+            .context_from(&mut node1)
             .map(|_| ());
     }
+
     // Now we're sure both nodes are dead, and we have both their outputs
+    let output1 = node1.wait_with_output().context_from(&mut node2)?;
     let output2 = node2.wait_with_output().context_from(&output1)?;
 
-    // Look for the success regex
-    output1
-        .stdout_line_matches(first_stdout_regex)
-        .context_from(&output2)?;
+    // Make sure the first node was killed, rather than exiting with an error.
     output1
         .assert_was_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
         .context_from(&output2)?;
 
-    // In the second node we look for the conflict regex
+    // Make sure node2 has the expected resource conflict.
     output2
         .stderr_line_matches(second_stderr_regex)
         .context_from(&output1)?;
@@ -1480,4 +1826,64 @@ where
         .context_from(&output1)?;
 
     Ok(())
+}
+
+/// What the expected behavior of the mempool is for a test that uses [`sync_until`].
+enum MempoolBehavior {
+    /// The mempool should be forced to activate at a certain height, for debug purposes.
+    ///
+    /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
+    /// then the `stop_regex`.
+    ForceActivationAt(Height),
+
+    /// The mempool should be automatically activated.
+    ///
+    /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
+    /// then the `stop_regex`.
+    ShouldAutomaticallyActivate,
+
+    /// The mempool should not become active during the test.
+    ///
+    /// # Correctness
+    ///
+    /// Unlike the other mempool behaviours, `zebrad` must stop after logging the stop regex,
+    /// without being killed by [`sync_until`] test harness.
+    ///
+    /// Since it needs to collect all the output,
+    /// the test harness can't kill `zebrad` after it logs the `stop_regex`.
+    ShouldNotActivate,
+}
+
+impl MempoolBehavior {
+    /// Return the height value that the mempool should be enabled at, if available.
+    pub fn enable_at_height(&self) -> Option<u32> {
+        match self {
+            MempoolBehavior::ForceActivationAt(height) => Some(height.0),
+            MempoolBehavior::ShouldAutomaticallyActivate | MempoolBehavior::ShouldNotActivate => {
+                None
+            }
+        }
+    }
+
+    /// Returns `true` if the mempool should activate,
+    /// either by forced or automatic activation.
+    pub fn require_activation(&self) -> bool {
+        self.require_forced_activation() || self.require_automatic_activation()
+    }
+
+    /// Returns `true` if the mempool should be forcefully activated at a specified height.
+    pub fn require_forced_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ForceActivationAt(_))
+    }
+
+    /// Returns `true` if the mempool should automatically activate.
+    pub fn require_automatic_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ShouldAutomaticallyActivate)
+    }
+
+    /// Returns `true` if the mempool should not activate.
+    #[allow(dead_code)]
+    pub fn require_no_activation(&self) -> bool {
+        matches!(self, MempoolBehavior::ShouldNotActivate)
+    }
 }

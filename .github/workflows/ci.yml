@@ -3,18 +3,21 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
-    path:
+    paths:
       - '**/*.rs'
       - '**/*.txt'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
-      - 'docker/**'
       - '.github/workflows/ci.yml'
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: full
 
 jobs:
   test:
-    name: Test (+${{ matrix.rust }}) on ${{ matrix.os }}
+    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     # The large timeout is to accommodate:
     # - Windows builds (75 minutes, typically 30-50 minutes)
     # - parameter downloads (40 minutes, but only when the cache expires)
@@ -25,9 +28,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         rust: [stable]
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -99,19 +99,6 @@ jobs:
         working-directory: ./zebra-consensus
         run: cargo run --example download-params
 
-      - name: Show env vars
-        run: |
-            echo "Test env vars:"
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
-            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
-            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-
       - name: Run tests
         uses: actions-rs/cargo@v1.0.3
         with:
@@ -130,15 +117,12 @@ jobs:
           args: --verbose --package zebrad --test acceptance sync_large_checkpoints_ -- --ignored
 
   test-fake-activation-heights:
-    name: Build (+${{ matrix.rust }}) zebra-state with fake activation heights on ubuntu-latest
+    name: Test ${{ matrix.rust }} zebra-state with fake activation heights on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable]
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -157,19 +141,6 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: fetch
-
-      - name: Show env vars
-        run: |
-            echo "Test env vars:"
-            echo "ZEBRA_SKIP_NETWORK_TESTS=${{ env.ZEBRA_SKIP_NETWORK_TESTS }}"
-            echo "ZCASH_PARAMS=${{ env.ZCASH_PARAMS }}"
-            echo "PROPTEST_CASES=${{ env.PROPTEST_CASES }}"
-            echo "PROPTEST_MAX_SHRINK_ITERS=${{ env.PROPTEST_MAX_SHRINK_ITERS }}"
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
 
       # This test changes zebra-chain's activation heights,
       # which can recompile all the Zebra crates,
@@ -187,16 +158,12 @@ jobs:
           args: --verbose --package zebra-state --lib -- with_fake_activation_heights
 
   build-chain-no-features:
-    name: Build (+${{ matrix.rust }}) zebra-chain w/o features on ubuntu-latest
+    name: Build ${{ matrix.rust }} zebra-chain w/o features on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable, beta]
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
-
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -216,26 +183,14 @@ jobs:
         with:
           command: fetch
 
-      - name: Show env vars
-        run: |
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-
       - name: Run build without features enabled
         working-directory: ./zebra-chain
         run: cargo build --verbose --no-default-features
 
   build:
-    name: Build (+stable) on ubuntu-latest
+    name: Build stable on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
-
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: full
 
     steps:
       - uses: actions/checkout@v2.4.0
@@ -262,14 +217,6 @@ jobs:
         with:
           command: fetch
 
-      - name: Show env vars
-        run: |
-            echo "Common env vars:"
-            echo "RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}"
-            echo "Build env vars:"
-            echo "CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
-            echo "CARGO_TARGET_DIR=${{ env.CARGO_TARGET_DIR }}"
-
       - name: Build
         uses: actions-rs/cargo@v1.0.3
         with:
@@ -277,7 +224,7 @@ jobs:
           args: --verbose --release
 
   cargo-deny:
-    name: Check deny.toml crate dependencies and validate licenses
+    name: Check deny.toml ${{ matrix.checks }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -298,3 +245,10 @@ jobs:
       with:
         command: check ${{ matrix.checks }}
         args: --all-features --workspace
+
+    # this check runs with optional features off
+    # so we expect some warnings about "skip tree root was not found"
+    - uses: EmbarkStudios/cargo-deny-action@v1
+      with:
+        command: check ${{ matrix.checks }}
+        args: --workspace

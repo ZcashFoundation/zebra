@@ -48,7 +48,9 @@ pub mod chain;
 pub mod error;
 
 pub use block::VerifyBlockError;
-pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
+pub use checkpoint::{
+    CheckpointList, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP,
+};
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::groth16;

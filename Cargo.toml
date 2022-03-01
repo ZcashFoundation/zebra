@@ -8,6 +8,7 @@ members = [
         "zebra-consensus",
         "zebra-rpc",
         "zebra-client",
+        "zebra-node-services",
         "zebra-test",
         "zebra-utils",
         "tower-batch",

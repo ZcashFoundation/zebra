@@ -13,7 +13,7 @@ use crate::{
     },
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
-        ZcashSerialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
 };
 
@@ -161,7 +161,7 @@ impl Spend<SharedAnchor> {
 impl ZcashSerialize for Spend<PerSpendAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
-        writer.write_all(&self.per_spend_anchor.0[..])?;
+        self.per_spend_anchor.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.nullifier.into())?;
         writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         self.zkproof.zcash_serialize(&mut writer)?;
@@ -186,15 +186,46 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
     ///
     /// The "anchor encoding for v4 transactions" is implemented here.
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // # Consensus
+        //
+        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // See comments below for each specific type.
+        //
+        // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
+        //
+        // Applies to `per_spend_anchor` below; validated in
+        // [`crate::sapling::tree::Root::zcash_deserialize`].
         Ok(Spend {
+            // Type is `ValueCommit^{Sapling}.Output`, i.e. J
+            // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
+            // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
-            per_spend_anchor: tree::Root(reader.read_32_bytes()?),
+            // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
+            // But as mentioned above, we validate it further as an integer.
+            per_spend_anchor: (&mut reader).zcash_deserialize_into()?,
+            // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
+            // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J
+            // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+            // See [`ValidatingKey::try_from`].
             rk: reader
                 .read_32_bytes()?
                 .try_into()
                 .map_err(SerializationError::Parse)?,
+            // Type is `ZKSpend.Proof`, described in
+            // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+            // It is not enforced here; this just reads 192 bytes.
+            // The type is validated when validating the proof, see
+            // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
+            // Type is SpendAuthSig^{Sapling}.Signature, i.e.
+            // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
+            // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
             spend_auth_sig: reader.read_64_bytes()?.into(),
         })
     }
@@ -217,9 +248,23 @@ impl ZcashSerialize for SpendPrefixInTransactionV5 {
 
 impl ZcashDeserialize for SpendPrefixInTransactionV5 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // # Consensus
+        //
+        // > Elements of a Spend description MUST be valid encodings of the types given above.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // See comments below for each specific type.
         Ok(SpendPrefixInTransactionV5 {
+            // Type is `ValueCommit^{Sapling}.Output`, i.e. J
+            // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
+            // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
+            // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
+            // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J
+            // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+            // See [`ValidatingKey::try_from`].
             rk: reader
                 .read_32_bytes()?
                 .try_into()
@@ -286,8 +331,12 @@ impl TrustedPreallocate for SpendPrefixInTransactionV5 {
         // and the associated fields are required,
         // a valid max allocation can never exceed this size
         const MAX: u64 = (MAX_BLOCK_BYTES - 1) / SHARED_ANCHOR_SPEND_SIZE;
+        // # Consensus
+        //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        //
         // This acts as nSpendsSapling and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.

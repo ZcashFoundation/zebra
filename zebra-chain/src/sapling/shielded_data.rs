@@ -90,21 +90,7 @@ where
     AnchorV: AnchorVariant + Clone,
 {
     /// The net value of Sapling spend transfers minus output transfers.
-    ///
-    /// [`ShieldedData`] validates this [value balance consensus
-    /// rule](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus):
-    ///
-    /// "If effectiveVersion = 4 and there are no Spend descriptions or Output
-    /// descriptions, then valueBalanceSapling MUST be 0."
-    ///
-    /// During deserialization, this rule is checked when there are no spends and
-    /// no outputs.
-    ///
-    /// During serialization, this rule is structurally validated by [`ShieldedData`].
-    /// `value_balance` is a field in [`ShieldedData`], which must have at least
-    /// one spend or output in its `transfers` field. If [`ShieldedData`] is `None`
-    /// then there can not possibly be any spends or outputs, and the
-    /// `value_balance` is always serialized as zero.
+    /// Denoted as `valueBalanceSapling` in the spec.
     pub value_balance: Amount,
 
     /// A bundle of spends and outputs, containing at least one spend or
@@ -115,6 +101,7 @@ where
     pub transfers: TransferData<AnchorV>,
 
     /// A signature on the transaction hash.
+    /// Denoted as `bindingSigSapling` in the spec.
     pub binding_sig: Signature<Binding>,
 }
 
@@ -212,8 +199,7 @@ where
         // TODO: use TransferData::shared_anchor to improve performance for V5 transactions
         self.spends_per_anchor()
             .map(|spend| spend.per_spend_anchor)
-            .sorted()
-            .dedup()
+            .unique_by(|raw| raw.0.to_bytes())
     }
 
     /// Iterate over the [`Spend`]s for this transaction, returning

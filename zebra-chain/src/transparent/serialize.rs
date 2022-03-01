@@ -1,3 +1,5 @@
+//! Serializes and deserializes transparent data.
+
 use std::io;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -14,12 +16,23 @@ use crate::{
 use super::{CoinbaseData, Input, OutPoint, Output, Script};
 
 /// The maximum length of the coinbase data.
+///
 /// Includes the encoded coinbase height, if any.
 ///
 /// > The number of bytes in the coinbase script, up to a maximum of 100 bytes.
 ///
-/// https://developer.bitcoin.org/reference/transactions.html#coinbase-input-the-input-of-the-first-transaction-in-a-block
+/// <https://developer.bitcoin.org/reference/transactions.html#coinbase-input-the-input-of-the-first-transaction-in-a-block>
 pub const MAX_COINBASE_DATA_LEN: usize = 100;
+
+/// The minimum length of the coinbase data.
+///
+/// Includes the encoded coinbase height, if any.
+///
+// TODO: Update the link below once the constant is documented in the
+// protocol.
+///
+/// <https://github.com/zcash/zips/issues/589>
+pub const MIN_COINBASE_DATA_LEN: usize = 2;
 
 /// The coinbase data for a genesis block.
 ///
@@ -65,6 +78,22 @@ impl ZcashDeserialize for OutPoint {
 ///
 /// The height may consume `0..=5` bytes at the stat of the coinbase data.
 /// The genesis block does not include an encoded coinbase height.
+///
+/// # Consensus
+///
+/// > A coinbase transaction for a *block* at *block height* greater than 0 MUST have
+/// > a script that, as its first item, encodes the *block height* `height` as follows.
+/// > For `height` in the range {1..16}, the encoding is a single byte of value
+/// > `0x50` + `height`. Otherwise, let `heightBytes` be the signed little-endian
+/// > representation of `height`, using the minimum nonzero number of bytes such that
+/// > the most significant byte is < `0x80`.
+/// > The length of `heightBytes` MUST be in the range {1..5}.
+/// > Then the encoding is the length of `heightBytes` encoded as one byte,
+/// > followed by `heightBytes` itself. This matches the encoding used by Bitcoin in the
+/// > implementation of [BIP-34] (but the description here is to be considered normative).
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+/// <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
 pub(crate) fn parse_coinbase_height(
     mut data: Vec<u8>,
 ) -> Result<(block::Height, CoinbaseData), SerializationError> {
@@ -247,9 +276,14 @@ impl ZcashDeserialize for Input {
             }
 
             let data: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
+
+            // Check the coinbase data length.
             if data.len() > MAX_COINBASE_DATA_LEN {
-                return Err(SerializationError::Parse("coinbase has too much data"));
+                return Err(SerializationError::Parse("coinbase data is too long"));
+            } else if data.len() < MIN_COINBASE_DATA_LEN {
+                return Err(SerializationError::Parse("coinbase data is too short"));
             }
+
             let (height, data) = parse_coinbase_height(data)?;
 
             let sequence = reader.read_u32::<LittleEndian>()?;

@@ -143,6 +143,14 @@ impl Item {
             Inner::Binding { vk_bytes, sig, c } => VerificationKey::<Binding>::try_from(vk_bytes)
                 .and_then(|vk| vk.verify_prehashed(&sig, c)),
             Inner::SpendAuth { vk_bytes, sig, c } => {
+                // # Consensus
+                //
+                // > Elements of an Action description MUST be canonical encodings of the types given above.
+                //
+                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+                //
+                // This validates the `rk` element, whose type is
+                // SpendAuthSig^{Orchard}.Public, i.e. ℙ.
                 VerificationKey::<SpendAuth>::try_from(vk_bytes)
                     .and_then(|vk| vk.verify_prehashed(&sig, c))
             }
@@ -244,6 +252,14 @@ impl Verifier {
 
             let VK = match item.inner {
                 Inner::SpendAuth { vk_bytes, .. } => {
+                    // # Consensus
+                    //
+                    // > Elements of an Action description MUST be canonical encodings of the types given above.
+                    //
+                    // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+                    //
+                    // This validates the `rk` element, whose type is
+                    // SpendAuthSig^{Orchard}.Public, i.e. ℙ.
                     VerificationKey::<SpendAuth>::try_from(vk_bytes.bytes)?.point
                 }
                 Inner::Binding { vk_bytes, .. } => {

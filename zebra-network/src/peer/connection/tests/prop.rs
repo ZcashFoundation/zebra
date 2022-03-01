@@ -1,3 +1,5 @@
+//! Randomised property tests for peer connection handling.
+
 use std::{collections::HashSet, env, mem, sync::Arc};
 
 use futures::{
@@ -10,6 +12,7 @@ use tracing::Span;
 
 use zebra_chain::{
     block::{self, Block},
+    fmt::DisplayToDebug,
     serialization::SerializationError,
 };
 use zebra_test::mock_service::{MockService, PropTestAssertion};
@@ -17,8 +20,11 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use crate::{
     peer::{connection::Connection, ClientRequest, ErrorSlot},
     protocol::external::Message,
+    protocol::internal::InventoryResponse,
     Request, Response, SharedPeerError,
 };
+
+use InventoryResponse::*;
 
 proptest! {
     // The default value of proptest cases (256) causes this test to take more than ten seconds on
@@ -31,17 +37,20 @@ proptest! {
             .unwrap_or(32))
     )]
 
+    /// This test makes sure that Zebra ignores extra blocks after a block request is cancelled.
+    ///
+    /// We need this behaviour to avoid cascading errors after a single cancelled block request.
     #[test]
     fn connection_is_not_desynchronized_when_request_is_cancelled(
-        first_block in any::<Arc<Block>>(),
-        second_block in any::<Arc<Block>>(),
+        first_block in any::<DisplayToDebug<Arc<Block>>>(),
+        second_block in any::<DisplayToDebug<Arc<Block>>>(),
     ) {
         let runtime = zebra_test::init_async();
 
         runtime.block_on(async move {
             // The real stream and sink are from a split TCP connection,
             // but that doesn't change how the state machine behaves.
-            let (mut peer_inbound_tx, peer_inbound_rx) = mpsc::channel(1);
+            let (mut peer_tx, peer_rx) = mpsc::channel(1);
 
             let (
                 connection,
@@ -51,7 +60,7 @@ proptest! {
                 shared_error_slot,
             ) = new_test_connection();
 
-            let connection_task = tokio::spawn(connection.run(peer_inbound_rx));
+            let connection_task = tokio::spawn(connection.run(peer_rx));
 
             let response_to_first_request = send_block_request(
                 first_block.hash(),
@@ -71,27 +80,35 @@ proptest! {
             .await;
 
             // Reply to first request
-            peer_inbound_tx
-                .send(Ok(Message::Block(first_block)))
+            peer_tx
+                .send(Ok(Message::Block(first_block.0)))
                 .await
                 .expect("Failed to send response to first block request");
 
             // Reply to second request
-            peer_inbound_tx
-                .send(Ok(Message::Block(second_block.clone())))
+            peer_tx
+                .send(Ok(Message::Block(second_block.0.clone())))
                 .await
                 .expect("Failed to send response to second block request");
 
             // Check second response is correctly received
             let receive_response_result = response_to_second_request.await;
 
-            prop_assert!(receive_response_result.is_ok());
+            prop_assert!(
+                receive_response_result.is_ok(),
+                "unexpected receive result: {:?}",
+                receive_response_result,
+            );
             let response_result = receive_response_result.unwrap();
 
-            prop_assert!(response_result.is_ok());
+            prop_assert!(
+                response_result.is_ok(),
+                "unexpected response result: {:?}",
+                response_result,
+            );
             let response = response_result.unwrap();
 
-            prop_assert_eq!(response, Response::Blocks(vec![second_block]));
+            prop_assert_eq!(response, Response::Blocks(vec![Available(second_block.0)]));
 
             // Check the state after the response
             let error = shared_error_slot.try_get_error();
@@ -100,10 +117,14 @@ proptest! {
             inbound_service.expect_no_requests().await?;
 
             // Stop the connection thread
-            mem::drop(peer_inbound_tx);
+            mem::drop(peer_tx);
 
             let connection_task_result = connection_task.await;
-            prop_assert!(connection_task_result.is_ok());
+            prop_assert!(
+                connection_task_result.is_ok(),
+                "unexpected task result: {:?}",
+                connection_task_result,
+            );
 
             Ok(())
         })?;
@@ -114,11 +135,11 @@ proptest! {
 fn new_test_connection() -> (
     Connection<
         MockService<Request, Response, PropTestAssertion>,
-        SinkMapErr<mpsc::UnboundedSender<Message>, fn(mpsc::SendError) -> SerializationError>,
+        SinkMapErr<mpsc::Sender<Message>, fn(mpsc::SendError) -> SerializationError>,
     >,
     mpsc::Sender<ClientRequest>,
     MockService<Request, Response, PropTestAssertion>,
-    mpsc::UnboundedReceiver<Message>,
+    mpsc::Receiver<Message>,
     ErrorSlot,
 ) {
     super::new_test_connection()
@@ -127,7 +148,7 @@ fn new_test_connection() -> (
 async fn send_block_request(
     block: block::Hash,
     client_requests: &mut mpsc::Sender<ClientRequest>,
-    outbound_messages: &mut mpsc::UnboundedReceiver<Message>,
+    outbound_messages: &mut mpsc::Receiver<Message>,
 ) -> oneshot::Receiver<Result<Response, SharedPeerError>> {
     let (response_sender, response_receiver) = oneshot::channel();
 
@@ -135,6 +156,9 @@ async fn send_block_request(
     let client_request = ClientRequest {
         request,
         tx: response_sender,
+        // we skip inventory collection in these tests
+        inv_collector: None,
+        transient_addr: None,
         span: Span::none(),
     };
 

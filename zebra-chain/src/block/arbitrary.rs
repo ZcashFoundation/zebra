@@ -59,6 +59,16 @@ pub const PREVOUTS_CHAIN_HEIGHT: usize = 4;
 pub const MAX_PARTIAL_CHAIN_BLOCKS: usize =
     MIN_TRANSPARENT_COINBASE_MATURITY as usize + PREVOUTS_CHAIN_HEIGHT;
 
+impl Arbitrary for Height {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (Height::MIN.0..=Height::MAX.0).prop_map(Height).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 /// The configuration data for proptest when generating arbitrary chains
@@ -462,11 +472,20 @@ impl Block {
                         .unwrap();
                     let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
                     match current_height.cmp(&heartwood_height) {
-                        std::cmp::Ordering::Less => {}
+                        std::cmp::Ordering::Less => {
+                            // In pre-Heartwood blocks this is the Sapling note commitment tree root.
+                            // We don't validate it since we checkpoint on Canopy, but it
+                            // needs to be well-formed, i.e. smaller than 𝑞_J, so we
+                            // arbitrarily set it to 1.
+                            block.header.commitment_bytes = [0u8; 32];
+                            block.header.commitment_bytes[0] = 1;
+                        }
                         std::cmp::Ordering::Equal => {
+                            // The Heartwood activation block has a hardcoded all-zeroes commitment.
                             block.header.commitment_bytes = [0u8; 32];
                         }
                         std::cmp::Ordering::Greater => {
+                            // Set the correct commitment bytes according to the network upgrade.
                             let history_tree_root = match &history_tree {
                                 Some(tree) => tree.hash().unwrap_or_else(|| [0u8; 32].into()),
                                 None => [0u8; 32].into(),

@@ -15,6 +15,7 @@ To check if any of the top-level crates need version increments, go to the zebra
 
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
+- [ ] Keep a list of the crates that haven't been incremented, to include in the PR
 - [ ] Use the `zebrad` crate version in the `zebra-network` user agent string
       (currently the constant `USER_AGENT` in `zebra-network/src/constants.rs`)
 - [ ] Use the latest git tag in `README.md`
@@ -110,7 +111,7 @@ We use [the Release Drafter workflow](https://github.com/marketplace/actions/rel
 
 To create the final change log:
 - [ ] Copy the draft changelog into `CHANGELOG.md`
-- [ ] Delete any trivial changes
+- [ ] Delete any trivial changes. Keep the list of those, to include in the PR
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
 - [ ] Check the category for each change
@@ -134,6 +135,8 @@ After you have the version increments and the updated changelog,
       (name suggestion, example: `v1.0.0-alpha.0-release`)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.0-release?expand=1&template=release-checklist.md)).
+      - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
+      - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
 - [ ] While the PR is being reviewed, keep track of any PRs that have been merged
       since you created the PR to update `CHANGELOG.md` and push any updates if necessary
 - [ ] Once the release PR has been approved and merged, create a new release

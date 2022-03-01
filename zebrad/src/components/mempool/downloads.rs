@@ -39,9 +39,10 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
+use zebra_chain::transaction::{self, UnminedTxId, VerifiedUnminedTx};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
+use zebra_node_services::mempool::Gossip;
 use zebra_state as zs;
 
 use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
@@ -109,35 +110,6 @@ pub enum TransactionDownloadVerifyError {
 
     #[error("transaction did not pass consensus validation")]
     Invalid(#[from] zebra_consensus::error::TransactionError),
-}
-
-/// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug, Eq, PartialEq)]
-pub enum Gossip {
-    Id(UnminedTxId),
-    Tx(UnminedTx),
-}
-
-impl Gossip {
-    /// Return the [`UnminedTxId`] of a gossiped transaction.
-    pub fn id(&self) -> UnminedTxId {
-        match self {
-            Gossip::Id(txid) => *txid,
-            Gossip::Tx(tx) => tx.id,
-        }
-    }
-}
-
-impl From<UnminedTxId> for Gossip {
-    fn from(txid: UnminedTxId) -> Self {
-        Gossip::Id(txid)
-    }
-}
-
-impl From<UnminedTx> for Gossip {
-    fn from(tx: UnminedTx) -> Self {
-        Gossip::Tx(tx)
-    }
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
@@ -257,7 +229,7 @@ where
         let txid = gossiped_tx.id();
 
         if self.cancel_handles.contains_key(&txid) {
-            tracing::debug!(
+            debug!(
                 ?txid,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -272,7 +244,7 @@ where
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
-            tracing::info!(
+            debug!(
                 ?txid,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -322,6 +294,10 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
+                    let tx = tx.available().expect(
+                        "unexpected missing tx status: single tx failures should be errors",
+                    );
+
                     metrics::counter!(
                         "mempool.downloaded.transactions.total",
                         1,
@@ -350,7 +326,7 @@ where
                 })
                 .await;
 
-            tracing::debug!(?txid, ?result, "verified transaction for the mempool");
+            debug!(?txid, ?result, "verified transaction for the mempool");
 
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
@@ -372,7 +348,7 @@ where
             tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
-                    tracing::trace!("task cancelled prior to completion");
+                    trace!("task cancelled prior to completion");
                     metrics::counter!("mempool.cancelled.verify.tasks.total", 1);
                     Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
@@ -386,7 +362,7 @@ where
             "transactions are only queued once"
         );
 
-        tracing::debug!(
+        debug!(
             ?txid,
             queue_len = self.pending.len(),
             ?MAX_INBOUND_CONCURRENCY,

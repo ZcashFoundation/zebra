@@ -13,7 +13,7 @@ use zebra_chain::{
 };
 
 use super::mock_transparent_transfer;
-use crate::{error::TransactionError, script, transaction};
+use crate::{error::TransactionError, transaction};
 
 /// The maximum number of transparent inputs to include in a mock transaction.
 const MAX_TRANSPARENT_INPUTS: usize = 10;
@@ -229,13 +229,14 @@ proptest! {
     }
 }
 
-/// Generate an arbitrary block height after the Sapling activation height on an arbitrary network.
+/// Generates an arbitrary [`block::Height`] after the Sapling activation height
+/// on an arbitrary network.
 ///
-/// A proptest [`Strategy`] that generates random tuples with
+/// A proptest [`Strategy`] that generates random tuples with:
 ///
-/// - a network (mainnet or testnet)
-/// - a block height between the Sapling activation height (inclusive) on that network and the
-///   maximum block height.
+/// - a network (mainnet or testnet);
+/// - a block height between the Sapling activation height (inclusive) on that
+///   network and the maximum transaction expiry height.
 fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)> {
     any::<Network>().prop_flat_map(|network| {
         let start_height_value = NetworkUpgrade::Sapling
@@ -243,7 +244,7 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
             .expect("Sapling to have an activation height")
             .0;
 
-        let end_height_value = block::Height::MAX.0;
+        let end_height_value = block::Height::MAX_EXPIRY_HEIGHT.0;
 
         (start_height_value..=end_height_value)
             .prop_map(move |height_value| (network, block::Height(height_value)))
@@ -441,8 +442,7 @@ fn validate(
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
-        let script_verifier = script::Verifier::new(state_service);
-        let verifier = transaction::Verifier::new(network, script_verifier);
+        let verifier = transaction::Verifier::new(network, state_service);
 
         // Test the transaction verifier
         verifier

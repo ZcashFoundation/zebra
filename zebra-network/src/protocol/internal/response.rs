@@ -1,28 +1,31 @@
+//! Zebra's internal peer message response format.
+
+use std::{fmt, sync::Arc};
+
 use zebra_chain::{
     block::{self, Block},
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use crate::meta_addr::MetaAddr;
-
-use std::{fmt, sync::Arc};
+use crate::{meta_addr::MetaAddr, protocol::internal::InventoryResponse};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+use InventoryResponse::*;
 
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Response {
-    /// Do not send any response to this request.
+    /// The request does not have a response.
     ///
     /// Either:
     ///  * the request does not need a response, or
-    ///  * we have no useful data to provide in response to the request
+    ///  * we have no useful data to provide in response to the request,
+    ///    and the request was not an inventory request.
     ///
-    /// When Zebra doesn't have any useful data, it always sends no response,
-    /// instead of sending `notfound`. `zcashd` sometimes sends no response,
-    /// and sometimes sends `notfound`.
+    /// (Inventory requests provide a list of missing hashes if none of the hashes were available.)
     Nil,
 
     /// A list of peers, used to respond to `GetPeers`.
@@ -32,34 +35,19 @@ pub enum Response {
     // TODO: make this into a HashMap<SocketAddr, MetaAddr> - a unique list of peer addresses (#2244)
     Peers(Vec<MetaAddr>),
 
-    /// A list of blocks.
-    ///
-    /// The list contains zero or more blocks.
-    //
-    // TODO: split this into found and not found (#2726)
-    Blocks(Vec<Arc<Block>>),
-
-    /// A list of block hashes.
+    /// An ordered list of block hashes.
     ///
     /// The list contains zero or more block hashes.
     //
     // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
     BlockHashes(Vec<block::Hash>),
 
-    /// A list of block headers.
+    /// An ordered list of block headers.
     ///
     /// The list contains zero or more block headers.
     //
-    // TODO: make this into a HashMap<block::Hash, CountedHeader> - a unique list of headers (#2244)
-    //       split this into found and not found (#2726)
+    // TODO: make this into an IndexMap - an ordered unique list of headers (#2244)
     BlockHeaders(Vec<block::CountedHeader>),
-
-    /// A list of unmined transactions.
-    ///
-    /// The list contains zero or more unmined transactions.
-    //
-    // TODO: split this into found and not found (#2726)
-    Transactions(Vec<UnminedTx>),
 
     /// A list of unmined transaction IDs.
     ///
@@ -68,8 +56,25 @@ pub enum Response {
     ///
     /// The list contains zero or more transaction IDs.
     //
-    // TODO: make this into a HashSet - a unique list of transaction IDs (#2244)
+    // TODO: make this into a HashSet - a unique list (#2244)
     TransactionIds(Vec<UnminedTxId>),
+
+    /// A list of found blocks, and missing block hashes.
+    ///
+    /// Each list contains zero or more entries.
+    ///
+    /// When Zebra doesn't have a block or transaction, it always sends `notfound`.
+    /// `zcashd` sometimes sends no response, and sometimes sends `notfound`.
+    //
+    // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
+    Blocks(Vec<InventoryResponse<Arc<Block>, block::Hash>>),
+
+    /// A list of found unmined transactions, and missing unmined transaction IDs.
+    ///
+    /// Each list contains zero or more entries.
+    //
+    // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
+    Transactions(Vec<InventoryResponse<UnminedTx, UnminedTxId>>),
 }
 
 impl fmt::Display for Response {
@@ -79,30 +84,38 @@ impl fmt::Display for Response {
 
             Response::Peers(peers) => format!("Peers {{ peers: {} }}", peers.len()),
 
-            // Display heights for single-block responses (which Zebra requests and expects)
-            Response::Blocks(blocks) if blocks.len() == 1 => {
-                let block = blocks.first().expect("len is 1");
-                format!(
-                    "Block {{ height: {}, hash: {} }}",
-                    block
-                        .coinbase_height()
-                        .as_ref()
-                        .map(|h| h.0.to_string())
-                        .unwrap_or_else(|| "None".into()),
-                    block.hash(),
-                )
-            }
-            Response::Blocks(blocks) => format!("Blocks {{ blocks: {} }}", blocks.len()),
-
             Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
             Response::BlockHeaders(headers) => {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())
             }
-
-            Response::Transactions(transactions) => {
-                format!("Transactions {{ transactions: {} }}", transactions.len())
-            }
             Response::TransactionIds(ids) => format!("TransactionIds {{ ids: {} }}", ids.len()),
+
+            // Display heights for single-block responses (which Zebra requests and expects)
+            Response::Blocks(blocks) if blocks.len() == 1 => {
+                match blocks.first().expect("len is 1") {
+                    Available(block) => format!(
+                        "Block {{ height: {}, hash: {} }}",
+                        block
+                            .coinbase_height()
+                            .as_ref()
+                            .map(|h| h.0.to_string())
+                            .unwrap_or_else(|| "None".into()),
+                        block.hash(),
+                    ),
+                    Missing(hash) => format!("Block {{ missing: {} }}", hash),
+                }
+            }
+            Response::Blocks(blocks) => format!(
+                "Blocks {{ blocks: {}, missing: {} }}",
+                blocks.iter().filter(|r| r.is_available()).count(),
+                blocks.iter().filter(|r| r.is_missing()).count()
+            ),
+
+            Response::Transactions(transactions) => format!(
+                "Transactions {{ transactions: {}, missing: {} }}",
+                transactions.iter().filter(|r| r.is_available()).count(),
+                transactions.iter().filter(|r| r.is_missing()).count()
+            ),
         })
     }
 }
@@ -115,13 +128,17 @@ impl Response {
 
             Response::Peers(_) => "Peers",
 
-            Response::Blocks(_) => "Blocks",
             Response::BlockHashes(_) => "BlockHashes",
-
-            Response::BlockHeaders { .. } => "BlockHeaders",
-
-            Response::Transactions(_) => "Transactions",
+            Response::BlockHeaders(_) => "BlockHeaders",
             Response::TransactionIds(_) => "TransactionIds",
+
+            Response::Blocks(_) => "Blocks",
+            Response::Transactions(_) => "Transactions",
         }
+    }
+
+    /// Returns true if the response is a block or transaction inventory download.
+    pub fn is_inventory_download(&self) -> bool {
+        matches!(self, Response::Blocks(_) | Response::Transactions(_))
     }
 }

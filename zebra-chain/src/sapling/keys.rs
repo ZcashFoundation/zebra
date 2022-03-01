@@ -1052,6 +1052,8 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     ///
     /// Returns an error if the key is non-canonical, or [it is of small order][1].
     ///
+    /// # Consensus
+    ///
     /// > Check that a Output description's cv and epk are not of small order,
     /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
     ///
@@ -1100,6 +1102,8 @@ impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     /// Convert an array into a ValidatingKey.
     ///
     /// Returns an error if the key is malformed or [is of small order][1].
+    ///
+    /// # Consensus
     ///
     /// > Check that a Spend description's cv and rk are not of small order,
     /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
