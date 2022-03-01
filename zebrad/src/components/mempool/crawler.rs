@@ -56,10 +56,11 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{block::Height, transaction::UnminedTxId};
 use zebra_network as zn;
+use zebra_node_services::mempool::Gossip;
 use zebra_state::ChainTipChange;
 
 use crate::components::{
-    mempool::{self, downloads::Gossip, Config},
+    mempool::{self, Config},
     sync::SyncStatus,
 };
 
