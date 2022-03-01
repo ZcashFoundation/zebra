@@ -10,6 +10,7 @@
 /tower-fallback/                        @ZcashFoundation/network-owners
 /zebra-consensus/                       @ZcashFoundation/network-owners
 /zebra-network/                         @ZcashFoundation/network-owners
+/zebra-node-services/                   @ZcashFoundation/network-owners
 /zebra-state/                           @ZcashFoundation/network-owners
 /zebra-tests/src/mock_service.rs        @ZcashFoundation/network-owners
 /zebra-tests/src/service_extensions.rs  @ZcashFoundation/network-owners
