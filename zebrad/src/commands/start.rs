@@ -75,6 +75,7 @@ use zebra_consensus::CheckpointList;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
+    application::app_version,
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
@@ -196,7 +197,7 @@ impl StartCmd {
                 .in_current_span(),
         );
 
-        let rpc_task_handle = RpcServer::spawn(config.rpc);
+        let rpc_task_handle = RpcServer::spawn(config.rpc, app_version().to_string());
 
         info!("spawned initial Zebra tasks");
 
