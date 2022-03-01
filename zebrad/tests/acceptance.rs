@@ -1634,8 +1634,11 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: update the missing method name when we add a new Zebra RPC
 
+    // Note:
+    // zcash/lightwalletd calls getbestblockhash here, but
+    // adityapk00/lightwalletd calls getblock
     let result = lightwalletd
-        .expect_stdout_line_matches("Method not found.*error zcashd getbestblockhash rpc");
+        .expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
     let result = lightwalletd.expect_stdout_line_matches(
         "Lightwalletd died with a Fatal error. Check logfile for details",
