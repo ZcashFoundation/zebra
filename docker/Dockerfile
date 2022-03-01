@@ -27,8 +27,7 @@ RUN apt-get -qq update && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Install google OS Config agent
-RUN if [ "$(uname -m)" != "aarch64" ]; then \
-    apt-get -qq update && \
+RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     curl \
     lsb-release \
@@ -37,7 +36,6 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
     apt-get -qq update  && \
     apt-get -qq install -y --no-install-recommends google-osconfig-agent && \
-    ; fi && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
