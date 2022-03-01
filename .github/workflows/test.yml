@@ -126,6 +126,8 @@ jobs:
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
           docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib --no-fail-fast -- with_fake_activation_heights
+        env:
+          TEST_FAKE_ACTIVATION_HEIGHTS: '1'
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state
   test-empty-sync:
