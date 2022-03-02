@@ -333,7 +333,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0944d18a9a37691b87733b39c9360c9950af9aa5f97e2455bc108d8eb64fc1c1"
 dependencies = [
  "bitvec",
- "blake2s_simd 0.5.11",
+ "blake2s_simd",
  "byteorder",
  "crossbeam-channel",
  "ff",
@@ -466,17 +466,6 @@ checksum = "9e461a7034e85b211a4acb57ee2e6730b32912b06c08cc242243c39fc21ae6a2"
 dependencies = [
  "arrayref",
  "arrayvec 0.5.2",
- "constant_time_eq",
-]
-
-[[package]]
-name = "blake2s_simd"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db539cc2b5f6003621f1cd9ef92d7ded8ea5232c7de0f9faa2de251cd98730d4"
-dependencies = [
- "arrayref",
- "arrayvec 0.7.2",
  "constant_time_eq",
 ]
 
@@ -2328,17 +2317,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55586aa936c35f34ba8aa5d97356d554311206e1ce1f9e68fe7b07288e5ad827"
 dependencies = [
  "ahash",
- "metrics-macros 0.4.1",
-]
-
-[[package]]
-name = "metrics"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f601807a248964869e222d209fd5f8e5bcc5542e4c9b1ef21bcee4424868ce5"
-dependencies = [
- "ahash",
- "metrics-macros 0.5.1",
+ "metrics-macros",
 ]
 
 [[package]]
@@ -2349,7 +2328,7 @@ checksum = "aee04ed06085ea4eb1e1378c4fd973d95e0d3e32897913cd58aedc3b10e71452"
 dependencies = [
  "hyper",
  "ipnet",
- "metrics 0.17.1",
+ "metrics",
  "metrics-util",
  "parking_lot 0.11.2",
  "quanta",
@@ -2371,17 +2350,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics-macros"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49e30813093f757be5cf21e50389a24dc7dbb22c49f23b7e8f51d69b508a5ffa"
-dependencies = [
- "proc-macro2 1.0.36",
- "quote 1.0.15",
- "syn 1.0.86",
-]
-
-[[package]]
 name = "metrics-util"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2395,7 +2363,7 @@ dependencies = [
  "dashmap",
  "hashbrown",
  "indexmap",
- "metrics 0.17.1",
+ "metrics",
  "num_cpus",
  "ordered-float",
  "parking_lot 0.11.2",
@@ -3774,40 +3742,42 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "sentry"
-version = "0.24.3"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "476c496f4b112059d58ba2871dd7bd0fb3743511975b3331e24af983628498a2"
+checksum = "546b9b6f76c26c60ffbcf0b7136e15169fe13d43949b4aadb7c1edc1c3f3a26f"
 dependencies = [
  "httpdate",
  "reqwest",
  "sentry-backtrace",
  "sentry-contexts",
- "sentry-core 0.24.3",
+ "sentry-core",
  "tokio",
 ]
 
 [[package]]
 name = "sentry-backtrace"
-version = "0.24.3"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "062d19e114079c0ac209c1d05c77ae0de709e1c9c1965cc43168f916b9691ad9"
+checksum = "9cd0cba2aff36ac98708f7a6e7abbdde82dbaf180d5870c41084dc1b473648b9"
 dependencies = [
  "backtrace",
  "lazy_static",
  "regex",
- "sentry-core 0.24.3",
+ "sentry-core",
 ]
 
 [[package]]
 name = "sentry-contexts"
-version = "0.24.3"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc7ffe5e38b3fe50e1f92db30cbf9f17318a1261aa74b779737e5d6940244e23"
+checksum = "9bacf1c62427c6c97b896640d0c4dd204bbd3b79dd192d7cb40891aa5ee11d58"
 dependencies = [
  "hostname",
+ "lazy_static",
  "libc",
+ "regex",
  "rustc_version",
- "sentry-core 0.24.3",
+ "sentry-core",
  "uname",
 ]
 
@@ -3819,20 +3789,8 @@ checksum = "f9a957270c9a430218f8031c866493061a27e35a70250e9527f093563a33ce6b"
 dependencies = [
  "chrono",
  "lazy_static",
- "sentry-types 0.23.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sentry-core"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41bbccac5904deebfd44f1bdedac78c73b606140904d8e7a60e74310ffe0a923"
-dependencies = [
- "lazy_static",
  "rand 0.8.5",
- "sentry-types 0.24.3",
+ "sentry-types",
  "serde",
  "serde_json",
 ]
@@ -3843,7 +3801,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d291df287241b0ef97f5bf9e9a595691ef8dfb49bc6acfd55b9dc2ade681f1c9"
 dependencies = [
- "sentry-core 0.23.0",
+ "sentry-core",
  "tracing-core",
  "tracing-subscriber 0.2.25",
 ]
@@ -3859,23 +3817,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "sentry-types"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd82ef59ae000f8502e3095508eb3e9606f1716f15394e539d6a5c24fd38484d"
-dependencies = [
- "debugid",
- "getrandom 0.2.5",
- "hex",
- "serde",
- "serde_json",
- "thiserror",
- "time 0.3.7",
  "url",
  "uuid",
 ]
@@ -5102,12 +5043,9 @@ version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e0ab7bdc962035a87fba73f3acca9b8a8d0034c2e6f60b84aeaaddddc155dce"
 dependencies = [
- "ansi_term 0.12.1",
  "sharded-slab",
- "smallvec 1.8.0",
  "thread_local",
  "tracing-core",
- "tracing-log",
 ]
 
 [[package]]
@@ -5595,7 +5533,7 @@ dependencies = [
  "bip0039",
  "bitvec",
  "blake2b_simd 0.5.11",
- "blake2s_simd 0.5.11",
+ "blake2s_simd",
  "bls12_381",
  "byteorder",
  "chacha20poly1305",
@@ -5668,7 +5606,7 @@ dependencies = [
  "bitflags",
  "bitvec",
  "blake2b_simd 1.0.0",
- "blake2s_simd 1.0.0",
+ "blake2s_simd",
  "bls12_381",
  "bs58",
  "byteorder",
@@ -5734,7 +5672,7 @@ dependencies = [
  "hex",
  "jubjub",
  "lazy_static",
- "metrics 0.18.0",
+ "metrics",
  "once_cell",
  "orchard",
  "proptest",
@@ -5749,9 +5687,9 @@ dependencies = [
  "tower-batch",
  "tower-fallback",
  "tracing",
- "tracing-error 0.2.0",
+ "tracing-error 0.1.2",
  "tracing-futures",
- "tracing-subscriber 0.3.9",
+ "tracing-subscriber 0.2.25",
  "zcash_proofs",
  "zebra-chain",
  "zebra-script",
@@ -5771,7 +5709,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
- "metrics 0.17.1",
+ "metrics",
  "ordered-map",
  "pin-project 1.0.10",
  "proptest",
@@ -5788,7 +5726,7 @@ dependencies = [
  "tor-rtcompat",
  "tower",
  "tracing",
- "tracing-error 0.2.0",
+ "tracing-error 0.1.2",
  "tracing-futures",
  "zebra-chain",
  "zebra-test",
@@ -5847,7 +5785,7 @@ dependencies = [
  "itertools",
  "jubjub",
  "lazy_static",
- "metrics 0.17.1",
+ "metrics",
  "mset",
  "once_cell",
  "proptest",
@@ -5898,8 +5836,8 @@ dependencies = [
  "hex",
  "serde_json",
  "structopt",
- "tracing-error 0.2.0",
- "tracing-subscriber 0.3.9",
+ "tracing-error 0.1.2",
+ "tracing-subscriber 0.2.25",
  "zebra-chain",
  "zebra-consensus",
  "zebra-state",
@@ -5920,7 +5858,7 @@ dependencies = [
  "indexmap",
  "inferno",
  "lazy_static",
- "metrics 0.17.1",
+ "metrics",
  "metrics-exporter-prometheus",
  "num-integer",
  "once_cell",

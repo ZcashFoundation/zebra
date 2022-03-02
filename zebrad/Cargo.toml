@@ -48,7 +48,7 @@ inferno = { version = "0.10.12", default-features = false }
 atty = "0.2.14"
 
 sentry-tracing = "0.23.0"
-sentry = { version = "0.24.3", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
+sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"] }
 
 num-integer = "0.1.44"
 rand = { version = "0.8.5", package = "rand" }

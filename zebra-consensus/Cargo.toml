@@ -27,7 +27,7 @@ serde = { version = "1.0.136", features = ["serde_derive"] }
 
 futures = "0.3.21"
 futures-util = "0.3.21"
-metrics = "0.18.0"
+metrics = "0.17.1"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["time", "sync", "tracing"] }
 tower = { version = "0.4.12", features = ["timeout", "util", "buffer"] }
@@ -58,8 +58,8 @@ proptest-derive = "0.3.0"
 rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2.1"
 tokio = { version = "1.17.0", features = ["full"] }
-tracing-error = "0.2.0"
-tracing-subscriber = "0.3.9"
+tracing-error = "0.1.2"
+tracing-subscriber = "0.2.25"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }

@@ -45,6 +45,7 @@ skip-tree = [
 
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
+    { name = "color-eyre", version = "=0.6.0" },
 
     # ticket #2980: inferno and orchard/cryptographic dependencies
     { name = "orchard", version = "=0.0.0" },
