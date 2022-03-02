@@ -185,7 +185,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
 fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     let tip = state.tip();
 
-    insta::assert_ron_snapshot!("tip", tip.map(|tip| Tip::from(tip)));
+    insta::assert_ron_snapshot!("tip", tip.map(Tip::from));
 
     if let Some((max_height, tip_block_hash)) = tip {
         let mut stored_block_hashes = Vec::new();
@@ -233,8 +233,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 let transaction = &stored_block.transactions[tx_index];
                 let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
 
-                let transaction_hash = TransactionHash::new(transaction_location, &transaction);
-                let transaction_data = TransactionData::new(transaction_location, &transaction);
+                let transaction_hash = TransactionHash::new(transaction_location, transaction);
+                let transaction_data = TransactionData::new(transaction_location, transaction);
 
                 stored_transaction_hashes.push(transaction_hash);
                 stored_transactions.push(transaction_data);
