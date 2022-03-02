@@ -55,6 +55,13 @@ impl From<(Height, block::Hash)> for Tip {
     }
 }
 
+/// Block hash structure for RON snapshots.
+///
+/// This structure is used to snapshot the height and hash on the same line,
+/// which looks good for a vector of heights and hashes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct BlockHash(String);
+
 /// Snapshot test for finalized block and transaction data.
 #[test]
 fn test_block_and_transaction_data() {
@@ -111,4 +118,35 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     let tip = state.tip();
 
     insta::assert_ron_snapshot!("tip", tip.map(|tip| Tip::from(tip)));
+
+    if let Some((max_height, tip_block_hash)) = tip {
+        // Check block height and hash database queries.
+        let mut stored_block_hashes = Vec::new();
+
+        for query_height in 0..=max_height.0 {
+            let query_height = Height(query_height);
+            let stored_block_hash = state
+                .hash(query_height)
+                .expect("heights up to tip have hashes");
+            let stored_height = state
+                .height(stored_block_hash)
+                .expect("hashes up to tip have heights");
+
+            // We don't need to snapshot the heights,
+            // because they are fully determined by the tip and block hashes.
+            //
+            // But we do it anyway, so the snapshots are more readable.
+            assert_eq!(stored_height, query_height);
+
+            if query_height == max_height {
+                assert_eq!(stored_block_hash, tip_block_hash);
+            }
+
+            stored_block_hashes.push((stored_height, BlockHash(stored_block_hash.to_string())));
+        }
+
+        // The block hashes are in height order, and we want to snapshot that order.
+        // So we don't sort the vector before snapshotting.
+        insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
+    }
 }
