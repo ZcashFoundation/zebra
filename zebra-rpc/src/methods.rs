@@ -104,15 +104,18 @@ impl Rpc for RpcImpl {
         let mut state = self.state_service.clone();
 
         async move {
+            let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));
             let response = state
                 .ready()
                 .await
                 .expect("State service should be always ready")
-                .call(zebra_state::Request::Block(
-                    zebra_state::HashOrHeight::Height(height),
-                ))
+                .call(request)
                 .await
-                .expect("Request always results in a no error response (check)");
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
 
             match response {
                 zebra_state::Response::Block(Some(block)) => Ok(GetBlock {
