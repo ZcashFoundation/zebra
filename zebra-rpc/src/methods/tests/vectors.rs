@@ -3,8 +3,8 @@
 use super::super::*;
 use zebra_network::constants::USER_AGENT;
 
-#[test]
-fn rpc_getinfo() {
+#[tokio::test]
+async fn rpc_getinfo() {
     zebra_test::init();
 
     let state_service = zebra_state::init_test(zebra_chain::parameters::Network::Mainnet);
