@@ -1,7 +1,6 @@
 use std::{convert::TryInto, env, sync::Arc};
 
-use futures::stream::FuturesUnordered;
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
     block::{self, Block, CountedHeader},
@@ -17,37 +16,12 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     constants, init_test,
-    service::{chain_tip::TipAction, StateService},
+    service::{chain_tip::TipAction, populated_state, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
     BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
-
-async fn populated_state(
-    blocks: impl IntoIterator<Item = Arc<Block>>,
-) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let requests = blocks
-        .into_iter()
-        .map(|block| Request::CommitFinalizedBlock(block.into()));
-
-    let network = Network::Mainnet;
-    let mut state = init_test(network);
-
-    let mut responses = FuturesUnordered::new();
-
-    for request in requests {
-        let rsp = state.ready().await.unwrap().call(request);
-        responses.push(rsp);
-    }
-
-    use futures::StreamExt;
-    while let Some(rsp) = responses.next().await {
-        rsp.expect("blocks should commit just fine");
-    }
-
-    state
-}
 
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
