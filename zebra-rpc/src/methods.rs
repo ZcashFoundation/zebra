@@ -10,15 +10,10 @@ use futures::FutureExt;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::block::Height;
 use zebra_network::constants::USER_AGENT;
-
-type State = Buffer<
-    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
-    zebra_state::Request,
->;
 
 #[cfg(test)]
 mod tests;
@@ -74,14 +69,29 @@ pub trait Rpc {
 
 /// RPC method implementations.
 
-pub struct RpcImpl {
+pub struct RpcImpl<State>
+where
+    State: Service<
+        zebra_state::Request,
+        Response = zebra_state::Response,
+        Error = zebra_state::BoxError,
+    >,
+{
     /// Zebra's application version.
     pub app_version: String,
     /// Zebra's running state service.
-    pub state_service: State,
+    pub state_service: Buffer<State, zebra_state::Request>,
 }
 
-impl Rpc for RpcImpl {
+impl<State> Rpc for RpcImpl<State>
+where
+    State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + 'static,
+    State::Future: Send,
+{
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
             build: self.app_version.clone(),
