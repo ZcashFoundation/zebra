@@ -9,6 +9,7 @@ on:
       - 'zebra-consensus/src/primitives/groth16/params.rs'
       - 'zebra-consensus/src/chain.rs'
       - 'zebrad/src/commands/start.rs'
+      - 'docker/zcash-params/Dockerfile'
       - '.github/workflows/zcash-params.yml'
 
 env:
@@ -57,7 +58,7 @@ jobs:
       with:
         target: builder
         context: .
-        file: ./docker/Dockerfile.params
+        file: ./docker/zcash-params/Dockerfile
         tags: |
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}

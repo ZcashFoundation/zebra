@@ -13,6 +13,7 @@ default-run = "zebrad"
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus/" }
 zebra-network = { path = "../zebra-network" }
+zebra-node-services = { path = "../zebra-node-services" }
 zebra-rpc = { path = "../zebra-rpc" }
 zebra-state = { path = "../zebra-state" }
 

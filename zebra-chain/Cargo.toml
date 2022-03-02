@@ -34,10 +34,10 @@ incrementalmerkletree = "0.2.0"
 itertools = "0.10.3"
 jubjub = "0.8.0"
 lazy_static = "1.4.0"
-ripemd160 = "0.9"
 rand_core = "0.6.3"
-secp256k1 = { version = "0.21.2", features = ["serde"] }
+ripemd160 = "0.9"
 serde = { version = "1.0.136", features = ["serde_derive", "rc"] }
+secp256k1 = { version = "0.21.3", features = ["serde"] }
 serde-big-array = "0.3.2"
 sha2 = { version = "0.9.9", features=["compress"] }
 static_assertions = "1.1.0"

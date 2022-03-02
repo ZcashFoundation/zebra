@@ -20,6 +20,9 @@ use crate::{
     Config,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod tests;
+
 /// Wrapper struct to ensure low-level database access goes through the correct API.
 pub struct DiskDb {
     /// The inner RocksDB database.
@@ -32,6 +35,10 @@ pub struct DiskDb {
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
+///
+/// [`rocksdb::WriteBatch`] is a batched set of database updates,
+/// which must be written to the database using `DiskDb::write(batch)`.
+#[must_use = "batches must be written to the database"]
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
@@ -99,6 +106,8 @@ impl ReadDisk for DiskDb {
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
+        //
+        // TODO: move disk reads to a blocking thread (#2188)
         let value_bytes = self
             .db
             .get_pinned_cf(cf, key_bytes)
@@ -115,6 +124,8 @@ impl ReadDisk for DiskDb {
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
+        //
+        // TODO: move disk reads to a blocking thread (#2188)
         self.db
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur")
@@ -187,11 +198,16 @@ impl DiskDb {
             Ok(db) => {
                 info!("Opened Zebra state cache at {}", path.display());
 
-                DiskDb {
+                let db = DiskDb {
                     db,
                     ephemeral: config.ephemeral,
-                }
+                };
+
+                db.assert_default_cf_is_empty();
+
+                db
             }
+
             // TODO: provide a different hint if the disk is full, see #1623
             Err(e) => panic!(
                 "Opening database {:?} failed: {:?}. \
@@ -201,6 +217,8 @@ impl DiskDb {
             ),
         }
     }
+
+    // Read methods
 
     /// Returns the `Path` where the files used by this database are located.
     pub fn path(&self) -> &Path {
@@ -213,11 +231,15 @@ impl DiskDb {
     }
 
     /// Returns an iterator over the keys in `cf_name`, starting from the first key.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn forward_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
         self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::Start)
     }
 
     /// Returns a reverse iterator over the keys in `cf_name`, starting from the last key.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn reverse_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
         self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::End)
     }
@@ -228,11 +250,15 @@ impl DiskDb {
         !self.forward_iterator(cf_handle).valid()
     }
 
+    // Write methods
+
     /// Writes `batch` to the database.
     pub fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         // TODO: move writing to the database to a blocking thread (#2188)
         self.db.write(batch.batch)
     }
+
+    // Private methods
 
     /// Returns the database options for the finalized state database.
     fn options() -> rocksdb::Options {
@@ -273,30 +299,43 @@ impl DiskDb {
     ///
     /// If the open file limit can not be increased to `MIN_OPEN_FILE_LIMIT`.
     fn increase_open_file_limit() -> u64 {
-        // `increase_nofile_limit` doesn't do anything on Windows in rlimit 0.7.0.
+        // Zebra mainly uses TCP sockets (`zebra-network`) and low-level files
+        // (`zebra-state` database).
         //
-        // On Windows, the default limit is:
-        // - 512 high-level stream I/O files (via the C standard functions), and
-        // - 8192 low-level I/O files (via the Unix C functions).
+        // On Unix-based platforms, `increase_nofile_limit` changes the limit for
+        // both database files and TCP connections.
+        //
+        // But it doesn't do anything on Windows in rlimit 0.7.0.
+        //
+        // On Windows, the default limits are:
+        // - 512 high-level stream I/O files (via the C standard functions),
+        // - 8192 low-level I/O files (via the Unix C functions), and
+        // - 1000 TCP Control Block entries (network connections).
+        //
         // https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks
+        // http://smallvoid.com/article/winnt-tcpip-max-limit.html
         //
-        // If we need more high-level I/O files on Windows,
-        // use `setmaxstdio` and `getmaxstdio` from the `rlimit` crate:
-        // https://docs.rs/rlimit/latest/rlimit/#windows
+        // `zebra-state`'s `IDEAL_OPEN_FILE_LIMIT` is much less than
+        // the Windows low-level I/O file limit.
         //
-        // Then panic if `setmaxstdio` fails to set the minimum value,
-        // and `getmaxstdio` is below the minimum value.
+        // The [`setmaxstdio` and `getmaxstdio`](https://docs.rs/rlimit/latest/rlimit/#windows)
+        // functions from the `rlimit` crate only change the high-level I/O file limit.
+        //
+        // `zebra-network`'s default connection limit is much less than
+        // the TCP Control Block limit on Windows.
 
         // We try setting the ideal limit, then the minimum limit.
         let current_limit = match increase_nofile_limit(DiskDb::IDEAL_OPEN_FILE_LIMIT) {
             Ok(current_limit) => current_limit,
             Err(limit_error) => {
+                // These errors can happen due to sandboxing or unsupported system calls,
+                // even if the file limit is high enough.
                 info!(
-                ?limit_error,
-                min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
-                ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
-                "unable to increase the open file limit, \
-                 assuming Zebra can open a minimum number of files"
+                    ?limit_error,
+                    min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
+                    ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
+                    "unable to increase the open file limit, \
+                     assuming Zebra can open a minimum number of files"
                 );
 
                 return DiskDb::MIN_OPEN_FILE_LIMIT;
@@ -346,6 +385,8 @@ impl DiskDb {
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
     ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self) {
+        self.assert_default_cf_is_empty();
+
         // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
         //
         // Zebra's data should be fine if we don't clean up, because:
@@ -415,6 +456,20 @@ impl DiskDb {
             // TODO: downgrade to debug once bugs like #2905 are fixed
             //       but leave any errors at "info" level
             info!(?res, "removed temporary database files");
+        }
+    }
+
+    /// Check that the "default" column family is empty.
+    ///
+    /// # Panics
+    ///
+    /// If Zebra has a bug where it is storing data in the wrong column family.
+    fn assert_default_cf_is_empty(&self) {
+        if let Some(default_cf) = self.cf_handle("default") {
+            assert!(
+                self.is_empty(default_cf),
+                "Zebra should not store data in the 'default' column family"
+            );
         }
     }
 }
