@@ -1,0 +1,7 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+assertion_line: 113
+expression: "tip.map(|tip| Tip::from(tip))"
+
+---
+None

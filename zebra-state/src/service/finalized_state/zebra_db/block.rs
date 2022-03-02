@@ -31,6 +31,9 @@ use crate::{
     BoxError, HashOrHeight,
 };
 
+#[cfg(test)]
+mod tests;
+
 impl FinalizedState {
     // Read block methods
 
@@ -87,6 +90,7 @@ impl FinalizedState {
                     .block(height.into())
                     .expect("block will exist if TransactionLocation does");
 
+                // TODO: store transactions in a separate database index (#3151)
                 block.transactions[index as usize].clone()
             })
     }
