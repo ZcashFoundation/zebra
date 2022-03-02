@@ -268,14 +268,14 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     }
 }
 
-/// Return true if `vec` is sorted in ascending order.
+/// Return true if `list` is sorted in ascending order.
 ///
 /// TODO: replace with Vec::is_sorted when it stabilises
 ///       https://github.com/rust-lang/rust/issues/53485
-pub fn is_sorted<T: Ord + Clone>(vec: &Vec<T>) -> bool {
+pub fn is_sorted<T: Ord + Clone>(list: &[T]) -> bool {
     // This could perform badly, but it is only used in tests, and the test vectors are small.
-    let mut sorted_vec = vec.clone();
-    sorted_vec.sort();
+    let mut sorted_list = list.to_owned();
+    sorted_list.sort();
 
-    vec == &sorted_vec
+    list == sorted_list
 }
