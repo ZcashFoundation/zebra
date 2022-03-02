@@ -62,14 +62,14 @@ impl From<(Height, block::Hash)> for Tip {
 ///
 /// This structure is used to snapshot the height and hash on the same line,
 /// which looks good for a vector of heights and hashes.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 struct BlockHash(String);
 
 /// Block data structure for RON snapshots.
 ///
 /// This structure is used to snapshot the height and block data on separate lines,
 /// which looks good for a vector of heights and block data.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 struct BlockData {
     height: u32,
     block: String,
@@ -92,7 +92,7 @@ impl BlockData {
 ///
 /// This structure is used to snapshot the location and transaction hash on separate lines,
 /// which looks good for a vector of locations and transaction hashes.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 struct TransactionHash {
     loc: TransactionLocation,
     hash: String,
@@ -111,7 +111,7 @@ impl TransactionHash {
 ///
 /// This structure is used to snapshot the location and transaction data on separate lines,
 /// which looks good for a vector of locations and transaction data.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 struct TransactionData {
     loc: TransactionLocation,
     transaction: String,
@@ -241,6 +241,24 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             }
         }
 
+        // By definition, all of these lists should be in chain order.
+        assert!(
+            is_sorted(&stored_block_hashes),
+            "unsorted: {:?}",
+            stored_block_hashes
+        );
+        assert!(is_sorted(&stored_blocks), "unsorted: {:?}", stored_blocks);
+        assert!(
+            is_sorted(&stored_transaction_hashes),
+            "unsorted: {:?}",
+            stored_transaction_hashes
+        );
+        assert!(
+            is_sorted(&stored_transactions),
+            "unsorted: {:?}",
+            stored_transactions
+        );
+
         // The blocks, transactions, and their hashes are in height/index order, and we want to snapshot that order.
         // So we don't sort the vectors before snapshotting.
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
@@ -248,4 +266,16 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
         insta::assert_ron_snapshot!("transactions", stored_transactions);
     }
+}
+
+/// Return true if `vec` is sorted in ascending order.
+///
+/// TODO: replace with Vec::is_sorted when it stabilises
+///       https://github.com/rust-lang/rust/issues/53485
+pub fn is_sorted<T: Ord + Clone>(vec: &Vec<T>) -> bool {
+    // This could perform badly, but it is only used in tests, and the test vectors are small.
+    let mut sorted_vec = vec.clone();
+    sorted_vec.sort();
+
+    vec == &sorted_vec
 }
