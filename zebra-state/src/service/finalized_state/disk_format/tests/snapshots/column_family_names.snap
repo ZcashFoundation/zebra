@@ -1,0 +1,25 @@
+---
+source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
+assertion_line: 41
+expression: cf_names
+
+---
+[
+  "block_by_height",
+  "default",
+  "hash_by_height",
+  "height_by_hash",
+  "history_tree",
+  "orchard_anchors",
+  "orchard_note_commitment_tree",
+  "orchard_nullifiers",
+  "sapling_anchors",
+  "sapling_note_commitment_tree",
+  "sapling_nullifiers",
+  "sprout_anchors",
+  "sprout_note_commitment_tree",
+  "sprout_nullifiers",
+  "tip_chain_value_pool",
+  "tx_by_hash",
+  "utxo_by_outpoint",
+]
