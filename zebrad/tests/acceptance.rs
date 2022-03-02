@@ -1157,12 +1157,9 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
-/// Callers can supply an extra `test_child_predicate`, which is called on
-/// the `TestChild` between the startup checks, and the final
-/// `STOP_AT_HEIGHT_REGEX` check.
-///
-/// The `TestChild` is spawned with a timeout, so the predicate should use
-/// `expect_stdout_line_matches` or `expect_stderr_line_matches`.
+/// The test passes when `zebrad` logs the `stop_regex`.
+/// Typically this is `STOP_AT_HEIGHT_REGEX`,
+/// with an extra check for checkpoint or full validation.
 ///
 /// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
 ///
@@ -1170,16 +1167,13 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// Returns an error if the child exits or the fixed timeout elapses
 /// before `STOP_AT_HEIGHT_REGEX` is found.
-fn create_cached_database_height<P>(
+fn create_cached_database_height(
     network: Network,
     height: Height,
     debug_skip_parameter_preload: bool,
     checkpoint_sync: bool,
-    test_child_predicate: impl Into<Option<P>>,
-) -> Result<()>
-where
-    P: FnOnce(&mut TestChild<PathBuf>) -> Result<()>,
-{
+    stop_regex: &str,
+) -> Result<()> {
     println!("Creating cached database");
     // 16 hours
     let timeout = Duration::from_secs(60 * 60 * 16);
@@ -1205,11 +1199,7 @@ where
     child.expect_stdout_line_matches("starting legacy chain check")?;
     child.expect_stdout_line_matches("no legacy chain found")?;
 
-    if let Some(test_child_predicate) = test_child_predicate.into() {
-        test_child_predicate(&mut child)?;
-    }
-
-    child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
+    child.expect_stdout_line_matches(stop_regex)?;
 
     child.kill()?;
 
@@ -1218,38 +1208,31 @@ where
 
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
+    let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
+
     create_cached_database_height(
         network,
         height,
         true,
         // Use checkpoints to increase sync performance while caching the database
         true,
-        |test_child: &mut TestChild<PathBuf>| {
-            // make sure pre-cached databases finish before the mandatory checkpoint
-            //
-            // TODO: this check passes even if we reach the mandatory checkpoint,
-            //       because we sync finalized state, then non-finalized state.
-            //       Instead, fail if we see "best non-finalized chain root" in the logs.
-            test_child.expect_stdout_line_matches("CommitFinalized request")?;
-            Ok(())
-        },
+        // Check that we're still using checkpoints when we finish the cached sync
+        &checkpoint_stop_regex,
     )
 }
 
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
+    let full_validation_stop_regex =
+        format!("{}.*best non-finalized chain root", STOP_AT_HEIGHT_REGEX);
+
     create_cached_database_height(
         network,
         height.unwrap(),
         false,
         // Test full validation by turning checkpoints off
         false,
-        |test_child: &mut TestChild<PathBuf>| {
-            // make sure cached database tests finish after the mandatory checkpoint,
-            // using the non-finalized state (the checkpoint_sync config must be false)
-            test_child.expect_stdout_line_matches("best non-finalized chain root")?;
-            Ok(())
-        },
+        &full_validation_stop_regex,
     )
 }
 
