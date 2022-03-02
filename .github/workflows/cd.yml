@@ -67,7 +67,7 @@ jobs:
       with:
         target: runtime
         context: .
-        file: ./docker/Dockerfile.build
+        file: ./docker/Dockerfile
         tags: |
           ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:latest
           ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }}
