@@ -6,8 +6,7 @@
 //! - hash(height: tip..=0)
 //! - height(hash: heights)
 //! - block(height: tip..=0)
-//! - transaction_hash(location: { height: tip..=0, index: 0.. })
-//! - transaction(hash: hashes)
+//! - transaction(hash: blocks.transactions.hashes)
 //!
 //! But skips the following trivial variations:
 //! - is_empty: covered by `tip == None`
@@ -32,9 +31,13 @@ use zebra_chain::{
     block::{self, Block, Height},
     parameters::Network::{self, *},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
+    transaction::Transaction,
 };
 
-use crate::{service::finalized_state::FinalizedState, Config};
+use crate::{
+    service::finalized_state::{disk_format::TransactionLocation, FinalizedState},
+    Config,
+};
 
 /// Tip structure for RON snapshots.
 ///
@@ -81,6 +84,48 @@ impl BlockData {
         BlockData {
             height: height.0,
             block: hex::encode(block),
+        }
+    }
+}
+
+/// Transaction hash structure for RON snapshots.
+///
+/// This structure is used to snapshot the location and transaction hash on separate lines,
+/// which looks good for a vector of locations and transaction hashes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct TransactionHash {
+    loc: TransactionLocation,
+    hash: String,
+}
+
+impl TransactionHash {
+    pub fn new(loc: TransactionLocation, transaction: &Transaction) -> TransactionHash {
+        TransactionHash {
+            loc,
+            hash: transaction.hash().to_string(),
+        }
+    }
+}
+
+/// Transaction data structure for RON snapshots.
+///
+/// This structure is used to snapshot the location and transaction data on separate lines,
+/// which looks good for a vector of locations and transaction data.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct TransactionData {
+    loc: TransactionLocation,
+    transaction: String,
+}
+
+impl TransactionData {
+    pub fn new(loc: TransactionLocation, transaction: &Transaction) -> TransactionData {
+        let transaction = transaction
+            .zcash_serialize_to_vec()
+            .expect("serialization of stored transaction succeeds");
+
+        TransactionData {
+            loc,
+            transaction: hex::encode(transaction),
         }
     }
 }
@@ -143,13 +188,16 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     insta::assert_ron_snapshot!("tip", tip.map(|tip| Tip::from(tip)));
 
     if let Some((max_height, tip_block_hash)) = tip {
-        // Check block height, block hash, and block database queries.
         let mut stored_block_hashes = Vec::new();
         let mut stored_blocks = Vec::new();
+
+        let mut stored_transaction_hashes = Vec::new();
+        let mut stored_transactions = Vec::new();
 
         for query_height in 0..=max_height.0 {
             let query_height = Height(query_height);
 
+            // Check block height, block hash, and block database queries.
             let stored_block_hash = state
                 .hash(query_height)
                 .expect("heights up to tip have hashes");
@@ -179,11 +227,25 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
             stored_block_hashes.push((stored_height, BlockHash(stored_block_hash.to_string())));
             stored_blocks.push(BlockData::new(stored_height, &stored_block));
+
+            // Check block transaction hashes and transactions.
+            for tx_index in 0..stored_block.transactions.len() {
+                let transaction = &stored_block.transactions[tx_index];
+                let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
+
+                let transaction_hash = TransactionHash::new(transaction_location, &transaction);
+                let transaction_data = TransactionData::new(transaction_location, &transaction);
+
+                stored_transaction_hashes.push(transaction_hash);
+                stored_transactions.push(transaction_data);
+            }
         }
 
-        // The blocks and block hashes are in height order, and we want to snapshot that order.
+        // The blocks, transactions, and their hashes are in height/index order, and we want to snapshot that order.
         // So we don't sort the vectors before snapshotting.
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
         insta::assert_ron_snapshot!("blocks", stored_blocks);
+        insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
+        insta::assert_ron_snapshot!("transactions", stored_transactions);
     }
 }
