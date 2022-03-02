@@ -34,6 +34,7 @@ use std::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+use hex::{FromHex, ToHex};
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
@@ -97,6 +98,40 @@ impl From<Hash> for [u8; 32] {
 impl From<&Hash> for [u8; 32] {
     fn from(hash: &Hash) -> Self {
         (*hash).into()
+    }
+}
+
+impl ToHex for &'_ Hash {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes.encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes.encode_hex_upper()
+    }
+}
+
+impl ToHex for Hash {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for Hash {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let hash = <[u8; 32]>::from_hex(hex)?;
+
+        Ok(hash.into())
     }
 }
 
