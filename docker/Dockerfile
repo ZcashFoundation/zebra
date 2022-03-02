@@ -40,13 +40,30 @@ RUN apt-get -qq update && \
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
-ENV RUSTFLAGS -O
+#
+# TODO: apply this optimisation level to all release builds in .cargo/config.toml
+ENV RUSTFLAGS "-C opt-level=3"
+
 ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
-ARG RUST_BACKTRACE=1
-ENV RUST_BACKTRACE ${RUST_BACKTRACE}
+ARG RUST_BACKTRACE
+ENV RUST_BACKTRACE ${RUST_BACKTRACE:-1}
+
+# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS
+ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
+
+# Use default checkpoint sync and network values if none is provided
+ARG CHECKPOINT_SYNC
+ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
+
+ARG NETWORK
+ENV NETWORK ${NETWORK:-Mainnet}
+
+ARG TEST_FULL_SYNC
+ENV TEST_FULL_SYNC ${TEST_FULL_SYNC:-1}
 
 COPY . .
 # Build zebra
@@ -58,13 +75,21 @@ FROM builder AS tester
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
 
-# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
-ARG ZEBRA_SKIP_IPV6_TESTS=1
-ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS}
-
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 
-CMD ["cargo" "test" "--locked" "--release" "--features" "enable-sentry" "--workspace"]
+COPY ./docker/entrypoint.sh /
+RUN chmod u+x /entrypoint.sh
+
+ARG CHECKPOINT_SYNC=true
+ARG NETWORK=Mainnet
+ARG TEST_FULL_SYNC
+ENV TEST_FULL_SYNC ${TEST_FULL_SYNC:-1}
+
+ARG RUN_TESTS
+ENV RUN_TESTS ${RUN_TESTS:-1}
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD [ "cargo"]
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
@@ -74,9 +99,6 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-para
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
-
-ARG CHECKPOINT_SYNC=true
-ARG NETWORK=Mainnet
 
 RUN set -ex; \
   { \
