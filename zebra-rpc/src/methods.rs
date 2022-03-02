@@ -130,7 +130,7 @@ where
                 Error::invalid_params("raw transaction is not specified as a hex string")
             })?;
             let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
-                .map_err(|_| Error::invalid_params("raw transaction is invalid"))?;
+                .map_err(|_| Error::invalid_params("raw transaction is structurally invalid"))?;
 
             let transaction_hash = raw_transaction.hash();
 
