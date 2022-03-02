@@ -39,9 +39,10 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
+use zebra_chain::transaction::{self, UnminedTxId, VerifiedUnminedTx};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
+use zebra_node_services::mempool::Gossip;
 use zebra_state as zs;
 
 use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
@@ -109,35 +110,6 @@ pub enum TransactionDownloadVerifyError {
 
     #[error("transaction did not pass consensus validation")]
     Invalid(#[from] zebra_consensus::error::TransactionError),
-}
-
-/// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug, Eq, PartialEq)]
-pub enum Gossip {
-    Id(UnminedTxId),
-    Tx(UnminedTx),
-}
-
-impl Gossip {
-    /// Return the [`UnminedTxId`] of a gossiped transaction.
-    pub fn id(&self) -> UnminedTxId {
-        match self {
-            Gossip::Id(txid) => *txid,
-            Gossip::Tx(tx) => tx.id,
-        }
-    }
-}
-
-impl From<UnminedTxId> for Gossip {
-    fn from(txid: UnminedTxId) -> Self {
-        Gossip::Id(txid)
-    }
-}
-
-impl From<UnminedTx> for Gossip {
-    fn from(tx: UnminedTx) -> Self {
-        Gossip::Tx(tx)
-    }
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
