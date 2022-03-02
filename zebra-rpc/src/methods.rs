@@ -61,6 +61,9 @@ pub trait Rpc {
     /// See Zcashd's RPC
     /// [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html) documentation
     /// for more information.
+    ///
+    /// Note: zcashd provides an extra `allowhighfees` parameter, but we don't yet because
+    /// lightwalletd doesn't use it.
     #[rpc(name = "sendrawtransaction")]
     fn send_raw_transaction(
         &self,
