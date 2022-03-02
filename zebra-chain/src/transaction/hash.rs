@@ -101,17 +101,22 @@ impl From<&Hash> for [u8; 32] {
     }
 }
 
-impl ToHex for &'_ Hash {
-    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+impl Hash {
+    /// Return the hash bytes in an order suitable for printing out byte by byte.
+    fn bytes_in_display_order(&self) -> [u8; 32] {
         let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
-        reversed_bytes.encode_hex()
+        reversed_bytes
+    }
+}
+
+impl ToHex for &'_ Hash {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
     }
 
     fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes.encode_hex_upper()
+        self.bytes_in_display_order().encode_hex_upper()
     }
 }
 
