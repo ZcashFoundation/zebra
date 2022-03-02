@@ -1519,10 +1519,9 @@ async fn rpc_endpoint() -> Result<()> {
 
     let parsed: Value = serde_json::from_slice(&body)?;
 
-    // Check that we have at least 12 characters in the `build` field.
-    // (commit hash is 8 and semver version numbers should be at least 4 more)
+    // Check that we have at least 4 characters in the `build` field.
     let build = parsed["result"]["build"].as_str().unwrap();
-    assert!(build.len() > 12, "Got {}", build);
+    assert!(build.len() > 4, "Got {}", build);
 
     // Check that the `subversion` field has "Zebra" in it.
     let subversion = parsed["result"]["subversion"].as_str().unwrap();
