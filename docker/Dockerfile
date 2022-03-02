@@ -73,6 +73,7 @@ FROM builder AS tester
 # Pre-download Zcash Sprout and Sapling parameters
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
+COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
 
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 

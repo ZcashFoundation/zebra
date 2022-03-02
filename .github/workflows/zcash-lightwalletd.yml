@@ -1,4 +1,4 @@
-name: zcash-params
+name: zcash-lightwalletd
 
 on:
   workflow_dispatch:
@@ -6,28 +6,34 @@ on:
     branches:
       - 'main'
     paths:
-      - 'zebra-consensus/src/primitives/groth16/params.rs'
-      - 'zebra-consensus/src/chain.rs'
+      - 'zebra-rpc/**'
+      - 'zebrad/tests/acceptance.rs'
+      - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
-      - 'docker/zcash-params/Dockerfile'
-      - '.github/workflows/zcash-params.yml'
+      - 'docker/zcash-lightwalletd/Dockerfile'
+      - '.github/workflows/zcash-lightwalletd.yml'
 
 env:
-  CARGO_INCREMENTAL: '1'
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
-  IMAGE_NAME: zcash-params
+  IMAGE_NAME: lightwalletd
 
 jobs:
   build:
     name: Build images
-    timeout-minutes: 60
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v2.4.0
       with:
+        repository: adityapk00/lightwalletd
+        ref: 'master'
+        persist-credentials: false
+
+    - uses: actions/checkout@v2.4.0
+      with:
+        path: zebra
         persist-credentials: false
 
     - name: Inject slug/short variables
@@ -58,14 +64,10 @@ jobs:
       with:
         target: builder
         context: .
-        file: ./docker/zcash-params/Dockerfile
+        file: ./zebra/docker/zcash-lightwalletd/Dockerfile
         tags: |
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
-        build-args: |
-          SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-          ZEBRA_SKIP_IPV6_TESTS="1"
-          SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
         cache-from: type=gha
         cache-to: type=gha,mode=max
