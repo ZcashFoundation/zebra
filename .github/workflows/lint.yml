@@ -6,9 +6,12 @@ on:
       - "**"
       - "!main"
     paths:
+      # code and tests
       - '**/*.rs'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions
       - 'clippy.toml'
       - '.cargo/config.toml'
       - '.github/workflows/lint.yml'

@@ -27,7 +27,10 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::Path, path::PathBuf,
+    time::Duration,
+};
 
 use zebra_chain::{
     block::Height,
@@ -123,6 +126,8 @@ trait ZebradTestDirExt
 where
     Self: AsRef<Path> + Sized,
 {
+    // Zebra methods
+
     /// Spawn `zebrad` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
     /// child process.
@@ -130,7 +135,7 @@ where
     /// If there is a config in the test directory, pass it to `zebrad`.
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
 
-    /// Create a config file and use it for all subsequently spawned processes.
+    /// Create a config file and use it for all subsequently spawned `zebrad` processes.
     /// Returns an error if the config already exists.
     ///
     /// If needed:
@@ -139,14 +144,14 @@ where
     fn with_config(self, config: &mut ZebradConfig) -> Result<Self>;
 
     /// Create a config file with the exact contents of `config`, and use it for
-    /// all subsequently spawned processes. Returns an error if the config
+    /// all subsequently spawned `zebrad` processes. Returns an error if the config
     /// already exists.
     ///
     /// If needed:
     ///   - recursively create directories for the config and state
     fn with_exact_config(self, config: &ZebradConfig) -> Result<Self>;
 
-    /// Overwrite any existing config file, and use the newly written config for
+    /// Overwrite any existing `zebrad` config file, and use the newly written config for
     /// all subsequently spawned processes.
     ///
     /// If needed:
@@ -154,19 +159,39 @@ where
     ///   - set `config.cache_dir` based on `self`
     fn replace_config(self, config: &mut ZebradConfig) -> Result<Self>;
 
-    /// `cache_dir` config update helper.
+    /// `cache_dir` config update helper for `zebrad`.
     ///
     /// If needed:
     ///   - set the cache_dir in the config.
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self>;
 
-    /// Config writing helper.
+    /// Config writing helper for `zebrad`.
     ///
     /// If needed:
     ///   - recursively create directories for the config and state,
     ///
     /// Then write out the config.
     fn write_config_helper(self, config: &ZebradConfig) -> Result<Self>;
+
+    // lightwalletd methods
+
+    /// Spawn `lightwalletd` with `args` as a child process in this test directory,
+    /// potentially taking ownership of the tempdir for the duration of the
+    /// child process.
+    ///
+    /// By default, launch a working test instance with logging, and avoid port conflicts.
+    ///
+    /// # Panics
+    ///
+    /// If there is no lightwalletd config in the test directory.
+    fn spawn_lightwalletd_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+
+    /// Create a config file and use it for all subsequently spawned `lightwalletd` processes.
+    /// Returns an error if the config already exists.
+    ///
+    /// If needed:
+    ///   - recursively create directories for the config
+    fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self>;
 }
 
 impl<T> ZebradTestDirExt for T
@@ -174,8 +199,8 @@ where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
     fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
-        let path = self.as_ref();
-        let default_config_path = path.join("zebrad.toml");
+        let dir = self.as_ref();
+        let default_config_path = dir.join("zebrad.toml");
 
         if default_config_path.exists() {
             let mut extra_args: Vec<_> = vec![
@@ -244,6 +269,69 @@ where
 
         let config_file = dir.join("zebrad.toml");
         fs::File::create(config_file)?.write_all(toml::to_string(&config)?.as_bytes())?;
+
+        Ok(self)
+    }
+
+    fn spawn_lightwalletd_child(self, extra_args: &[&str]) -> Result<TestChild<Self>> {
+        let dir = self.as_ref().to_owned();
+        let default_config_path = dir.join("lightwalletd-zcash.conf");
+
+        assert!(
+            default_config_path.exists(),
+            "lightwalletd requires a config"
+        );
+
+        // By default, launch a working test instance with logging,
+        // and avoid port conflicts.
+        let mut args: Vec<_> = vec![
+            // the fake zcashd conf we just wrote
+            "--zcash-conf-path",
+            default_config_path
+                .as_path()
+                .to_str()
+                .expect("Path is valid Unicode"),
+            // the lightwalletd cache directory
+            //
+            // TODO: create a sub-directory for lightwalletd
+            "--data-dir",
+            dir.to_str().expect("Path is valid Unicode"),
+            // log to standard output
+            //
+            // TODO: if lightwalletd needs to run on Windows,
+            //       work out how to log to the terminal on all platforms
+            "--log-file",
+            "/dev/stdout",
+            // let the OS choose a random available wallet client port
+            "--grpc-bind-addr",
+            "127.0.0.1:0",
+            "--http-bind-addr",
+            "127.0.0.1:0",
+            // don't require a TLS certificate for the HTTP server
+            "--no-tls-very-insecure",
+        ];
+        args.extend_from_slice(extra_args);
+
+        self.spawn_child_with_command("lightwalletd", &args)
+    }
+
+    fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {
+        use std::fs;
+
+        let lightwalletd_config = format!(
+            "\
+            rpcbind={}\n\
+            rpcport={}\n\
+            ",
+            zebra_rpc_listener.ip(),
+            zebra_rpc_listener.port(),
+        );
+
+        let dir = self.as_ref();
+        fs::create_dir_all(dir)?;
+
+        let config_file = dir.join("lightwalletd-zcash.conf");
+        fs::write(config_file, lightwalletd_config.as_bytes())?;
 
         Ok(self)
     }
@@ -933,6 +1021,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn full_sync_mainnet() {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
@@ -944,6 +1033,7 @@ fn full_sync_mainnet() {
 #[test]
 #[ignore]
 fn full_sync_testnet() {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
@@ -1157,12 +1247,9 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
-/// Callers can supply an extra `test_child_predicate`, which is called on
-/// the `TestChild` between the startup checks, and the final
-/// `STOP_AT_HEIGHT_REGEX` check.
-///
-/// The `TestChild` is spawned with a timeout, so the predicate should use
-/// `expect_stdout_line_matches` or `expect_stderr_line_matches`.
+/// The test passes when `zebrad` logs the `stop_regex`.
+/// Typically this is `STOP_AT_HEIGHT_REGEX`,
+/// with an extra check for checkpoint or full validation.
 ///
 /// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
 ///
@@ -1170,16 +1257,13 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// Returns an error if the child exits or the fixed timeout elapses
 /// before `STOP_AT_HEIGHT_REGEX` is found.
-fn create_cached_database_height<P>(
+fn create_cached_database_height(
     network: Network,
     height: Height,
     debug_skip_parameter_preload: bool,
     checkpoint_sync: bool,
-    test_child_predicate: impl Into<Option<P>>,
-) -> Result<()>
-where
-    P: FnOnce(&mut TestChild<PathBuf>) -> Result<()>,
-{
+    stop_regex: &str,
+) -> Result<()> {
     println!("Creating cached database");
     // 16 hours
     let timeout = Duration::from_secs(60 * 60 * 16);
@@ -1205,11 +1289,7 @@ where
     child.expect_stdout_line_matches("starting legacy chain check")?;
     child.expect_stdout_line_matches("no legacy chain found")?;
 
-    if let Some(test_child_predicate) = test_child_predicate.into() {
-        test_child_predicate(&mut child)?;
-    }
-
-    child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
+    child.expect_stdout_line_matches(stop_regex)?;
 
     child.kill()?;
 
@@ -1218,38 +1298,31 @@ where
 
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
+    let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
+
     create_cached_database_height(
         network,
         height,
         true,
         // Use checkpoints to increase sync performance while caching the database
         true,
-        |test_child: &mut TestChild<PathBuf>| {
-            // make sure pre-cached databases finish before the mandatory checkpoint
-            //
-            // TODO: this check passes even if we reach the mandatory checkpoint,
-            //       because we sync finalized state, then non-finalized state.
-            //       Instead, fail if we see "best non-finalized chain root" in the logs.
-            test_child.expect_stdout_line_matches("CommitFinalized request")?;
-            Ok(())
-        },
+        // Check that we're still using checkpoints when we finish the cached sync
+        &checkpoint_stop_regex,
     )
 }
 
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
+    let full_validation_stop_regex =
+        format!("{}.*best non-finalized chain root", STOP_AT_HEIGHT_REGEX);
+
     create_cached_database_height(
         network,
         height.unwrap(),
         false,
         // Test full validation by turning checkpoints off
         false,
-        |test_child: &mut TestChild<PathBuf>| {
-            // make sure cached database tests finish after the mandatory checkpoint,
-            // using the non-finalized state (the checkpoint_sync config must be false)
-            test_child.expect_stdout_line_matches("best non-finalized chain root")?;
-            Ok(())
-        },
+        &full_validation_stop_regex,
     )
 }
 
@@ -1499,86 +1572,29 @@ fn lightwalletd_integration() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     let listen_port = random_known_port();
     let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
-    let listen_addr = SocketAddr::new(listen_ip, listen_port);
+    let zebra_rpc_listener = SocketAddr::new(listen_ip, listen_port);
 
     // Write a configuration that has the rpc listen_addr option set
     // TODO: split this config into another function?
     let mut config = default_test_config()?;
-    config.rpc.listen_addr = Some(listen_addr);
+    config.rpc.listen_addr = Some(zebra_rpc_listener);
 
-    let dir = testdir()?.with_config(&mut config)?;
-    let mut zebrad = dir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
+    let zdir = testdir()?.with_config(&mut config)?;
+    let mut zebrad = zdir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
 
     // Wait until `zebrad` has opened the RPC endpoint
-    zebrad
-        .expect_stdout_line_matches(format!("Opened RPC endpoint at {}", listen_addr).as_str())?;
+    zebrad.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", zebra_rpc_listener).as_str(),
+    )?;
 
     // Launch lightwalletd
-    // TODO: split this into another function
 
     // Write a fake zcashd configuration that has the rpcbind and rpcport options set
-    // TODO: split this into another function
-    let dir = testdir()?;
-    let lightwalletd_config = format!(
-        "\
-        rpcbind={}\n\
-        rpcport={}\n\
-        ",
-        listen_ip, listen_port
-    );
+    let ldir = testdir()?;
+    let ldir = ldir.with_lightwalletd_config(zebra_rpc_listener)?;
 
-    use std::fs;
-    use std::io::Write;
-
-    let path = dir.path().to_owned();
-
-    // TODO: split this into another function
-    if !config.state.ephemeral {
-        let cache_dir = path.join("state");
-        fs::create_dir_all(&cache_dir)?;
-    } else {
-        fs::create_dir_all(&path)?;
-    }
-
-    let config_file = path.join("lightwalletd-zcash.conf");
-    fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
-
-    let result = {
-        let default_config_path = path.join("lightwalletd-zcash.conf");
-
-        assert!(
-            default_config_path.exists(),
-            "lightwalletd requires a config"
-        );
-
-        dir.spawn_child_with_command(
-            "lightwalletd",
-            &[
-                // the fake zcashd conf we just wrote
-                "--zcash-conf-path",
-                default_config_path
-                    .as_path()
-                    .to_str()
-                    .expect("Path is valid Unicode"),
-                // the lightwalletd cache directory
-                //
-                // TODO: create a sub-directory for lightwalletd
-                "--data-dir",
-                path.to_str().expect("Path is valid Unicode"),
-                // log to standard output
-                "--log-file",
-                "/dev/stdout",
-                // randomise wallet client ports
-                "--grpc-bind-addr",
-                "127.0.0.1:0",
-                "--http-bind-addr",
-                "127.0.0.1:0",
-                // don't require a TLS certificate
-                "--no-tls-very-insecure",
-            ],
-        )
-    };
-
+    // Launch the lightwalletd process
+    let result = ldir.spawn_lightwalletd_child(&[]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
     let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
 
@@ -1601,8 +1617,11 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: update the missing method name when we add a new Zebra RPC
 
-    let result = lightwalletd
-        .expect_stdout_line_matches("Method not found.*error zcashd getbestblockhash rpc");
+    // Note:
+    // zcash/lightwalletd calls getbestblockhash here, but
+    // adityapk00/lightwalletd calls getblock
+    let result =
+        lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
     let result = lightwalletd.expect_stdout_line_matches(
         "Lightwalletd died with a Fatal error. Check logfile for details",
