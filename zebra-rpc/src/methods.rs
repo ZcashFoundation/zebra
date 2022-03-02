@@ -119,7 +119,7 @@ impl Rpc for RpcImpl {
 
             match response {
                 zebra_state::Response::Block(Some(block)) => Ok(GetBlock {
-                    data: block.to_string(),
+                    data: hex::encode(block.to_string()),
                 }),
                 _ => Err(Error {
                     code: ErrorCode::ServerError(0),
