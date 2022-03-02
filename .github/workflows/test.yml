@@ -13,10 +13,16 @@ on:
     branches:
       - main
     paths:
+      # code and tests
       - '**/*.rs'
+      # hard-coded checkpoints
       - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions
       - 'docker/**'
       - '.github/workflows/test.yml'
 
