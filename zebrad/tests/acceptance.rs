@@ -1617,15 +1617,16 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: update the missing method name when we add a new Zebra RPC
 
-    // Note:
     // zcash/lightwalletd calls getbestblockhash here, but
     // adityapk00/lightwalletd calls getblock
     let result =
         lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
-    let result = lightwalletd.expect_stdout_line_matches(
-        "Lightwalletd died with a Fatal error. Check logfile for details",
-    );
+
+    // zcash/lightwalletd exits with a fatal error here, but
+    // adityapk00/lightwalletd keeps trying the mempool
+    let result =
+        lightwalletd.expect_stdout_line_matches("Mempool refresh error: -32601: Method not found");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // Cleanup both processes
@@ -1639,9 +1640,10 @@ fn lightwalletd_integration() -> Result<()> {
 
     // If the test fails here, see the [note on port conflict](#Note on port conflict)
     //
-    // TODO: change lightwalletd to `assert_was_killed` when enough RPCs are implemented
+    // zcash/lightwalletd exits by itself, but
+    // adityapk00/lightwalletd keeps on going, so it gets killed by the test harness.
     lightwalletd_output
-        .assert_was_not_killed()
+        .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
     zebrad_output
         .assert_was_killed()
