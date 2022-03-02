@@ -1505,10 +1505,8 @@ async fn rpc_endpoint() -> Result<()> {
     // The `getinfo` RPC method returns the software version in the `build` field
     // of the response. This will always have the string `Zebra` in it.
     let parsed: Value = serde_json::from_slice(&body)?;
-    assert!(parsed["result"]["build"]
-        .as_str()
-        .unwrap()
-        .contains("Zebra"));
+    let build = parsed["result"]["build"].as_str().unwrap();
+    assert!(build.contains("Zebra"), "Got {}", build);
 
     child.kill()?;
 
