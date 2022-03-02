@@ -12,7 +12,10 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, ServiceExt};
 
-use zebra_chain::{serialization::ZcashDeserialize, transaction::Transaction};
+use zebra_chain::{
+    serialization::ZcashDeserialize,
+    transaction::{self, Transaction},
+};
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
 
@@ -158,7 +161,7 @@ where
             );
 
             match &queue_results[0] {
-                Ok(()) => Ok(SentTransactionHash(transaction_hash.to_string())),
+                Ok(()) => Ok(SentTransactionHash(transaction_hash)),
                 Err(error) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: error.to_string(),
@@ -188,4 +191,4 @@ pub struct GetBlockChainInfo {
 /// Response to a `sendrawtransaction` RPC request.
 ///
 /// A JSON string with the transaction hash in hexadecimal.
-pub struct SentTransactionHash(String);
+pub struct SentTransactionHash(#[serde(serialize_with = "hex::serialize")] transaction::Hash);
