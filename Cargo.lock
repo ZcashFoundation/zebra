@@ -3831,7 +3831,7 @@ dependencies = [
  "reqwest",
  "sentry-backtrace",
  "sentry-contexts",
- "sentry-core",
+ "sentry-core 0.23.0",
  "tokio",
 ]
 
@@ -3844,7 +3844,7 @@ dependencies = [
  "backtrace",
  "lazy_static",
  "regex",
- "sentry-core",
+ "sentry-core 0.23.0",
 ]
 
 [[package]]
@@ -3858,7 +3858,7 @@ dependencies = [
  "libc",
  "regex",
  "rustc_version 0.4.0",
- "sentry-core",
+ "sentry-core 0.23.0",
  "uname",
 ]
 
@@ -3871,20 +3871,33 @@ dependencies = [
  "chrono",
  "lazy_static",
  "rand 0.8.5",
- "sentry-types",
+ "sentry-types 0.23.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sentry-core"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56333f11be3a78131c67637f7611339df8af7ad9af831226585a457df75f9e3b"
+dependencies = [
+ "lazy_static",
+ "rand 0.8.5",
+ "sentry-types 0.25.0",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "sentry-tracing"
-version = "0.23.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d291df287241b0ef97f5bf9e9a595691ef8dfb49bc6acfd55b9dc2ade681f1c9"
+checksum = "8a1b281efe225a8750e2011a325a5455b29a3e5cd40762337ef647a253e3213f"
 dependencies = [
- "sentry-core",
+ "sentry-core 0.25.0",
  "tracing-core",
- "tracing-subscriber 0.2.25",
+ "tracing-subscriber 0.3.7",
 ]
 
 [[package]]
@@ -3898,6 +3911,23 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "sentry-types"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "825fd3382e2397007499a910e0184e55f7837cb0df4af30ae62bd2123e2ebcd6"
+dependencies = [
+ "debugid",
+ "getrandom 0.2.3",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time 0.3.6",
  "url",
  "uuid",
 ]
@@ -5117,6 +5147,15 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5312f325fe3588e277415f5a6cca1f4ccad0f248c4cd5a4bd33032d7286abc22"
+dependencies = [
+ "tracing-core",
 ]
 
 [[package]]
