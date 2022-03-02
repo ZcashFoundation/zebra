@@ -9,6 +9,8 @@ edition = "2021"
 
 [dependencies]
 
+zebra-network = { path = "../zebra-network" }
+
 futures = "0.3"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
@@ -24,3 +26,7 @@ tracing = "0.1"
 tracing-futures = "0.2"
 
 serde = { version = "1", features = ["serde_derive"] }
+
+[dev-dependencies]
+
+zebra-test = { path = "../zebra-test/" }

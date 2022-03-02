@@ -24,14 +24,17 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn(config: Config) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(config: Config, app_version: String) -> tokio::task::JoinHandle<()> {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
+
+            // Initialize the rpc methods with the zebra version
+            let rpc_impl = RpcImpl { app_version };
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
                 jsonrpc_core::IoHandler::with_compatibility(jsonrpc_core::Compatibility::Both);
-            io.extend_with(RpcImpl.to_delegate());
+            io.extend_with(rpc_impl.to_delegate());
 
             let server = ServerBuilder::new(io)
                 // use the same tokio executor as the rest of Zebra
@@ -54,6 +57,7 @@ impl RpcServer {
                     info!("Stopping RPC endpoint");
                 })
             };
+
             tokio::task::spawn_blocking(server)
         } else {
             // There is no RPC port, so the RPC task does nothing.

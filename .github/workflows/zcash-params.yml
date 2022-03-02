@@ -9,6 +9,7 @@ on:
       - 'zebra-consensus/src/primitives/groth16/params.rs'
       - 'zebra-consensus/src/chain.rs'
       - 'zebrad/src/commands/start.rs'
+      - 'docker/zcash-params/Dockerfile'
       - '.github/workflows/zcash-params.yml'
 
 env:

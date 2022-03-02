@@ -10,6 +10,7 @@ on:
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
+      - 'docker/zcash-lightwalletd/Dockerfile'
       - '.github/workflows/zcash-lightwalletd.yml'
 
 env:
@@ -81,26 +82,3 @@ jobs:
         push: true
         cache-from: type=gha
         cache-to: type=gha,mode=max
-
-  lint-lightwalletd:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go: [ '1.17' ]
-    name: Go ${{ matrix.go }} linting
-
-    steps:
-      - name: lightwalletd source code
-        uses: actions/checkout@v2
-        with:
-          repository: adityapk00/lightwalletd
-          ref: 'master'
-
-      - name: Setup go
-        uses: actions/setup-go@v2
-        with:
-          go-version: ${{ matrix.go }}
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v2
-        continue-on-error: true
