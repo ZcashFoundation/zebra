@@ -1517,11 +1517,16 @@ async fn rpc_endpoint() -> Result<()> {
     let body = to_bytes(res).await;
     let (body, mut child) = child.kill_on_error(body)?;
 
-    // The `getinfo` RPC method returns the software version in the `build` field
-    // of the response. This will always have the string `Zebra` in it.
     let parsed: Value = serde_json::from_slice(&body)?;
+
+    // Check that we have at least 12 characters in the `build` field.
+    // (commit hash is 8 and semver version numbers should be at least 4 more)
     let build = parsed["result"]["build"].as_str().unwrap();
-    assert!(build.contains("Zebra"), "Got {}", build);
+    assert!(build.len() > 12, "Got {}", build);
+
+    // Check that the `subversion` field has "Zebra" in it.
+    let subversion = parsed["result"]["subversion"].as_str().unwrap();
+    assert!(subversion.contains("Zebra"), "Got {}", subversion);
 
     child.kill()?;
 
