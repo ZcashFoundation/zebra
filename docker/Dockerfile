@@ -56,6 +56,7 @@ FROM builder AS tester
 # Pre-download Zcash Sprout and Sapling parameters
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
+COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS=1
