@@ -54,13 +54,13 @@ pub trait Rpc {
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
 
-    /// Send a raw signed transaction.
+    /// sendrawtransaction
     ///
     /// Sends the raw bytes of a signed transaction to the network, if the transaction is valid.
     ///
-    /// See Zcashd's RPC
-    /// [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html) documentation
-    /// for more information.
+    /// zcashd reference: <https://zcash.github.io/rpc/sendrawtransaction.html>
+    ///
+    /// Result: a hexadecimal string of the hash of the sent transaction.
     ///
     /// Note: zcashd provides an extra `allowhighfees` parameter, but we don't yet because
     /// lightwalletd doesn't use it.
