@@ -46,9 +46,6 @@ skip-tree = [
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
 
-    # ticket #3061: reqwest and minreq dependencies
-    { name = "webpki-roots", version = "=0.18.0" },
-
     # ticket #2980: inferno and orchard/cryptographic dependencies
     { name = "orchard", version = "=0.0.0" },
 
@@ -67,13 +64,6 @@ skip-tree = [
 
     # wait for lots of crates in the cryptographic ecosystem to upgrade
     { name = "rand", version = "=0.7.3" },
-    { name = "rustls", version = "=0.19.1" },
-
-    # wait for lots of crates in the tokio ecosystem to upgrade
-    { name = "socket2", version = "=0.3.16" },
-
-    # wait for arti to stabilise
-    { name = "arti-client" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
