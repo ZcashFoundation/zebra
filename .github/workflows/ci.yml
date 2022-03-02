@@ -26,7 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        # Windows was removed for now, see https://github.com/ZcashFoundation/zebra/discussions/3704
+        os: [ubuntu-latest, macOS-latest]
         rust: [stable]
 
     steps:
@@ -35,14 +36,6 @@ jobs:
           persist-credentials: false
 
       - uses: actions-rs/toolchain@v1
-        if: matrix.os == 'windows-latest'
-        with:
-          target: x86_64-pc-windows-gnu
-          toolchain: stable
-          profile: minimal
-          override: true
-      - uses: actions-rs/toolchain@v1
-        if: matrix.os != 'windows-latest'
         with:
           toolchain: ${{ matrix.rust }}
           profile: minimal
@@ -93,12 +86,6 @@ jobs:
       # Modified from:
       # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33
       - name: Fetch path to Zcash parameters
-        if: matrix.os == 'windows-latest'
-        working-directory: ./zebra-consensus
-        shell: bash
-        run: echo "ZCASH_PARAMS=$(cargo run --target x86_64-pc-windows-gnu --example get-params-path)" >> $GITHUB_ENV
-      - name: Fetch path to Zcash parameters
-        if: matrix.os != 'windows-latest'
         working-directory: ./zebra-consensus
         shell: bash
         run: echo "ZCASH_PARAMS=$(cargo run --example get-params-path)" >> $GITHUB_ENV
@@ -114,13 +101,6 @@ jobs:
         run: cargo run --example download-params
 
       - name: Run tests
-        if: matrix.os == 'windows-latest'
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: test
-          args: --verbose --all --target x86_64-pc-windows-gnu
-      - name: Run tests
-        if: matrix.os != 'windows-latest'
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
