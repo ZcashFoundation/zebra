@@ -64,8 +64,11 @@ pub trait Rpc {
     ///      "data": String, // The block encoded as hex
     /// }
     ///
-    /// Note: We only expose the `data` field lightwalletd uses the non-verbose
+    /// Note 1: We only expose the `data` field lightwalletd uses the non-verbose
     /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
+    ///
+    /// Note 2: `lightwalletd` only requests blocks by height, so we don't support
+    /// getting blocks by hash.
     #[rpc(name = "getblock")]
     fn get_block(&self, height: Height) -> BoxFuture<Result<GetBlock>>;
 }
