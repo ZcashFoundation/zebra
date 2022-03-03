@@ -10,10 +10,6 @@ updates:
   - "A-dependencies"
   - "A-rust"
   - "P-Low :snowflake:"
-  ignore:
-  - dependency-name: tokio-util
-    versions:
-    - ">= 0.3.a, < 0.4"
 - package-ecosystem: github-actions
   directory: "/"
   schedule:
