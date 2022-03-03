@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
@@ -124,14 +124,7 @@ where
             let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));
             let response = state
                 .ready()
-                .await
-                .map_err(|_| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "State service is not ready".to_string(),
-                    data: None,
-                })
-                .expect("State service should be always ready")
-                .call(request)
+                .and_then(|service| service.call(request))
                 .await
                 .map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
