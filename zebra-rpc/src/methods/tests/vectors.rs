@@ -48,7 +48,7 @@ async fn rpc_getblock() {
         .collect();
 
     // Create a populated state service
-    let state_service = zebra_state::populated_state(blocks.clone()).await;
+    let state_service = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
 
     // Init RPC
     let rpc = RpcImpl {

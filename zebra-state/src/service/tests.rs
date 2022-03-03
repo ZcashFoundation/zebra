@@ -196,7 +196,7 @@ async fn test_populated_state_responds_correctly(
 
 #[tokio::main]
 async fn populate_and_check(blocks: Vec<Arc<Block>>) -> Result<()> {
-    let state = populated_state(blocks).await;
+    let state = populated_state(blocks, Network::Mainnet).await;
     test_populated_state_responds_correctly(state).await?;
     Ok(())
 }

@@ -847,12 +847,12 @@ pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxEr
 #[cfg(any(test, feature = "proptest-impl"))]
 pub async fn populated_state(
     blocks: impl IntoIterator<Item = Arc<Block>>,
+    network: Network,
 ) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     let requests = blocks
         .into_iter()
         .map(|block| Request::CommitFinalizedBlock(block.into()));
 
-    let network = Network::Mainnet;
     let mut state = init_test(network);
 
     let mut responses = FuturesUnordered::new();
