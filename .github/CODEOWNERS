@@ -1,10 +1,10 @@
-# These owners will be the default owners for everything in
-# the repo. Unless a later match takes precedence,
-# this teams will be requested for review when someone opens a pull request.
-*       @ZcashFoundation/network-reviewers @ZcashFoundation/cryptographic-reviewers
+# Unless a later match takes precedence,
+# this team will be requested for review when someone opens a pull request.
+#
+# We use a single team here, because if we use two teams, GitHub assigns two reviewers.
+*       @ZcashFoundation/general-rust-reviewers
 
 # Network and Async Code
-# To be reviewed by Teor, Janito, or Alfredo.
 /tower-batch/                           @ZcashFoundation/network-reviewers
 /tower-fallback/                        @ZcashFoundation/network-reviewers
 /zebra-consensus/                       @ZcashFoundation/network-reviewers
@@ -19,7 +19,6 @@
 /zebrad/src/components/                 @ZcashFoundation/network-reviewers
 
 # Cryptographic Code
-# To be reviewed by Deirdre, Conrado, or Marek.
 /zebra-consensus/src/primitives/        @ZcashFoundation/cryptographic-reviewers
 /zebra-chain/src/primitives/            @ZcashFoundation/cryptographic-reviewers
 /zebra-chain/src/orchard/               @ZcashFoundation/cryptographic-reviewers
@@ -30,7 +29,6 @@
 /zebra-chain/src/history_tree/          @ZcashFoundation/cryptographic-reviewers
 
 # Devops Code
-# To be reviewed by Gustavo, Deirdre, Teor, or Conrado.
 /.github/                               @ZcashFoundation/devops-reviewers
 /docker/                                @ZcashFoundation/devops-reviewers
 cloudbuild.yaml                         @ZcashFoundation/devops-reviewers
@@ -41,5 +39,4 @@ firebase.json                           @ZcashFoundation/devops-reviewers
 katex-header.html                       @ZcashFoundation/devops-reviewers
 
 # Unsafe Code
-# To be reviewed by Teor, Janito, Conrado, or Marek.
 /zebra-script/                          @ZcashFoundation/unsafe-rust-reviewers
