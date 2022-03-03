@@ -63,13 +63,6 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        assert_eq!(
-            get_block.data,
-            hex::encode(
-                block
-                    .zcash_serialize_to_vec()
-                    .expect("vec serialization is infallible")
-            )
-        );
+        assert_eq!(get_block.data, block.into());
     }
 }
