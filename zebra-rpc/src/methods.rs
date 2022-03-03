@@ -12,7 +12,7 @@ use jsonrpc_derive::rpc;
 
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, serialization::ZcashSerialize};
 use zebra_network::constants::USER_AGENT;
 
 #[cfg(test)]
@@ -135,7 +135,11 @@ where
 
             match response {
                 zebra_state::Response::Block(Some(block)) => Ok(GetBlock {
-                    data: hex::encode(block.to_string()),
+                    data: hex::encode(
+                        block
+                            .zcash_serialize_to_vec()
+                            .expect("vec serialization is infallible"),
+                    ),
                 }),
                 _ => Err(Error {
                     code: ErrorCode::ServerError(0),
