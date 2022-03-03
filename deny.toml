@@ -50,7 +50,6 @@ skip-tree = [
     { name = "orchard", version = "=0.0.0" },
 
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
-    # alternative: downgrade Zebra to `bigint`
     { name = "bigint", version = "=4.4.3" },
 
     # upgrade sentry, metrics-exporter-prometheus, reqwest, hyper,
