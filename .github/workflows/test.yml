@@ -95,6 +95,7 @@ jobs:
             ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
             ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
+          labels: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
           build-args: |
             NETWORK=${{ github.event.inputs.network || env.NETWORK }}
             SHORT_SHA=${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}
