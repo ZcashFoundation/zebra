@@ -9,7 +9,6 @@
 use futures::FutureExt;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{block::Height, serialization::ZcashSerialize};
