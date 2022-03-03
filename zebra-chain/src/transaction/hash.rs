@@ -102,7 +102,10 @@ impl From<&Hash> for [u8; 32] {
 }
 
 impl Hash {
-    /// Return the hash bytes in an order suitable for printing out byte by byte.
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
     fn bytes_in_display_order(&self) -> [u8; 32] {
         let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
