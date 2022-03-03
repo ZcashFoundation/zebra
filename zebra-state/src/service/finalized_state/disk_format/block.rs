@@ -17,6 +17,8 @@ use zebra_chain::{
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
+// Transaction types
+
 /// A transaction's location in the chain, by block height and transaction index.
 ///
 /// This provides a chain-order list of transactions.
@@ -99,30 +101,16 @@ impl IntoDisk for TransactionLocation {
         let height_bytes = self.height.as_bytes();
         let index_bytes = self.index.to_be_bytes();
 
-        let mut bytes = [0; 8];
-
-        bytes[0..4].copy_from_slice(&height_bytes);
-        bytes[4..8].copy_from_slice(&index_bytes);
-
-        bytes
+        [height_bytes, index_bytes].concat().try_into().unwrap()
     }
 }
 
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let disk_bytes = disk_bytes.as_ref();
-        let height = {
-            let mut bytes = [0; 4];
-            bytes.copy_from_slice(&disk_bytes[0..4]);
-            let height = u32::from_be_bytes(bytes);
-            Height(height)
-        };
+        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(4);
 
-        let index = {
-            let mut bytes = [0; 4];
-            bytes.copy_from_slice(&disk_bytes[4..8]);
-            u32::from_be_bytes(bytes)
-        };
+        let height = Height::from_bytes(height_bytes);
+        let index = u32::from_be_bytes(index_bytes.try_into().unwrap());
 
         TransactionLocation { height, index }
     }

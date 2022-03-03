@@ -17,24 +17,28 @@ impl IntoDisk for transparent::Utxo {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let mut bytes = vec![0; 5];
-        bytes[0..4].copy_from_slice(&self.height.0.to_be_bytes());
-        bytes[4] = self.from_coinbase as u8;
-        self.output
-            .zcash_serialize(&mut bytes)
+        let height_bytes = self.height.as_bytes().to_vec();
+        let coinbase_flag_bytes = [self.from_coinbase as u8].to_vec();
+        let output_bytes = self
+            .output
+            .zcash_serialize_to_vec()
             .expect("serialization to vec doesn't fail");
-        bytes
+
+        [height_bytes, coinbase_flag_bytes, output_bytes].concat()
     }
 }
 
 impl FromDisk for transparent::Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (meta_bytes, output_bytes) = bytes.as_ref().split_at(5);
-        let height = Height(u32::from_be_bytes(meta_bytes[0..4].try_into().unwrap()));
-        let from_coinbase = meta_bytes[4] == 1u8;
+        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(4);
+        let (coinbase_flag_bytes, output_bytes) = rest_bytes.split_at(1);
+
+        let height = Height::from_bytes(height_bytes);
+        let from_coinbase = coinbase_flag_bytes[0] == 1u8;
         let output = output_bytes
             .zcash_deserialize_into()
-            .expect("db has serialized data");
+            .expect("db has valid serialized data");
+
         Self {
             output,
             height,
@@ -47,6 +51,7 @@ impl IntoDisk for transparent::OutPoint {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
+        // TODO: serialize the index into a smaller number of bytes (#3152)
         self.zcash_serialize_to_vec()
             .expect("serialization to vec doesn't fail")
     }
