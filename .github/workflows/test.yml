@@ -25,17 +25,6 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test.yml'
-  pull_request_review:
-    branches:
-      - main
-    paths:
-      - '**/*.rs'
-      - '**/*.txt'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - 'docker/**'
-      - '.github/workflows/test.yml'
-    types: [submitted]
 
 env:
   CARGO_INCREMENTAL: '1'
