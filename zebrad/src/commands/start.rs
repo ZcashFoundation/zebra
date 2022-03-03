@@ -163,7 +163,7 @@ impl StartCmd {
             block_download_peer_set: peer_set.clone(),
             block_verifier: chain_verifier,
             mempool: mempool.clone(),
-            state: state,
+            state,
             latest_chain_tip: latest_chain_tip.clone(),
         };
         setup_tx
