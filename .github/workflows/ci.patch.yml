@@ -5,10 +5,10 @@ on:
     paths-ignore:
       - '**/*.rs'
       - '**/*.txt'
+      - '**/*.snap'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
-      - 'docker/**'
       - '.github/workflows/ci.yml'
 
 jobs:

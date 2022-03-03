@@ -4,11 +4,17 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      # code and tests
       - '**/*.rs'
+      # hard-coded checkpoints
       - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
+      # workflow definitions
       - '.github/workflows/ci.yml'
 
 env:
