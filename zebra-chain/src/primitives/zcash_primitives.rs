@@ -15,6 +15,131 @@ use crate::{
     transparent::{self, Script},
 };
 
+// Used by boilerplate code below.
+
+#[derive(Clone, Debug)]
+struct TransparentAuth<'a> {
+    all_prev_outputs: &'a [transparent::Output],
+}
+
+impl zcash_primitives::transaction::components::transparent::Authorization for TransparentAuth<'_> {
+    type ScriptSig = zcash_primitives::legacy::Script;
+}
+
+// In this block we convert our Output to a librustzcash to TxOut.
+// (We could do the serialize/deserialize route but it's simple enough to convert manually)
+impl zcash_primitives::transaction::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
+    fn input_amounts(&self) -> Vec<zcash_primitives::transaction::components::amount::Amount> {
+        self.all_prev_outputs
+            .iter()
+            .map(|prevout| {
+                zcash_primitives::transaction::components::amount::Amount::from_nonnegative_i64_le_bytes(
+                    prevout.value.to_bytes(),
+                ).expect("will not fail since it was previously validated")
+            })
+            .collect()
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<zcash_primitives::legacy::Script> {
+        self.all_prev_outputs
+            .iter()
+            .map(|prevout| {
+                zcash_primitives::legacy::Script(prevout.lock_script.as_raw_bytes().into())
+            })
+            .collect()
+    }
+}
+
+// Boilerplate mostly copied from `zcash/src/rust/src/transaction_ffi.rs` which is required
+// to compute sighash.
+// TODO: remove/change if they improve the API to not require this.
+
+struct MapTransparent<'a> {
+    auth: TransparentAuth<'a>,
+}
+
+impl<'a>
+    zcash_primitives::transaction::components::transparent::MapAuth<
+        zcash_primitives::transaction::components::transparent::Authorized,
+        TransparentAuth<'a>,
+    > for MapTransparent<'a>
+{
+    fn map_script_sig(
+        &self,
+        s: <zcash_primitives::transaction::components::transparent::Authorized as zcash_primitives::transaction::components::transparent::Authorization>::ScriptSig,
+    ) -> <TransparentAuth as zcash_primitives::transaction::components::transparent::Authorization>::ScriptSig{
+        s
+    }
+
+    fn map_authorization(
+        &self,
+        _: zcash_primitives::transaction::components::transparent::Authorized,
+    ) -> TransparentAuth<'a> {
+        // TODO: This map should consume self, so we can move self.auth
+        self.auth.clone()
+    }
+}
+
+struct IdentityMap;
+
+impl
+    zcash_primitives::transaction::components::sapling::MapAuth<
+        zcash_primitives::transaction::components::sapling::Authorized,
+        zcash_primitives::transaction::components::sapling::Authorized,
+    > for IdentityMap
+{
+    fn map_proof(
+        &self,
+        p: <zcash_primitives::transaction::components::sapling::Authorized as zcash_primitives::transaction::components::sapling::Authorization>::Proof,
+    ) -> <zcash_primitives::transaction::components::sapling::Authorized as zcash_primitives::transaction::components::sapling::Authorization>::Proof{
+        p
+    }
+
+    fn map_auth_sig(
+        &self,
+        s: <zcash_primitives::transaction::components::sapling::Authorized as zcash_primitives::transaction::components::sapling::Authorization>::AuthSig,
+    ) -> <zcash_primitives::transaction::components::sapling::Authorized as zcash_primitives::transaction::components::sapling::Authorization>::AuthSig{
+        s
+    }
+
+    fn map_authorization(
+        &self,
+        a: zcash_primitives::transaction::components::sapling::Authorized,
+    ) -> zcash_primitives::transaction::components::sapling::Authorized {
+        a
+    }
+}
+
+impl
+    zcash_primitives::transaction::components::orchard::MapAuth<
+        orchard::bundle::Authorized,
+        orchard::bundle::Authorized,
+    > for IdentityMap
+{
+    fn map_spend_auth(
+        &self,
+        s: <orchard::bundle::Authorized as orchard::bundle::Authorization>::SpendAuth,
+    ) -> <orchard::bundle::Authorized as orchard::bundle::Authorization>::SpendAuth {
+        s
+    }
+
+    fn map_authorization(&self, a: orchard::bundle::Authorized) -> orchard::bundle::Authorized {
+        a
+    }
+}
+
+struct PrecomputedAuth<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> zcash_primitives::transaction::Authorization for PrecomputedAuth<'a> {
+    type TransparentAuth = TransparentAuth<'a>;
+    type SaplingAuth = zcash_primitives::transaction::components::sapling::Authorized;
+    type OrchardAuth = orchard::bundle::Authorized;
+}
+
+// End of (mostly) copied code
+
 impl TryFrom<&Transaction> for zcash_primitives::transaction::Transaction {
     type Error = io::Error;
 
@@ -98,16 +223,16 @@ pub(crate) fn sighash(
         Some(input_index) => {
             let output = all_previous_outputs[input_index].clone();
             script = (&output.lock_script).into();
-            zcash_primitives::transaction::sighash::SignableInput::Transparent(
-                zcash_primitives::transaction::sighash::TransparentInput::new(
-                    input_index,
-                    &script,
-                    output
-                        .value
-                        .try_into()
-                        .expect("amount was previously validated"),
-                ),
-            )
+            zcash_primitives::transaction::sighash::SignableInput::Transparent {
+                hash_type: hash_type.bits() as _,
+                index: input_index,
+                script_code: &script,
+                script_pubkey: &script,
+                value: output
+                    .value
+                    .try_into()
+                    .expect("amount was previously validated"),
+            }
         }
         None => zcash_primitives::transaction::sighash::SignableInput::Shielded,
     };
@@ -115,11 +240,18 @@ pub(crate) fn sighash(
     let txid_parts = alt_tx
         .deref()
         .digest(zcash_primitives::transaction::txid::TxIdDigester);
+    let f_transparent = MapTransparent {
+        auth: TransparentAuth {
+            all_prev_outputs: all_previous_outputs,
+        },
+    };
+    let txdata: zcash_primitives::transaction::TransactionData<PrecomputedAuth> = alt_tx
+        .into_data()
+        .map_authorization(f_transparent, IdentityMap, IdentityMap);
 
     SigHash(
         *zcash_primitives::transaction::sighash::signature_hash(
-            alt_tx.deref(),
-            hash_type.bits(),
+            &txdata,
             &signable_input,
             &txid_parts,
         )
