@@ -64,13 +64,15 @@ pub trait Rpc {
     ///      "data": String, // The block encoded as hex
     /// }
     ///
-    /// Note 1: We only expose the `data` field lightwalletd uses the non-verbose
+    /// Note 1: We only expose the `data` field as lightwalletd uses the non-verbose
     /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
     ///
     /// Note 2: `lightwalletd` only requests blocks by height, so we don't support
     /// getting blocks by hash.
+    ///
+    /// Note 3: The `verbosity` parameter is ignored but required in the call.
     #[rpc(name = "getblock")]
-    fn get_block(&self, height: Height) -> BoxFuture<Result<GetBlock>>;
+    fn get_block(&self, height: Height, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 }
 
 /// RPC method implementations.
@@ -116,7 +118,7 @@ where
         Ok(response)
     }
 
-    fn get_block(&self, height: Height) -> BoxFuture<Result<GetBlock>> {
+    fn get_block(&self, height: Height, _verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state_service.clone();
 
         async move {
