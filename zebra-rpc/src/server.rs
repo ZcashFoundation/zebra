@@ -19,11 +19,6 @@ use crate::{
 
 pub mod compatibility;
 
-//type State = Buffer<
-//    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
-//    zebra_state::Request,
-//>;
-
 /// Zebra RPC Server
 #[derive(Clone, Debug)]
 pub struct RpcServer;
