@@ -52,7 +52,11 @@ use zebrad::{
 ///
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
-const LAUNCH_DELAY: Duration = Duration::from_secs(10);
+const LAUNCH_DELAY: Duration = Duration::from_secs(15);
+
+/// The amount of time we wait between launching two
+/// conflicting nodes.
+const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
 
 /// Returns a config with:
 /// - a Zcash listener on an unused port on IPv4 localhost, and
@@ -1540,7 +1544,74 @@ async fn tracing_endpoint() -> Result<()> {
     Ok(())
 }
 
-// TODO: RPC endpoint and port conflict tests (#3165)
+#[tokio::test]
+async fn rpc_endpoint() -> Result<()> {
+    use hyper::{body::to_bytes, Body, Client, Method, Request};
+    use serde_json::Value;
+
+    zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let endpoint = format!("127.0.0.1:{}", port);
+    let url = format!("http://{}", endpoint);
+
+    // Write a configuration that has RPC listen_addr set
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(endpoint.parse().unwrap());
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut child = dir.spawn_child(&["start"])?;
+
+    // Wait until port is open.
+    child.expect_stdout_line_matches(format!("Opened RPC endpoint at {}", endpoint).as_str())?;
+
+    // Create an http client
+    let client = Client::new();
+
+    // Create a request to call `getinfo` RPC method
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(url)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#,
+        ))?;
+
+    // Make the call to the RPC endpoint
+    let res = client.request(req).await?;
+
+    // Test rpc endpoint response
+    assert!(res.status().is_success());
+
+    let body = to_bytes(res).await;
+    let (body, mut child) = child.kill_on_error(body)?;
+
+    let parsed: Value = serde_json::from_slice(&body)?;
+
+    // Check that we have at least 4 characters in the `build` field.
+    let build = parsed["result"]["build"].as_str().unwrap();
+    assert!(build.len() > 4, "Got {}", build);
+
+    // Check that the `subversion` field has "Zebra" in it.
+    let subversion = parsed["result"]["subversion"].as_str().unwrap();
+    assert!(subversion.contains("Zebra"), "Got {}", subversion);
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
 
 /// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
 ///
@@ -1617,15 +1688,16 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: update the missing method name when we add a new Zebra RPC
 
-    // Note:
     // zcash/lightwalletd calls getbestblockhash here, but
     // adityapk00/lightwalletd calls getblock
     let result =
         lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
-    let result = lightwalletd.expect_stdout_line_matches(
-        "Lightwalletd died with a Fatal error. Check logfile for details",
-    );
+
+    // zcash/lightwalletd exits with a fatal error here, but
+    // adityapk00/lightwalletd keeps trying the mempool
+    let result =
+        lightwalletd.expect_stdout_line_matches("Mempool refresh error: -32601: Method not found");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // Cleanup both processes
@@ -1639,9 +1711,10 @@ fn lightwalletd_integration() -> Result<()> {
 
     // If the test fails here, see the [note on port conflict](#Note on port conflict)
     //
-    // TODO: change lightwalletd to `assert_was_killed` when enough RPCs are implemented
+    // zcash/lightwalletd exits by itself, but
+    // adityapk00/lightwalletd keeps on going, so it gets killed by the test harness.
     lightwalletd_output
-        .assert_was_not_killed()
+        .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
     zebrad_output
         .assert_was_killed()
@@ -1736,6 +1809,34 @@ fn zebra_tracing_conflict() -> Result<()> {
     Ok(())
 }
 
+/// Start 2 zebrad nodes using the same RPC listener port, but different
+/// state directories and Zcash listener ports. The first node should get
+/// exclusive use of the port. The second node will panic.
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn zebra_rpc_conflict() -> Result<()> {
+    zebra_test::init();
+
+    // [Note on port conflict](#Note on port conflict)
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{}", port);
+
+    // Write a configuration that has our created RPC listen_addr
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(listen_addr.parse().unwrap());
+    let dir1 = testdir()?.with_config(&mut config)?;
+    let regex1 = regex::escape(&format!(r"Opened RPC endpoint at {}", listen_addr));
+
+    // From another folder create a configuration with the same endpoint.
+    // `rpc.listen_addr` will be the same in the 2 nodes.
+    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    let dir2 = testdir()?.with_config(&mut config)?;
+
+    check_config_conflict(dir1, regex1.as_str(), dir2, "Unable to start RPC server")?;
+
+    Ok(())
+}
+
 /// Start 2 zebrad nodes using the same state directory, but different Zcash
 /// listener ports. The first node should get exclusive access to the database.
 /// The second node will panic with the Zcash state conflict hint added in #1535.
@@ -1797,6 +1898,9 @@ where
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
+
+    // Wait a bit before launching the second node.
+    std::thread::sleep(BETWEEN_NODES_DELAY);
 
     // Spawn the second node
     let node2 = second_dir.spawn_child(&["start"]);
