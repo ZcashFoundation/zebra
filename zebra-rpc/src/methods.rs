@@ -124,6 +124,11 @@ where
             let response = state
                 .ready()
                 .await
+                .map_err(|_| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "State service is not ready".to_string(),
+                    data: None,
+                })
                 .expect("State service should be always ready")
                 .call(request)
                 .await
