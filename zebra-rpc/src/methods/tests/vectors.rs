@@ -57,7 +57,7 @@ async fn rpc_getblock() {
     };
 
     // Make calls and check response
-    for (i, block) in blocks.iter().enumerate() {
+    for (i, block) in blocks.into_iter().enumerate() {
         let get_block = rpc
             .get_block(Height(i as u32), 0u8)
             .await
