@@ -60,6 +60,9 @@ skip-tree = [
     { name = "tokio-util", version = "=0.6.9" },
     { name = "tracing-subscriber", version = "=0.1.6" },
 
+    # upgrade abscissa and arti
+    { name = "darling", version = "=0.10.2" },
+
     # recent major version bumps
     # we should re-check these dependencies in February 2022
 
