@@ -52,15 +52,15 @@ impl TransactionLocation {
     }
 }
 
-// Helper trait for defining the exact format used to interact with disk per
-// type.
+/// Helper trait for defining the exact format used to interact with disk per
+/// type.
 pub trait IntoDisk {
-    // The type used to compare a value as a key to other keys stored in a
-    // database
+    /// The type used to compare a value as a key to other keys stored in a
+    /// database.
     type Bytes: AsRef<[u8]>;
 
-    // function to convert the current type to its disk format in `zs_get()`
-    // without necessarily allocating a new IVec
+    /// Converts the current type to its disk format in `zs_get()`,
+    /// without necessarily allocating a new ivec.
     fn as_bytes(&self) -> Self::Bytes;
 }
 
