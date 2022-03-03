@@ -6,16 +6,23 @@ on:
     branches:
       - main
     paths:
+      # code and tests
       - '**/*.rs'
+      # hard-coded checkpoints
       - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions
       - 'codecov.yml'
       - '.github/workflows/coverage.yml'
   pull_request:
     paths:
       - '**/*.rs'
       - '**/*.txt'
+      - '**/*.snap'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'codecov.yml'
