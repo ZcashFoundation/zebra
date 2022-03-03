@@ -15,7 +15,6 @@ on:
       - '**/Cargo.lock'
       - '**/deny.toml'
       # workflow definitions
-      - 'docker/**'
       - '.github/workflows/ci.yml'
 
 env:
