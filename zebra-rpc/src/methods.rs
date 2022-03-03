@@ -191,4 +191,4 @@ pub struct GetBlockChainInfo {
 /// Response to a `sendrawtransaction` RPC request.
 ///
 /// A JSON string with the transaction hash in hexadecimal.
-pub struct SentTransactionHash(#[serde(serialize_with = "hex::serialize")] transaction::Hash);
+pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
