@@ -80,8 +80,6 @@ where
     app_version: String,
 
     /// A handle to the mempool service.
-    ///
-    /// Used when sending raw transactions.
     mempool: Buffer<Mempool, mempool::Request>,
 }
 
