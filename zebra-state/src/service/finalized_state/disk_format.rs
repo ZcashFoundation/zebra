@@ -5,15 +5,13 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
+use std::{collections::BTreeMap, convert::TryInto, sync::Arc};
 
 use bincode::Options;
-use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     amount::NonNegative,
-    block,
-    block::{Block, Height},
+    block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
     parameters::Network,
@@ -24,33 +22,12 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+pub use types::TransactionLocation;
+
+pub mod types;
+
 #[cfg(test)]
 mod tests;
-
-/// A transaction's location in the chain, by block height and transaction index.
-///
-/// This provides a chain-order list of transactions.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct TransactionLocation {
-    /// The block height of the transaction.
-    pub height: block::Height,
-
-    /// The index of the transaction in its block.
-    pub index: u32,
-}
-
-impl TransactionLocation {
-    /// Create a transaction location from a block height and index (as the native index integer type).
-    #[allow(dead_code)]
-    pub fn from_usize(height: Height, index: usize) -> TransactionLocation {
-        TransactionLocation {
-            height,
-            index: index
-                .try_into()
-                .expect("all valid indexes are much lower than u32::MAX"),
-        }
-    }
-}
 
 /// Helper trait for defining the exact format used to interact with disk per
 /// type.
@@ -146,7 +123,7 @@ impl FromDisk for TransactionLocation {
             let mut bytes = [0; 4];
             bytes.copy_from_slice(&disk_bytes[0..4]);
             let height = u32::from_be_bytes(bytes);
-            block::Height(height)
+            Height(height)
         };
 
         let index = {
@@ -215,7 +192,7 @@ impl IntoDisk for () {
     }
 }
 
-impl IntoDisk for block::Height {
+impl IntoDisk for Height {
     type Bytes = [u8; 4];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -223,10 +200,10 @@ impl IntoDisk for block::Height {
     }
 }
 
-impl FromDisk for block::Height {
+impl FromDisk for Height {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let array = bytes.as_ref().try_into().unwrap();
-        block::Height(u32::from_be_bytes(array))
+        Height(u32::from_be_bytes(array))
     }
 }
 
@@ -247,7 +224,7 @@ impl IntoDisk for transparent::Utxo {
 impl FromDisk for transparent::Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let (meta_bytes, output_bytes) = bytes.as_ref().split_at(5);
-        let height = block::Height(u32::from_be_bytes(meta_bytes[0..4].try_into().unwrap()));
+        let height = Height(u32::from_be_bytes(meta_bytes[0..4].try_into().unwrap()));
         let from_coinbase = meta_bytes[4] == 1u8;
         let output = output_bytes
             .zcash_deserialize_into()

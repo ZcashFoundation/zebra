@@ -212,6 +212,7 @@ jobs:
             /zebra-state/**/constants.rs
             /zebra-state/**/finalized_state.rs
             /zebra-state/**/disk_format.rs
+            /zebra-state/**/disk_format/types.rs
             /zebra-state/**/disk_db.rs
             /zebra-state/**/zebra_db.rs
             /zebra-state/**/zebra_db/block.rs
