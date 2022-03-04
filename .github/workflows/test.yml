@@ -349,7 +349,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v2.17.0
         # Just search for the latest uploaded artifact if the previous disk regeneration job was skipped,
         # otherwise use the output from ${{ needs.regenerate-stateful-disks.outputs.disk_short_sha }}
-        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' ||  || github.event.inputs.regenerate-disks != 'true'}}
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: test.yml
@@ -359,7 +359,7 @@ jobs:
 
       - name: Get disk state SHA from txt
         id: get-disk-sha
-        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' ||  || github.event.inputs.regenerate-disks != 'true'}}
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         run: |
           output=$(cat latest-disk-state-sha.txt)
           echo "::set-output name=sha::$output"
