@@ -42,8 +42,8 @@ jobs:
       with:
         # list of Docker images to use as base name for tags
         images: |
-          ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}
-          ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}
+          ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}
+          ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REF_SLUG_URL }}
         # generate Docker tags based on the following events/attributes
         tags: |
           type=schedule
@@ -140,9 +140,9 @@ jobs:
 
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -154,15 +154,15 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
+          gcloud compute instance-groups list | grep "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed create \
-          "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}" \
-          --template "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
+          --template "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ env.REGION }}" \
@@ -173,8 +173,8 @@ jobs:
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}" \
-          --version template="zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
+          --version template="zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
 
   deploy-instance:
@@ -207,12 +207,12 @@ jobs:
       # Create instance template from container image
       - name: Manual deploy of a single instance running zebrad
         run: |
-          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type=pd-ssd \
           --container-stdin \
           --container-tty \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
