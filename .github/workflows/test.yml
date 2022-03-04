@@ -25,17 +25,6 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test.yml'
-  pull_request_review:
-    branches:
-      - main
-    paths:
-      - '**/*.rs'
-      - '**/*.txt'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - 'docker/**'
-      - '.github/workflows/test.yml'
-    types: [submitted]
 
 env:
   CARGO_INCREMENTAL: '1'
@@ -46,7 +35,7 @@ env:
   GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   ZONE: us-central1-a
-  MACHINE_TYPE: c2d-standard-16
+  MACHINE_TYPE: c2d-standard-4
   IMAGE_NAME: zebrad-test
 
 jobs:
@@ -204,6 +193,7 @@ jobs:
     needs: build
     outputs:
       disk_short_sha: ${{ steps.disk-short-sha.outputs.disk_short_sha }}
+      any_changed: ${{ steps.changed-files-specific.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -315,8 +305,8 @@ jobs:
           --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
 
       - name: Output and write the disk SHORT_SHA to a txt
-        id: disk-short-sha
         if: steps.sync-to-checkpoint.outcome == 'success'
+        id: disk-short-sha
         run: |
           short_sha=$(echo "${{ env.GITHUB_SHA_SHORT }}")
           echo "$short_sha" > latest-disk-state-sha.txt
@@ -332,14 +322,14 @@ jobs:
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }} || ${{ steps.sync-to-checkpoint.outcome == 'failure' }}
+        if: ${{ steps.sync-to-checkpoint.outcome == 'success' || steps.sync-to-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
-    name: Test full validation sync from cached state
+    name: Test validation sync from cached state
     runs-on: ubuntu-latest
     needs: [ build, regenerate-stateful-disks]
     steps:
@@ -357,6 +347,9 @@ jobs:
       # Get the latest uploaded txt with the disk SHORT_SHA from this workflow
       - name: Download latest disk state SHORT_SHA
         uses: dawidd6/action-download-artifact@v2.17.0
+        # Just search for the latest uploaded artifact if the previous disk regeneration job was skipped,
+        # otherwise use the output from ${{ needs.regenerate-stateful-disks.outputs.disk_short_sha }}
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: test.yml
@@ -366,6 +359,7 @@ jobs:
 
       - name: Get disk state SHA from txt
         id: get-disk-sha
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         run: |
           output=$(cat latest-disk-state-sha.txt)
           echo "::set-output name=sha::$output"
@@ -440,83 +434,7 @@ jobs:
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-past-checkpoint.outcome == 'success' }} || ${{ steps.sync-past-checkpoint.outcome == 'failure' }}
+        if: ${{ steps.sync-past-checkpoint.outcome == 'success' || steps.sync-past-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "zebrad-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
-
-  # Test that Zebra can run a full mainnet sync after a PR is approved
-  test-full-sync:
-    name: Test full Mainnet sync
-    runs-on: ubuntu-latest
-    needs: [ build]
-    if: github.event.review.state == 'approved'
-    steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v0.5.0
-        with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
-      # Creates Compute Engine virtual machine instance w/ disks
-      - name: Create GCP compute instance
-        id: create-instance
-        run: |
-          gcloud compute instances create-with-container "sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
-          --boot-disk-type pd-extreme \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          --container-restart-policy=never \
-          --container-stdin \
-          --container-tty \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1,TEST_FULL_SYNC=1,ZEBRA_FORCE_USE_COLOR=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
-          --machine-type ${{ env.MACHINE_TYPE }} \
-          --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
-          --tags zebrad \
-          --zone "${{ env.ZONE }}"
-
-      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
-      # This TODO relates to the following issues:
-      # https://github.com/actions/runner/issues/241
-      # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
-      - name: Get container name from logs
-        id: get-container-name
-        if: steps.create-instance.outcome == 'success'
-        run: |
-          INSTANCE_ID=$(gcloud compute instances describe sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          echo "Using instance: $INSTANCE_ID"
-          while [[ ${CONTAINER_NAME} != *"sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-              echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
-              sleep 10
-          done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-          echo "::set-output name=zebra_container::$CONTAINER_NAME"
-
-      - name: Sync past mandatory checkpoint logs
-        id: sync-past-checkpoint
-        run: |
-          gcloud compute ssh \
-          sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
-        env:
-          ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
-
-      - name: Delete test instance
-        # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-past-checkpoint.outcome == 'success' }} || ${{ steps.sync-past-checkpoint.outcome == 'failure' }}
-        continue-on-error: true
-        run: |
-          gcloud compute instances delete "sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
