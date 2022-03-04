@@ -20,7 +20,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/test-full-sync.yml'
     types: [submitted]
 
 env:
@@ -35,6 +35,7 @@ env:
   MACHINE_TYPE: c2d-standard-16
   IMAGE_NAME: zebrad-test
 
+jobs:
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
     name: Test full Mainnet sync
