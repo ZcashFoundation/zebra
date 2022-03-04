@@ -2,26 +2,31 @@
 
 use std::sync::Arc;
 
-use super::super::*;
+use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{Block, Height},
     parameters::Network,
     serialization::ZcashDeserializeInto,
 };
-
 use zebra_network::constants::USER_AGENT;
+use zebra_node_services::BoxError;
+use zebra_test::mock_service::MockService;
+
+use super::super::*;
 
 #[tokio::test]
 async fn rpc_getinfo() {
     zebra_test::init();
 
-    let state_service = zebra_state::init_test(Network::Mainnet);
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state = zebra_state::init_test(Network::Mainnet);
 
-    let rpc = RpcImpl {
-        app_version: "Zebra version test".to_string(),
-        state_service,
-    };
+    let rpc = RpcImpl::new(
+        "Zebra version test".to_string(),
+        Buffer::new(mempool.clone(), 1),
+        state,
+    );
 
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
 
@@ -32,6 +37,8 @@ async fn rpc_getinfo() {
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
     assert_eq!(get_info.subversion, USER_AGENT);
+
+    mempool.expect_no_requests().await;
 }
 
 #[tokio::test]
@@ -47,13 +54,15 @@ async fn rpc_getblock() {
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
         .collect();
 
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let state_service = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
+    let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
 
     // Init RPC
     let rpc = RpcImpl {
         app_version: "Zebra version test".to_string(),
-        state_service,
+        mempool: Buffer::new(mempool.clone(), 1),
+        state,
     };
 
     // Make calls and check response

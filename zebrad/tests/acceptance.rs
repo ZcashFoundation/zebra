@@ -1817,6 +1817,10 @@ fn zebra_tracing_conflict() -> Result<()> {
 fn zebra_rpc_conflict() -> Result<()> {
     zebra_test::init();
 
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
     let listen_addr = format!("127.0.0.1:{}", port);

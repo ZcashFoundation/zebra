@@ -7,12 +7,18 @@
 //! So this implementation follows the `lightwalletd` client implementation.
 
 use futures::{FutureExt, TryFutureExt};
+use hex::FromHex;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::block::{Height, SerializedBlock};
+use zebra_chain::{
+    block::{Height, SerializedBlock},
+    serialization::ZcashDeserialize,
+    transaction::Transaction,
+};
 use zebra_network::constants::USER_AGENT;
+use zebra_node_services::{mempool, BoxError};
 
 #[cfg(test)]
 mod tests;
@@ -52,6 +58,22 @@ pub trait Rpc {
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
 
+    /// sendrawtransaction
+    ///
+    /// Sends the raw bytes of a signed transaction to the network, if the transaction is valid.
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/sendrawtransaction.html>
+    ///
+    /// Result: a hexadecimal string of the hash of the sent transaction.
+    ///
+    /// Note: zcashd provides an extra `allowhighfees` parameter, but we don't yet because
+    /// lightwalletd doesn't use it.
+    #[rpc(name = "sendrawtransaction")]
+    fn send_raw_transaction(
+        &self,
+        raw_transaction_hex: String,
+    ) -> BoxFuture<Result<SentTransactionHash>>;
+
     /// getblock
     ///
     /// Returns requested block by height, encoded as hex.
@@ -76,8 +98,9 @@ pub trait Rpc {
 
 /// RPC method implementations.
 
-pub struct RpcImpl<State>
+pub struct RpcImpl<Mempool, State>
 where
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
         zebra_state::Request,
         Response = zebra_state::Response,
@@ -86,12 +109,41 @@ where
 {
     /// Zebra's application version.
     pub app_version: String,
-    /// Zebra's running state service.
-    pub state_service: Buffer<State, zebra_state::Request>,
+    /// A handle to the mempool service.
+    pub mempool: Buffer<Mempool, mempool::Request>,
+    /// A handle to the state service.
+    pub state: Buffer<State, zebra_state::Request>,
 }
 
-impl<State> Rpc for RpcImpl<State>
+impl<Mempool, State> RpcImpl<Mempool, State>
 where
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
+    State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + 'static,
+    State::Future: Send,
+{
+    /// Create a new instance of the RPC handler.
+    pub fn new(
+        app_version: String,
+        mempool: Buffer<Mempool, mempool::Request>,
+        state: Buffer<State, zebra_state::Request>,
+    ) -> Self {
+        RpcImpl {
+            app_version,
+            mempool,
+            state,
+        }
+    }
+}
+
+impl<Mempool, State> Rpc for RpcImpl<Mempool, State>
+where
+    Mempool:
+        tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
+    Mempool::Future: Send,
     State: Service<
             zebra_state::Request,
             Response = zebra_state::Response,
@@ -117,8 +169,55 @@ where
         Ok(response)
     }
 
+    fn send_raw_transaction(
+        &self,
+        raw_transaction_hex: String,
+    ) -> BoxFuture<Result<SentTransactionHash>> {
+        let mempool = self.mempool.clone();
+
+        async move {
+            let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
+                Error::invalid_params("raw transaction is not specified as a hex string")
+            })?;
+            let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
+                .map_err(|_| Error::invalid_params("raw transaction is structurally invalid"))?;
+
+            let transaction_hash = raw_transaction.hash();
+
+            let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
+            let request = mempool::Request::Queue(vec![transaction_parameter]);
+
+            let response = mempool.oneshot(request).await.map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
+            let queue_results = match response {
+                mempool::Response::Queued(results) => results,
+                _ => unreachable!("incorrect response variant from mempool service"),
+            };
+
+            assert_eq!(
+                queue_results.len(),
+                1,
+                "mempool service returned more results than expected"
+            );
+
+            match &queue_results[0] {
+                Ok(()) => Ok(SentTransactionHash(transaction_hash.to_string())),
+                Err(error) => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                }),
+            }
+        }
+        .boxed()
+    }
+
     fn get_block(&self, height: Height, _verbosity: u8) -> BoxFuture<Result<GetBlock>> {
-        let mut state = self.state_service.clone();
+        let mut state = self.state.clone();
 
         async move {
             let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));
@@ -158,6 +257,12 @@ pub struct GetBlockChainInfo {
     chain: String,
     // TODO: add other fields used by lightwalletd (#3143)
 }
+
+#[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+/// Response to a `sendrawtransaction` RPC request.
+///
+/// A JSON string with the transaction hash in hexadecimal.
+pub struct SentTransactionHash(String);
 
 #[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.

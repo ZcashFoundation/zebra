@@ -4,12 +4,13 @@
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
 
+use jsonrpc_core;
+use jsonrpc_http_server::ServerBuilder;
 use tower::{buffer::Buffer, Service};
 use tracing::*;
 use tracing_futures::Instrument;
 
-use jsonrpc_core;
-use jsonrpc_http_server::ServerBuilder;
+use zebra_node_services::{mempool, BoxError};
 
 use crate::{
     config::Config,
@@ -25,12 +26,16 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<State>(
+    pub fn spawn<Mempool, State>(
         config: Config,
         app_version: String,
-        state_service: Buffer<State, zebra_state::Request>,
+        mempool: Buffer<Mempool, mempool::Request>,
+        state: Buffer<State, zebra_state::Request>,
     ) -> tokio::task::JoinHandle<()>
     where
+        Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+            + 'static,
+        Mempool::Future: Send,
         State: Service<
                 zebra_state::Request,
                 Response = zebra_state::Response,
@@ -44,7 +49,8 @@ impl RpcServer {
             // Initialize the rpc methods with the zebra version
             let rpc_impl = RpcImpl {
                 app_version,
-                state_service,
+                mempool,
+                state,
             };
 
             // Create handler compatible with V1 and V2 RPC protocols

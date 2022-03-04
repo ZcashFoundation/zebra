@@ -8,9 +8,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
+zebra-node-services = { path = "../zebra-node-services" }
 zebra-state = { path = "../zebra-state" }
 
 futures = "0.3"
@@ -32,5 +32,9 @@ tracing-futures = "0.2"
 serde = { version = "1", features = ["serde_derive"] }
 
 [dev-dependencies]
+proptest = "0.10.1"
+thiserror = "1.0.30"
+tokio = { version = "1.16.1", features = ["full", "test-util"] }
 
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

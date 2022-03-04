@@ -24,7 +24,7 @@ env:
 jobs:
   build:
     name: Build images
-    timeout-minutes: 60
+    timeout-minutes: 90
     runs-on: ubuntu-latest
 
     steps:
@@ -34,6 +34,24 @@ jobs:
 
     - name: Inject slug/short variables
       uses: rlespinasse/github-slug-action@v4
+
+      # Automatic tag management and OCI Image Format Specification for labels
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v3.6.2
+      with:
+        # list of Docker images to use as base name for tags
+        images: |
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
+        # generate Docker tags based on the following events/attributes
+        tags: |
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
 
     # Setup gcloud CLI
     - name: Authenticate to Google Cloud
@@ -72,9 +90,8 @@ jobs:
         platforms: |
           linux/amd64
           linux/arm64
-        tags: |
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         build-args: |
           SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
           ZEBRA_SKIP_IPV6_TESTS="1"
