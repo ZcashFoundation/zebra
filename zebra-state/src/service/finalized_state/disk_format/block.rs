@@ -166,3 +166,9 @@ impl IntoDisk for transaction::Hash {
         self.0
     }
 }
+
+impl FromDisk for transaction::Hash {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        transaction::Hash(disk_bytes.as_ref().try_into().unwrap())
+    }
+}

@@ -18,6 +18,7 @@ use zebra_chain::transparent;
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_format::transparent::OutputLocation,
         FinalizedBlock, FinalizedState,
     },
     BoxError,
@@ -30,7 +31,10 @@ impl FinalizedState {
     /// `transparent::OutPoint` if it is present.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
-        self.db.zs_get(utxo_by_outpoint, outpoint)
+
+        let output_location = OutputLocation::from_outpoint(outpoint);
+
+        self.db.zs_get(utxo_by_outpoint, &output_location)
     }
 }
 
@@ -54,20 +58,23 @@ impl DiskWriteBatch {
 
         // Index all new transparent outputs, before deleting any we've spent
         for (outpoint, utxo) in new_outputs.borrow().iter() {
-            self.zs_insert(utxo_by_outpoint, outpoint, utxo);
+            let output_location = OutputLocation::from_outpoint(outpoint);
+
+            self.zs_insert(utxo_by_outpoint, output_location, utxo);
         }
 
         // Mark all transparent inputs as spent.
         //
         // Coinbase inputs represent new coins,
         // so there are no UTXOs to mark as spent.
-        for outpoint in block
+        for output_location in block
             .transactions
             .iter()
             .flat_map(|tx| tx.inputs())
             .flat_map(|input| input.outpoint())
+            .map(|outpoint| OutputLocation::from_outpoint(&outpoint))
         {
-            self.zs_delete(utxo_by_outpoint, outpoint);
+            self.zs_delete(utxo_by_outpoint, output_location);
         }
 
         Ok(())
