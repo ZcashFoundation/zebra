@@ -66,9 +66,6 @@ ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
-ARG TEST_FULL_SYNC
-ENV TEST_FULL_SYNC ${TEST_FULL_SYNC:-1}
-
 COPY . .
 # Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
