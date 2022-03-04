@@ -1,4 +1,4 @@
-use std::{convert::TryInto, io};
+use std::{borrow::Borrow, convert::TryInto, io};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
@@ -133,5 +133,32 @@ impl ZcashDeserialize for Block {
             header: limited_reader.zcash_deserialize_into()?,
             transactions: limited_reader.zcash_deserialize_into()?,
         })
+    }
+}
+
+/// A serialized block.
+///
+/// Stores bytes that are guaranteed to be deserializable into a [`Block`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SerializedBlock {
+    bytes: Vec<u8>,
+}
+
+/// Build a [`SerializedBlock`] by serializing a block.
+impl<B: Borrow<Block>> From<B> for SerializedBlock {
+    fn from(block: B) -> Self {
+        SerializedBlock {
+            bytes: block
+                .borrow()
+                .zcash_serialize_to_vec()
+                .expect("Writing to a `Vec` should never fail"),
+        }
+    }
+}
+
+/// Access the serialized bytes of a [`SerializedBlock`].
+impl AsRef<[u8]> for SerializedBlock {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_ref()
     }
 }

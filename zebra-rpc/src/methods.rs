@@ -11,7 +11,7 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::{block::Height, serialization::ZcashSerialize};
+use zebra_chain::block::{Height, SerializedBlock};
 use zebra_network::constants::USER_AGENT;
 
 #[cfg(test)]
@@ -133,13 +133,7 @@ where
                 })?;
 
             match response {
-                zebra_state::Response::Block(Some(block)) => Ok(GetBlock {
-                    data: hex::encode(
-                        block
-                            .zcash_serialize_to_vec()
-                            .expect("vec serialization is infallible"),
-                    ),
-                }),
+                zebra_state::Response::Block(Some(block)) => Ok(GetBlock { data: block.into() }),
                 _ => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
@@ -165,8 +159,9 @@ pub struct GetBlockChainInfo {
     // TODO: add other fields used by lightwalletd (#3143)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
 pub struct GetBlock {
-    data: String,
+    #[serde(with = "hex")]
+    data: SerializedBlock,
 }
