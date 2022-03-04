@@ -740,7 +740,8 @@ So they should not be used for consensus-critical checks.
 
 - The `Utxo` type can be constructed from the `Output` data,
   `height: TransactionLocation.height`, and
-  `is_coinbase: OutLocation.output_index == 1`.
+  `is_coinbase: TransactionLocation.index == 0`
+  (coinbase transactions are always the first transaction in a block).
 
 - `balance_by_transparent_addr` is the sum of all `utxo_by_transparent_addr_loc`s
   that are still in `utxo_by_outpoint`. It is cached to improve performance for
