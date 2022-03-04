@@ -249,6 +249,7 @@ jobs:
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
+        if: steps.create-instance.outcome == 'success'
         run: |
           INSTANCE_ID=$(gcloud compute instances describe zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
@@ -262,6 +263,7 @@ jobs:
 
       - name: Regenerate stateful disks logs
         id: sync-to-checkpoint
+        if: steps.create-instance.outcome == 'success'
         run: |
           gcloud compute ssh \
           zebrad-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
@@ -275,6 +277,8 @@ jobs:
       # Create image from disk that will be used to sync past mandatory checkpoint test
       # Force the image creation as the disk is still attached even though is not being used by the container
       - name: Create image from state disk
+        # Only run if the earlier step succeeds
+        if: steps.sync-to-checkpoint.outcome == 'success'
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-${{ env.lower_net_name }}-canopy \
           --force \
@@ -284,6 +288,7 @@ jobs:
           --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
 
       - name: Output and write the disk SHORT_SHA to a txt
+        if: steps.sync-to-checkpoint.outcome == 'success'
         id: disk-short-sha
         run: |
           short_sha=$(echo "${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}")
@@ -291,6 +296,7 @@ jobs:
           echo "::set-output name=disk_short_sha::$short_sha"
 
       - name: Upload the disk state txt
+        if: steps.sync-to-checkpoint.outcome == 'success'
         uses: actions/upload-artifact@v2.3.1
         with:
           name: latest-disk-state-sha
