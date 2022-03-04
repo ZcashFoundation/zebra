@@ -314,7 +314,7 @@ jobs:
 
       - name: Upload the disk state txt
         if: steps.sync-to-checkpoint.outcome == 'success'
-        uses: actions/upload-artifact@v2.3.1
+        uses: actions/upload-artifact@v3
         with:
           name: latest-disk-state-sha
           path: latest-disk-state-sha.txt
