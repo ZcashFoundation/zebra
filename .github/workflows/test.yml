@@ -127,7 +127,7 @@ jobs:
     name: Test all
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event_name != 'pull_request_review' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' || github.event_name != 'pull_request_review' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -145,7 +145,7 @@ jobs:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event_name != 'pull_request_review' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' || github.event_name != 'pull_request_review' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -164,7 +164,7 @@ jobs:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event_name != 'pull_request_review' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' || github.event_name != 'pull_request_review' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -182,7 +182,7 @@ jobs:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event_name != 'pull_request_review' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' || github.event_name != 'pull_request_review' }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
