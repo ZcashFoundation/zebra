@@ -15,7 +15,7 @@ on:
     paths:
       # code and tests
       - '**/*.rs'
-      # hard-coded checkpoints
+      # hard-coded checkpoints and proptest regressions
       - '**/*.txt'
       # test data snapshots
       - '**/*.snap'
