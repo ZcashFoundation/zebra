@@ -60,10 +60,10 @@ jobs:
       - name: Create GCP compute instance
         id: create-instance
         run: |
-          gcloud compute instances create-with-container "sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
+          gcloud compute instances create-with-container "sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-extreme \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
@@ -82,21 +82,21 @@ jobs:
         id: get-container-name
         if: steps.create-instance.outcome == 'success'
         run: |
-          INSTANCE_ID=$(gcloud compute instances describe sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
+          INSTANCE_ID=$(gcloud compute instances describe sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
-          while [[ ${CONTAINER_NAME} != *"sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
+          while [[ ${CONTAINER_NAME} != *"sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
+              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
               sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
+          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
 
       - name: Full sync mainnet
         id: full-sync-mainnet
         run: |
           gcloud compute ssh \
-          sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
+          sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -109,4 +109,4 @@ jobs:
         if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
         continue-on-error: true
         run: |
-          gcloud compute instances delete "sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+          gcloud compute instances delete "sync-tests-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
