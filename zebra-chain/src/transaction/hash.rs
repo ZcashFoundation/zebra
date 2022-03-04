@@ -113,7 +113,7 @@ impl Hash {
     }
 }
 
-impl ToHex for &'_ Hash {
+impl ToHex for &Hash {
     fn encode_hex<T: FromIterator<char>>(&self) -> T {
         self.bytes_in_display_order().encode_hex()
     }
