@@ -40,7 +40,6 @@ jobs:
   test-full-sync:
     name: Test full Mainnet sync
     runs-on: ubuntu-latest
-    if: github.event.review.state == 'approved'
     steps:
       - uses: actions/checkout@v2.4.0
         with:
