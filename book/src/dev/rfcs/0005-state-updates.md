@@ -611,10 +611,10 @@ We use the following rocksdb column families:
 | `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
 | `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
 | *Transparent*                  |                        |                                     |         |
-| `utxo_by_out_loc`              | `OutLocation`          | `transparent::Output`               | Delete  |
-| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| TransparentAddrLoc`    | Update  |
-| `utxo_by_transparent_addr_loc` | `TransparentAddrLoc`   | `AtLeastOne<OutLocation>`           | Up/Del  |
-| `tx_by_transparent_addr_loc`   | `TransparentAddrLoc`   | `AtLeastOne<TransactionLocation>`   | Append  |
+| `utxo_by_out_loc`              | `OutputLocation`       | `transparent::Output`               | Delete  |
+| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
+| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `AtLeastOne<OutputLocation>`        | Up/Del  |
+| `tx_by_transparent_addr_loc`   | `AddressLocation`      | `AtLeastOne<TransactionLocation>`   | Append  |
 | *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
@@ -640,12 +640,12 @@ Block and Transaction Data:
 - `TransactionCount`: same as `TransactionIndex`
 - `TransactionLocation`: `Height \|\| TransactionIndex`
 - `HeightTransactionCount`: `Height \|\| TransactionCount`
-- `TransparentOutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
+- `OutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
 - transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
-- `OutLocation`: `TransactionLocation \|\| TransparentOutputIndex`
-- `TransparentAddrLoc`: the first `OutLocation` used by a `transparent::Address`.
+- `OutputLocation`: `TransactionLocation \|\| OutputIndex`
+- `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
   Always has the same value for each address, even if the first output is spent.
-- `Utxo`: `Output`, derives extra fields from the `OutLocation` key
+- `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
 - `AtLeastOne<T>`: `[T; AtLeastOne::len()]` (for known-size `T`)
 
 We use big-endian encoding for keys, to allow database index prefix searches.
@@ -734,7 +734,7 @@ So they should not be used for consensus-critical checks.
   we store blocks by height, storing the height saves one level of indirection.
   Transaction hashes can be looked up using `hash_by_tx`.
 
-- Similarly, UTXOs are stored in `utxo_by_outpoint` by `OutLocation`,
+- Similarly, UTXOs are stored in `utxo_by_outpoint` by `OutputLocation`,
   rather than `OutPoint`. `OutPoint`s can be looked up using `tx_by_hash`,
   and reconstructed using `hash_by_tx`.
 
@@ -744,7 +744,7 @@ So they should not be used for consensus-critical checks.
 
 - `balance_by_transparent_addr` is the sum of all `utxo_by_transparent_addr_loc`s
   that are still in `utxo_by_outpoint`. It is cached to improve performance for
-  addresses with large UTXO sets. It also stores the `TransparentAddrLoc` for each
+  addresses with large UTXO sets. It also stores the `AddressLocation` for each
   address, which allows for efficient lookups.
 
 - `utxo_by_transparent_addr_loc` stores unspent transparent output locations by address.
@@ -752,12 +752,12 @@ So they should not be used for consensus-critical checks.
   has been spent in `utxo_by_outpoint`, that UTXO location can be deleted from
   `utxo_by_transparent_addr_loc`. (We don't do these deletions every time a block is
   committed, because that requires an expensive full index search.)
-  This list includes the `TransparentAddrLoc`, if it has not been spent.
+  This list includes the `AddressLocation`, if it has not been spent.
   (This duplicate data is small, and helps simplify the code.)
 
 - `tx_by_transparent_addr_loc` stores transaction locations by address.
   This list includes transactions containing spent UTXOs.
-  It also includes the `TransactionLocation` from the `TransparentAddrLoc`.
+  It also includes the `TransactionLocation` from the `AddressLocation`.
   (This duplicate data is small, and helps simplify the code.)
 
 - Each `*_note_commitment_tree` stores the note commitment tree state
