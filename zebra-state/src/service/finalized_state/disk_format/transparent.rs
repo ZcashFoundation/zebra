@@ -111,7 +111,7 @@ impl FromDisk for OutputIndex {
 }
 
 impl IntoDisk for OutputLocation {
-    type Bytes = [u8; 8];
+    type Bytes = [u8; 36];
 
     fn as_bytes(&self) -> Self::Bytes {
         let hash_bytes = self.hash.as_bytes().to_vec();
