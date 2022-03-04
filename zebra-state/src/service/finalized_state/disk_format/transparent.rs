@@ -11,7 +11,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
+use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk, IntoDiskFixedLen};
 
 impl IntoDisk for transparent::Utxo {
     type Bytes = Vec<u8>;
@@ -30,7 +30,9 @@ impl IntoDisk for transparent::Utxo {
 
 impl FromDisk for transparent::Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(4);
+        let height_len = Height::fixed_byte_len();
+
+        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(height_len);
         let (coinbase_flag_bytes, output_bytes) = rest_bytes.split_at(1);
 
         let height = Height::from_bytes(height_bytes);

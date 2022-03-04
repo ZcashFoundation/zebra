@@ -15,7 +15,7 @@ use zebra_chain::{
     transaction,
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
+use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk, IntoDiskFixedLen};
 
 // Transaction types
 
@@ -107,7 +107,9 @@ impl IntoDisk for TransactionLocation {
 
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(4);
+        let height_len = Height::fixed_byte_len();
+
+        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(height_len);
 
         let height = Height::from_bytes(height_bytes);
         let index = u32::from_be_bytes(index_bytes.try_into().unwrap());
