@@ -193,6 +193,7 @@ jobs:
     needs: build
     outputs:
       disk_short_sha: ${{ steps.disk-short-sha.outputs.disk_short_sha }}
+      any_changed: ${{ steps.changed-files-specific.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -346,9 +347,9 @@ jobs:
       # Get the latest uploaded txt with the disk SHORT_SHA from this workflow
       - name: Download latest disk state SHORT_SHA
         uses: dawidd6/action-download-artifact@v2.17.0
-        # Just search for the latest uploaded artifact if the previous job was skipped,
+        # Just search for the latest uploaded artifact if the previous disk regeneration job was skipped,
         # otherwise use the output from ${{ needs.regenerate-stateful-disks.outputs.disk_short_sha }}
-        if: ${{ needs.regenerate-stateful-disks.steps.create-instance.outcome == 'skipped' }}
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' ||  || github.event.inputs.regenerate-disks != 'true'}}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: test.yml
@@ -358,7 +359,7 @@ jobs:
 
       - name: Get disk state SHA from txt
         id: get-disk-sha
-        if: ${{ needs.regenerate-stateful-disks.steps.create-instance.outcome == 'skipped' }}
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' ||  || github.event.inputs.regenerate-disks != 'true'}}
         run: |
           output=$(cat latest-disk-state-sha.txt)
           echo "::set-output name=sha::$output"
