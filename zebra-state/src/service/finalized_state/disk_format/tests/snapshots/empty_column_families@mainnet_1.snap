@@ -1,0 +1,12 @@
+---
+source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
+assertion_line: 140
+expression: empty_column_families
+
+---
+[
+  "history_tree: no entries",
+  "orchard_nullifiers: no entries",
+  "sapling_nullifiers: no entries",
+  "sprout_nullifiers: no entries",
+]
