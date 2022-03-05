@@ -4,7 +4,6 @@ use thiserror::Error;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    parameters::Network,
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{Transaction, UnminedTx},
 };
@@ -21,8 +20,8 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let state = zebra_state::init_test(Network::Mainnet);
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), state);
+            let mut state = MockService::build().for_prop_tests();
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
             let hash = SentTransactionHash(transaction.hash().to_string());
 
             let transaction_bytes = transaction
@@ -40,6 +39,8 @@ proptest! {
                 .expect_request(expected_request)
                 .await?
                 .respond(response);
+
+            state.expect_no_requests().await?;
 
             let result = send_task
                 .await
@@ -60,9 +61,9 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let state = zebra_state::init_test(Network::Mainnet);
+            let mut state = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), state);
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
             let transaction_bytes = transaction
                 .zcash_serialize_to_vec()
@@ -78,6 +79,9 @@ proptest! {
                 .expect_request(expected_request)
                 .await?
                 .respond(Err(DummyError));
+
+            state.expect_no_requests().await?;
+
 
             let result = send_task
                 .await
@@ -105,9 +109,9 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let state = zebra_state::init_test(Network::Mainnet);
+            let mut state = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), state);
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
             let transaction_bytes = transaction
                 .zcash_serialize_to_vec()
@@ -124,6 +128,8 @@ proptest! {
                 .expect_request(expected_request)
                 .await?
                 .respond(response);
+
+            state.expect_no_requests().await?;
 
             let result = send_task
                 .await
@@ -158,13 +164,14 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let state = zebra_state::init_test(Network::Mainnet);
+            let mut state = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), state);
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
 
             mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
 
             let result = send_task
                 .await
@@ -201,13 +208,14 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let state = zebra_state::init_test(Network::Mainnet);
+            let mut state = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), state);
+            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
 
             mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
 
             let result = send_task
                 .await

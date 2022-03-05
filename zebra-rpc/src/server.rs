@@ -47,11 +47,7 @@ impl RpcServer {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl {
-                app_version,
-                mempool,
-                state,
-            };
+            let rpc_impl = RpcImpl::new(app_version, mempool, state);
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =

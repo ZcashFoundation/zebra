@@ -20,12 +20,12 @@ async fn rpc_getinfo() {
     zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state = zebra_state::init_test(Network::Mainnet);
+    let mut state = MockService::build().for_unit_tests();
 
     let rpc = RpcImpl::new(
         "Zebra version test".to_string(),
         Buffer::new(mempool.clone(), 1),
-        state,
+        Buffer::new(state.clone(), 1),
     );
 
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
@@ -39,6 +39,7 @@ async fn rpc_getinfo() {
     assert_eq!(get_info.subversion, USER_AGENT);
 
     mempool.expect_no_requests().await;
+    state.expect_no_requests().await;
 }
 
 #[tokio::test]

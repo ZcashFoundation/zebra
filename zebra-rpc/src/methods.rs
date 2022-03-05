@@ -97,7 +97,6 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
-
 pub struct RpcImpl<Mempool, State>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
@@ -108,11 +107,11 @@ where
     >,
 {
     /// Zebra's application version.
-    pub app_version: String,
+    app_version: String,
     /// A handle to the mempool service.
-    pub mempool: Buffer<Mempool, mempool::Request>,
+    mempool: Buffer<Mempool, mempool::Request>,
     /// A handle to the state service.
-    pub state: Buffer<State, zebra_state::Request>,
+    state: Buffer<State, zebra_state::Request>,
 }
 
 impl<Mempool, State> RpcImpl<Mempool, State>
@@ -233,11 +232,12 @@ where
 
             match response {
                 zebra_state::Response::Block(Some(block)) => Ok(GetBlock { data: block.into() }),
-                _ => Err(Error {
+                zebra_state::Response::Block(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
                     data: None,
                 }),
+                _ => unreachable!("unmatched response to a block request"),
             }
         }
         .boxed()
