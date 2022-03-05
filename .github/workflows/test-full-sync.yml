@@ -20,7 +20,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/test-full-sync.yml'
     types: [submitted]
 
 env:
@@ -35,11 +35,84 @@ env:
   MACHINE_TYPE: c2d-standard-16
   IMAGE_NAME: zebrad-test
 
+jobs:
+  build:
+    name: Build images
+    timeout-minutes: 210
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+
+        # Automatic tag management and OCI Image Format Specification for labels
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3.6.2
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
+            ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      # Setup Docker Buildx to allow use of docker cache layers from GH
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v1.12.0
+        with:
+          registry: us-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      - name: Login to Google Container Registry
+        uses: docker/login-action@v1.12.0
+        with:
+          registry: gcr.io
+          username: _json_key
+          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      # Build and push image to Google Artifact Registry
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@v2.8.0
+        with:
+          target: tester
+          context: .
+          file: ./docker/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NETWORK=${{ github.event.inputs.network || env.NETWORK }}
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_BACKTRACE=full
+            ZEBRA_SKIP_NETWORK_TESTS="1"
+            CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
+            RUST_LOG=debug
+            SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
     name: Test full Mainnet sync
     runs-on: ubuntu-latest
-    if: github.event.review.state == 'approved'
+    needs: [ build ]
     steps:
       - uses: actions/checkout@v2.4.0
         with:
@@ -59,10 +132,10 @@ env:
       - name: Create GCP compute instance
         id: create-instance
         run: |
-          gcloud compute instances create-with-container "sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" \
+          gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-extreme \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
@@ -81,21 +154,21 @@ env:
         id: get-container-name
         if: steps.create-instance.outcome == 'success'
         run: |
-          INSTANCE_ID=$(gcloud compute instances describe sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
+          INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
-          while [[ ${CONTAINER_NAME} != *"sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
+          while [[ ${CONTAINER_NAME} != *"full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
+              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
               sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
+          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
 
       - name: Full sync mainnet
         id: full-sync-mainnet
         run: |
           gcloud compute ssh \
-          sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }} \
+          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -108,4 +181,4 @@ env:
         if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
         continue-on-error: true
         run: |
-          gcloud compute instances delete "sync-tests-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA_SHORT || env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+          gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
