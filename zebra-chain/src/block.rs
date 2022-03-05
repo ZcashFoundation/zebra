@@ -22,7 +22,7 @@ pub use commitment::{
 pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header};
 pub use height::Height;
-pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
+pub use serialize::{SerializedBlock, SerializedBlockHash, MAX_BLOCK_BYTES};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use arbitrary::LedgerState;

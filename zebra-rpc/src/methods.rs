@@ -13,9 +13,9 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::SerializedBlock,
-    serialization::{SerializationError, ZcashDeserialize},
-    transaction::{self, Transaction},
+    block::{Height, SerializedBlock, SerializedBlockHash},
+    serialization::ZcashDeserialize,
+    transaction::Transaction,
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
@@ -279,9 +279,9 @@ where
                 })?;
 
             match response {
-                zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash {
-                    hex: hash.to_string(),
-                }),
+                zebra_state::Response::Tip(Some((_height, hash))) => {
+                    Ok(GetBestBlockHash { hex: hash.into() })
+                }
                 _ => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
@@ -321,7 +321,5 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 /// Response to a `getbestblockhash` RPC request.
 pub struct GetBestBlockHash {
     #[serde(with = "hex")]
-    // TODO: create and use `SerializedBlockHash`
-    //hex: SerializedBlockHash,
-    hex: String,
+    hex: SerializedBlockHash,
 }
