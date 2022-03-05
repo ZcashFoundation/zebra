@@ -94,6 +94,20 @@ pub trait Rpc {
     /// Note 3: The `verbosity` parameter is ignored but required in the call.
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
+
+    /// getbestblockhash
+    ///
+    /// Returns the hash of the current best blockchain tip block.
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/getbestblockhash.html>
+    ///
+    /// Result:
+    /// {
+    ///      "hex": String, // Hex encoded block hash
+    /// }
+    ///
+    #[rpc(name = "getbestblockhash")]
+    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
 }
 
 /// RPC method implementations.
@@ -248,6 +262,35 @@ where
         }
         .boxed()
     }
+
+    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>> {
+        let mut state = self.state.clone();
+
+        async move {
+            let request = zebra_state::Request::Tip;
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash {
+                    hex: hash.to_string(),
+                }),
+                _ => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Block not found".to_string(),
+                    data: None,
+                }),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -273,3 +316,12 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 #[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
 pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
+
+#[derive(serde::Serialize)]
+/// Response to a `getbestblockhash` RPC request.
+pub struct GetBestBlockHash {
+    #[serde(with = "hex")]
+    // TODO: create and use `SerializedBlockHash`
+    //hex: SerializedBlockHash,
+    hex: String,
+}
