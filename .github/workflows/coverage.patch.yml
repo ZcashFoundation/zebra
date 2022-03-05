@@ -5,6 +5,7 @@ on:
     paths-ignore:
       - '**/*.rs'
       - '**/*.txt'
+      - '**/*.snap'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'codecov.yml'
