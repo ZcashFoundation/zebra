@@ -1,0 +1,10 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+assertion_line: 120
+expression: "tip.map(|tip| Tip::from(tip))"
+
+---
+Some(Tip(
+  height: 0,
+  block_hash: "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
+))

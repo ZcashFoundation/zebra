@@ -6,10 +6,17 @@ on:
     branches:
       - 'main'
     paths:
+      # rebuild lightwalletd whenever the related Zebra code changes
+      #
+      # TODO: this code isn't compiled in this docker image
+      #       rebuild whenever the actual code at adityapk00/lightwalletd/master changes
       - 'zebra-rpc/**'
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
+      # workflow definitions
+      #
+      # unlike the Zebra code, these workflow definitions do change the docker image
       - 'docker/zcash-lightwalletd/Dockerfile'
       - '.github/workflows/zcash-lightwalletd.yml'
 
@@ -38,6 +45,24 @@ jobs:
 
     - name: Inject slug/short variables
       uses: rlespinasse/github-slug-action@v4
+
+      # Automatic tag management and OCI Image Format Specification for labels
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v3.6.2
+      with:
+        # list of Docker images to use as base name for tags
+        images: |
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
+        # generate Docker tags based on the following events/attributes
+        tags: |
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
 
     # Setup gcloud CLI
     - name: Authenticate to Google Cloud
@@ -76,9 +101,8 @@ jobs:
         platforms: |
           linux/amd64
           linux/arm64
-        tags: |
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:latest
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         push: true
         cache-from: type=gha
         cache-to: type=gha,mode=max

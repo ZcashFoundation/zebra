@@ -6,7 +6,7 @@ on:
     paths:
       # code and tests
       - '**/*.rs'
-      # hard-coded checkpoints
+      # hard-coded checkpoints and proptest regressions
       - '**/*.txt'
       # test data snapshots
       - '**/*.snap'
@@ -15,7 +15,6 @@ on:
       - '**/Cargo.lock'
       - '**/deny.toml'
       # workflow definitions
-      - 'docker/**'
       - '.github/workflows/ci.yml'
 
 env:
