@@ -93,7 +93,7 @@ pub trait Rpc {
     ///
     /// Note 3: The `verbosity` parameter is ignored but required in the call.
     #[rpc(name = "getblock")]
-    fn get_block(&self, height: Height, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
+    fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 }
 
 /// RPC method implementations.
@@ -215,8 +215,13 @@ where
         .boxed()
     }
 
-    fn get_block(&self, height: Height, _verbosity: u8) -> BoxFuture<Result<GetBlock>> {
+    fn get_block(&self, height: String, _verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
+        let height = Height(
+            height
+                .parse::<u32>()
+                .expect("Height as string should parse"),
+        );
 
         async move {
             let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));

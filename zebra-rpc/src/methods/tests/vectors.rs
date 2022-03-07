@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::Block,
     parameters::Network,
     serialization::ZcashDeserializeInto,
 };
@@ -69,7 +69,7 @@ async fn rpc_getblock() {
     // Make calls and check response
     for (i, block) in blocks.into_iter().enumerate() {
         let get_block = rpc
-            .get_block(Height(i as u32), 0u8)
+            .get_block(i.to_string(), 0u8)
             .await
             .expect("We should have a GetBlock struct");
 
