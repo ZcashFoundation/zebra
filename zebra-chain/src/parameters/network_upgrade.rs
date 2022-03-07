@@ -192,11 +192,18 @@ impl NetworkUpgrade {
             {
                 (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
             }
+
             // To prevent accidentally setting this somehow, only check the env var
             // when being compiled for tests. We can't use cfg(test) since the
             // test that uses this is in zebra-state, and cfg(test) is not
             // set for dependencies. However, zebra-state does set the
             // zebra-test feature of zebra-chain if it's a dev dependency.
+            //
+            // Cargo features are additive, so all test binaries built along with
+            // zebra-state will have this feature enabled. But we are using
+            // Rust Edition 2021 and Cargo resolver version 2, so the "zebra-test"
+            // feature should only be enabled for tests:
+            // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
             #[cfg(feature = "zebra-test")]
             if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
                 (
