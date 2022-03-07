@@ -117,7 +117,7 @@ async fn rpc_getbestblockhash() {
     let tip_block_hash = tip_block.hash();
 
     // Get a mempool handle
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
 
@@ -145,4 +145,6 @@ async fn rpc_getbestblockhash() {
             .cloned()
             .collect::<Vec::<u8>>()
     );
+
+    mempool.expect_no_requests().await;
 }
