@@ -15,27 +15,37 @@ pub fn block_header() -> Header {
     Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap()
 }
 
-/// Generate a block with multiple transactions just below limit
+/// Generate a block with multiple transparent transactions just below limit
 pub fn large_multi_transaction_block() -> Block {
     multi_transaction_block(false)
 }
 
-/// Generate a block with one transaction and multiple inputs just below limit
+/// Generate a block with one transaction and multiple transparent inputs just below limit
 pub fn large_single_transaction_block_many_inputs() -> Block {
     single_transaction_block_many_inputs(false)
 }
 
-/// Generate a block with multiple transactions just above limit
+/// Generate a block with one transaction and multiple transparent outputs just below limit
+pub fn large_single_transaction_block_many_outputs() -> Block {
+    single_transaction_block_many_outputs(false)
+}
+
+/// Generate a block with multiple transparent transactions just above limit
 pub fn oversized_multi_transaction_block() -> Block {
     multi_transaction_block(true)
 }
 
-/// Generate a block with one transaction and multiple inputs just above limit
+/// Generate a block with one transaction and multiple transparent inputs just above limit
 pub fn oversized_single_transaction_block_many_inputs() -> Block {
     single_transaction_block_many_inputs(true)
 }
 
-// Implementation of block generation with multiple transactions
+/// Generate a block with one transaction and multiple transparent outputs just above limit
+pub fn oversized_single_transaction_block_many_outputs() -> Block {
+    single_transaction_block_many_outputs(true)
+}
+
+/// Implementation of block generation with multiple transparent transactions
 fn multi_transaction_block(oversized: bool) -> Block {
     // A dummy transaction
     let tx = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
@@ -68,7 +78,7 @@ fn multi_transaction_block(oversized: bool) -> Block {
     }
 }
 
-// Implementation of block generation with one transaction and multiple inputs
+/// Implementation of block generation with one transaction and multiple transparent inputs
 fn single_transaction_block_many_inputs(oversized: bool) -> Block {
     // Dummy input and output
     let input =
@@ -115,6 +125,67 @@ fn single_transaction_block_many_inputs(oversized: bool) -> Block {
 
     // 1 single output
     outputs.push(output);
+
+    // Create a big transaction
+    let big_transaction = Transaction::V1 {
+        inputs,
+        outputs,
+        lock_time,
+    };
+
+    // Put the big transaction into a block
+    let transactions = vec![Arc::new(big_transaction)];
+    Block {
+        header,
+        transactions,
+    }
+}
+
+/// Implementation of block generation with one transaction and multiple transparent outputs
+fn single_transaction_block_many_outputs(oversized: bool) -> Block {
+    // Dummy input and output
+    let input =
+        transparent::Input::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();
+    let output =
+        transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
+
+    // A block header
+    let header = block_header();
+
+    // Serialize header
+    let mut data_header = Vec::new();
+    header
+        .zcash_serialize(&mut data_header)
+        .expect("Block header should serialize");
+
+    // Serialize a LockTime
+    let lock_time = LockTime::Time(DateTime::<Utc>::from_utc(
+        NaiveDateTime::from_timestamp(61, 0),
+        Utc,
+    ));
+    let mut data_locktime = Vec::new();
+    lock_time
+        .zcash_serialize(&mut data_locktime)
+        .expect("LockTime should serialize");
+
+    // Calculate the number of outputs we need
+    let mut max_outputs_in_tx = (MAX_BLOCK_BYTES as usize
+        - data_header.len()
+        - zebra_test::vectors::DUMMY_INPUT1[..].len()
+        - data_locktime.len())
+        / (zebra_test::vectors::DUMMY_OUTPUT1[..].len() - 1);
+
+    if oversized {
+        max_outputs_in_tx += 1;
+    }
+
+    // 1 single input
+    let inputs = vec![input];
+
+    // Create outputs to be just below the limit
+    let outputs = std::iter::repeat(output)
+        .take(max_outputs_in_tx)
+        .collect::<Vec<_>>();
 
     // Create a big transaction
     let big_transaction = Transaction::V1 {
