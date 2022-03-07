@@ -23,7 +23,7 @@ RUN apt-get -qq update && \
 
 # Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
 # GitHub Actions time limit (6 hours), so we needed to make it faster.
-ENV RUSTFLAGS "-C opt-level=0 -C link-arg=-fuse-ld=lld"
+ENV RUSTFLAGS "-C opt-level=0"
 ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
