@@ -57,6 +57,15 @@ pub type QueuedFinalized = (
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
+/// A read-write service for Zebra's cached blockchain state.
+///
+/// This service modifies and provides access to:
+/// - the non-finalized state: the ~100 most recent blocks.
+///                            Zebra allows chain forks in the non-finalized state,
+///                            stores it in memory, and re-downloads it when restarted.
+/// - the finalized state: older blocks that have many confirmations.
+///                        Zebra stores the single best chain in the finalized state,
+///                        and re-loads it from disk when restarted.
 pub(crate) struct StateService {
     /// Holds data relating to finalized chain state.
     pub(crate) disk: FinalizedState,
