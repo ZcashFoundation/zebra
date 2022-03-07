@@ -12,6 +12,14 @@
 //! If this test fails, run `cargo insta review` to update the test snapshots,
 //! then commit the `test_*.snap` files using git.
 //!
+//! # Snapshot Format
+//!
+//! These snapshots use [RON (Rusty Object Notation)](https://github.com/ron-rs/ron#readme),
+//! a text format similar to Rust syntax. Raw byte data is encoded in hexadecimal.
+//!
+//! Due to `serde` limitations, some object types can't be represented exactly,
+//! so RON uses the closest equivalent structure.
+//!
 //! # TODO
 //!
 //! Test shielded data, and data activated in Overwinter and later network upgrades.
