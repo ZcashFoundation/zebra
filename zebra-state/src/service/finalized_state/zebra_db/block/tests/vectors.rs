@@ -21,12 +21,12 @@ use zebra_chain::{
         Block, Height,
     },
     parameters::Network::{self, *},
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
-    service::finalized_state::{disk_db::DiskWriteBatch, FinalizedState},
+    service::finalized_state::{disk_db::DiskWriteBatch, disk_format::IntoDisk, FinalizedState},
     Config, FinalizedBlock,
 };
 
@@ -49,16 +49,26 @@ fn test_block_db_round_trip() {
     // These blocks have the same height and header hash, so they each need a new state.
     test_block_db_round_trip_with(Mainnet, iter::once(large_multi_transaction_block()));
 
-    /*
-    test_block_db_round_trip_with(
-        Mainnet,
-        iter::once(large_single_transaction_block_many_inputs()),
-    );
-        test_block_db_round_trip_with(
-            Mainnet,
-            iter::once(large_single_transaction_block_many_outputs()),
-        );
-    */
+    // These blocks are unstable under serialization, so we apply a round-trip first.
+    //
+    // TODO: fix the bug in the generated test vectors.
+    let block = large_single_transaction_block_many_inputs();
+    let block_data = block
+        .zcash_serialize_to_vec()
+        .expect("serialization to vec never fails");
+    let block: Block = block_data
+        .zcash_deserialize_into()
+        .expect("deserialization of valid serialized block never fails");
+    test_block_db_round_trip_with(Mainnet, iter::once(block));
+
+    let block = large_single_transaction_block_many_outputs();
+    let block_data = block
+        .zcash_serialize_to_vec()
+        .expect("serialization to vec never fails");
+    let block: Block = block_data
+        .zcash_deserialize_into()
+        .expect("deserialization of valid serialized block never fails");
+    test_block_db_round_trip_with(Mainnet, iter::once(block));
 }
 
 fn test_block_db_round_trip_with(
@@ -69,9 +79,29 @@ fn test_block_db_round_trip_with(
 
     let state = FinalizedState::new(&Config::ephemeral(), network);
 
-    // Check that each block round-trips to the database.
-    //
+    // Check that each block round-trips to the database
     for original_block in block_test_cases.into_iter() {
+        // First, check that the block round-trips without using the database
+        let block_data = original_block
+            .zcash_serialize_to_vec()
+            .expect("serialization to vec never fails");
+        let round_trip_block: Block = block_data
+            .zcash_deserialize_into()
+            .expect("deserialization of valid serialized block never fails");
+        let round_trip_data = round_trip_block
+            .zcash_serialize_to_vec()
+            .expect("serialization to vec never fails");
+
+        assert_eq!(
+            original_block, round_trip_block,
+            "test block structure must round-trip",
+        );
+        assert_eq!(
+            block_data, round_trip_data,
+            "test block data must round-trip",
+        );
+
+        // Now, use the database
         let original_block = Arc::new(original_block);
         let finalized = if original_block.coinbase_height().is_some() {
             original_block.clone().into()
@@ -95,6 +125,22 @@ fn test_block_db_round_trip_with(
         let stored_block = state
             .block(finalized.height.into())
             .expect("block was stored at height");
+
+        if stored_block != original_block {
+            println!(
+                "
+                detailed block mismatch report:
+                original: {:?}\n\
+                original data: {:?}\n\
+                stored: {:?}\n\
+                stored data: {:?}\n\
+                ",
+                original_block,
+                hex::encode(original_block.as_bytes()),
+                stored_block,
+                hex::encode(stored_block.as_bytes()),
+            );
+        }
 
         assert_eq!(stored_block, original_block);
     }
