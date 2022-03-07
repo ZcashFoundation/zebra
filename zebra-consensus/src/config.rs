@@ -4,13 +4,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// Should Zebra sync using checkpoints?
+    /// Should Zebra sync using post-Canopy checkpoints?
     ///
-    /// Setting this option to true enables post-Canopy checkpoints.
-    /// (Zebra always checkpoints up to and including Canopy activation.)
+    /// This option is `true` by default, and allows for faster chain synchronization.
     ///
-    /// Future versions of Zebra may change the mandatory checkpoint
-    /// height.
+    /// Disabling this option forces Zebra to only use checkpoints until Canopy activation, which
+    /// helps with debugging by forcing Zebra to validate more blocks.
     pub checkpoint_sync: bool,
 
     /// Skip the pre-download of Groth16 parameters if this option is true.
