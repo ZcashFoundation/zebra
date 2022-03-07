@@ -14,11 +14,6 @@ use NetworkUpgrade::*;
 fn activation_bijective() {
     zebra_test::init();
 
-    if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
-        eprintln!("Skipping activation_bijective() since $TEST_FAKE_ACTIVATION_HEIGHTS is set");
-        return;
-    }
-
     let mainnet_activations = NetworkUpgrade::activation_list(Mainnet);
     let mainnet_heights: HashSet<&block::Height> = mainnet_activations.keys().collect();
     assert_eq!(MAINNET_ACTIVATION_HEIGHTS.len(), mainnet_heights.len());

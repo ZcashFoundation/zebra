@@ -11,6 +11,7 @@ use zebra_test::{command::TestDirExt, prelude::Stdio};
 /// (This message is captured by the test runner, use `cargo test -- --nocapture` to see it.)
 ///
 /// The command's stdout and stderr are ignored.
+#[allow(clippy::print_stderr)]
 fn is_command_available(cmd: &str, args: &[&str]) -> bool {
     let status = Command::new(cmd)
         .args(args)
