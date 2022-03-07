@@ -187,10 +187,6 @@ impl NetworkUpgrade {
     /// and it's a test build, this returns a list of fake activation heights
     /// used by some tests.
     pub(crate) fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
-        println!(
-            "activation_list called {:?}",
-            std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS")
-        );
         let (mainnet_heights, testnet_heights) = {
             #[cfg(not(feature = "zebra-test"))]
             {
