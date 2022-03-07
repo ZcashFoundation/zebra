@@ -290,7 +290,7 @@ fn block_limits_single_tx() {
     // Test block limit with a big single transaction
 
     // Create a block just below the limit
-    let mut block = generate::large_single_transaction_block();
+    let mut block = generate::large_single_transaction_block_many_inputs();
 
     // Serialize the block
     let mut data = Vec::new();
@@ -305,7 +305,7 @@ fn block_limits_single_tx() {
         .expect("block should deserialize as we are just below limit");
 
     // Add 1 more input to the transaction, limit will be reached
-    block = generate::oversized_single_transaction_block();
+    block = generate::oversized_single_transaction_block_many_inputs();
 
     let mut data = Vec::new();
     block

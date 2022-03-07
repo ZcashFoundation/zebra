@@ -21,8 +21,8 @@ pub fn large_multi_transaction_block() -> Block {
 }
 
 /// Generate a block with one transaction and multiple inputs just below limit
-pub fn large_single_transaction_block() -> Block {
-    single_transaction_block(false)
+pub fn large_single_transaction_block_many_inputs() -> Block {
+    single_transaction_block_many_inputs(false)
 }
 
 /// Generate a block with multiple transactions just above limit
@@ -31,8 +31,8 @@ pub fn oversized_multi_transaction_block() -> Block {
 }
 
 /// Generate a block with one transaction and multiple inputs just above limit
-pub fn oversized_single_transaction_block() -> Block {
-    single_transaction_block(true)
+pub fn oversized_single_transaction_block_many_inputs() -> Block {
+    single_transaction_block_many_inputs(true)
 }
 
 // Implementation of block generation with multiple transactions
@@ -69,7 +69,7 @@ fn multi_transaction_block(oversized: bool) -> Block {
 }
 
 // Implementation of block generation with one transaction and multiple inputs
-fn single_transaction_block(oversized: bool) -> Block {
+fn single_transaction_block_many_inputs(oversized: bool) -> Block {
     // Dummy input and output
     let input =
         transparent::Input::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..]).unwrap();

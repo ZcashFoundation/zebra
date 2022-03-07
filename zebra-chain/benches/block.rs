@@ -7,7 +7,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use zebra_chain::{
     block::{
-        tests::generate::{large_multi_transaction_block, large_single_transaction_block},
+        tests::generate::{large_multi_transaction_block, large_single_transaction_block_many_inputs},
         Block,
     },
     serialization::{ZcashDeserialize, ZcashSerialize},
@@ -26,8 +26,8 @@ fn block_serialization(c: &mut Criterion) {
             large_multi_transaction_block(),
         ),
         (
-            "large_single_transaction_block",
-            large_single_transaction_block(),
+            "large_single_transaction_block_many_inputs",
+            large_single_transaction_block_many_inputs(),
         ),
     ];
 
