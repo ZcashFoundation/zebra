@@ -22,7 +22,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            checkpoint_sync: false,
+            checkpoint_sync: true,
             debug_skip_parameter_preload: false,
         }
     }
