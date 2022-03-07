@@ -133,18 +133,11 @@ async fn rpc_getbestblockhash() {
         .get_best_block_hash()
         .await
         .expect("We should have a GetBestBlockHash struct");
-    let response = get_best_block_hash.hex.as_ref().to_vec();
-    let tip_block_hash_bytes = hex::decode(tip_block_hash.to_string()).unwrap();
+    let response = get_best_block_hash.hex.as_ref();
+    let tip_block_hash_bytes = &tip_block_hash.0;
 
     // Check if response is equal to block 10 hash.
-    assert_eq!(
-        response,
-        tip_block_hash_bytes
-            .iter()
-            .rev()
-            .cloned()
-            .collect::<Vec::<u8>>()
-    );
+    assert_eq!(response, tip_block_hash_bytes);
 
     mempool.expect_no_requests().await;
 }
