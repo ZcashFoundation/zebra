@@ -38,7 +38,6 @@ Compilers:
   - Zebra does not have a minimum supported Rust version (MSRV) policy yet
 
 
-
 ### Dependencies
 
 Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
