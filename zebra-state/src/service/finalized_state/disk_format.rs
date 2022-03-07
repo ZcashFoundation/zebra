@@ -8,6 +8,8 @@
 use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
 
 use bincode::Options;
+use serde::{Deserialize, Serialize};
+
 use zebra_chain::{
     amount::NonNegative,
     block,
@@ -25,10 +27,29 @@ use zebra_chain::{
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// A transaction's location in the chain, by block height and transaction index.
+///
+/// This provides a chain-order list of transactions.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TransactionLocation {
+    /// The block height of the transaction.
     pub height: block::Height,
+
+    /// The index of the transaction in its block.
     pub index: u32,
+}
+
+impl TransactionLocation {
+    /// Create a transaction location from a block height and index (as the native index integer type).
+    #[allow(dead_code)]
+    pub fn from_usize(height: Height, index: usize) -> TransactionLocation {
+        TransactionLocation {
+            height,
+            index: index
+                .try_into()
+                .expect("all valid indexes are much lower than u32::MAX"),
+        }
+    }
 }
 
 // Helper trait for defining the exact format used to interact with disk per

@@ -19,12 +19,12 @@ fi
 
 case "$1" in
     -- | cargo)
-        if [[ "$RUN_TESTS" -eq "1" ]]; then
-            if [[ "$TEST_FULL_SYNC" -eq "1" ]]; then
-                exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--test" "acceptance" "--" "--nocapture" "--ignored" "full_sync_mainnet"
-            else
-                exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--workspace" "--" "--include-ignored"
-            fi
+        if [[ "$RUN_ALL_TESTS" -eq "1" ]]; then
+            exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--workspace" "--" "--include-ignored"
+        elif [[ "$TEST_FULL_SYNC" -eq "1" ]]; then
+            exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--test" "acceptance" "--" "--nocapture" "--ignored" "full_sync_mainnet"
+        else
+            exec "$@"
         fi
         ;;
     zebrad)
