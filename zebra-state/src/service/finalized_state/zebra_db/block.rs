@@ -31,6 +31,9 @@ use crate::{
     BoxError, HashOrHeight,
 };
 
+#[cfg(test)]
+mod tests;
+
 impl FinalizedState {
     // Read block methods
 
@@ -87,6 +90,7 @@ impl FinalizedState {
                     .block(height.into())
                     .expect("block will exist if TransactionLocation does");
 
+                // TODO: store transactions in a separate database index (#3151)
                 block.transactions[index as usize].clone()
             })
     }
@@ -166,7 +170,7 @@ impl DiskWriteBatch {
     }
 
     /// If `finalized.block` is a genesis block,
-    /// prepare a database batch that finishes intializing the database,
+    /// prepare a database batch that finishes initializing the database,
     /// and return `true` (without actually writing anything).
     ///
     /// Since the genesis block's transactions are skipped,

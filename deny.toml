@@ -32,10 +32,10 @@ skip = [
 # by default infinite
 skip-tree = [
     # ticket #2983: criterion dependencies
-    { name = "criterion", version = "=0.3.4" },
+    { name = "criterion", version = "=0.3.5" },
 
     # ticket #3000: tower-fallback dependencies
-    { name = "pin-project", version = "=0.4.28" },
+    { name = "pin-project", version = "=0.4.29" },
 
     # ticket #3063: redjubjub dependencies
     { name = "redjubjub", version = "=0.4.0" },
@@ -46,14 +46,10 @@ skip-tree = [
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
 
-    # ticket #3061: reqwest and minreq dependencies
-    { name = "webpki-roots", version = "=0.18.0" },
-
     # ticket #2980: inferno and orchard/cryptographic dependencies
     { name = "orchard", version = "=0.0.0" },
 
     # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
-    # alternative: downgrade Zebra to `bigint`
     { name = "bigint", version = "=4.4.3" },
 
     # upgrade sentry, metrics-exporter-prometheus, reqwest, hyper,
@@ -61,19 +57,16 @@ skip-tree = [
     #
     # also wait for tower-test and tokio-test to upgrade
     { name = "tokio-util", version = "=0.6.9" },
+    { name = "tracing-subscriber", version = "=0.1.6" },
+
+    # upgrade abscissa and arti
+    { name = "darling", version = "=0.10.2" },
 
     # recent major version bumps
     # we should re-check these dependencies in February 2022
 
     # wait for lots of crates in the cryptographic ecosystem to upgrade
     { name = "rand", version = "=0.7.3" },
-    { name = "rustls", version = "=0.19.1" },
-
-    # wait for lots of crates in the tokio ecosystem to upgrade
-    { name = "socket2", version = "=0.3.16" },
-
-    # wait for arti to stabilise
-    { name = "arti-client" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

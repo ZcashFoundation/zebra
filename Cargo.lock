@@ -448,6 +448,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake2b_simd"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72936ee4afc7f8f736d1c38383b56480b5497b4617b4a77bdbf1d2ababc76127"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.2",
+ "constant_time_eq",
+]
+
+[[package]]
 name = "blake2s_simd"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -558,6 +569,17 @@ name = "bytes"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4872d67bab6358e59559027aa3b9157c53d9358c51423c17554809a8858e0f8"
+
+[[package]]
+name = "bzip2-sys"
+version = "0.1.11+1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "736a955f3fa7875102d57c82b8cac37ec45224a07fd32d58f9f7a186b6cd4cdc"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+]
 
 [[package]]
 name = "canonical-path"
@@ -714,13 +736,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f1885697ee8a177096d42f158922251a41973117f6d8a234cee94b9509157b7"
 dependencies = [
  "backtrace",
- "color-spantrace",
+ "color-spantrace 0.1.6",
  "eyre",
  "indenter",
  "once_cell",
  "owo-colors 1.3.0",
- "tracing-error",
+ "tracing-error 0.1.2",
  "url",
+]
+
+[[package]]
+name = "color-eyre"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ebf286c900a6d5867aeff75cfee3192857bb7f24b547d4f0df2ed6baa812c90"
+dependencies = [
+ "backtrace",
+ "color-spantrace 0.2.0",
+ "eyre",
+ "indenter",
+ "once_cell",
+ "owo-colors 3.2.0",
+ "tracing-error 0.2.0",
 ]
 
 [[package]]
@@ -732,7 +769,19 @@ dependencies = [
  "once_cell",
  "owo-colors 1.3.0",
  "tracing-core",
- "tracing-error",
+ "tracing-error 0.1.2",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba75b3d9449ecdccb27ecbc479fdc0b87fa2dd43d2f8298f9bf0e59aacc8dce"
+dependencies = [
+ "once_cell",
+ "owo-colors 3.2.0",
+ "tracing-core",
+ "tracing-error 0.2.0",
 ]
 
 [[package]]
@@ -1296,7 +1345,7 @@ name = "equihash"
 version = "0.1.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "byteorder",
 ]
 
@@ -1660,7 +1709,7 @@ version = "0.1.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f186b85ed81082fb1cf59d52b0111f02915e89a4ac61d292b38d075e570f3a9"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "ff",
  "group",
  "pasta_curves",
@@ -1871,6 +1920,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "incrementalmerkletree"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186fd3ab92aeac865d4b80b410de9a7b341d31ba8281373caed0b6d17b2b5e96"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1905,9 +1963,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4c0c443f6dceb3a1cb7607c87501aa91e4b9c976044f725c2a74ca2152c91a4"
+checksum = "30a7e1911532a662f6b08b68f884080850f2fd9544963c3ab23a5af42bda1eac"
 dependencies = [
  "console",
  "once_cell",
@@ -1929,9 +1987,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.3.1"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
+checksum = "35e70ee094dc02fd9c13fdad4940090f22dbd6ac7c9e7094a46cf0232a50bc7c"
 
 [[package]]
 name = "itertools"
@@ -2104,14 +2162,17 @@ checksum = "33a33a362ce288760ec6a508b94caaec573ae7d3bbbd91b87aa0bad4456839db"
 
 [[package]]
 name = "librocksdb-sys"
-version = "6.20.3"
+version = "0.6.1+6.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c309a9d2470844aceb9a4a098cf5286154d20596868b75a6b36357d2bb9ca25d"
+checksum = "81bc587013734dadb7cf23468e531aa120788b87243648be42e2d3a072186291"
 dependencies = [
  "bindgen",
+ "bzip2-sys",
  "cc",
  "glob",
  "libc",
+ "libz-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -2126,9 +2187,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.3"
+version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de5435b8549c16d423ed0c03dbaafe57cf6c3344744f1242520d59c9d8ecec66"
+checksum = "df2bf61678a0a521c3f7daf815d2e6717d85a272a7dcd02c9768272b32bd1e2a"
 dependencies = [
  "cc",
  "libc",
@@ -2605,12 +2666,12 @@ dependencies = [
  "arrayvec 0.7.2",
  "bigint",
  "bitvec",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "ff",
  "fpe",
  "group",
  "halo2",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.1.0",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -2736,7 +2797,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d647d91972bad78120fd61e06b225fcda117805c9bbf17676b51bd03a251278b"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "ff",
  "group",
  "lazy_static",
@@ -3265,7 +3326,7 @@ name = "reddsa"
 version = "0.0.0"
 source = "git+https://github.com/str4d/redjubjub.git?rev=416a6a8ebf8bd42c114c938883016c04f338de72#416a6a8ebf8bd42c114c938883016c04f338de72"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "byteorder",
  "digest",
  "group",
@@ -3282,7 +3343,7 @@ name = "redjubjub"
 version = "0.4.0"
 source = "git+https://github.com/ZcashFoundation/redjubjub.git?rev=a32ae3fc871bc72558ac2ce7eac933d1ad5f4a9c#a32ae3fc871bc72558ac2ce7eac933d1ad5f4a9c"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "byteorder",
  "digest",
  "jubjub",
@@ -3442,9 +3503,9 @@ dependencies = [
 
 [[package]]
 name = "rocksdb"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a62eca5cacf2c8261128631bed9f045598d40bfbe4b29f5163f0f802f8f44a7"
+checksum = "620f4129485ff1a7128d184bc687470c21c7951b64779ebc9cfdad3dcd920290"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -3945,9 +4006,9 @@ dependencies = [
 
 [[package]]
 name = "siphasher"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a86232ab60fa71287d7f2ddae4a7073f6b7aac33631c3015abb556f08c6d0a3e"
+checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
 
 [[package]]
 name = "sketches-ddsketch"
@@ -4780,7 +4841,7 @@ dependencies = [
 name = "tower-batch"
 version = "0.2.21"
 dependencies = [
- "color-eyre",
+ "color-eyre 0.6.1",
  "ed25519-zebra",
  "futures",
  "futures-core",
@@ -4879,6 +4940,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-error"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
+dependencies = [
+ "tracing",
+ "tracing-subscriber 0.3.9",
+]
+
+[[package]]
 name = "tracing-flame"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4967,6 +5038,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e0ab7bdc962035a87fba73f3acca9b8a8d0034c2e6f60b84aeaaddddc155dce"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
 ]
 
 [[package]]
@@ -5426,7 +5508,7 @@ version = "0.2.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "bigint",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "byteorder",
 ]
 
@@ -5435,7 +5517,7 @@ name = "zcash_note_encryption"
 version = "0.0.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "byteorder",
  "chacha20",
  "chacha20poly1305",
@@ -5453,7 +5535,7 @@ dependencies = [
  "aes",
  "bip0039",
  "bitvec",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "blake2s_simd",
  "bls12_381",
  "byteorder",
@@ -5463,7 +5545,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.1.0",
  "jubjub",
  "lazy_static",
  "log",
@@ -5485,7 +5567,7 @@ version = "0.5.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
 dependencies = [
  "bellman",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "bls12_381",
  "byteorder",
  "directories",
@@ -5504,10 +5586,10 @@ version = "0.1.6-alpha.0"
 source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=270d32d192c5880f911acf21ef100caa128e6179#270d32d192c5880f911acf21ef100caa128e6179"
 dependencies = [
  "bindgen",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "cc",
  "halo2",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.1.0",
  "libc",
  "memuse",
  "orchard",
@@ -5526,13 +5608,13 @@ dependencies = [
  "bigint",
  "bitflags",
  "bitvec",
- "blake2b_simd",
+ "blake2b_simd 1.0.0",
  "blake2s_simd",
  "bls12_381",
  "bs58",
  "byteorder",
  "chrono",
- "color-eyre",
+ "color-eyre 0.6.1",
  "criterion",
  "displaydoc",
  "ed25519-zebra",
@@ -5542,7 +5624,7 @@ dependencies = [
  "group",
  "halo2",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.2.0",
  "itertools",
  "jubjub",
  "lazy_static",
@@ -5581,10 +5663,10 @@ name = "zebra-consensus"
 version = "1.0.0-beta.5"
 dependencies = [
  "bellman",
- "blake2b_simd",
+ "blake2b_simd 1.0.0",
  "bls12_381",
  "chrono",
- "color-eyre",
+ "color-eyre 0.6.1",
  "dirs",
  "displaydoc",
  "futures",
@@ -5608,7 +5690,7 @@ dependencies = [
  "tower-batch",
  "tower-fallback",
  "tracing",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-futures",
  "tracing-subscriber 0.2.25",
  "zcash_proofs",
@@ -5647,7 +5729,7 @@ dependencies = [
  "tor-rtcompat",
  "tower",
  "tracing",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-futures",
  "zebra-chain",
  "zebra-test",
@@ -5703,7 +5785,7 @@ version = "1.0.0-beta.5"
 dependencies = [
  "bincode",
  "chrono",
- "color-eyre",
+ "color-eyre 0.6.1",
  "dirs",
  "displaydoc",
  "futures",
@@ -5736,7 +5818,7 @@ dependencies = [
 name = "zebra-test"
 version = "1.0.0-beta.5"
 dependencies = [
- "color-eyre",
+ "color-eyre 0.5.11",
  "futures",
  "hex",
  "insta",
@@ -5752,7 +5834,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-subscriber 0.2.25",
 ]
 
@@ -5760,11 +5842,11 @@ dependencies = [
 name = "zebra-utils"
 version = "1.0.0-beta.5"
 dependencies = [
- "color-eyre",
+ "color-eyre 0.6.1",
  "hex",
  "serde_json",
  "structopt",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-subscriber 0.2.25",
  "zebra-chain",
  "zebra-consensus",
@@ -5778,7 +5860,7 @@ dependencies = [
  "abscissa_core",
  "atty",
  "chrono",
- "color-eyre",
+ "color-eyre 0.5.11",
  "dirs",
  "futures",
  "gumdrop",
@@ -5806,7 +5888,7 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
- "tracing-error",
+ "tracing-error 0.1.2",
  "tracing-flame",
  "tracing-futures",
  "tracing-journald",

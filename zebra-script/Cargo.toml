@@ -13,7 +13,7 @@ zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", re
 zebra-chain = { path = "../zebra-chain" }
 
 thiserror = "1.0.30"
-displaydoc = "0.2.2"
+displaydoc = "0.2.3"
 
 [dev-dependencies]
 hex = "0.4.3"
