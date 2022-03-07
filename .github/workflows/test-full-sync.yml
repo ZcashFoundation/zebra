@@ -40,6 +40,7 @@ jobs:
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
+    if: github.event.review.state == 'approved'
     steps:
       - uses: actions/checkout@v2.4.0
         with:
