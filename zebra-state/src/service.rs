@@ -31,11 +31,16 @@ use crate::{
 
 use self::{
     chain_tip::{ChainTipChange, ChainTipSender, LatestChainTip},
+    finalized_state::FinalizedState,
     non_finalized_state::{NonFinalizedState, QueuedBlocks},
+    pending_utxos::PendingUtxos,
 };
 
+pub mod block_iter;
 pub mod chain_tip;
+
 pub(crate) mod check;
+
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
@@ -45,8 +50,6 @@ pub mod arbitrary;
 
 #[cfg(test)]
 mod tests;
-
-use self::{finalized_state::FinalizedState, pending_utxos::PendingUtxos};
 
 pub type QueuedBlock = (
     PreparedBlock,
@@ -410,10 +413,10 @@ impl StateService {
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
     /// by the iterator. `hash` can come from any chain.
-    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> Iter<'_> {
-        Iter {
+    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> block_iter::Iter<'_> {
+        block_iter::Iter {
             service: self,
-            state: IterState::NonFinalized(hash),
+            state: block_iter::IterState::NonFinalized(hash),
         }
     }
 
@@ -575,98 +578,6 @@ impl StateService {
             blocks, and the canopy activation block, must be committed to the state as finalized \
             blocks"
         );
-    }
-}
-
-pub(crate) struct Iter<'a> {
-    service: &'a StateService,
-    state: IterState,
-}
-
-enum IterState {
-    NonFinalized(block::Hash),
-    Finalized(block::Height),
-    Finished,
-}
-
-impl Iter<'_> {
-    fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter { service, state } = self;
-
-        let hash = match state {
-            IterState::NonFinalized(hash) => *hash,
-            IterState::Finalized(_) | IterState::Finished => unreachable!(),
-        };
-
-        if let Some(block) = service.mem.any_block_by_hash(hash) {
-            let hash = block.header.previous_block_hash;
-            self.state = IterState::NonFinalized(hash);
-            Some(block)
-        } else {
-            None
-        }
-    }
-
-    fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter { service, state } = self;
-
-        let hash_or_height: HashOrHeight = match *state {
-            IterState::Finalized(height) => height.into(),
-            IterState::NonFinalized(hash) => hash.into(),
-            IterState::Finished => unreachable!(),
-        };
-
-        if let Some(block) = service.disk.block(hash_or_height) {
-            let height = block
-                .coinbase_height()
-                .expect("valid blocks have a coinbase height");
-
-            if let Some(next_height) = height - 1 {
-                self.state = IterState::Finalized(next_height);
-            } else {
-                self.state = IterState::Finished;
-            }
-
-            Some(block)
-        } else {
-            self.state = IterState::Finished;
-            None
-        }
-    }
-}
-
-impl Iterator for Iter<'_> {
-    type Item = Arc<Block>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.state {
-            IterState::NonFinalized(_) => self
-                .next_non_finalized_block()
-                .or_else(|| self.next_finalized_block()),
-            IterState::Finalized(_) => self.next_finalized_block(),
-            IterState::Finished => None,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.len();
-        (len, Some(len))
-    }
-}
-
-impl std::iter::FusedIterator for Iter<'_> {}
-
-impl ExactSizeIterator for Iter<'_> {
-    fn len(&self) -> usize {
-        match self.state {
-            IterState::NonFinalized(hash) => self
-                .service
-                .any_height_by_hash(hash)
-                .map(|height| (height.0 + 1) as _)
-                .unwrap_or(0),
-            IterState::Finalized(height) => (height.0 + 1) as _,
-            IterState::Finished => 0,
-        }
     }
 }
 
