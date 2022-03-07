@@ -20,6 +20,7 @@ on:
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   test:
