@@ -9,12 +9,12 @@ on:
     branches:
       - main
     paths:
-      # code and tests
+      # code and tests (including full sync acceptance test changes)
+      # TODO: ignore changes in test code that isn't used in the full sync test
       - '**/*.rs'
       # hard-coded checkpoints
+      # TODO: ignore changes to proptest seed .txt files
       - '**/*.txt'
-      # test data snapshots
-      - '**/*.snap'
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
