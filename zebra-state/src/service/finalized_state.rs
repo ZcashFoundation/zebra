@@ -327,6 +327,7 @@ impl FinalizedState {
     ) -> Result<block::Hash, BoxError> {
         let finalized_hash = finalized.hash;
 
+        // Get a list of the spent UTXOs, before we delete any from the database
         let all_utxos_spent_by_block = finalized
             .block
             .transactions
