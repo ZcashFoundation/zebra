@@ -140,7 +140,8 @@ jobs:
         if: ${{ steps.instance-exists.outcome == 'failure' }}
         run: |
           gcloud compute instances update-container "full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}" \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --zone "${{ env.ZONE }}
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
