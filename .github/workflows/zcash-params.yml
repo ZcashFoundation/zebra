@@ -3,8 +3,8 @@ name: zcash-params
 on:
   workflow_dispatch:
   push:
-    branches:
-      - 'main'
+    # branches:
+    #   - 'main'
     paths:
       # parameter download code
       - 'zebra-consensus/src/primitives/groth16/params.rs'
