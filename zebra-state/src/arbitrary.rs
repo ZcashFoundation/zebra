@@ -21,7 +21,7 @@ impl Prepare for Arc<Block> {
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs = transparent::new_ordered_outputs(&block, height, &transaction_hashes);
 
         PreparedBlock {
             block,

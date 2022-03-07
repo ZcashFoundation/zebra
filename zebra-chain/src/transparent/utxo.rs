@@ -3,7 +3,7 @@
 use std::{collections::HashMap, convert::TryInto};
 
 use crate::{
-    block::{self, Block},
+    block::{self, Block, Height},
     transaction::{self, Transaction},
     transparent,
 };
@@ -113,19 +113,20 @@ pub(crate) fn outputs_from_utxos(
 /// list of precomputed transaction hashes.
 pub fn new_outputs(
     block: &Block,
+    height: Height,
     transaction_hashes: &[transaction::Hash],
 ) -> HashMap<transparent::OutPoint, Utxo> {
-    utxos_from_ordered_utxos(new_ordered_outputs(block, transaction_hashes))
+    utxos_from_ordered_utxos(new_ordered_outputs(block, height, transaction_hashes))
 }
 
 /// Compute an index of newly created [`OrderedUtxo`]s, given a block and a
 /// list of precomputed transaction hashes.
 pub fn new_ordered_outputs(
     block: &Block,
+    height: Height,
     transaction_hashes: &[transaction::Hash],
 ) -> HashMap<transparent::OutPoint, OrderedUtxo> {
     let mut new_ordered_outputs = HashMap::new();
-    let height = block.coinbase_height().expect("block has coinbase height");
 
     for (tx_index_in_block, (transaction, hash)) in block
         .transactions
