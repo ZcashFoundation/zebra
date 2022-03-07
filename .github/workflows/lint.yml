@@ -51,7 +51,9 @@ jobs:
       - uses: actions-rs/toolchain@v1.0.1
         if: ${{ !steps.check_permissions.outputs.has-permission }}
         with:
+          profile: minimal
           toolchain: stable
+          components: clippy
           override: true
 
       - name: Run clippy manually without annotations
@@ -70,6 +72,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.1
         with:
+          profile: minimal
           toolchain: stable
           components: rustfmt
           override: true
