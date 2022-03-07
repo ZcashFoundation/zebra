@@ -170,7 +170,7 @@ impl DiskWriteBatch {
     }
 
     /// If `finalized.block` is a genesis block,
-    /// prepare a database batch that finishes intializing the database,
+    /// prepare a database batch that finishes initializing the database,
     /// and return `true` (without actually writing anything).
     ///
     /// Since the genesis block's transactions are skipped,
