@@ -11,7 +11,9 @@ use zebra_chain::{
     amount::{Amount, MAX_MONEY},
     block::{
         self,
-        tests::generate::{large_multi_transaction_block, large_single_transaction_block_many_inputs},
+        tests::generate::{
+            large_multi_transaction_block, large_single_transaction_block_many_inputs,
+        },
         Block, Height,
     },
     parameters::{Network, NetworkUpgrade},
