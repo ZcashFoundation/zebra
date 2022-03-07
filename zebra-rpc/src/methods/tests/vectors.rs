@@ -55,7 +55,7 @@ async fn rpc_getblock() {
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
         .collect();
 
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
 
@@ -75,4 +75,6 @@ async fn rpc_getblock() {
 
         assert_eq!(get_block.data, block.into());
     }
+
+    mempool.expect_no_requests().await;
 }
