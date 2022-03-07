@@ -105,7 +105,9 @@ jobs:
           build-args: |
             NETWORK=${{ github.event.inputs.network || env.NETWORK }}
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-            RUST_BACKTRACE=full
+            RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}
+            RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }}
+            COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }}
             ZEBRA_SKIP_NETWORK_TESTS="1"
             CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
             RUST_LOG=debug
