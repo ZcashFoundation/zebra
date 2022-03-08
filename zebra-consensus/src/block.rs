@@ -197,7 +197,6 @@ where
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
-                height,
                 &transaction_hashes,
             ));
             for transaction in &block.transactions {

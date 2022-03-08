@@ -179,17 +179,16 @@ impl ContextuallyValidBlock {
 
 impl FinalizedBlock {
     /// Create a block that's ready to be committed to the finalized state,
-    /// using a precalculated [`block::Hash`] and [`block::Height`].
+    /// using a precalculated [`block::Hash`].
     ///
     /// Note: a [`FinalizedBlock`] isn't actually finalized
     /// until [`Request::CommitFinalizedBlock`] returns success.
-    pub fn with_hash_and_height(
-        block: Arc<Block>,
-        hash: block::Hash,
-        height: block::Height,
-    ) -> Self {
+    pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
+        let height = block
+            .coinbase_height()
+            .expect("coinbase height was already checked");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_outputs(&block, height, &transaction_hashes);
+        let new_outputs = transparent::new_outputs(&block, &transaction_hashes);
 
         Self {
             block,
@@ -204,11 +203,8 @@ impl FinalizedBlock {
 impl From<Arc<Block>> for FinalizedBlock {
     fn from(block: Arc<Block>) -> Self {
         let hash = block.hash();
-        let height = block
-            .coinbase_height()
-            .expect("finalized blocks must have a valid coinbase height");
 
-        FinalizedBlock::with_hash_and_height(block, hash, height)
+        FinalizedBlock::with_hash(block, hash)
     }
 }
 
