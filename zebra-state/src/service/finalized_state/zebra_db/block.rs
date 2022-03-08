@@ -91,7 +91,7 @@ impl FinalizedState {
                     .expect("block will exist if TransactionLocation does");
 
                 // TODO: store transactions in a separate database index (#3151)
-                block.transactions[index as usize].clone()
+                block.transactions[index.as_usize()].clone()
             })
     }
 }
@@ -224,12 +224,7 @@ impl DiskWriteBatch {
             .zip(transaction_hashes.iter())
             .enumerate()
         {
-            let transaction_location = TransactionLocation {
-                height: *height,
-                index: transaction_index
-                    .try_into()
-                    .expect("no more than 4 billion transactions per block"),
-            };
+            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
             self.zs_insert(tx_by_hash, transaction_hash, transaction_location);
 
             self.prepare_nullifier_batch(db, transaction)?;

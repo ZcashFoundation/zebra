@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 933c998cd42e62c9b80ceae375981200f1039e493262f7d931d973900c75812e # shrinks to (chain, count, network, _history_tree) = (alloc::vec::Vec<zebra_state::request::PreparedBlock><zebra_state::request::PreparedBlock>, len=104, 2, Mainnet, HistoryTree(None))
