@@ -13,6 +13,7 @@ pub struct GenerateCmd {
 
 impl Runnable for GenerateCmd {
     /// Start the application.
+    #[allow(clippy::print_stdout)]
     fn run(&self) {
         let default_config = ZebradConfig::default();
         let mut output = r"# Default configuration for zebrad.

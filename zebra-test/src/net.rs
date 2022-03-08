@@ -18,6 +18,7 @@ const ZEBRA_SKIP_IPV6_TESTS: &str = "ZEBRA_SKIP_IPV6_TESTS";
 /// Should we skip Zebra tests which need reliable, fast network connectivity?
 //
 // TODO: separate "good and reliable" from "any network"?
+#[allow(clippy::print_stderr)]
 pub fn zebra_skip_network_tests() -> bool {
     if env::var_os(ZEBRA_SKIP_NETWORK_TESTS).is_some() {
         // This message is captured by the test runner, use
@@ -34,6 +35,7 @@ pub fn zebra_skip_network_tests() -> bool {
 ///
 /// Since `zebra_skip_network_tests` only disables tests which need reliable network connectivity,
 /// we allow IPv6 tests even when `ZEBRA_SKIP_NETWORK_TESTS` is set.
+#[allow(clippy::print_stderr)]
 pub fn zebra_skip_ipv6_tests() -> bool {
     if env::var_os(ZEBRA_SKIP_IPV6_TESTS).is_some() {
         eprintln!("Skipping IPv6 network test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
