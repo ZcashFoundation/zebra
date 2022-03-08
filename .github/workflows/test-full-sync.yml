@@ -145,7 +145,6 @@ jobs:
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
         id: create-instance
-        if: ${{ steps.instance-exists.outcome == 'failure' }}
         run: |
           gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
