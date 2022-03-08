@@ -65,6 +65,7 @@ fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
     Ok(s)
 }
 
+#[allow(clippy::print_stdout)]
 fn main() -> Result<()> {
     init_tracing();
 
