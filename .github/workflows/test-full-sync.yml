@@ -135,27 +135,19 @@ jobs:
         with:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
-      # Check if our destination compute instance exists already
-      - name: Check if compute instance exists
+      # Check if our destination compute instance exists and delete it
+      - name: Delete existing instance with same SHA
         id: instance-exists
         continue-on-error: true
         run: |
-          gcloud compute instances list --filter="full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}" --format='value(NAME)' | grep "regenerate-disk-pr-${{ env.GITHUB_REF_SLUG_URL }}"
-
-      - name: Update GCP compute instance
-        id: update-instance
-        if: ${{ steps.instance-exists.outcome == 'success' }}
-        run: |
-          gcloud compute instances update-container "full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}" \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          --zone "${{ env.ZONE }}"
+          gcloud compute instances delete $(gcloud compute instances list --filter="full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --format='value(NAME)')
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
         id: create-instance
         if: ${{ steps.instance-exists.outcome == 'failure' }}
         run: |
-          gcloud compute instances create-with-container "full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}" \
+          gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-extreme \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
@@ -175,23 +167,24 @@ jobs:
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
-        if: ${{ steps.create-instance.outcome == 'success' || steps.update-instance.outcome == 'success' }}
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
-          INSTANCE_ID=$(gcloud compute instances describe full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }} --zone ${{ env.ZONE }} --format='value(id)')
+          INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
-          while [[ ${CONTAINER_NAME} != *"full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}-....' | tr -d "'.")
+          while [[ ${CONTAINER_NAME} != *"full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
+              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
               sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }}-....' | tr -d "'.")
+          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
 
       - name: Full sync mainnet
         id: full-sync-mainnet
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
-          full-sync-pr-${{ env.GITHUB_REF_SLUG_URL }} \
+          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
