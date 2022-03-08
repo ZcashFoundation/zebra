@@ -244,13 +244,14 @@ jobs:
       # Check if our destination compute instance exists already
       - name: Check if compute instance exists
         id: instance-exists
+        if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         continue-on-error: true
         run: |
           gcloud compute instances list --filter="regenerate-disk-pr-${{ env.GITHUB_REF_SLUG_URL }}" --format='value(NAME)' | grep "regenerate-disk-pr-${{ env.GITHUB_REF_SLUG_URL }}"
 
       - name: Update GCP compute instance
         id: update-instance
-        if: ${{ steps.instance-exists.outcome == 'failure' }}
+        if: ${{ (steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true') && (steps.instance-exists.outcome == 'success') }}
         run: |
           gcloud compute instances update-container "regenerate-disk-pr-${{ env.GITHUB_REF_SLUG_URL }}" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
@@ -258,7 +259,7 @@ jobs:
 
       - name: Create GCP compute instance
         id: create-instance
-        if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
+        if: ${{ (steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true') && (steps.instance-exists.outcome == 'failure') }}
         run: |
           gcloud compute instances create-with-container "regenerate-disk-pr-${{ env.GITHUB_REF_SLUG_URL }}" \
           --boot-disk-size 100GB \
