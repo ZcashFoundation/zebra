@@ -252,7 +252,7 @@ jobs:
         if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         continue-on-error: true
         run: |
-          gcloud compute instances delete $(gcloud compute instances list --filter="regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --format='value(NAME)')
+          gcloud compute instances delete $(gcloud compute instances list --filter="regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --format='value(NAME)') --delete-disks all --zone "${{ env.ZONE }}
 
       - name: Create GCP compute instance
         id: create-instance
@@ -327,6 +327,13 @@ jobs:
           --storage-location=us \
           --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
 
+      - name: Delete test instance
+        # Do not delete the instance if the sync timeouts in GitHub
+        if: ${{ steps.sync-to-checkpoint.outcome == 'success' || steps.sync-to-checkpoint.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          gcloud compute instances delete "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
     name: Test full validation sync from cached state
@@ -357,7 +364,7 @@ jobs:
         if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         continue-on-error: true
         run: |
-          gcloud compute instances delete $(gcloud compute instances list --filter="regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --format='value(NAME)')
+          gcloud compute instances delete $(gcloud compute instances list --filter="regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --format='value(NAME)') --delete-disks all --zone "${{ env.ZONE }}
 
       - name: Get disk state name from gcloud
         id: get-disk-name
@@ -428,3 +435,10 @@ jobs:
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
+
+      - name: Delete test instance
+        # Do not delete the instance if the sync timeouts in GitHub
+        if: ${{ steps.sync-past-checkpoint.outcome == 'success' || steps.sync-past-checkpoint.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          gcloud compute instances delete "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
