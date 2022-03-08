@@ -14,6 +14,14 @@
 //!
 //! These tests use fixed test vectors, based on the results of other database queries.
 //!
+//! # Snapshot Format
+//!
+//! These snapshots use [RON (Rusty Object Notation)](https://github.com/ron-rs/ron#readme),
+//! a text format similar to Rust syntax. Raw byte data is encoded in hexadecimal.
+//!
+//! Due to `serde` limitations, some object types can't be represented exactly,
+//! so RON uses the closest equivalent structure.
+//!
 //! # Fixing Test Failures
 //!
 //! If this test fails, run `cargo insta review` to update the test snapshots,
