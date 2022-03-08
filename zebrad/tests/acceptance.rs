@@ -1261,6 +1261,7 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// Returns an error if the child exits or the fixed timeout elapses
 /// before `STOP_AT_HEIGHT_REGEX` is found.
+#[allow(clippy::print_stderr)]
 fn create_cached_database_height(
     network: Network,
     height: Height,
@@ -1268,7 +1269,8 @@ fn create_cached_database_height(
     checkpoint_sync: bool,
     stop_regex: &str,
 ) -> Result<()> {
-    println!("Creating cached database");
+    eprintln!("creating cached database");
+
     // 16 hours
     let timeout = Duration::from_secs(60 * 60 * 16);
 

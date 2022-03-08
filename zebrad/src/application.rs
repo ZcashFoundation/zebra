@@ -192,6 +192,7 @@ impl Application for ZebradApp {
     /// If you would like to add additional components to your application
     /// beyond the default ones provided by the framework, this is the place
     /// to do so.
+    #[allow(clippy::print_stderr)]
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         use crate::components::{
             metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
