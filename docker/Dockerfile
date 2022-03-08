@@ -53,7 +53,13 @@ ENV CARGO_HOME /app/.cargo/
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
 ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE ${RUST_BACKTRACE:-1}
+ENV RUST_BACKTRACE ${RUST_BACKTRACE:-0}
+
+ARG RUST_LIB_BACKTRACE
+ENV RUST_LIB_BACKTRACE ${RUST_LIB_BACKTRACE:-0}
+
+ARG COLORBT_SHOW_HIDDEN
+ENV COLORBT_SHOW_HIDDEN ${COLORBT_SHOW_HIDDEN:-0}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
