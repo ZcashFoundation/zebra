@@ -48,6 +48,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
 ///
 /// This test requires setting the TEST_FAKE_ACTIVATION_HEIGHTS.
 #[test]
+#[allow(clippy::print_stderr)]
 fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<()> {
     zebra_test::init();
 
