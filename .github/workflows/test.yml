@@ -331,7 +331,7 @@ jobs:
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
-    name: Test validation sync from cached state
+    name: Test full validation sync from cached state
     runs-on: ubuntu-latest
     needs: [ build, regenerate-stateful-disks]
     steps:
