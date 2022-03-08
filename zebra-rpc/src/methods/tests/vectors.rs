@@ -4,11 +4,7 @@ use std::sync::Arc;
 
 use tower::buffer::Buffer;
 
-use zebra_chain::{
-    block::Block,
-    parameters::Network,
-    serialization::ZcashDeserializeInto,
-};
+use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
 use zebra_test::mock_service::MockService;
