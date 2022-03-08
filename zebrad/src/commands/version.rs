@@ -11,6 +11,7 @@ pub struct VersionCmd {}
 
 impl Runnable for VersionCmd {
     /// Print version message
+    #[allow(clippy::print_stdout)]
     fn run(&self) {
         println!("{} {}", ZebradCmd::name(), ZebradCmd::version());
     }
