@@ -248,7 +248,7 @@ jobs:
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
-        id: instance-exists
+        id: delete-old-instance
         if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         continue-on-error: true
         run: |
@@ -360,7 +360,7 @@ jobs:
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
-        id: instance-exists
+        id: delete-old-instance
         if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         continue-on-error: true
         run: |
