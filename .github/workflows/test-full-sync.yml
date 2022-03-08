@@ -138,9 +138,12 @@ jobs:
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
         id: delete-old-instance
-        continue-on-error: true
         run: |
-          gcloud compute instances delete $(gcloud compute instances list --filter="full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --format='value(NAME)') --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          INSTANCE=$(gcloud compute instances list --filter=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
