@@ -52,8 +52,13 @@ pub enum NetworkUpgrade {
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-#[cfg(not(test_fake_activation_heights))]
-pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+///
+/// # Correctness
+///
+/// Don't use this directly; use NetworkUpgrade::activation_list() so that
+/// we can switch to fake activation heights for some tests.
+#[allow(unused)]
+pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(1), BeforeOverwinter),
     (block::Height(347_500), Overwinter),
@@ -64,8 +69,9 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     // TODO: Add Nu5 mainnet activation height
 ];
 
-#[cfg(test_fake_activation_heights)]
-pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+/// Fake mainnet network upgrade activation heights, used in tests.
+#[allow(unused)]
+const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(5), BeforeOverwinter),
     (block::Height(10), Overwinter),
@@ -80,8 +86,13 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-#[cfg(not(test_fake_activation_heights))]
-pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+///
+/// # Correctness
+///
+/// Don't use this directly; use NetworkUpgrade::activation_list() so that
+/// we can switch to fake activation heights for some tests.
+#[allow(unused)]
+pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(1), BeforeOverwinter),
     (block::Height(207_500), Overwinter),
@@ -92,8 +103,9 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_599_200), Nu5),
 ];
 
-#[cfg(test_fake_activation_heights)]
-pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+/// Fake testnet network upgrade activation heights, used in tests.
+#[allow(unused)]
+const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(5), BeforeOverwinter),
     (block::Height(10), Overwinter),
@@ -170,10 +182,41 @@ impl NetworkUpgrade {
     /// network upgrade does not appear in the list.
     ///
     /// This is actually a bijective map.
+    ///
+    /// When the environment variable TEST_FAKE_ACTIVATION_HEIGHTS is set
+    /// and it's a test build, this returns a list of fake activation heights
+    /// used by some tests.
     pub(crate) fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
+        let (mainnet_heights, testnet_heights) = {
+            #[cfg(not(feature = "zebra-test"))]
+            {
+                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
+            }
+
+            // To prevent accidentally setting this somehow, only check the env var
+            // when being compiled for tests. We can't use cfg(test) since the
+            // test that uses this is in zebra-state, and cfg(test) is not
+            // set for dependencies. However, zebra-state does set the
+            // zebra-test feature of zebra-chain if it's a dev dependency.
+            //
+            // Cargo features are additive, so all test binaries built along with
+            // zebra-state will have this feature enabled. But we are using
+            // Rust Edition 2021 and Cargo resolver version 2, so the "zebra-test"
+            // feature should only be enabled for tests:
+            // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
+            #[cfg(feature = "zebra-test")]
+            if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
+                (
+                    FAKE_MAINNET_ACTIVATION_HEIGHTS,
+                    FAKE_TESTNET_ACTIVATION_HEIGHTS,
+                )
+            } else {
+                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
+            }
+        };
         match network {
-            Mainnet => MAINNET_ACTIVATION_HEIGHTS,
-            Testnet => TESTNET_ACTIVATION_HEIGHTS,
+            Mainnet => mainnet_heights,
+            Testnet => testnet_heights,
         }
         .iter()
         .cloned()

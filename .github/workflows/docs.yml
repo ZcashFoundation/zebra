@@ -6,9 +6,15 @@ on:
     branches:
       - main
     paths:
+      # doc source files
       - 'book/**'
       - '**/firebase.json'
       - 'katex-header.html'
+      # rustdoc source files
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
       - '.github/workflows/docs.yml'
 
 jobs:

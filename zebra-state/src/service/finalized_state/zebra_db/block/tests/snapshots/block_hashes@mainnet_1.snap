@@ -1,0 +1,10 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+assertion_line: 141
+expression: stored_block_hashes
+
+---
+[
+  (Height(0), BlockHash("00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08")),
+  (Height(1), BlockHash("0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283")),
+]
