@@ -37,4 +37,4 @@ jobs:
         continue-on-error: true
         run: |
           TEST_INSTANCES=$(gcloud compute instances list --filter="${{ env.GITHUB_REF_SLUG_URL }}" --format='value(NAME)')
-          for instance in ${TEST_INSTANCES}; do gcloud compute instances delete $instance; done
+          for instance in ${TEST_INSTANCES}; do gcloud compute instances delete $instance --zone "${{ env.ZONE }}" --delete-disks all --quiet; done
