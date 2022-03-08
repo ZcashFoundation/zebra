@@ -16,39 +16,47 @@ pub fn block_header() -> Header {
 }
 
 /// Generate a block with multiple transparent transactions just below limit
+///
+/// TODO: add a coinbase height to the returned block
 pub fn large_multi_transaction_block() -> Block {
     multi_transaction_block(false)
 }
 
 /// Generate a block with one transaction and multiple transparent inputs just below limit
 ///
-/// Note: the returned block changes under round-trip serialization.
+/// TODO: add a coinbase height to the returned block
+///       make the returned block stable under round-trip serialization
 pub fn large_single_transaction_block_many_inputs() -> Block {
     single_transaction_block_many_inputs(false)
 }
 
 /// Generate a block with one transaction and multiple transparent outputs just below limit
 ///
-/// Note: the returned block changes under round-trip serialization.
+/// TODO: add a coinbase height to the returned block
+///       make the returned block stable under round-trip serialization
 pub fn large_single_transaction_block_many_outputs() -> Block {
     single_transaction_block_many_outputs(false)
 }
 
 /// Generate a block with multiple transparent transactions just above limit
+///
+/// TODO: add a coinbase height to the returned block
 pub fn oversized_multi_transaction_block() -> Block {
     multi_transaction_block(true)
 }
 
 /// Generate a block with one transaction and multiple transparent inputs just above limit
 ///
-/// Note: the returned block changes under round-trip serialization.
+/// TODO: add a coinbase height to the returned block
+///       make the returned block stable under round-trip serialization
 pub fn oversized_single_transaction_block_many_inputs() -> Block {
     single_transaction_block_many_inputs(true)
 }
 
 /// Generate a block with one transaction and multiple transparent outputs just above limit
 ///
-/// Note: the returned block changes under round-trip serialization.
+/// TODO: add a coinbase height to the returned block
+///       make the returned block stable under round-trip serialization
 pub fn oversized_single_transaction_block_many_outputs() -> Block {
     single_transaction_block_many_outputs(true)
 }
