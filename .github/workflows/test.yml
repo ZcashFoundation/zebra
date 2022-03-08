@@ -256,6 +256,7 @@ jobs:
             echo "No instance to delete"
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
 
       - name: Create GCP compute instance
         id: create-instance
@@ -365,13 +366,13 @@ jobs:
       - name: Delete existing instance with same SHA
         id: delete-old-instance
         if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
-        continue-on-error: true
         run: |
           INSTANCE=$(gcloud compute instances list --filter=sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
           if [ -z "${INSTANCE}" ]; then
             echo "No instance to delete"
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
 
       - name: Get disk state name from gcloud
         id: get-disk-name

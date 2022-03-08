@@ -144,6 +144,7 @@ jobs:
             echo "No instance to delete"
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
