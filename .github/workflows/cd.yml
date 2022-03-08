@@ -96,9 +96,10 @@ jobs:
         target: runtime
         context: .
         file: ./docker/Dockerfile
-        platforms: |
-          linux/amd64
-          linux/arm64
+        # TODO: building crates is taking too long with arm64 and it's timing out on GHA
+        # platforms: |
+        #   linux/amd64
+        #   linux/arm64
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
