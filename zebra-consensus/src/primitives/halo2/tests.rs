@@ -23,7 +23,7 @@ use zebra_chain::{
 
 use crate::primitives::halo2::*;
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors() {
     let proving_key = ProvingKey::build();
 
