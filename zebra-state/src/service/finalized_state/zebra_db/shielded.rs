@@ -13,7 +13,7 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use zebra_chain::{
-    history_tree::HistoryTree, orchard, parameters::Network, sapling, sprout,
+    block::Height, history_tree::HistoryTree, orchard, parameters::Network, sapling, sprout,
     transaction::Transaction,
 };
 
@@ -100,6 +100,17 @@ impl FinalizedState {
         self.db.zs_get(sprout_anchors, sprout_anchor)
     }
 
+    /// Returns the Sprout note commitment tree matching the given block height.
+    #[allow(dead_code)]
+    pub fn sprout_note_commitment_tree_by_height(
+        &self,
+        height: &Height,
+    ) -> Option<sprout::tree::NoteCommitmentTree> {
+        let sprout_trees = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+
+        self.db.zs_get(sprout_trees, height)
+    }
+
     /// Returns the Sapling note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
@@ -116,6 +127,17 @@ impl FinalizedState {
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
+    /// Returns the Sapling note commitment tree matching the given block height.
+    #[allow(dead_code)]
+    pub fn sapling_note_commitment_tree_by_height(
+        &self,
+        height: &Height,
+    ) -> Option<sapling::tree::NoteCommitmentTree> {
+        let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+
+        self.db.zs_get(sapling_trees, height)
+    }
+
     /// Returns the Orchard note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn orchard_note_commitment_tree(&self) -> orchard::tree::NoteCommitmentTree {
@@ -130,6 +152,17 @@ impl FinalizedState {
         self.db
             .zs_get(orchard_note_commitment_tree, &height)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Orchard note commitment tree matching the given block height.
+    #[allow(dead_code)]
+    pub fn orchard_note_commitment_tree_by_height(
+        &self,
+        height: &Height,
+    ) -> Option<orchard::tree::NoteCommitmentTree> {
+        let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+
+        self.db.zs_get(orchard_trees, height)
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
@@ -242,14 +275,6 @@ impl DiskWriteBatch {
         self.zs_insert(sprout_anchors, sprout_root, &note_commitment_trees.sprout);
         self.zs_insert(sapling_anchors, sapling_root, ());
         self.zs_insert(orchard_anchors, orchard_root, ());
-
-        // Update the trees in state
-        let current_tip_height = *height - 1;
-        if let Some(h) = current_tip_height {
-            self.zs_delete(sprout_note_commitment_tree_cf, h);
-            self.zs_delete(sapling_note_commitment_tree_cf, h);
-            self.zs_delete(orchard_note_commitment_tree_cf, h);
-        }
 
         self.zs_insert(
             sprout_note_commitment_tree_cf,
