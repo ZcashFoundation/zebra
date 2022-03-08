@@ -98,5 +98,5 @@ jobs:
           ZEBRA_SKIP_IPV6_TESTS="1"
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
+        cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
