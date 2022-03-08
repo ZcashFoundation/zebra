@@ -1261,6 +1261,7 @@ fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 ///
 /// Returns an error if the child exits or the fixed timeout elapses
 /// before `STOP_AT_HEIGHT_REGEX` is found.
+#[allow(clippy::print_stderr)]
 fn create_cached_database_height(
     network: Network,
     height: Height,
@@ -1268,7 +1269,8 @@ fn create_cached_database_height(
     checkpoint_sync: bool,
     stop_regex: &str,
 ) -> Result<()> {
-    println!("Creating cached database");
+    eprintln!("creating cached database");
+
     // 16 hours
     let timeout = Duration::from_secs(60 * 60 * 16);
 
@@ -1694,10 +1696,11 @@ fn lightwalletd_integration() -> Result<()> {
         lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // zcash/lightwalletd exits with a fatal error here, but
-    // adityapk00/lightwalletd keeps trying the mempool
+    // zcash/lightwalletd exits with a fatal error here.
+    // adityapk00/lightwalletd keeps trying the mempool,
+    // but it sometimes skips the "Method not found" log line.
     let result =
-        lightwalletd.expect_stdout_line_matches("Mempool refresh error: -32601: Method not found");
+        lightwalletd.expect_stdout_line_matches("(Mempool refresh error: -32601: Method not found)|(Another refresh in progress, returning)");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // Cleanup both processes

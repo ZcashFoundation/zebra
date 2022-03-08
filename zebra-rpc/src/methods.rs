@@ -15,7 +15,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use zebra_chain::{
     block::{Height, SerializedBlock},
     serialization::ZcashDeserialize,
-    transaction::Transaction,
+    transaction::{self, Transaction},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
@@ -204,7 +204,7 @@ where
             );
 
             match &queue_results[0] {
-                Ok(()) => Ok(SentTransactionHash(transaction_hash.to_string())),
+                Ok(()) => Ok(SentTransactionHash(transaction_hash)),
                 Err(error) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: error.to_string(),
@@ -267,7 +267,7 @@ pub struct GetBlockChainInfo {
 /// Response to a `sendrawtransaction` RPC request.
 ///
 /// A JSON string with the transaction hash in hexadecimal.
-pub struct SentTransactionHash(String);
+pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
 #[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.

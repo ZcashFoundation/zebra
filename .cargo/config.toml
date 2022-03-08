@@ -38,6 +38,12 @@ rustflags = [
     "-Wclippy::dbg_macro",
     "-Wclippy::todo",
 
+    # Manual debugging output.
+    # Use tracing::trace!() or tracing::debug!() instead.
+    "-Wclippy::print_stdout",
+    "-Wclippy::print_stderr",
+    "-Wclippy::dbg_macro",
+
     # Code styles we want to accept
     "-Aclippy::try_err",
 
@@ -58,10 +64,6 @@ rustflags = [
     #"-Wclippy::cast_possible_wrap", # 13 test warnings (fixed outside tests)
     #"-Wclippy::cast_precision_loss", # 25 non-test warnings, 10 test warnings
     #"-Wclippy::cast_sign_loss", # 6 non-test warnings, 15 test warnings
-
-    # disable these lints using a zebra-test config.toml, but warn for other crates
-    #"-Wclippy::print_stdout",
-    #"-Wclippy::print_stderr",
 
     # fix hidden lifetime parameters
     #"-Wrust_2018_idioms",

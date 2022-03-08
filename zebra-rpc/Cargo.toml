@@ -28,8 +28,8 @@ tower = "0.4.12"
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
 
-serde = { version = "1.0.136", features = ["serde_derive"] }
 hex = { version = "0.4.3", features = ["serde"] }
+serde = { version = "1.0.136", features = ["serde_derive"] }
 
 [dev-dependencies]
 proptest = "0.10.1"

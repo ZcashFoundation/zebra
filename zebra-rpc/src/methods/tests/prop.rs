@@ -22,7 +22,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state = MockService::build().for_prop_tests();
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
-            let hash = SentTransactionHash(transaction.hash().to_string());
+            let hash = SentTransactionHash(transaction.hash());
 
             let transaction_bytes = transaction
                 .zcash_serialize_to_vec()
