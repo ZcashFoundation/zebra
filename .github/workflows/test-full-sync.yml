@@ -5,8 +5,6 @@ on:
     inputs:
       network:
         default: 'Mainnet'
-  # only run on Mergify head branches:
-  # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
   pull_request:
     branches:
       - main
