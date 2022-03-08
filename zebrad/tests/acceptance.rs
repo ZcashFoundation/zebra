@@ -1694,10 +1694,11 @@ fn lightwalletd_integration() -> Result<()> {
         lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // zcash/lightwalletd exits with a fatal error here, but
-    // adityapk00/lightwalletd keeps trying the mempool
+    // zcash/lightwalletd exits with a fatal error here.
+    // adityapk00/lightwalletd keeps trying the mempool,
+    // but it sometimes skips the "Method not found" log line.
     let result =
-        lightwalletd.expect_stdout_line_matches("Mempool refresh error: -32601: Method not found");
+        lightwalletd.expect_stdout_line_matches("(Mempool refresh error: -32601: Method not found)|(Another refresh in progress, returning)");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // Cleanup both processes
