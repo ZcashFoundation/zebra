@@ -80,10 +80,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: <https://zcash.github.io/rpc/getblock.html>
     ///
-    /// Result:
-    /// {
-    ///      "data": String, // The block encoded as hex
-    /// }
+    /// Result: [`GetBlock`]
     ///
     /// Note 1: We only expose the `data` field as lightwalletd uses the non-verbose
     /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
@@ -101,10 +98,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: <https://zcash.github.io/rpc/getbestblockhash.html>
     ///
-    /// Result:
-    /// {
-    ///      "hex": String, // Hex encoded block hash
-    /// }
+    /// Result: [`GetBestBlockHash`]
     ///
     #[rpc(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
