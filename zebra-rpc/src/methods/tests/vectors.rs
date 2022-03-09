@@ -133,7 +133,7 @@ async fn rpc_getbestblockhash() {
         .get_best_block_hash()
         .await
         .expect("We should have a GetBestBlockHash struct");
-    let response = get_best_block_hash.hex.as_ref();
+    let response = get_best_block_hash.0.as_ref();
     let tip_block_hash_bytes = &tip_block_hash.0;
 
     // Check if response is equal to block 10 hash.
