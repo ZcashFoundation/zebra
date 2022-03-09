@@ -127,7 +127,7 @@ fn test_block_db_round_trip_with(
             .expect("block was stored at height");
 
         if stored_block != original_block {
-            println!(
+            error!(
                 "
                 detailed block mismatch report:
                 original: {:?}\n\
