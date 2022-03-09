@@ -18,7 +18,7 @@ zebra-rpc = { path = "../zebra-rpc" }
 zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
-gumdrop = "0.7"
+gumdrop = "0.8"
 chrono = "0.4.19"
 indexmap = "1.8.0"
 lazy_static = "1.4.0"
