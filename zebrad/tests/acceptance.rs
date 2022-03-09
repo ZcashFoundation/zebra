@@ -54,6 +54,10 @@ use zebrad::{
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
+/// The amount of time we wait after launching `lightwalletd`,
+/// and between expected `lightwalletd` log messages.
+const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
+
 /// The amount of time we wait between launching two
 /// conflicting nodes.
 const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
@@ -1669,7 +1673,7 @@ fn lightwalletd_integration() -> Result<()> {
     // Launch the lightwalletd process
     let result = ldir.spawn_lightwalletd_child(&[]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
-    let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
+    let mut lightwalletd = lightwalletd.with_timeout(LIGHTWALLETD_DELAY);
 
     // Wait until `lightwalletd` has launched
     let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
