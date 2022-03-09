@@ -28,7 +28,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{check, finalized_state::disk_db::DiskDb, QueuedFinalized},
+    service::{check, QueuedFinalized},
     BoxError, Config, FinalizedBlock,
 };
 
@@ -42,9 +42,14 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+// TODO: replace with a ZebraDb struct
+pub(super) use disk_db::DiskDb;
+
 /// The finalized part of the chain state, stored in the db.
+#[derive(Debug)]
 pub struct FinalizedState {
     /// The underlying database.
+    // TODO: replace with a ZebraDb struct
     db: DiskDb,
 
     /// Queued blocks that arrived out of order, indexed by their parent block hash.

@@ -9,7 +9,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{fmt::Debug, path::Path};
+use std::{fmt::Debug, path::Path, sync::Arc};
 
 use rlimit::increase_nofile_limit;
 
@@ -24,9 +24,13 @@ use crate::{
 mod tests;
 
 /// Wrapper struct to ensure low-level database access goes through the correct API.
+#[derive(Clone, Debug)]
 pub struct DiskDb {
-    /// The inner RocksDB database.
-    db: rocksdb::DB,
+    /// The shared inner RocksDB database.
+    ///
+    /// RocksDB allows reads and writes via a shared reference.
+    /// Only column family changes and [`Drop`] require exclusive access.
+    db: Arc<rocksdb::DB>,
 
     /// The configured temporary database setting.
     ///
@@ -94,6 +98,22 @@ pub trait ReadDisk {
     where
         K: IntoDisk;
 }
+
+impl PartialEq for DiskDb {
+    fn eq(&self, other: &Self) -> bool {
+        if self.db.path() == other.db.path() {
+            assert_eq!(
+                self.ephemeral, other.ephemeral,
+                "database with same path but different ephemeral configs",
+            );
+            return true;
+        }
+
+        false
+    }
+}
+
+impl Eq for DiskDb {}
 
 impl ReadDisk for DiskDb {
     fn zs_get<K, V>(&self, cf: &rocksdb::ColumnFamily, key: &K) -> Option<V>
@@ -199,7 +219,7 @@ impl DiskDb {
                 info!("Opened Zebra state cache at {}", path.display());
 
                 let db = DiskDb {
-                    db,
+                    db: Arc::new(db),
                     ephemeral: config.ephemeral,
                 };
 
@@ -385,6 +405,15 @@ impl DiskDb {
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
     ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self) {
+        if Arc::get_mut(&mut self.db).is_none() {
+            debug!(
+                "dropping cloned DiskDb, \
+                 but keeping shared database until the last reference is dropped",
+            );
+
+            return;
+        }
+
         self.assert_default_cf_is_empty();
 
         // Drop isn't guaranteed to run, such as when we panic, or if the tokio shutdown times out.
@@ -434,8 +463,17 @@ impl DiskDb {
     }
 
     /// If the database is `ephemeral`, delete it.
-    fn delete_ephemeral(&self) {
+    fn delete_ephemeral(&mut self) {
         if self.ephemeral {
+            if Arc::get_mut(&mut self.db).is_none() {
+                debug!(
+                    "dropping cloned DiskDb, \
+                     but keeping shared database files until the last reference is dropped",
+                );
+
+                return;
+            }
+
             let path = self.path();
             info!(cache_path = ?path, "removing temporary database files");
 
