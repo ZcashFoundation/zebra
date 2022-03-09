@@ -4,32 +4,13 @@
 
 use std::sync::Arc;
 
-use proptest::prelude::*;
-
-use zebra_chain::{
-    amount::NonNegative,
-    block::{self, Block},
-    sprout,
-    value_balance::ValueBalance,
-};
+use zebra_chain::{amount::NonNegative, block::Block, sprout, value_balance::ValueBalance};
 
 use crate::service::finalized_state::{
     disk_db::{DiskWriteBatch, WriteDisk},
-    disk_format::{FromDisk, IntoDisk, TransactionLocation},
+    disk_format::{FromDisk, IntoDisk},
     FinalizedState,
 };
-
-impl Arbitrary for TransactionLocation {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<block::Height>(), any::<u32>())
-            .prop_map(|(height, index)| Self { height, index })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
 
 pub fn round_trip<T>(input: T) -> T
 where
