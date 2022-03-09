@@ -28,7 +28,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
-  ZEBRA_SKIP_IPV6_TESTS: "1"
+  ZEBRA_SKIP_IPV6_TESTS: '1'
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
@@ -135,6 +135,11 @@ jobs:
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
 
+  # This test changes zebra-chain's activation heights,
+  # which can recompile all the Zebra crates,
+  # so we want its build products to be cached separately.
+  #
+  # Also, we don't want to accidentally use the fake heights in other tests.
   test-fake-activation-heights:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
@@ -241,6 +246,18 @@ jobs:
         with:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
+      # Check if our destination compute instance exists and delete it
+      - name: Delete existing instance with same SHA
+        id: delete-old-instance
+        if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
+        run: |
+          INSTANCE=$(gcloud compute instances list --filter=regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
+
       - name: Create GCP compute instance
         id: create-instance
         if: ${{ steps.changed-files-specific.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
@@ -276,7 +293,7 @@ jobs:
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
-        if: steps.create-instance.outcome == 'success'
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           INSTANCE_ID=$(gcloud compute instances describe regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
@@ -287,10 +304,11 @@ jobs:
           done
           CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
+          sleep 60
 
       - name: Regenerate stateful disks logs
         id: sync-to-checkpoint
-        if: steps.create-instance.outcome == 'success'
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
           regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -319,7 +337,7 @@ jobs:
         if: ${{ steps.sync-to-checkpoint.outcome == 'success' || steps.sync-to-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
-          gcloud compute instances delete "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+          gcloud compute instances delete "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
@@ -344,6 +362,18 @@ jobs:
         uses: google-github-actions/auth@v0.5.0
         with:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      # Check if our destination compute instance exists and delete it
+      - name: Delete existing instance with same SHA
+        id: delete-old-instance
+        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
+        run: |
+          INSTANCE=$(gcloud compute instances list --filter=sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
 
       - name: Get disk state name from gcloud
         id: get-disk-name
@@ -391,7 +421,7 @@ jobs:
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
-        if: steps.create-instance.outcome == 'success'
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           INSTANCE_ID=$(gcloud compute instances describe sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
@@ -402,6 +432,7 @@ jobs:
           done
           CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
+          sleep 60
 
       - name: Sync past mandatory checkpoint logs
         id: sync-past-checkpoint
@@ -420,4 +451,4 @@ jobs:
         if: ${{ steps.sync-past-checkpoint.outcome == 'success' || steps.sync-past-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
-          gcloud compute instances delete "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+          gcloud compute instances delete "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
