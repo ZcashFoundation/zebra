@@ -41,7 +41,7 @@ jobs:
   build:
     # only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if:  startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == "workflow_dispatch"
+    if:  startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == 'workflow_dispatch'
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
