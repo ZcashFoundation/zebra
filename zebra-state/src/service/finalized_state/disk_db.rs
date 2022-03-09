@@ -412,6 +412,9 @@ impl DiskDb {
     pub(crate) fn shutdown(&mut self, force: bool) {
         // Prevent a race condition where another thread clones the Arc,
         // right after we've checked we're the only holder of the Arc.
+        //
+        // There is still a small race window after the guard is dropped,
+        // but if the race happens, it will only cause database errors during shutdown.
         let clone_prevention_guard = Arc::get_mut(&mut self.db);
 
         if clone_prevention_guard.is_none() && !force {
@@ -483,6 +486,9 @@ impl DiskDb {
 
         // Prevent a race condition where another thread clones the Arc,
         // right after we've checked we're the only holder of the Arc.
+        //
+        // There is still a small race window after the guard is dropped,
+        // but if the race happens, it will only cause database errors during shutdown.
         let clone_prevention_guard = Arc::get_mut(&mut self.db);
 
         if clone_prevention_guard.is_none() && !force {
