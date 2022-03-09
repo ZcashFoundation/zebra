@@ -69,7 +69,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        assert_eq!(get_block.data, block.into());
+        assert_eq!(get_block.0, block.into());
     }
 
     mempool.expect_no_requests().await;

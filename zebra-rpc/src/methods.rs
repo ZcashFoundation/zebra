@@ -237,7 +237,7 @@ where
                 })?;
 
             match response {
-                zebra_state::Response::Block(Some(block)) => Ok(GetBlock { data: block.into() }),
+                zebra_state::Response::Block(Some(block)) => Ok(GetBlock(block.into())),
                 zebra_state::Response::Block(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
@@ -272,7 +272,4 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
 #[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
-pub struct GetBlock {
-    #[serde(with = "hex")]
-    data: SerializedBlock,
-}
+pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
