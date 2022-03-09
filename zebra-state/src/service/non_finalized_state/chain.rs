@@ -194,26 +194,14 @@ impl Chain {
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
     /// [`update_chain_state_with`] returns success.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(&mut self, block: ContextuallyValidBlock) -> Result<(), ValidateContextError> {
+    pub fn push(mut self, block: ContextuallyValidBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
-        if let Err(error) = self.update_chain_tip_with(&block) {
-            // The chain could be in an invalid half-updated state, so clear its data.
-            *self = Chain::new(
-                self.network,
-                sprout::tree::NoteCommitmentTree::default(),
-                sapling::tree::NoteCommitmentTree::default(),
-                orchard::tree::NoteCommitmentTree::default(),
-                HistoryTree::default(),
-                ValueBalance::zero(),
-            );
-
-            return Err(error);
-        }
+        self.update_chain_tip_with(&block)?;
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
 
-        Ok(())
+        Ok(self)
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
