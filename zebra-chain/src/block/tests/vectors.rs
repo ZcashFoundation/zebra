@@ -39,7 +39,7 @@ fn blockheaderhash_debug() {
 fn blockheaderhash_from_blockheader() {
     zebra_test::init();
 
-    let blockheader = generate::block_header();
+    let (blockheader, _blockheader_bytes) = generate::block_header();
 
     let hash = Hash::from(&blockheader);
 
@@ -326,7 +326,7 @@ fn node_time_check(
     block_header_time: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), BlockTimeError> {
-    let mut header = generate::block_header();
+    let (mut header, _header_bytes) = generate::block_header();
     header.time = block_header_time;
     // pass a zero height and hash - they are only used in the returned error
     header.time_is_valid_at(now, &Height(0), &Hash([0; 32]))
