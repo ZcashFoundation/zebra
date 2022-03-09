@@ -1,6 +1,6 @@
 ---
 source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
-assertion_line: 245
+assertion_line: 274
 expression: stored_transaction_hashes
 
 ---
@@ -8,7 +8,7 @@ expression: stored_transaction_hashes
   TransactionHash(
     loc: TransactionLocation(
       height: Height(0),
-      index: 0,
+      index: TransactionIndex(0),
     ),
     hash: "c4eaa58879081de3c24a7b117ed2b28300e7ec4c4c1dff1d3f1268b7857a4ddb",
   ),

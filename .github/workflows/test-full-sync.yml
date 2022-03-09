@@ -39,14 +39,14 @@ env:
 
 jobs:
   build:
-    # only run on Mergify head branches:
+    # only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if:  startsWith(github.head_ref, 'mergify/merge-queue/')
+    if:  startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == 'workflow_dispatch'
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -121,7 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ build ]
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
