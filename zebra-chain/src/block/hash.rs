@@ -44,8 +44,6 @@ impl fmt::Display for Hash {
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
         f.debug_tuple("block::Hash")
             .field(&self.encode_hex::<String>())
             .finish()
