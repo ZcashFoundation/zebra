@@ -415,11 +415,11 @@ impl NonFinalizedState {
             Some(chain) => Ok(chain.clone()),
             // Create a new fork
             None => {
-                // Reverse the iteration order, to find highest difficulty chains first.
+                // Check the lowest difficulty chains first,
+                // because the fork could be closer to their tip.
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .rev()
                     .find_map(|chain| {
                         chain
                             .fork(
