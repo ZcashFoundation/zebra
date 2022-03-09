@@ -1,5 +1,4 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
-#![allow(clippy::unit_arg)]
 
 mod address;
 mod keys;
@@ -11,20 +10,21 @@ pub use address::Address;
 pub use script::Script;
 pub use serialize::GENESIS_COINBASE_DATA;
 pub use utxo::{
-    new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, CoinbaseSpendRestriction,
-    OrderedUtxo, Utxo,
+    new_ordered_outputs, new_outputs, outputs_from_utxos, utxos_from_ordered_utxos,
+    CoinbaseSpendRestriction, OrderedUtxo, Utxo,
 };
 
-pub(crate) use utxo::outputs_from_utxos;
-
 #[cfg(any(test, feature = "proptest-impl"))]
-pub(crate) use utxo::new_transaction_ordered_outputs;
+pub use utxo::{
+    new_ordered_outputs_with_height, new_outputs_with_height, new_transaction_ordered_outputs,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
+
 #[cfg(test)]
 mod tests;
 
