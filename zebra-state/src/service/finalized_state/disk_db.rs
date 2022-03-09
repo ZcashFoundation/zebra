@@ -402,10 +402,19 @@ impl DiskDb {
 
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
+    /// If `force` is true, clean up regardless of any shared references.
+    /// `force` can cause errors accessing the database from other shared references.
+    /// It should only be used in debugging or test code, immediately before a manual shutdown.
+    ///
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
-    ///       move shutting down the database to a blocking thread (#2188)
-    pub(crate) fn shutdown(&mut self) {
-        if Arc::get_mut(&mut self.db).is_none() {
+    ///       move shutting down the database to a blocking thread (#2188),
+    ///            and remove `force` and the manual flush
+    pub(crate) fn shutdown(&mut self, force: bool) {
+        // Prevent a race condition where another thread clones the Arc,
+        // right after we've checked we're the only holder of the Arc.
+        let clone_prevention_guard = Arc::get_mut(&mut self.db);
+
+        if clone_prevention_guard.is_none() && !force {
             debug!(
                 "dropping cloned DiskDb, \
                  but keeping shared database until the last reference is dropped",
@@ -459,42 +468,52 @@ impl DiskDb {
         //
         // But our current code doesn't seem to cause any issues.
         // We might want to explicitly drop the database as part of graceful shutdown (#1678).
-        self.delete_ephemeral();
+        self.delete_ephemeral(force);
     }
 
     /// If the database is `ephemeral`, delete it.
-    fn delete_ephemeral(&mut self) {
-        if self.ephemeral {
-            if Arc::get_mut(&mut self.db).is_none() {
-                debug!(
-                    "dropping cloned DiskDb, \
-                     but keeping shared database files until the last reference is dropped",
-                );
-
-                return;
-            }
-
-            let path = self.path();
-            info!(cache_path = ?path, "removing temporary database files");
-
-            // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
-            // but the Zcash blockchain might not fit in memory. So we just
-            // delete the database files instead.
-            //
-            // We'd like to call `DB::destroy` here, but calling destroy on a
-            // live DB is undefined behaviour:
-            // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
-            //
-            // So we assume that all the database files are under `path`, and
-            // delete them using standard filesystem APIs. Deleting open files
-            // might cause errors on non-Unix platforms, so we ignore the result.
-            // (The OS will delete them eventually anyway.)
-            let res = std::fs::remove_dir_all(path);
-
-            // TODO: downgrade to debug once bugs like #2905 are fixed
-            //       but leave any errors at "info" level
-            info!(?res, "removed temporary database files");
+    ///
+    /// If `force` is true, clean up regardless of any shared references.
+    /// `force` can cause errors accessing the database from other shared references.
+    /// It should only be used in debugging or test code, immediately before a manual shutdown.
+    fn delete_ephemeral(&mut self, force: bool) {
+        if !self.ephemeral {
+            return;
         }
+
+        // Prevent a race condition where another thread clones the Arc,
+        // right after we've checked we're the only holder of the Arc.
+        let clone_prevention_guard = Arc::get_mut(&mut self.db);
+
+        if clone_prevention_guard.is_none() && !force {
+            debug!(
+                "dropping cloned DiskDb, \
+                 but keeping shared database files until the last reference is dropped",
+            );
+
+            return;
+        }
+
+        let path = self.path();
+        info!(cache_path = ?path, "removing temporary database files");
+
+        // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
+        // but the Zcash blockchain might not fit in memory. So we just
+        // delete the database files instead.
+        //
+        // We'd like to call `DB::destroy` here, but calling destroy on a
+        // live DB is undefined behaviour:
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
+        //
+        // So we assume that all the database files are under `path`, and
+        // delete them using standard filesystem APIs. Deleting open files
+        // might cause errors on non-Unix platforms, so we ignore the result.
+        // (The OS will delete them eventually anyway.)
+        let res = std::fs::remove_dir_all(path);
+
+        // TODO: downgrade to debug once bugs like #2905 are fixed
+        //       but leave any errors at "info" level
+        info!(?res, "removed temporary database files");
     }
 
     /// Check that the "default" column family is empty.
@@ -514,6 +533,6 @@ impl DiskDb {
 
 impl Drop for DiskDb {
     fn drop(&mut self) {
-        self.shutdown();
+        self.shutdown(false);
     }
 }

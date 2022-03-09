@@ -306,7 +306,8 @@ impl FinalizedState {
                 "stopping at configured height, flushing database to disk"
             );
 
-            self.db.shutdown();
+            // We're just about to do a forced exit, so it's ok to do a forced db shutdown
+            self.db.shutdown(true);
 
             Self::exit_process();
         }
