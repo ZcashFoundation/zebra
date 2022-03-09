@@ -120,10 +120,6 @@ impl DiskWriteBatch {
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let hash_by_height = db.cf_handle("hash_by_height").unwrap();
-        let height_by_hash = db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = db.cf_handle("block_by_height").unwrap();
-
         let FinalizedBlock {
             block,
             hash,
@@ -131,12 +127,9 @@ impl DiskWriteBatch {
             ..
         } = &finalized;
 
-        // Index the block
-        self.zs_insert(hash_by_height, height, hash);
-        self.zs_insert(height_by_hash, hash, height);
-
-        // TODO: as part of ticket #3151, commit transaction data, but not UTXOs or address indexes
-        self.zs_insert(block_by_height, height, block);
+        // Commit block and transaction data,
+        // but not transaction indexes, note commitments, or UTXOs.
+        self.prepare_block_header_transactions_batch(db, &finalized)?;
 
         // # Consensus
         //
@@ -151,6 +144,7 @@ impl DiskWriteBatch {
             return Ok(());
         }
 
+        // Commit transaction indexes
         self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
 
         self.prepare_note_commitment_batch(
@@ -161,10 +155,43 @@ impl DiskWriteBatch {
             history_tree,
         )?;
 
+        // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;
 
         // The block has passed contextual validation, so update the metrics
         FinalizedState::block_precommit_metrics(block, *hash, *height);
+
+        Ok(())
+    }
+
+    /// Prepare a database batch containing the block header and transactions
+    /// from `finalized.block`, and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - This method does not currently return any errors.
+    pub fn prepare_block_header_transactions_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &FinalizedBlock,
+    ) -> Result<(), BoxError> {
+        let hash_by_height = db.cf_handle("hash_by_height").unwrap();
+        let height_by_hash = db.cf_handle("height_by_hash").unwrap();
+        let block_by_height = db.cf_handle("block_by_height").unwrap();
+
+        let FinalizedBlock {
+            block,
+            hash,
+            height,
+            ..
+        } = finalized;
+
+        // Index the block
+        self.zs_insert(hash_by_height, height, hash);
+        self.zs_insert(height_by_hash, hash, height);
+
+        // Commit block and transaction data, but not UTXOs or address indexes
+        self.zs_insert(block_by_height, height, block);
 
         Ok(())
     }
