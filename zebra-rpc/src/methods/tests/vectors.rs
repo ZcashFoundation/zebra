@@ -74,3 +74,27 @@ async fn rpc_getblock() {
 
     mempool.expect_no_requests().await;
 }
+
+#[tokio::test]
+async fn rpc_getblock_error() {
+    zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut state = MockService::build().for_unit_tests();
+
+    // Init RPC
+    let rpc = RpcImpl {
+        app_version: "Zebra version test".to_string(),
+        mempool: Buffer::new(mempool.clone(), 1),
+        state: Buffer::new(state.clone(), 1),
+    };
+
+    // Make sure we get an error if Zebra can't parse the block height.
+    assert!(rpc
+        .get_block("not parsable as height".to_string(), 0u8)
+        .await
+        .is_err());
+
+    mempool.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
