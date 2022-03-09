@@ -17,8 +17,8 @@ mod tests;
 
 pub use block::TransactionLocation;
 
-/// Helper trait for defining the exact format used to interact with disk per
-/// type.
+/// Helper trait for defining the exact format used to store to disk,
+/// for each type.
 pub trait IntoDisk {
     /// The type used to compare a value as a key to other keys stored in a
     /// database.
@@ -27,6 +27,14 @@ pub trait IntoDisk {
     /// Converts the current type to its disk format in `zs_get()`,
     /// without necessarily allocating a new ivec.
     fn as_bytes(&self) -> Self::Bytes;
+}
+
+/// Helper trait for types with fixed-length disk storage.
+///
+/// This trait must not be implemented for types with variable-length disk storage.
+pub trait IntoDiskFixedLen: IntoDisk {
+    /// Returns the fixed serialized length of `Bytes`.
+    fn fixed_byte_len() -> usize;
 }
 
 /// Helper type for retrieving types from the disk with the correct format.
@@ -41,7 +49,7 @@ pub trait FromDisk: Sized {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self;
 }
 
-// Generic trait impls
+// Generic serialization impls
 
 impl<'a, T> IntoDisk for &'a T
 where
@@ -74,10 +82,28 @@ where
     }
 }
 
+// Commonly used serialization impls
+
 impl IntoDisk for () {
     type Bytes = [u8; 0];
 
     fn as_bytes(&self) -> Self::Bytes {
         []
+    }
+}
+
+// Generic serialization length impls
+
+impl<T> IntoDiskFixedLen for T
+where
+    T: IntoDisk,
+    T::Bytes: Default + IntoIterator + Copy,
+{
+    /// Returns the fixed size of `Bytes`.
+    ///
+    /// Assumes that `Copy` types are fixed-sized byte arrays.
+    fn fixed_byte_len() -> usize {
+        // Bytes is probably a [u8; N]
+        Self::Bytes::default().into_iter().count()
     }
 }

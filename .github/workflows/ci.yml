@@ -20,6 +20,8 @@ on:
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   test:
@@ -36,7 +38,7 @@ jobs:
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -131,7 +133,7 @@ jobs:
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -172,7 +174,7 @@ jobs:
         rust: [stable, beta]
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -199,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 

@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2.4.0
+    - uses: actions/checkout@v3.0.0
       with:
         persist-credentials: false
 
@@ -96,9 +96,10 @@ jobs:
         target: runtime
         context: .
         file: ./docker/Dockerfile
-        platforms: |
-          linux/amd64
-          linux/arm64
+        # TODO: building crates is taking too long with arm64 and it's timing out on GHA
+        # platforms: |
+        #   linux/amd64
+        #   linux/arm64
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
@@ -120,7 +121,7 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -186,7 +187,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
