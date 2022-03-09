@@ -162,30 +162,3 @@ impl AsRef<[u8]> for SerializedBlock {
         self.bytes.as_ref()
     }
 }
-
-/// A serialized block hash.
-///
-/// Stores bytes that are guaranteed to be deserializable into a [`Hash`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct SerializedBlockHash {
-    bytes: Vec<u8>,
-}
-
-/// Build a [`SerializedBlockHash`] by serializing a block hash.
-impl<B: Borrow<Hash>> From<B> for SerializedBlockHash {
-    fn from(hash: B) -> Self {
-        SerializedBlockHash {
-            bytes: hash
-                .borrow()
-                .zcash_serialize_to_vec()
-                .expect("Writing to a `Vec` should never fail"),
-        }
-    }
-}
-
-/// Access the serialized bytes of a [`SerializedBlockHash`].
-impl AsRef<[u8]> for SerializedBlockHash {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes.as_ref()
-    }
-}

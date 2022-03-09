@@ -13,7 +13,7 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::{SerializedBlock, SerializedBlockHash},
+    block::{self, SerializedBlock},
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, Transaction},
 };
@@ -279,9 +279,7 @@ where
                 })?;
 
             match response {
-                zebra_state::Response::Tip(Some((_height, hash))) => {
-                    Ok(GetBestBlockHash(hash.into()))
-                }
+                zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash(hash)),
                 _ => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
@@ -319,4 +317,4 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 
 #[derive(Debug, PartialEq, serde::Serialize)]
 /// Response to a `getbestblockhash` RPC request.
-pub struct GetBestBlockHash(#[serde(with = "hex")] SerializedBlockHash);
+pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
