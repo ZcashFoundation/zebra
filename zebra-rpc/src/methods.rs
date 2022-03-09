@@ -13,8 +13,8 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::{Height, SerializedBlock},
-    serialization::ZcashDeserialize,
+    block::SerializedBlock,
+    serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, Transaction},
 };
 use zebra_network::constants::USER_AGENT;
@@ -217,13 +217,14 @@ where
 
     fn get_block(&self, height: String, _verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
-        let height = Height(
-            height
-                .parse::<u32>()
-                .expect("Height as string should parse"),
-        );
 
         async move {
+            let height = height.parse().map_err(|error: SerializationError| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
             let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));
             let response = state
                 .ready()
