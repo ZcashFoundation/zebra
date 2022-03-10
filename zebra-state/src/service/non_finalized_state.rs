@@ -388,12 +388,9 @@ impl NonFinalizedState {
             .unwrap_or(false)
     }
 
-    /// Return the non-finalized portion of the current best chain
-    pub(crate) fn best_chain(&self) -> Option<&Chain> {
-        self.chain_set
-            .iter()
-            .next_back()
-            .map(|box_chain| box_chain.deref())
+    /// Return the non-finalized portion of the current best chain.
+    pub(crate) fn best_chain(&self) -> Option<&Arc<Chain>> {
+        self.chain_set.iter().next_back()
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.

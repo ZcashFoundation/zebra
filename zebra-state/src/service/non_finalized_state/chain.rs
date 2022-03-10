@@ -369,6 +369,12 @@ impl Chain {
         self.blocks.keys().next_back().cloned()
     }
 
+    /// Return the non-finalized tip block for this chain,
+    /// or `None` if `self.blocks` is empty.
+    pub fn tip_block(&self) -> Option<&ContextuallyValidBlock> {
+        self.blocks.values().next_back()
+    }
+
     /// Returns true if the non-finalized part of this chain is empty.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
