@@ -25,6 +25,7 @@ allow = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     #  wait for zcash_proofs fork be merged back into upstream
+    # https://github.com/ZcashFoundation/zebra/issues/3831
     { name = "equihash", version = "=0.1.0" },
     { name = "zcash_encoding", version = "=0.0.0" },
     { name = "zcash_note_encryption", version = "=0.1.0" },
