@@ -155,8 +155,12 @@ impl StartCmd {
             .service(mempool);
 
         // Launch RPC server
-        let rpc_task_handle =
-            RpcServer::spawn(config.rpc, app_version().to_string(), mempool.clone());
+        let rpc_task_handle = RpcServer::spawn(
+            config.rpc,
+            app_version().to_string(),
+            mempool.clone(),
+            state.clone(),
+        );
 
         let setup_data = InboundSetupData {
             address_book,

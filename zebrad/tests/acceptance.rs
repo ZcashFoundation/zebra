@@ -1693,7 +1693,7 @@ fn lightwalletd_integration() -> Result<()> {
     // zcash/lightwalletd calls getbestblockhash here, but
     // adityapk00/lightwalletd calls getblock
     let result =
-        lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
+        lightwalletd.expect_stdout_line_matches("Block hash changed, clearing mempool clients");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // zcash/lightwalletd exits with a fatal error here.
