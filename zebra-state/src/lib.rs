@@ -41,7 +41,7 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipSender},
-    init_test,
+    init_test, populated_state,
 };
 
 pub(crate) use request::ContextuallyValidBlock;
