@@ -831,6 +831,65 @@ impl Service<Request> for StateService {
     }
 }
 
+impl Service<Request> for ReadStateService {
+    type Response = Response;
+    type Error = BoxError;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    #[instrument(name = "read_state", skip(self, req))]
+    fn call(&mut self, req: Request) -> Self::Future {
+        match req {
+            // TODO: implement for lightwalletd
+            Request::Block(_hash_or_height) => unimplemented!("ReadStateService doesn't Block yet"),
+            Request::Transaction(_hash) => {
+                unimplemented!("ReadStateService doesn't Transaction yet")
+            }
+
+            Request::Tip => unimplemented!("ReadStateService doesn't Tip yet"),
+
+            // We can get existing UTXOs,
+            // but that should be a different request with a different name
+            Request::AwaitUtxo(_outpoint) => unreachable!("ReadStateService can't await UTXOs"),
+
+            // Out of scope.
+            //
+            // This request might benefit from better performance,
+            // but it isn't needed for lightwalletd.
+            Request::Depth(_hash) => unimplemented!("ReadStateService doesn't Depth yet"),
+
+            // These requests probably don't need better performance.
+            Request::FindBlockHashes {
+                known_blocks: _,
+                stop: _,
+            } => {
+                unimplemented!("ReadStateService doesn't FindBlockHashes yet")
+            }
+            Request::FindBlockHeaders {
+                known_blocks: _,
+                stop: _,
+            } => {
+                unimplemented!("ReadStateService doesn't FindBlockHeaders yet")
+            }
+
+            // This request needs to wait for queued blocks.
+            Request::BlockLocator => {
+                unreachable!("ReadStateService should not be used for block locators")
+            }
+
+            // Write Requests.
+            Request::CommitBlock(_prepared) => unreachable!("ReadStateService can't commit blocks"),
+            Request::CommitFinalizedBlock(_finalized) => {
+                unreachable!("ReadStateService can't commit blocks")
+            }
+        }
+    }
+}
+
 /// Initialize a state service from the provided [`Config`].
 /// Returns a boxed state service, a read-only state service,
 /// and receivers for state chain tip updates.
