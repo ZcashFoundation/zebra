@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::serialize::parse_coinbase_height;
 use crate::{
-    parameters::Network, primitives::zcash_primitives::transparent_output_address,
+    block::Block, parameters::Network, primitives::zcash_primitives::transparent_output_address,
     serialization::ZcashDeserializeInto, transaction,
 };
 use hex::FromHex;
@@ -79,4 +79,50 @@ fn get_transparent_output_address() -> Result<()> {
     assert_eq!(addr.to_string(), "tmWbBGi7TjExNmLZyMcFpxVh3ZPbGrpbX3H");
 
     Ok(())
+}
+
+#[test]
+fn get_transparent_output_address_with_blocks() {
+    zebra_test::init();
+
+    get_transparent_output_address_with_blocks_for_network(Network::Mainnet);
+    get_transparent_output_address_with_blocks_for_network(Network::Testnet);
+}
+
+/// Test that the block test vector indexes match the heights in the block data,
+/// and that each post-sapling block has a corresponding final sapling root.
+fn get_transparent_output_address_with_blocks_for_network(network: Network) {
+    let block_iter = match network {
+        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+    };
+
+    let mut valid_addresses = 0;
+
+    for (&height, block_bytes) in block_iter.skip(1) {
+        let block = block_bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        for (idx, tx) in block.transactions.iter().enumerate() {
+            for output in tx.outputs() {
+                let addr = output.address(network);
+                if addr.is_none() && idx == 0 && output.lock_script.as_raw_bytes()[0] == 0x21 {
+                    // There are a bunch of coinbase transactions with pay-to-pubkey scripts
+                    // which we don't support; skip them
+                    continue;
+                }
+                assert!(
+                    addr.is_some(),
+                    "address of {:?}; block #{}; tx #{}; must not be None",
+                    output,
+                    height,
+                    idx,
+                );
+                valid_addresses += 1;
+            }
+        }
+    }
+    // Make sure we didn't accidentally skip all vectors
+    assert!(valid_addresses > 0);
 }
