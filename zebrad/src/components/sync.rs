@@ -396,16 +396,7 @@ where
         while !self.prospective_tips.is_empty() {
             // Check whether any block tasks are currently ready:
             while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-                match rsp {
-                    Ok(hash) => {
-                        trace!(?hash, "verified and committed block to state");
-                    }
-                    Err(e) => {
-                        if Self::should_restart_sync(e) {
-                            return Err(());
-                        }
-                    }
-                }
+                self.handle_block_response(rsp).await?;
             }
             self.update_metrics();
 
@@ -430,17 +421,9 @@ where
                     "waiting for pending blocks",
                 );
 
-                match self.downloads.next().await.expect("downloads is nonempty") {
-                    Ok(hash) => {
-                        trace!(?hash, "verified and committed block to state");
-                    }
+                let response = self.downloads.next().await.expect("downloads is nonempty");
 
-                    Err(e) => {
-                        if Self::should_restart_sync(e) {
-                            return Err(());
-                        }
-                    }
-                }
+                self.handle_block_response(response).await?;
                 self.update_metrics();
             }
 
@@ -785,6 +768,28 @@ where
         debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Handles a response for a requested block.
+    ///
+    /// Returns `Ok` if the block was successfully verified and commited to the state, or if an
+    /// expected error occurred, so that the synchronization can continue normally.
+    ///
+    /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
+    async fn handle_block_response(
+        &mut self,
+        response: Result<block::Hash, BlockDownloadVerifyError>,
+    ) -> Result<(), ()> {
+        match response {
+            Ok(hash) => trace!(?hash, "verified and committed block to state"),
+            Err(error) => {
+                if Self::should_restart_sync(error) {
+                    return Err(());
+                }
+            }
         }
 
         Ok(())
