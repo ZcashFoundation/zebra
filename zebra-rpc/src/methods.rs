@@ -274,9 +274,9 @@ where
 
             match response {
                 zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash(hash)),
-                zebra_state::Response::Block(None) => Err(Error {
+                zebra_state::Response::Tip(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
-                    message: "Block not found".to_string(),
+                    message: "No blocks in state".to_string(),
                     data: None,
                 }),
                 _ => unreachable!("unmatched response to a tip request"),
