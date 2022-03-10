@@ -572,7 +572,7 @@ fn different_blocks_different_chains() -> Result<()> {
         let result1 = chain1.push(block1.clone());
         let result2 = chain2.push(block2.clone());
 
-        // if there is an error, the chains come back empty
+        // if there is an error, we don't get the chains back
         if let (Ok(mut chain1), Ok(chain2)) = (result1, result2) {
             if block1 == block2 {
                 // the blocks were equal, so the chains should be equal

@@ -189,7 +189,7 @@ impl Chain {
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
-    /// If the block is invalid, clears the chain, and returns an error.
+    /// If the block is invalid, drops this chain, and returns an error.
     ///
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
     /// [`update_chain_state_with`] returns success.
