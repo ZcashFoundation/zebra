@@ -9,7 +9,6 @@ On many-core machines (like, 32-core) the build is very fast; on 2-core machines
 it's less fast.
 
 We continuously test that our builds and tests pass on:
-- Windows Server 2019
 - macOS Big Sur 11.0
 - Ubuntu 18.04 / the latest LTS
 - Debian Buster

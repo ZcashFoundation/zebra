@@ -119,7 +119,6 @@ The recommended requirements for compiling and running `zebrad` are:
 We continuously test that our builds and tests pass on:
 
 The *latest* [GitHub Runners](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources) for:
-- Windows Server
 - macOS
 - Ubuntu
 
@@ -206,6 +205,8 @@ There are a few bugs in Zebra that we're still working on fixing:
   - These panics can be ignored, unless they happen frequently.
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
+- [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
+  - We used to test with Windows Server 2019, but not anymore; see issue for details
 
 ## Future Work
 
