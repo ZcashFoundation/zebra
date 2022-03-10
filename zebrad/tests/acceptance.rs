@@ -1701,7 +1701,7 @@ fn lightwalletd_integration() -> Result<()> {
     // After the first getblock call, lightwalletd will log:
     // "Block hash changed, clearing mempool clients"
     // But we can't check for that, because it can come before or after the Ingestor log.
-    let result = lightwalletd.expect_stdout_line_matches("Ingestor adding block to cache: 1");
+    let result = lightwalletd.expect_stdout_line_matches("Ingestor adding block to cache");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // (next RPC)
