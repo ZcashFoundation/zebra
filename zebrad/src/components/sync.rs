@@ -354,9 +354,10 @@ where
         self.request_genesis().await?;
 
         loop {
-            let _ = self.try_to_sync().await;
+            if self.try_to_sync().await.is_err() {
+                self.downloads.cancel_all();
+            }
 
-            self.downloads.cancel_all();
             self.update_metrics();
 
             info!(
