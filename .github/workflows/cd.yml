@@ -136,7 +136,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
+        uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 
@@ -202,7 +202,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
+        uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 
