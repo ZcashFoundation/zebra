@@ -12,11 +12,10 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{FinalizedBlock, PreparedBlock, ValidateContextError};
+use crate::{constants, BoxError, FinalizedBlock, PreparedBlock, ValidateContextError};
 
+// use self as check
 use super::check;
-
-use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 pub(crate) mod anchors;
 pub(crate) mod difficulty;
@@ -25,6 +24,8 @@ pub(crate) mod utxo;
 
 #[cfg(test)]
 mod tests;
+
+use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 /// Check that the `prepared` block is contextually valid for `network`, based
 /// on the `finalized_tip_height` and `relevant_chain`.
@@ -301,6 +302,57 @@ fn difficulty_threshold_is_valid(
             difficulty_threshold,
             expected_difficulty,
         })?
+    }
+
+    Ok(())
+}
+
+/// Check if zebra is following a legacy chain and return an error if so.
+pub(crate) fn legacy_chain<I>(
+    nu5_activation_height: block::Height,
+    ancestors: I,
+    network: Network,
+) -> Result<(), BoxError>
+where
+    I: Iterator<Item = Arc<Block>>,
+{
+    for (count, block) in ancestors.enumerate() {
+        // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
+        // so the rest of our checks are useless.
+        //
+        // If the cached tip is close to NU5 activation, but there aren't any V5 transactions in the
+        // chain yet, we could reach MAX_BLOCKS_TO_CHECK in Canopy, and incorrectly return an error.
+        if block
+            .coinbase_height()
+            .expect("valid blocks have coinbase heights")
+            < nu5_activation_height
+        {
+            return Ok(());
+        }
+
+        // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
+        // the Zebra instance that verified those blocks had no NU5 activation height.
+        if count >= constants::MAX_LEGACY_CHAIN_BLOCKS {
+            return Err("giving up after checking too many blocks".into());
+        }
+
+        // If a transaction `network_upgrade` field is different from the network upgrade calculated
+        // using our activation heights, the Zebra instance that verified those blocks had different
+        // network upgrade heights.
+        block
+            .check_transaction_network_upgrade_consistency(network)
+            .map_err(|_| "inconsistent network upgrade found in transaction")?;
+
+        // If we find at least one transaction with a valid `network_upgrade` field, the Zebra instance that
+        // verified those blocks used the same network upgrade heights. (Up to this point in the chain.)
+        let has_network_upgrade = block
+            .transactions
+            .iter()
+            .find_map(|trans| trans.network_upgrade())
+            .is_some();
+        if has_network_upgrade {
+            return Ok(());
+        }
     }
 
     Ok(())
