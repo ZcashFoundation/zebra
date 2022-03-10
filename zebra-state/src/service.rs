@@ -24,7 +24,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants, request::HashOrHeight, service::chain_tip::ChainTipBlock, BoxError, CloneError,
+    request::HashOrHeight, service::chain_tip::ChainTipBlock, BoxError, CloneError,
     CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request, Response,
     ValidateContextError,
 };
@@ -103,7 +103,7 @@ impl StateService {
         tracing::info!("starting legacy chain check");
         if let Some(tip) = state.best_tip() {
             if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
-                if legacy_chain_check(
+                if check::legacy_chain(
                     nu5_activation_height,
                     state.any_ancestor_blocks(tip.1),
                     state.network,
@@ -841,82 +841,4 @@ pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxEr
     let (state_service, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
-}
-
-/// Initialize a state service with blocks.
-#[cfg(any(test, feature = "proptest-impl"))]
-pub async fn populated_state(
-    blocks: impl IntoIterator<Item = Arc<Block>>,
-    network: Network,
-) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let requests = blocks
-        .into_iter()
-        .map(|block| Request::CommitFinalizedBlock(block.into()));
-
-    let mut state = init_test(network);
-
-    let mut responses = FuturesUnordered::new();
-
-    for request in requests {
-        let rsp = state.ready().await.unwrap().call(request);
-        responses.push(rsp);
-    }
-
-    use futures::StreamExt;
-    while let Some(rsp) = responses.next().await {
-        rsp.expect("blocks should commit just fine");
-    }
-
-    state
-}
-
-/// Check if zebra is following a legacy chain and return an error if so.
-fn legacy_chain_check<I>(
-    nu5_activation_height: block::Height,
-    ancestors: I,
-    network: Network,
-) -> Result<(), BoxError>
-where
-    I: Iterator<Item = Arc<Block>>,
-{
-    for (count, block) in ancestors.enumerate() {
-        // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
-        // so the rest of our checks are useless.
-        //
-        // If the cached tip is close to NU5 activation, but there aren't any V5 transactions in the
-        // chain yet, we could reach MAX_BLOCKS_TO_CHECK in Canopy, and incorrectly return an error.
-        if block
-            .coinbase_height()
-            .expect("valid blocks have coinbase heights")
-            < nu5_activation_height
-        {
-            return Ok(());
-        }
-
-        // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
-        // the Zebra instance that verified those blocks had no NU5 activation height.
-        if count >= constants::MAX_LEGACY_CHAIN_BLOCKS {
-            return Err("giving up after checking too many blocks".into());
-        }
-
-        // If a transaction `network_upgrade` field is different from the network upgrade calculated
-        // using our activation heights, the Zebra instance that verified those blocks had different
-        // network upgrade heights.
-        block
-            .check_transaction_network_upgrade_consistency(network)
-            .map_err(|_| "inconsistent network upgrade found in transaction")?;
-
-        // If we find at least one transaction with a valid `network_upgrade` field, the Zebra instance that
-        // verified those blocks used the same network upgrade heights. (Up to this point in the chain.)
-        let has_network_upgrade = block
-            .transactions
-            .iter()
-            .find_map(|trans| trans.network_upgrade())
-            .is_some();
-        if has_network_upgrade {
-            return Ok(());
-        }
-    }
-
-    Ok(())
 }

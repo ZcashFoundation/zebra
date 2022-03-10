@@ -158,3 +158,29 @@ impl Strategy for PreparedChain {
         })
     }
 }
+
+/// Initialize a state service with blocks.
+pub async fn populated_state(
+    blocks: impl IntoIterator<Item = Arc<Block>>,
+    network: Network,
+) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+    let requests = blocks
+        .into_iter()
+        .map(|block| Request::CommitFinalizedBlock(block.into()));
+
+    let mut state = init_test(network);
+
+    let mut responses = FuturesUnordered::new();
+
+    for request in requests {
+        let rsp = state.ready().await.unwrap().call(request);
+        responses.push(rsp);
+    }
+
+    use futures::StreamExt;
+    while let Some(rsp) = responses.next().await {
+        rsp.expect("blocks should commit just fine");
+    }
+
+    state
+}
