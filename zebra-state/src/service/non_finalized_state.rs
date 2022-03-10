@@ -204,7 +204,7 @@ impl NonFinalizedState {
     #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
     fn validate_and_commit(
         &self,
-        mut new_chain: Arc<Chain>,
+        new_chain: Arc<Chain>,
         prepared: PreparedBlock,
         finalized_state: &FinalizedState,
     ) -> Result<Arc<Chain>, ValidateContextError> {
@@ -243,9 +243,10 @@ impl NonFinalizedState {
 
         // We're pretty sure the new block is valid,
         // so clone the inner chain if needed, then add the new block.
-        Arc::make_mut(&mut new_chain).push(contextual)?;
-
-        Ok(new_chain)
+        Arc::try_unwrap(new_chain)
+            .unwrap_or_else(|shared_chain| (*shared_chain).clone())
+            .push(contextual)
+            .map(Arc::new)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
