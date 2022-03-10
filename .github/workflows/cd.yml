@@ -110,8 +110,8 @@ jobs:
           CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:buildcache
+        cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:buildcache,mode=max
 
   deploy-nodes:
     name: Deploy Mainnet nodes
@@ -136,7 +136,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
+        uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 
@@ -202,7 +202,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
+        uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 

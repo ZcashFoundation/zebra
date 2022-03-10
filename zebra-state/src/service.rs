@@ -7,9 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::future::FutureExt;
+use futures::{future::FutureExt, stream::FuturesUnordered};
 use tokio::sync::oneshot;
-use tower::{util::BoxService, Service};
+use tower::{util::BoxService, Service, ServiceExt};
 use tracing::instrument;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -841,6 +841,33 @@ pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxEr
     let (state_service, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
+}
+
+/// Initialize a state service with blocks.
+#[cfg(any(test, feature = "proptest-impl"))]
+pub async fn populated_state(
+    blocks: impl IntoIterator<Item = Arc<Block>>,
+    network: Network,
+) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+    let requests = blocks
+        .into_iter()
+        .map(|block| Request::CommitFinalizedBlock(block.into()));
+
+    let mut state = init_test(network);
+
+    let mut responses = FuturesUnordered::new();
+
+    for request in requests {
+        let rsp = state.ready().await.unwrap().call(request);
+        responses.push(rsp);
+    }
+
+    use futures::StreamExt;
+    while let Some(rsp) = responses.next().await {
+        rsp.expect("blocks should commit just fine");
+    }
+
+    state
 }
 
 /// Check if zebra is following a legacy chain and return an error if so.

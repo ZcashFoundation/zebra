@@ -1,3 +1,5 @@
+//! Randomised property tests for the non-finalized state.
+
 use std::{collections::BTreeMap, env, sync::Arc};
 
 use zebra_test::prelude::*;
@@ -62,7 +64,7 @@ fn push_genesis_chain() -> Result<()> {
 
                 chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), None));
 
-                only_chain = only_chain
+                only_chain
                     .push(block.clone())
                     .map_err(|e| (e, chain_values.clone()))
                     .expect("invalid chain value pools");
@@ -103,7 +105,7 @@ fn push_history_tree_chain() -> Result<()> {
             .iter()
             .take(count)
             .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                only_chain = only_chain.push(block)?;
+                only_chain.push(block)?;
             }
 
         prop_assert_eq!(only_chain.blocks.len(), count);
@@ -152,7 +154,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
                 block,
                 partial_chain.unspent_utxos(),
             )?;
-            partial_chain = partial_chain
+            partial_chain
                 .push(block)
                 .expect("partial chain push is valid");
         }
@@ -169,7 +171,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         for block in chain.iter().cloned() {
             let block =
                 ContextuallyValidBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
-            full_chain = full_chain
+            full_chain
                 .push(block.clone())
                 .expect("full chain push is valid");
 
@@ -219,7 +221,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         for block in chain.iter().skip(fork_at_count).cloned() {
             let block =
                 ContextuallyValidBlock::with_block_and_spent_utxos(block, forked.unspent_utxos())?;
-            forked = forked.push(block).expect("forked chain push is valid");
+            forked.push(block).expect("forked chain push is valid");
         }
 
         prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
@@ -259,13 +261,13 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
             .iter()
             .take(fork_at_count)
             .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                partial_chain = partial_chain.push(block)?;
+                partial_chain.push(block)?;
             }
 
         for block in chain
             .iter()
             .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                full_chain = full_chain.push(block.clone())?;
+                full_chain.push(block.clone())?;
             }
 
         let mut forked = full_chain
@@ -289,7 +291,7 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
             .iter()
             .skip(fork_at_count)
             .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
-                forked = forked.push(block)?;
+                forked.push(block)?;
         }
 
         prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
@@ -326,7 +328,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             .iter()
             .take(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                full_chain = full_chain.push(block)?;
+                full_chain.push(block)?;
             }
 
         let mut partial_chain = Chain::new(
@@ -341,14 +343,14 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             .iter()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                partial_chain = partial_chain.push(block.clone())?;
+                partial_chain.push(block.clone())?;
             }
 
         for block in chain
             .iter()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                full_chain = full_chain.push(block.clone())?;
+                full_chain.push(block.clone())?;
             }
 
         for _ in 0..finalized_count {
@@ -396,7 +398,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             .iter()
             .take(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                full_chain = full_chain.push(block)?;
+                full_chain.push(block)?;
             }
 
         let mut partial_chain = Chain::new(
@@ -412,14 +414,14 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             .iter()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                partial_chain = partial_chain.push(block.clone())?;
+                partial_chain.push(block.clone())?;
             }
 
         for block in chain
             .iter()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                full_chain = full_chain.push(block.clone())?;
+                full_chain.push(block.clone())?;
             }
 
         for _ in 0..finalized_count {
@@ -561,8 +563,8 @@ fn different_blocks_different_chains() -> Result<()> {
         } else {
             Default::default()
         };
-        let chain1 = Chain::new(Network::Mainnet, Default::default(), Default::default(), Default::default(), finalized_tree1, ValueBalance::fake_populated_pool());
-        let chain2 = Chain::new(Network::Mainnet, Default::default(), Default::default(), Default::default(), finalized_tree2, ValueBalance::fake_populated_pool());
+        let mut chain1 = Chain::new(Network::Mainnet, Default::default(), Default::default(), Default::default(), finalized_tree1, ValueBalance::fake_populated_pool());
+        let mut chain2 = Chain::new(Network::Mainnet, Default::default(), Default::default(), Default::default(), finalized_tree2, ValueBalance::fake_populated_pool());
 
         let block1 = vec1[1].clone().prepare().test_with_zero_spent_utxos();
         let block2 = vec2[1].clone().prepare().test_with_zero_spent_utxos();
@@ -570,8 +572,8 @@ fn different_blocks_different_chains() -> Result<()> {
         let result1 = chain1.push(block1.clone());
         let result2 = chain2.push(block2.clone());
 
-        // if there is an error, we don't get the chains back
-        if let (Ok(mut chain1), Ok(chain2)) = (result1, result2) {
+        // if there is an error, the chains come back empty
+        if result1.is_ok() && result2.is_ok() {
             if block1 == block2 {
                 // the blocks were equal, so the chains should be equal
 

@@ -11,7 +11,8 @@ queue_rules:
       - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
       - check-success=Test stable on ubuntu-latest
       - check-success=Test stable on macOS-latest
-      - check-success=Test stable on windows-latest
+      # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
+      # - check-success=Test stable on windows-latest
       - check-success=Coverage nightly
       - check-success=Clippy
       - check-success=Rustfmt
@@ -28,7 +29,7 @@ queue_rules:
       - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
       - check-success=Test stable on ubuntu-latest
       - check-success=Test stable on macOS-latest
-      - check-success=Test stable on windows-latest
+      # - check-success=Test stable on windows-latest
       - check-success=Coverage nightly
       - check-success=Clippy
       - check-success=Rustfmt
@@ -45,7 +46,7 @@ queue_rules:
       - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
       - check-success=Test stable on ubuntu-latest
       - check-success=Test stable on macOS-latest
-      - check-success=Test stable on windows-latest
+      # - check-success=Test stable on windows-latest
       - check-success=Coverage nightly
       - check-success=Clippy
       - check-success=Rustfmt

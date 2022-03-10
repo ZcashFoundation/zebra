@@ -197,18 +197,31 @@ impl Chain {
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
-    /// If the block is invalid, drop this chain and return an error.
+    /// If the block is invalid, clears the chain, and returns an error.
     ///
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
     /// [`update_chain_state_with`] returns success.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: ContextuallyValidBlock) -> Result<Chain, ValidateContextError> {
+    pub fn push(&mut self, block: ContextuallyValidBlock) -> Result<(), ValidateContextError> {
         // update cumulative data members
-        self.update_chain_tip_with(&block)?;
+        if let Err(error) = self.update_chain_tip_with(&block) {
+            // The chain could be in an invalid half-updated state, so clear its data.
+            *self = Chain::new(
+                self.network,
+                sprout::tree::NoteCommitmentTree::default(),
+                sapling::tree::NoteCommitmentTree::default(),
+                orchard::tree::NoteCommitmentTree::default(),
+                HistoryTree::default(),
+                ValueBalance::zero(),
+            );
+
+            return Err(error);
+        }
+
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
 
-        Ok(self)
+        Ok(())
     }
 
     /// Remove the lowest height block of the non-finalized portion of a chain.
@@ -316,12 +329,30 @@ impl Chain {
         Ok(Some(forked))
     }
 
+    /// Returns the block hash of the tip block.
     pub fn non_finalized_tip_hash(&self) -> block::Hash {
         self.blocks
             .values()
             .next_back()
             .expect("only called while blocks is populated")
             .hash
+    }
+
+    /// Returns the block hash of the non-finalized root block.
+    pub fn non_finalized_root_hash(&self) -> block::Hash {
+        self.blocks
+            .values()
+            .next()
+            .expect("only called while blocks is populated")
+            .hash
+    }
+
+    /// Returns the block hash of the `n`th block from the non-finalized root.
+    ///
+    /// This is the block at `lowest_height() + n`.
+    #[allow(dead_code)]
+    pub fn non_finalized_nth_hash(&self, n: usize) -> Option<block::Hash> {
+        self.blocks.values().nth(n).map(|block| block.hash)
     }
 
     /// Remove the highest height block of the non-finalized portion of a chain.
@@ -358,8 +389,15 @@ impl Chain {
         self.blocks.keys().next_back().cloned()
     }
 
+    /// Returns true if the non-finalized part of this chain is empty.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
+    }
+
+    /// Returns the non-finalized length of this chain.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.blocks.len()
     }
 
     /// Returns the unspent transaction outputs (UTXOs) in this non-finalized chain.
