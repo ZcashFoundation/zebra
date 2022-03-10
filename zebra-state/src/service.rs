@@ -36,16 +36,15 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::HashOrHeight, service::chain_tip::ChainTipBlock, BoxError, CloneError,
-    CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request, Response,
-    ValidateContextError,
-};
-
-use self::{
-    chain_tip::{ChainTipChange, ChainTipSender, LatestChainTip},
-    finalized_state::FinalizedState,
-    non_finalized_state::{NonFinalizedState, QueuedBlocks},
-    pending_utxos::PendingUtxos,
+    request::HashOrHeight,
+    service::{
+        chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
+        finalized_state::{DiskDb, FinalizedState},
+        non_finalized_state::{Chain, NonFinalizedState, QueuedBlocks},
+        pending_utxos::PendingUtxos,
+    },
+    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request,
+    Response, ValidateContextError,
 };
 
 pub mod block_iter;
