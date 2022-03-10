@@ -20,7 +20,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tower::{util::BoxService, Service};
 use tracing::instrument;
 
@@ -112,12 +112,53 @@ pub(crate) struct StateService {
 
     /// A sender channel for the current best chain tip.
     chain_tip_sender: ChainTipSender,
+
+    /// A sender channel for the current best non-finalized chain.
+    best_chain_sender: watch::Sender<Option<Arc<Chain>>>,
+}
+
+/// A read-only service for accessing Zebra's cached blockchain state.
+///
+/// This service provides read-only access to:
+/// - the non-finalized state: the ~100 most recent blocks.
+/// - the finalized state: older blocks that have many confirmations.
+///
+/// Requests to this service are processed in parallel,
+/// ignoring any blocks queued by the read-write [`StateService`].
+///
+/// This quick response behavior is better for most state users.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct ReadStateService {
+    /// The shared inner on-disk database for the finalized state.
+    ///
+    /// RocksDB allows reads and writes via a shared reference.
+    /// TODO: prevent write access via this type.
+    ///
+    /// This chain is updated concurrently with requests,
+    /// so it might include some block data that is also in `best_mem`.
+    disk: DiskDb,
+
+    /// A watch channel for the current best in-memory chain.
+    ///
+    /// This chain is only updated between requests,
+    /// so it might include some block data that is also on `disk`.
+    best_mem: watch::Receiver<Option<Arc<Chain>>>,
+
+    /// The configured Zcash network.
+    network: Network,
 }
 
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub fn new(config: Config, network: Network) -> (Self, LatestChainTip, ChainTipChange) {
+    /// Create a new read-write state service.
+    /// Returns the read-write and read-only state services,
+    /// and read-only watch channels for its best chain tip.
+    pub fn new(
+        config: Config,
+        network: Network,
+    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let disk = FinalizedState::new(&config, network);
         let initial_tip = disk
             .tip_block()
@@ -127,6 +168,9 @@ impl StateService {
             ChainTipSender::new(initial_tip, network);
 
         let mem = NonFinalizedState::new(network);
+
+        let (read_only_service, best_chain_sender) = ReadStateService::new(&disk);
+
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
@@ -138,6 +182,7 @@ impl StateService {
             network,
             last_prune: Instant::now(),
             chain_tip_sender,
+            best_chain_sender,
         };
 
         tracing::info!("starting legacy chain check");
@@ -164,7 +209,7 @@ impl StateService {
         }
         tracing::info!("no legacy chain found");
 
-        (state, latest_chain_tip, chain_tip_change)
+        (state, read_only_service, latest_chain_tip, chain_tip_change)
     }
 
     /// Queue a finalized block for verification and storage in the finalized state.
@@ -242,7 +287,11 @@ impl StateService {
         );
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
-        let tip_block = self.mem.best_tip_block().map(ChainTipBlock::from);
+        let best_chain = self.mem.best_chain();
+        let tip_block = best_chain
+            .and_then(|chain| chain.tip_block())
+            .cloned()
+            .map(ChainTipBlock::from);
 
         // update metrics using the best non-finalized tip
         if let Some(tip_block) = tip_block.as_ref() {
@@ -255,6 +304,13 @@ impl StateService {
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
             metrics::gauge!("zcash.chain.verified.block.height", tip_block.height.0 as _);
+        }
+
+        // update the chain watch channels
+
+        if self.best_chain_sender.receiver_count() > 0 {
+            // If the final receiver was just dropped, ignore the error.
+            let _ = self.best_chain_sender.send(best_chain.cloned());
         }
 
         self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
@@ -609,6 +665,26 @@ impl StateService {
     }
 }
 
+impl ReadStateService {
+    /// Creates a new read-only state service, using the provided finalized state.
+    ///
+    /// Returns the newly created service,
+    /// and a watch channel for updating its best non-finalized chain.
+    pub(crate) fn new(disk: &FinalizedState) -> (Self, watch::Sender<Option<Arc<Chain>>>) {
+        let (best_chain_sender, best_chain_receiver) = watch::channel(None);
+
+        let read_only_service = Self {
+            disk: disk.db().clone(),
+            best_mem: best_chain_receiver,
+            network: disk.network(),
+        };
+
+        tracing::info!("created new read-only state service");
+
+        (read_only_service, best_chain_sender)
+    }
+}
+
 impl Service<Request> for StateService {
     type Response = Response;
     type Error = BoxError;
@@ -756,12 +832,15 @@ impl Service<Request> for StateService {
 }
 
 /// Initialize a state service from the provided [`Config`].
-/// Returns a boxed state service, and receivers for state chain tip updates.
+/// Returns a boxed state service, a read-only state service,
+/// and receivers for state chain tip updates.
 ///
 /// Each `network` has its own separate on-disk database.
 ///
-/// To share access to the state, wrap the returned service in a `Buffer`. It's
-/// possible to construct multiple state services in the same application (as
+/// To share access to the state, wrap the returned service in a `Buffer`,
+/// or clone the returned [`ReadStateService`].
+///
+/// It's possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
 pub fn init(
@@ -769,13 +848,16 @@ pub fn init(
     network: Network,
 ) -> (
     BoxService<Request, Response, BoxError>,
+    ReadStateService,
     LatestChainTip,
     ChainTipChange,
 ) {
-    let (state_service, latest_chain_tip, chain_tip_change) = StateService::new(config, network);
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
+        StateService::new(config, network);
 
     (
         BoxService::new(state_service),
+        read_only_state_service,
         latest_chain_tip,
         chain_tip_change,
     )
@@ -786,7 +868,7 @@ pub fn init(
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let (state_service, _, _) = StateService::new(Config::ephemeral(), network);
+    let (state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
 }

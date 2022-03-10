@@ -698,7 +698,7 @@ async fn setup(
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, latest_chain_tip, chain_tip_change) =
+    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);

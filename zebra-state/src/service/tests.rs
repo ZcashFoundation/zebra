@@ -390,7 +390,7 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);
@@ -443,7 +443,7 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, _, _) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(state_service.disk.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(

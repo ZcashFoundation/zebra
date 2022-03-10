@@ -645,7 +645,7 @@ async fn setup(
 
     // State
     let state_config = StateConfig::ephemeral();
-    let (state_service, latest_chain_tip, chain_tip_change) =
+    let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
