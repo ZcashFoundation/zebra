@@ -1,5 +1,17 @@
+//! [`tower::Service`]s for Zebra's cached chain state.
+//!
+//! Zebra provides cached state access via two main services:
+//! - [`StateService`]: a read-write service that waits for queued blocks.
+//! - [`ReadStateService`]: a read-only service that answers from the most recent committed block.
+//!
+//! Most users should prefer [`ReadStateService`], unless they need to wait for
+//! verified blocks to be committed. (For example, the syncer and mempool tasks.)
+//!
+//! Zebra also provides access to the best chain tip via:
+//! - [`LatestChainTip`]: a read-only channel that contains the latest committed tip.
+//! - [`ChainTipChange`]: a read-only channel that can asynchronously await chain tip changes.
+
 use std::{
-    convert::TryInto,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -69,20 +81,37 @@ pub type QueuedFinalized = (
 /// - the finalized state: older blocks that have many confirmations.
 ///                        Zebra stores the single best chain in the finalized state,
 ///                        and re-loads it from disk when restarted.
+///
+/// Requests to this service are processed in series,
+/// so read requests wait for all queued write requests to complete,
+/// then return their answers.
+///
+/// This behaviour is implicitly used by Zebra's syncer,
+/// to delay the next ObtainTips until all queued blocks have been commited.
+///
+/// But most state users can ignore any queued blocks, and get faster read responses
+/// using the [`ReadOnlyStateService`].
+#[derive(Debug)]
 pub(crate) struct StateService {
-    /// Holds data relating to finalized chain state.
+    /// The finalized chain state, including its on-disk database.
     pub(crate) disk: FinalizedState,
-    /// Holds data relating to non-finalized chain state.
+
+    /// The non-finalized chain state, including its in-memory chain forks.
     mem: NonFinalizedState,
+
+    /// The configured Zcash network.
+    network: Network,
+
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
-    /// The set of outpoints with pending requests for their associated transparent::Output
+
+    /// The set of outpoints with pending requests for their associated transparent::Output.
     pending_utxos: PendingUtxos,
-    /// The configured Zcash network
-    network: Network,
-    /// Instant tracking the last time `pending_utxos` was pruned
+
+    /// Instant tracking the last time `pending_utxos` was pruned.
     last_prune: Instant,
-    /// The current best chain tip height.
+
+    /// A sender channel for the current best chain tip.
     chain_tip_sender: ChainTipSender,
 }
 
