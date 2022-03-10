@@ -6,7 +6,7 @@
 
 use jsonrpc_core;
 use jsonrpc_http_server::ServerBuilder;
-use tower::buffer::Buffer;
+use tower::{buffer::Buffer, Service};
 use tracing::*;
 use tracing_futures::Instrument;
 
@@ -26,21 +26,28 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<Mempool>(
+    pub fn spawn<Mempool, State>(
         config: Config,
         app_version: String,
         mempool: Buffer<Mempool, mempool::Request>,
+        state: Buffer<State, zebra_state::Request>,
     ) -> tokio::task::JoinHandle<()>
     where
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
             + 'static,
         Mempool::Future: Send,
+        State: Service<
+                zebra_state::Request,
+                Response = zebra_state::Response,
+                Error = zebra_state::BoxError,
+            > + 'static,
+        State::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl::new(app_version, mempool);
+            let rpc_impl = RpcImpl::new(app_version, mempool, state);
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
