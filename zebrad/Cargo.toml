@@ -54,7 +54,7 @@ num-integer = "0.1.44"
 rand = { version = "0.8.5", package = "rand" }
 
 [build-dependencies]
-vergen = { version = "6.0.2", default-features = false, features = ["cargo", "git"] }
+vergen = { version = "7.0.0", default-features = false, features = ["cargo", "git"] }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
