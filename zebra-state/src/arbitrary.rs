@@ -8,7 +8,10 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-use crate::{request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, PreparedBlock};
+use crate::{
+    request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, FinalizedBlock,
+    PreparedBlock,
+};
 
 /// Mocks computation done during semantic validation
 pub trait Prepare {
@@ -21,7 +24,8 @@ impl Prepare for Arc<Block> {
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs =
+            transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
 
         PreparedBlock {
             block,
@@ -153,5 +157,29 @@ impl ContextuallyValidBlock {
     /// Only for use in tests.
     pub fn test_with_zero_chain_pool_change(block: impl Into<PreparedBlock>) -> Self {
         Self::test_with_chain_pool_change(block, ValueBalance::zero())
+    }
+}
+
+impl FinalizedBlock {
+    /// Create a block that's ready to be committed to the finalized state,
+    /// using a precalculated [`block::Hash`] and [`block::Height`].
+    ///
+    /// This is a test-only method, prefer [`FinalizedBlock::with_hash`].
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn with_hash_and_height(
+        block: Arc<Block>,
+        hash: block::Hash,
+        height: block::Height,
+    ) -> Self {
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let new_outputs = transparent::new_outputs_with_height(&block, height, &transaction_hashes);
+
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        }
     }
 }

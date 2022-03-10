@@ -1,3 +1,5 @@
+//! Fixed test vectors for the non-finalized state.
+
 use std::sync::Arc;
 
 use zebra_chain::{

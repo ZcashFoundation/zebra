@@ -45,7 +45,7 @@ async fn rpc_getinfo() {
 async fn rpc_getblock() {
     zebra_test::init();
 
-    // Put `NUMBER_OF_BLOCKS` blocks in a vector
+    // Put the first `NUMBER_OF_BLOCKS` blocks in a vector
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
         .range(0..=NUMBER_OF_BLOCKS)
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())

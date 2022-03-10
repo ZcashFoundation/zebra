@@ -10,9 +10,7 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-#![allow(clippy::unit_arg)]
-
-use std::{cell::Cell, fmt};
+use std::{fmt, ops::Deref};
 
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::{bridgetree, Frontier};
@@ -201,7 +199,7 @@ pub enum NoteCommitmentTreeError {
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
     ///
@@ -232,13 +230,9 @@ pub struct NoteCommitmentTree {
     /// the tree). This is particularly important since we decided to
     /// instantiate the trees from the genesis block, for simplicity.
     ///
-    /// [`Cell`] offers interior mutability (it works even with a non-mutable
-    /// reference to the tree) but it prevents the tree (and anything that uses
-    /// it) from being shared between threads. If this ever becomes an issue we
-    /// can leave caching to the callers (which requires much more code), or
-    /// replace `Cell` with `Arc<Mutex<_>>` (and be careful of deadlocks and
-    /// async code.)
-    cached_root: Cell<Option<Root>>,
+    /// We use a [`RwLock`] for this cache, because it is only written once per tree update.
+    /// Each tree has its own cached root, a new lock is created for each clone.
+    cached_root: std::sync::RwLock<Option<Root>>,
 }
 
 impl NoteCommitmentTree {
@@ -248,7 +242,13 @@ impl NoteCommitmentTree {
     pub fn append(&mut self, cm: NoteCommitment) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm.into()) {
             // Invalidate cached root
-            self.cached_root.replace(None);
+            let cached_root = self
+                .cached_root
+                .get_mut()
+                .expect("a thread that previously held exclusive lock access panicked");
+
+            *cached_root = None;
+
             Ok(())
         } else {
             Err(NoteCommitmentTreeError::FullTree)
@@ -258,13 +258,28 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree; used as an anchor in Sprout
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        match self.cached_root.get() {
+        if let Some(root) = self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked")
+            .deref()
+        {
             // Return cached root.
-            Some(root) => root,
+            return *root;
+        }
+
+        // Get exclusive access, compute the root, and cache it.
+        let mut write_root = self
+            .cached_root
+            .write()
+            .expect("a thread that previously held exclusive lock access panicked");
+        match write_root.deref() {
+            // Another thread got write access first, return cached root.
+            Some(root) => *root,
             None => {
                 // Compute root and cache it.
                 let root = Root(self.inner.root().0);
-                self.cached_root.replace(Some(root));
+                *write_root = Some(root);
                 root
             }
         }
@@ -291,6 +306,21 @@ impl NoteCommitmentTree {
     /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
         self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
+    }
+}
+
+impl Clone for NoteCommitmentTree {
+    /// Clones the inner tree, and creates a new `RwLock` with the cloned root data.
+    fn clone(&self) -> Self {
+        let cached_root = *self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked");
+
+        Self {
+            inner: self.inner.clone(),
+            cached_root: std::sync::RwLock::new(cached_root),
+        }
     }
 }
 

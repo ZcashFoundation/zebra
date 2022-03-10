@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2.4.0
+    - uses: actions/checkout@v3.0.0
       with:
         persist-credentials: false
 
@@ -96,9 +96,10 @@ jobs:
         target: runtime
         context: .
         file: ./docker/Dockerfile
-        platforms: |
-          linux/amd64
-          linux/arm64
+        # TODO: building crates is taking too long with arm64 and it's timing out on GHA
+        # platforms: |
+        #   linux/amd64
+        #   linux/arm64
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
@@ -109,8 +110,8 @@ jobs:
           CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
           SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
         push: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:buildcache
+        cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:buildcache,mode=max
 
   deploy-nodes:
     name: Deploy Mainnet nodes
@@ -120,7 +121,7 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -135,7 +136,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
+        uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 
@@ -186,7 +187,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.0
         with:
           persist-credentials: false
 
@@ -201,7 +202,7 @@ jobs:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
+        uses: google-github-actions/setup-gcloud@v0.6.0
         with:
           project_id: ${{ env.PROJECT_ID }}
 

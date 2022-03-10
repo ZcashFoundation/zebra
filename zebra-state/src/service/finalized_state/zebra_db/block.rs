@@ -91,7 +91,7 @@ impl FinalizedState {
                     .expect("block will exist if TransactionLocation does");
 
                 // TODO: store transactions in a separate database index (#3151)
-                block.transactions[index as usize].clone()
+                block.transactions[index.as_usize()].clone()
             })
     }
 }
@@ -120,10 +120,6 @@ impl DiskWriteBatch {
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let hash_by_height = db.cf_handle("hash_by_height").unwrap();
-        let height_by_hash = db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = db.cf_handle("block_by_height").unwrap();
-
         let FinalizedBlock {
             block,
             hash,
@@ -131,12 +127,9 @@ impl DiskWriteBatch {
             ..
         } = &finalized;
 
-        // Index the block
-        self.zs_insert(hash_by_height, height, hash);
-        self.zs_insert(height_by_hash, hash, height);
-
-        // TODO: as part of ticket #3151, commit transaction data, but not UTXOs or address indexes
-        self.zs_insert(block_by_height, height, block);
+        // Commit block and transaction data,
+        // but not transaction indexes, note commitments, or UTXOs.
+        self.prepare_block_header_transactions_batch(db, &finalized)?;
 
         // # Consensus
         //
@@ -151,6 +144,7 @@ impl DiskWriteBatch {
             return Ok(());
         }
 
+        // Commit transaction indexes
         self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
 
         self.prepare_note_commitment_batch(
@@ -161,10 +155,43 @@ impl DiskWriteBatch {
             history_tree,
         )?;
 
+        // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;
 
         // The block has passed contextual validation, so update the metrics
         FinalizedState::block_precommit_metrics(block, *hash, *height);
+
+        Ok(())
+    }
+
+    /// Prepare a database batch containing the block header and transactions
+    /// from `finalized.block`, and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - This method does not currently return any errors.
+    pub fn prepare_block_header_transactions_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &FinalizedBlock,
+    ) -> Result<(), BoxError> {
+        let hash_by_height = db.cf_handle("hash_by_height").unwrap();
+        let height_by_hash = db.cf_handle("height_by_hash").unwrap();
+        let block_by_height = db.cf_handle("block_by_height").unwrap();
+
+        let FinalizedBlock {
+            block,
+            hash,
+            height,
+            ..
+        } = finalized;
+
+        // Index the block
+        self.zs_insert(hash_by_height, height, hash);
+        self.zs_insert(height_by_hash, hash, height);
+
+        // Commit block and transaction data, but not UTXOs or address indexes
+        self.zs_insert(block_by_height, height, block);
 
         Ok(())
     }
@@ -224,12 +251,7 @@ impl DiskWriteBatch {
             .zip(transaction_hashes.iter())
             .enumerate()
         {
-            let transaction_location = TransactionLocation {
-                height: *height,
-                index: transaction_index
-                    .try_into()
-                    .expect("no more than 4 billion transactions per block"),
-            };
+            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
             self.zs_insert(tx_by_hash, transaction_hash, transaction_location);
 
             self.prepare_nullifier_batch(db, transaction)?;
