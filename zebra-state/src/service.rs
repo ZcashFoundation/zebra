@@ -7,9 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{future::FutureExt, stream::FuturesUnordered};
+use futures::future::FutureExt;
 use tokio::sync::oneshot;
-use tower::{util::BoxService, Service, ServiceExt};
+use tower::{util::BoxService, Service};
 use tracing::instrument;
 
 #[cfg(any(test, feature = "proptest-impl"))]

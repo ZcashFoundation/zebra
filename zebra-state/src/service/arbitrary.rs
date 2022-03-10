@@ -1,20 +1,27 @@
+//! Arbitrary data generation and test setup for Zebra's state.
+
 use std::sync::Arc;
 
+use futures::{stream::FuturesUnordered, StreamExt};
 use proptest::{
     num::usize::BinarySearch,
     prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
+use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
-    block::Block, fmt::SummaryDebug, history_tree::HistoryTree, parameters::NetworkUpgrade,
+    block::Block,
+    fmt::SummaryDebug,
+    history_tree::HistoryTree,
+    parameters::{Network, NetworkUpgrade},
     LedgerState,
 };
 
-use crate::arbitrary::Prepare;
-
-use super::*;
+use crate::{
+    arbitrary::Prepare, init_test, service::check, BoxError, PreparedBlock, Request, Response,
+};
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
 
@@ -177,7 +184,6 @@ pub async fn populated_state(
         responses.push(rsp);
     }
 
-    use futures::StreamExt;
     while let Some(rsp) = responses.next().await {
         rsp.expect("blocks should commit just fine");
     }
