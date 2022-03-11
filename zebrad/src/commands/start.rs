@@ -53,6 +53,11 @@
 //!  * Transaction Gossip Task
 //!    * runs in the background and gossips newly added mempool transactions
 //!      to peers
+//!
+//! Remote Procedure Calls:
+//!  * JSON-RPC Service
+//!    * answers RPC client requests using the State Service and Mempool Service
+//!    * submits client transactions to the node's mempool
 
 use std::{cmp::max, ops::Add, time::Duration};
 

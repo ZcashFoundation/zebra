@@ -3,6 +3,9 @@
 //! This endpoint is compatible with clients that incorrectly send
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
+//!
+//! See the full list of
+//! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
 use jsonrpc_core;
 use jsonrpc_http_server::ServerBuilder;
