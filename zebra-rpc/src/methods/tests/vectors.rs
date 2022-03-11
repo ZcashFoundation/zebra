@@ -141,24 +141,3 @@ async fn rpc_getbestblockhash() {
 
     mempool.expect_no_requests().await;
 }
-
-#[tokio::test]
-async fn rpc_getrawmempool() {
-    zebra_test::init();
-
-    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-    // Init RPC
-    let _rpc = RpcImpl {
-        app_version: "Zebra version test".to_string(),
-        mempool: Buffer::new(mempool.clone(), 1),
-        state: Buffer::new(state.clone(), 1),
-    };
-
-    // Hangs
-    //let raw_mempool = rpc.get_raw_mempool().await.unwrap();
-
-    mempool.expect_no_requests().await;
-    state.expect_no_requests().await;
-}
