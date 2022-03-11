@@ -182,6 +182,8 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
+    /// Opens or creates the database at `config.path` for `network`,
+    /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
         let db_options = DiskDb::options();

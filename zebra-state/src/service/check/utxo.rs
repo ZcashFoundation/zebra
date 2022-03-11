@@ -9,7 +9,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::finalized_state::FinalizedState,
+    service::finalized_state::ZebraDb,
     PreparedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
@@ -39,7 +39,7 @@ pub fn transparent_spend(
     prepared: &PreparedBlock,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
-    finalized_state: &FinalizedState,
+    finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::Utxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
 
@@ -117,7 +117,7 @@ fn transparent_spend_chain_order(
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
-    finalized_state: &FinalizedState,
+    finalized_state: &ZebraDb,
 ) -> Result<transparent::Utxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {
         // reject the spend if it uses an output from this block,

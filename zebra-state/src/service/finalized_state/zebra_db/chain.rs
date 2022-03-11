@@ -25,12 +25,13 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        FinalizedBlock, FinalizedState,
+        zebra_db::ZebraDb,
+        FinalizedBlock,
     },
     BoxError,
 };
 
-impl FinalizedState {
+impl ZebraDb {
     /// Returns the ZIP-221 history tree of the finalized tip or `None`
     /// if it does not exist yet in the state (pre-Heartwood).
     pub fn history_tree(&self) -> HistoryTree {
