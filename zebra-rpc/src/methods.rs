@@ -119,24 +119,23 @@ where
     /// A handle to the mempool service.
     mempool: Buffer<Mempool, mempool::Request>,
     /// A handle to the state service.
-    state: Buffer<State, zebra_state::Request>,
+    state: State,
 }
 
 impl<Mempool, State> RpcImpl<Mempool, State>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = zebra_state::BoxError,
-        > + 'static,
-    State::Future: Send,
+        zebra_state::Request,
+        Response = zebra_state::Response,
+        Error = zebra_state::BoxError,
+    >,
 {
     /// Create a new instance of the RPC handler.
     pub fn new(
         app_version: String,
         mempool: Buffer<Mempool, mempool::Request>,
-        state: Buffer<State, zebra_state::Request>,
+        state: State,
     ) -> Self {
         RpcImpl {
             app_version,
@@ -155,7 +154,10 @@ where
             zebra_state::Request,
             Response = zebra_state::Response,
             Error = zebra_state::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     State::Future: Send,
 {
     fn get_info(&self) -> Result<GetInfo> {

@@ -3,6 +3,9 @@
 //! This endpoint is compatible with clients that incorrectly send
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
+//!
+//! See the full list of
+//! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
 use jsonrpc_core;
 use jsonrpc_http_server::ServerBuilder;
@@ -30,7 +33,7 @@ impl RpcServer {
         config: Config,
         app_version: String,
         mempool: Buffer<Mempool, mempool::Request>,
-        state: Buffer<State, zebra_state::Request>,
+        state: State,
     ) -> tokio::task::JoinHandle<()>
     where
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
@@ -40,7 +43,10 @@ impl RpcServer {
                 zebra_state::Request,
                 Response = zebra_state::Response,
                 Error = zebra_state::BoxError,
-            > + 'static,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
         State::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {

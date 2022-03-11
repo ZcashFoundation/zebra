@@ -10,7 +10,7 @@ mod tests;
 
 pub use queued_blocks::QueuedBlocks;
 
-use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
+use std::{collections::BTreeSet, mem, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
@@ -332,9 +332,11 @@ impl NonFinalizedState {
     }
 
     /// Returns the block at the tip of the best chain.
-    pub fn best_tip_block(&self) -> Option<ContextuallyValidBlock> {
-        let (height, _hash) = self.best_tip()?;
-        self.best_block(height.into())
+    #[allow(dead_code)]
+    pub fn best_tip_block(&self) -> Option<&ContextuallyValidBlock> {
+        let best_chain = self.best_chain()?;
+
+        best_chain.tip_block()
     }
 
     /// Returns the height of `hash` in the best chain.
@@ -388,12 +390,9 @@ impl NonFinalizedState {
             .unwrap_or(false)
     }
 
-    /// Return the non-finalized portion of the current best chain
-    pub(crate) fn best_chain(&self) -> Option<&Chain> {
-        self.chain_set
-            .iter()
-            .next_back()
-            .map(|box_chain| box_chain.deref())
+    /// Return the non-finalized portion of the current best chain.
+    pub(crate) fn best_chain(&self) -> Option<&Arc<Chain>> {
+        self.chain_set.iter().next_back()
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.

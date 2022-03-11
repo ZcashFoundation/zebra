@@ -18,14 +18,9 @@ use std::{
     collections::HashMap,
     io::{stderr, stdout, Write},
     path::Path,
-    sync::Arc,
 };
 
-use zebra_chain::{
-    block::{self, Block},
-    history_tree::HistoryTree,
-    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
-};
+use zebra_chain::{block, history_tree::HistoryTree, parameters::Network};
 
 use crate::{
     service::{check, QueuedFinalized},
@@ -118,29 +113,19 @@ impl FinalizedState {
         new_state
     }
 
+    /// Returns the configured network for this database.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     /// Returns the `Path` where the files used by this database are located.
-    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         self.db.path()
     }
 
-    /// Returns the hash of the current finalized tip block.
-    pub fn finalized_tip_hash(&self) -> block::Hash {
-        self.tip()
-            .map(|(_, hash)| hash)
-            // if the state is empty, return the genesis previous block hash
-            .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
-    }
-
-    /// Returns the height of the current finalized tip block.
-    pub fn finalized_tip_height(&self) -> Option<block::Height> {
-        self.tip().map(|(height, _)| height)
-    }
-
-    /// Returns the tip block, if there is one.
-    pub fn tip_block(&self) -> Option<Arc<Block>> {
-        let (height, _hash) = self.tip()?;
-        self.block(height.into())
+    /// Returns a reference to the inner database instance.
+    pub(crate) fn db(&self) -> &DiskDb {
+        &self.db
     }
 
     /// Queue a finalized block to be committed to the state.

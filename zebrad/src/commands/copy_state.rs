@@ -111,8 +111,13 @@ impl CopyStateCmd {
         );
 
         let source_start_time = Instant::now();
-        let (mut source_state, _source_latest_chain_tip, _source_chain_tip_change) =
-            old_zs::init(source_config.clone(), network);
+        // TODO: use ReadStateService for the source?
+        let (
+            mut source_state,
+            _source_read_only_state_service,
+            _source_latest_chain_tip,
+            _source_chain_tip_change,
+        ) = old_zs::init(source_config.clone(), network);
 
         let elapsed = source_start_time.elapsed();
         info!(?elapsed, "finished initializing source state service");
@@ -123,8 +128,15 @@ impl CopyStateCmd {
         );
 
         let target_start_time = Instant::now();
-        let (mut target_state, _target_latest_chain_tip, _target_chain_tip_change) =
-            new_zs::init(target_config.clone(), network);
+        // TODO: call Options::PrepareForBulkLoad()
+        // See "What's the fastest way to load data into RocksDB?" in
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        let (
+            mut target_state,
+            _target_read_only_state_service,
+            _target_latest_chain_tip,
+            _target_chain_tip_change,
+        ) = new_zs::init(target_config.clone(), network);
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");

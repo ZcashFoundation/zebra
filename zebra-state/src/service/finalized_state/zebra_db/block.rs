@@ -78,6 +78,27 @@ impl FinalizedState {
         self.db.zs_get(block_by_height, &height)
     }
 
+    // Read tip block methods
+
+    /// Returns the hash of the current finalized tip block.
+    pub fn finalized_tip_hash(&self) -> block::Hash {
+        self.tip()
+            .map(|(_, hash)| hash)
+            // if the state is empty, return the genesis previous block hash
+            .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
+    }
+
+    /// Returns the height of the current finalized tip block.
+    pub fn finalized_tip_height(&self) -> Option<block::Height> {
+        self.tip().map(|(height, _)| height)
+    }
+
+    /// Returns the tip block, if there is one.
+    pub fn tip_block(&self) -> Option<Arc<Block>> {
+        let (height, _hash) = self.tip()?;
+        self.block(height.into())
+    }
+
     // Read transaction methods
 
     /// Returns the given transaction if it exists.

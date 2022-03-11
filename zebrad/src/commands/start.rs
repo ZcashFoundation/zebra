@@ -53,6 +53,11 @@
 //!  * Transaction Gossip Task
 //!    * runs in the background and gossips newly added mempool transactions
 //!      to peers
+//!
+//! Remote Procedure Calls:
+//!  * JSON-RPC Service
+//!    * answers RPC client requests using the State Service and Mempool Service
+//!    * submits client transactions to the node's mempool
 
 use std::{cmp::max, ops::Add, time::Duration};
 
@@ -101,7 +106,7 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let (state_service, latest_chain_tip, chain_tip_change) =
+        let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
