@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::NetworkUpgrade,
+    parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -147,4 +147,24 @@ pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
         .expect("digest has the correct size");
 
     AuthDigest(digest_bytes)
+}
+
+/// Return the destination address from a transparent output.
+///
+/// Returns None if the address type is not valid or unrecognized.
+pub(crate) fn transparent_output_address(
+    output: &transparent::Output,
+    network: Network,
+) -> Option<transparent::Address> {
+    let script = zcash_primitives::legacy::Script::from(&output.lock_script);
+    let alt_addr = script.address();
+    match alt_addr {
+        Some(zcash_primitives::legacy::TransparentAddress::PublicKey(pub_key_hash)) => Some(
+            transparent::Address::from_pub_key_hash(network, pub_key_hash),
+        ),
+        Some(zcash_primitives::legacy::TransparentAddress::Script(script_hash)) => {
+            Some(transparent::Address::from_script_hash(network, script_hash))
+        }
+        None => None,
+    }
 }
