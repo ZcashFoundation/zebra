@@ -137,13 +137,13 @@ pub struct ReadStateService {
     ///
     /// This chain is updated concurrently with requests,
     /// so it might include some block data that is also in `best_mem`.
-    disk: ZebraDb,
+    db: ZebraDb,
 
     /// A watch channel for the current best in-memory chain.
     ///
     /// This chain is only updated between requests,
     /// so it might include some block data that is also on `disk`.
-    best_mem: watch::Receiver<Option<Arc<Chain>>>,
+    best_chain_receiver: watch::Receiver<Option<Arc<Chain>>>,
 
     /// The configured Zcash network.
     network: Network,
@@ -676,8 +676,8 @@ impl ReadStateService {
         let (best_chain_sender, best_chain_receiver) = watch::channel(None);
 
         let read_only_service = Self {
-            disk: disk.db().clone(),
-            best_mem: best_chain_receiver,
+            db: disk.db().clone(),
+            best_chain_receiver,
             network: disk.network(),
         };
 
