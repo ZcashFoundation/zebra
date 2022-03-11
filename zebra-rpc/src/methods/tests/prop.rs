@@ -26,7 +26,11 @@ proptest! {
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
+            let rpc = RpcImpl::new(
+                "RPC test".to_owned(),
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+            );
             let hash = SentTransactionHash(transaction.hash());
 
             let transaction_bytes = transaction
@@ -68,7 +72,11 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
+            let rpc = RpcImpl::new(
+                "RPC test".to_owned(),
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+            );
 
             let transaction_bytes = transaction
                 .zcash_serialize_to_vec()
@@ -86,7 +94,6 @@ proptest! {
                 .respond(Err(DummyError));
 
             state.expect_no_requests().await?;
-
 
             let result = send_task
                 .await
@@ -116,7 +123,11 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
+            let rpc = RpcImpl::new(
+                "RPC test".to_owned(),
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+            );
 
             let transaction_bytes = transaction
                 .zcash_serialize_to_vec()
@@ -171,7 +182,11 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
+            let rpc = RpcImpl::new(
+                "RPC test".to_owned(),
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+            );
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
 
@@ -215,7 +230,11 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
+            let rpc = RpcImpl::new(
+                "RPC test".to_owned(),
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+            );
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
 
@@ -246,7 +265,8 @@ proptest! {
     /// Make the mock mempool service return a list of transaction IDs, and check that the RPC call
     /// returns those IDs as hexadecimal strings.
     #[test]
-    fn mempool_transactions_are_sent_to_caller(transaction_ids in any::<HashSet<UnminedTxId>>()) {
+    fn mempool_transactions_are_sent_to_caller(transaction_ids in any::<HashSet<UnminedTxId>>())
+    {
         let runtime = zebra_test::init_async();
         let _guard = runtime.enter();
 
@@ -257,7 +277,11 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
+            let rpc = RpcImpl::new(
+                "RPC test".to_owned(),
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+            );
 
             let call_task = tokio::spawn(rpc.get_raw_mempool());
             let expected_response: Vec<String> = transaction_ids
