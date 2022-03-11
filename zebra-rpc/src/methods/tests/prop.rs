@@ -8,6 +8,8 @@ use zebra_chain::{
     transaction::{Transaction, UnminedTx},
 };
 use zebra_node_services::mempool;
+use zebra_state::BoxError;
+
 use zebra_test::mock_service::MockService;
 
 use super::super::{Rpc, RpcImpl, SentTransactionHash};
@@ -20,7 +22,7 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let mut state = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
             let hash = SentTransactionHash(transaction.hash());
 
@@ -61,7 +63,7 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let mut state = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
@@ -109,7 +111,7 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let mut state = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
@@ -164,7 +166,7 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let mut state = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 
@@ -208,7 +210,7 @@ proptest! {
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
-            let mut state = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new("RPC test".to_owned(), Buffer::new(mempool.clone(), 1), Buffer::new(state.clone(), 1));
 

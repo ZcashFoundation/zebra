@@ -33,7 +33,7 @@ impl RpcServer {
         config: Config,
         app_version: String,
         mempool: Buffer<Mempool, mempool::Request>,
-        state: Buffer<State, zebra_state::Request>,
+        state: State,
     ) -> tokio::task::JoinHandle<()>
     where
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
@@ -43,7 +43,10 @@ impl RpcServer {
                 zebra_state::Request,
                 Response = zebra_state::Response,
                 Error = zebra_state::BoxError,
-            > + 'static,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
         State::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {

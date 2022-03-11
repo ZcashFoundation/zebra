@@ -7,6 +7,7 @@ use tower::buffer::Buffer;
 use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
+
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -19,7 +20,7 @@ async fn rpc_getinfo() {
     zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut state = MockService::build().for_unit_tests();
+    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let rpc = RpcImpl::new(
         "Zebra version test".to_string(),
@@ -80,7 +81,7 @@ async fn rpc_getblock_error() {
     zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut state = MockService::build().for_unit_tests();
+    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
     let rpc = RpcImpl {
