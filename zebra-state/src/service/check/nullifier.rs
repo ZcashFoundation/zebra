@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use tracing::trace;
 
 use crate::{
-    error::DuplicateNullifierError, service::finalized_state::FinalizedState, PreparedBlock,
+    error::DuplicateNullifierError, service::finalized_state::ZebraDb, PreparedBlock,
     ValidateContextError,
 };
 
@@ -26,7 +26,7 @@ use crate::{
 #[tracing::instrument(skip(prepared, finalized_state))]
 pub(crate) fn no_duplicates_in_finalized_chain(
     prepared: &PreparedBlock,
-    finalized_state: &FinalizedState,
+    finalized_state: &ZebraDb,
 ) -> Result<(), ValidateContextError> {
     for nullifier in prepared.block.sprout_nullifiers() {
         if finalized_state.contains_sprout_nullifier(nullifier) {

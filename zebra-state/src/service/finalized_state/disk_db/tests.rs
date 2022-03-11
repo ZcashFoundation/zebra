@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use crate::service::finalized_state::DiskDb;
+use crate::service::finalized_state::disk_db::DiskDb;
 
 impl DiskDb {
     /// Returns a list of column family names in this database.
