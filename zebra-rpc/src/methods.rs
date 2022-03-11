@@ -6,6 +6,8 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
+use std::collections::HashSet;
+
 use futures::{FutureExt, TryFutureExt};
 use hex::FromHex;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -102,6 +104,12 @@ pub trait Rpc {
     ///
     #[rpc(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
+
+    /// Returns all transaction ids in the memory pool, as a [`GetRawMempool`] JSON struct.
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/getrawmempool.html>
+    #[rpc(name = "getrawmempool")]
+    fn get_raw_mempool(&self) -> BoxFuture<Result<GetRawMempool>>;
 }
 
 /// RPC method implementations.
@@ -286,6 +294,36 @@ where
         }
         .boxed()
     }
+
+    fn get_raw_mempool(&self) -> BoxFuture<Result<GetRawMempool>> {
+        let mut mempool = self.mempool.clone();
+
+        async move {
+            let request = mempool::Request::TransactionIds;
+
+            let response = mempool
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                mempool::Response::TransactionIds(unmined_transaction_ids) => {
+                    let mined_hashes: HashSet<transaction::Hash> = unmined_transaction_ids
+                        .iter()
+                        .map(|u| u.mined_id())
+                        .collect();
+                    Ok(GetRawMempool(mined_hashes))
+                }
+                _ => unreachable!("unmatched response to a transactionids request"),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -315,3 +353,9 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 #[derive(Debug, PartialEq, serde::Serialize)]
 /// Response to a `getbestblockhash` RPC request.
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+
+#[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+/// Response to a `getrawmempool` RPC request.
+///
+/// A JSON array of string with the transaction hashes.
+pub struct GetRawMempool(HashSet<transaction::Hash>);
