@@ -11,6 +11,9 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
+// Number of blocks to populate state with
+const NUMBER_OF_BLOCKS: u32 = 10;
+
 #[tokio::test]
 async fn rpc_getinfo() {
     zebra_test::init();
@@ -41,9 +44,6 @@ async fn rpc_getinfo() {
 #[tokio::test]
 async fn rpc_getblock() {
     zebra_test::init();
-
-    // Number of blocks to populate state with
-    const NUMBER_OF_BLOCKS: u32 = 10;
 
     // Put the first `NUMBER_OF_BLOCKS` blocks in a vector
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
@@ -97,4 +97,46 @@ async fn rpc_getblock_error() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+}
+
+#[tokio::test]
+async fn rpc_getbestblockhash() {
+    zebra_test::init();
+
+    // Put `NUMBER_OF_BLOCKS` blocks in a vector
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(0..=NUMBER_OF_BLOCKS)
+        .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+        .collect();
+
+    // Get the hash of the block at the tip using hardcoded block tip bytes.
+    // We want to test the RPC response is equal to this hash
+    let tip_block: Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let tip_block_hash = tip_block.hash();
+
+    // Get a mempool handle
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
+    let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
+
+    // Init RPC
+    let rpc = RpcImpl {
+        app_version: "Zebra version test".to_string(),
+        mempool: Buffer::new(mempool.clone(), 1),
+        state,
+    };
+
+    // Get the tip hash using RPC method `get_best_block_hash`
+    let get_best_block_hash = rpc
+        .get_best_block_hash()
+        .await
+        .expect("We should have a GetBestBlockHash struct");
+    let response_hash = get_best_block_hash.0;
+
+    // Check if response is equal to block 10 hash.
+    assert_eq!(response_hash, tip_block_hash);
+
+    mempool.expect_no_requests().await;
 }
