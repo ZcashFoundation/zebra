@@ -841,13 +841,23 @@ impl Service<Request> for ReadStateService {
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "read_state", skip(self, req))]
+    #[instrument(name = "read_state", skip(self))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            // TODO: implement for lightwalletd before using this state in RPC methods
-
             // Used by get_block RPC.
-            Request::Block(_hash_or_height) => unimplemented!("ReadStateService doesn't Block yet"),
+            Request::Block(hash_or_height) => {
+                let state = self.clone();
+
+                async move {
+                    Ok(read::block(
+                        state.best_chain_receiver.borrow().as_ref(),
+                        &state.db,
+                        hash_or_height,
+                    ))
+                    .map(Response::Block)
+                }
+                .boxed()
+            }
 
             // Used by get_best_block_hash & get_blockchain_info (#3143) RPCs.
             //
