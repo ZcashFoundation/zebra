@@ -2,14 +2,6 @@
 //!
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
-mod chain;
-mod queued_blocks;
-
-#[cfg(test)]
-mod tests;
-
-pub use queued_blocks::QueuedBlocks;
-
 use std::{collections::BTreeSet, mem, sync::Arc};
 
 use zebra_chain::{
@@ -23,13 +15,20 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, FinalizedBlock, HashOrHeight, PreparedBlock,
-    ValidateContextError,
+    request::ContextuallyValidBlock,
+    service::{check, finalized_state::ZebraDb},
+    FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError,
 };
 
-pub(crate) use self::chain::Chain;
+mod chain;
+mod queued_blocks;
 
-use super::{check, finalized_state::FinalizedState};
+#[cfg(test)]
+mod tests;
+
+pub use queued_blocks::QueuedBlocks;
+
+pub(crate) use chain::Chain;
 
 /// The state of the chains in memory, including queued blocks.
 #[derive(Debug, Clone)]
@@ -138,7 +137,7 @@ impl NonFinalizedState {
     pub fn commit_block(
         &mut self,
         prepared: PreparedBlock,
-        finalized_state: &FinalizedState,
+        finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
@@ -174,7 +173,7 @@ impl NonFinalizedState {
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
-        finalized_state: &FinalizedState,
+        finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let chain = Chain::new(
             self.network,
@@ -206,7 +205,7 @@ impl NonFinalizedState {
         &self,
         new_chain: Arc<Chain>,
         prepared: PreparedBlock,
-        finalized_state: &FinalizedState,
+        finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,

@@ -39,7 +39,7 @@ use crate::{
     request::HashOrHeight,
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
-        finalized_state::{DiskDb, FinalizedState},
+        finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState, QueuedBlocks},
         pending_utxos::PendingUtxos,
     },
@@ -132,18 +132,18 @@ pub(crate) struct StateService {
 pub struct ReadStateService {
     /// The shared inner on-disk database for the finalized state.
     ///
-    /// RocksDB allows reads and writes via a shared reference.
-    /// TODO: prevent write access via this type.
+    /// RocksDB allows reads and writes via a shared reference,
+    /// but [`ZebraDb`] doesn't expose any write methods or types.
     ///
     /// This chain is updated concurrently with requests,
     /// so it might include some block data that is also in `best_mem`.
-    disk: DiskDb,
+    db: ZebraDb,
 
     /// A watch channel for the current best in-memory chain.
     ///
     /// This chain is only updated between requests,
     /// so it might include some block data that is also on `disk`.
-    best_mem: watch::Receiver<Option<Arc<Chain>>>,
+    best_chain_receiver: watch::Receiver<Option<Arc<Chain>>>,
 
     /// The configured Zcash network.
     network: Network,
@@ -161,6 +161,7 @@ impl StateService {
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let disk = FinalizedState::new(&config, network);
         let initial_tip = disk
+            .db()
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
@@ -243,7 +244,8 @@ impl StateService {
         tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.mem.any_chain_contains(&prepared.hash) || self.disk.hash(prepared.height).is_some()
+        if self.mem.any_chain_contains(&prepared.hash)
+            || self.disk.db().hash(prepared.height).is_some()
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err("block is already committed to the state".into()));
@@ -282,7 +284,7 @@ impl StateService {
                 );
         }
 
-        let finalized_tip_height = self.disk.finalized_tip_height().expect(
+        let finalized_tip_height = self.disk.db().finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         );
         self.queued_blocks.prune_by_height(finalized_tip_height);
@@ -326,10 +328,10 @@ impl StateService {
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared, &self.disk)?;
+        if self.disk.db().finalized_tip_hash() == parent_hash {
+            self.mem.commit_new_chain(prepared, self.disk.db())?;
         } else {
-            self.mem.commit_block(prepared, &self.disk)?;
+            self.mem.commit_block(prepared, self.disk.db())?;
         }
 
         Ok(())
@@ -337,7 +339,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || &self.disk.finalized_tip_hash() == hash
+        self.mem.any_chain_contains(hash) || &self.disk.db().finalized_tip_hash() == hash
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -400,11 +402,11 @@ impl StateService {
         check::block_is_valid_for_recent_chain(
             prepared,
             self.network,
-            self.disk.finalized_tip_height(),
+            self.disk.db().finalized_tip_height(),
             relevant_chain,
         )?;
 
-        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk)?;
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, self.disk.db())?;
 
         Ok(())
     }
@@ -427,7 +429,7 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.best_tip().or_else(|| self.disk.tip())
+        self.mem.best_tip().or_else(|| self.disk.db().tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.
@@ -436,7 +438,7 @@ impl StateService {
         let height = self
             .mem
             .best_height_by_hash(hash)
-            .or_else(|| self.disk.height(hash))?;
+            .or_else(|| self.disk.db().height(hash))?;
 
         Some(tip.0 - height.0)
     }
@@ -447,7 +449,7 @@ impl StateService {
         self.mem
             .best_block(hash_or_height)
             .map(|contextual| contextual.block)
-            .or_else(|| self.disk.block(hash_or_height))
+            .or_else(|| self.disk.db().block(hash_or_height))
     }
 
     /// Return the transaction identified by `hash` if it exists in the current
@@ -455,14 +457,14 @@ impl StateService {
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
             .best_transaction(hash)
-            .or_else(|| self.disk.transaction(hash))
+            .or_else(|| self.disk.db().transaction(hash))
     }
 
     /// Return the hash for the block at `height` in the current best chain.
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.mem
             .best_hash(height)
-            .or_else(|| self.disk.hash(height))
+            .or_else(|| self.disk.db().hash(height))
     }
 
     /// Return true if `hash` is in the current best chain.
@@ -474,14 +476,14 @@ impl StateService {
     pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .best_height_by_hash(hash)
-            .or_else(|| self.disk.height(hash))
+            .or_else(|| self.disk.db().height(hash))
     }
 
     /// Return the height for the block at `hash` in any chain.
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .any_height_by_hash(hash)
-            .or_else(|| self.disk.height(hash))
+            .or_else(|| self.disk.db().height(hash))
     }
 
     /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
@@ -489,7 +491,7 @@ impl StateService {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| self.disk.utxo(outpoint))
+            .or_else(|| self.disk.db().utxo(outpoint))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -674,8 +676,8 @@ impl ReadStateService {
         let (best_chain_sender, best_chain_receiver) = watch::channel(None);
 
         let read_only_service = Self {
-            disk: disk.db().clone(),
-            best_mem: best_chain_receiver,
+            db: disk.db().clone(),
+            best_chain_receiver,
             network: disk.network(),
         };
 

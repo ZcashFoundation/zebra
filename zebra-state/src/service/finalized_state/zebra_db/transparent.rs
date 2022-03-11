@@ -19,12 +19,13 @@ use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::transparent::OutputLocation,
-        FinalizedBlock, FinalizedState,
+        zebra_db::ZebraDb,
+        FinalizedBlock,
     },
     BoxError,
 };
 
-impl FinalizedState {
+impl ZebraDb {
     // Read transparent methods
 
     /// Returns the `transparent::Output` pointed to by the given

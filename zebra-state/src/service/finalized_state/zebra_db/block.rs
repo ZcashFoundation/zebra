@@ -25,8 +25,8 @@ use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{FromDisk, TransactionLocation},
-        zebra_db::shielded::NoteCommitmentTrees,
-        FinalizedBlock, FinalizedState,
+        zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
+        FinalizedBlock,
     },
     BoxError, HashOrHeight,
 };
@@ -34,7 +34,7 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-impl FinalizedState {
+impl ZebraDb {
     // Read block methods
 
     /// Returns true if the database is empty.
@@ -115,6 +115,58 @@ impl FinalizedState {
                 block.transactions[index.as_usize()].clone()
             })
     }
+
+    // Write block methods
+
+    /// Write `finalized` to the finalized state.
+    ///
+    /// Uses:
+    /// - `history_tree`: the current tip's history tree
+    /// - `network`: the configured network
+    /// - `source`: the source of the block in log messages
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    /// - Propagates any errors from updating history and note commitment trees
+    pub(in super::super) fn write_block(
+        &mut self,
+        finalized: FinalizedBlock,
+        history_tree: HistoryTree,
+        network: Network,
+        source: &str,
+    ) -> Result<block::Hash, BoxError> {
+        let finalized_hash = finalized.hash;
+
+        // Get a list of the spent UTXOs, before we delete any from the database
+        let all_utxos_spent_by_block = finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
+            .collect();
+
+        let mut batch = DiskWriteBatch::new();
+
+        // In case of errors, propagate and do not write the batch.
+        batch.prepare_block_batch(
+            &self.db,
+            finalized,
+            network,
+            all_utxos_spent_by_block,
+            self.note_commitment_trees(),
+            history_tree,
+            self.finalized_value_pool(),
+        )?;
+
+        self.db.write(batch)?;
+
+        tracing::trace!(?source, "committed block from");
+
+        Ok(finalized_hash)
+    }
 }
 
 impl DiskWriteBatch {
@@ -180,7 +232,7 @@ impl DiskWriteBatch {
         self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;
 
         // The block has passed contextual validation, so update the metrics
-        FinalizedState::block_precommit_metrics(block, *hash, *height);
+        block_precommit_metrics(block, *hash, *height);
 
         Ok(())
     }
