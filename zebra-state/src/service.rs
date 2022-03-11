@@ -844,44 +844,63 @@ impl Service<Request> for ReadStateService {
     #[instrument(name = "read_state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            // TODO: implement for lightwalletd
+            // TODO: implement for lightwalletd before using this state in RPC methods
+
+            // get_block
             Request::Block(_hash_or_height) => unimplemented!("ReadStateService doesn't Block yet"),
+
+            // get_best_block_hash & get_blockchain_info (#3143)
+            // these methods can use Request::Tip or the ChainTip struct
+            Request::Tip => unimplemented!("ReadStateService doesn't Tip yet"),
+
+            // TODO: implement for lightwalletd as part of these tickets
+
+            // get_raw_transaction (#3145)
             Request::Transaction(_hash) => {
                 unimplemented!("ReadStateService doesn't Transaction yet")
             }
 
-            Request::Tip => unimplemented!("ReadStateService doesn't Tip yet"),
+            // TODO: split the Request enum, then implement new ReadRequests for lightwalletd
 
-            // We can get existing UTXOs,
-            // but that should be a different request with a different name
-            Request::AwaitUtxo(_outpoint) => unreachable!("ReadStateService can't await UTXOs"),
+            // z_get_tree_state (#3156)
 
-            // Out of scope.
-            //
-            // This request might benefit from better performance,
-            // but it isn't needed for lightwalletd.
-            Request::Depth(_hash) => unimplemented!("ReadStateService doesn't Depth yet"),
+            // depends on transparent address indexes (#3150)
+            // get_address_tx_ids (#3147)
+            // get_address_balance (#3157)
+            // get_address_utxos (#3158)
 
-            // These requests probably don't need better performance.
+            // Out of Scope
+            // TODO: delete when splitting the Request enum
+
+            // These requests don't need better performance at the moment.
             Request::FindBlockHashes {
                 known_blocks: _,
                 stop: _,
             } => {
-                unimplemented!("ReadStateService doesn't FindBlockHashes yet")
+                unreachable!("ReadStateService doesn't need to FindBlockHashes")
             }
             Request::FindBlockHeaders {
                 known_blocks: _,
                 stop: _,
             } => {
-                unimplemented!("ReadStateService doesn't FindBlockHeaders yet")
+                unreachable!("ReadStateService doesn't need to FindBlockHeaders")
             }
+
+            // Some callers of this request need to wait for queued blocks.
+            Request::Depth(_hash) => unreachable!("ReadStateService could change depth behaviour"),
 
             // This request needs to wait for queued blocks.
             Request::BlockLocator => {
                 unreachable!("ReadStateService should not be used for block locators")
             }
 
-            // Write Requests.
+            // Impossible Requests
+
+            // The read-only service doesn't have the shared internal state
+            // needed to await UTXOs.
+            Request::AwaitUtxo(_outpoint) => unreachable!("ReadStateService can't await UTXOs"),
+
+            // The read-only service can't write.
             Request::CommitBlock(_prepared) => unreachable!("ReadStateService can't commit blocks"),
             Request::CommitFinalizedBlock(_finalized) => {
                 unreachable!("ReadStateService can't commit blocks")
