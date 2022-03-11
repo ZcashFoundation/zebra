@@ -55,6 +55,7 @@ pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
+mod read;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -443,13 +444,10 @@ impl StateService {
         Some(tip.0 - height.0)
     }
 
-    /// Return the block identified by either its `height` or `hash` if it exists
-    /// in the current best chain.
+    /// Return the block identified by either its `height` or `hash`,
+    /// if it exists in the current best chain.
     pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
-        self.mem
-            .best_block(hash_or_height)
-            .map(|contextual| contextual.block)
-            .or_else(|| self.disk.db().block(hash_or_height))
+        read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
 
     /// Return the transaction identified by `hash` if it exists in the current
