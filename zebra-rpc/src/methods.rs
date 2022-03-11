@@ -6,8 +6,6 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
-use std::collections::HashSet;
-
 use futures::{FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -105,7 +103,7 @@ pub trait Rpc {
     #[rpc(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
 
-    /// Returns all transaction ids in the memory pool, as a [`GetRawMempool`] JSON struct.
+    /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
     /// zcashd reference: <https://zcash.github.io/rpc/getrawmempool.html>
     #[rpc(name = "getrawmempool")]
@@ -352,9 +350,3 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 #[derive(Debug, PartialEq, serde::Serialize)]
 /// Response to a `getbestblockhash` RPC request.
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
-
-#[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-/// Response to a `getrawmempool` RPC request.
-///
-/// A JSON array of string with the transaction hashes.
-pub struct GetRawMempool(HashSet<transaction::Hash>);
