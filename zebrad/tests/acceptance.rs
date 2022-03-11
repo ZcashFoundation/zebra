@@ -1696,15 +1696,6 @@ fn lightwalletd_integration() -> Result<()> {
         lightwalletd.expect_stdout_line_matches("Block hash changed, clearing mempool clients");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // zcash/lightwalletd exits with a fatal error here.
-    // adityapk00/lightwalletd keeps trying the mempool,
-    // but it sometimes skips the "Method not found" log line.
-    // If the `getrawmempool` method is implemented we should have an error
-    // when looking for the provided regex.
-    let result =
-        lightwalletd.expect_stdout_line_matches("(Mempool refresh error: -32601: Method not found)|(Another refresh in progress, returning)");
-    assert!(result.is_err());
-
     // Cleanup both processes
 
     let result = lightwalletd.kill();
