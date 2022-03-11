@@ -846,11 +846,13 @@ impl Service<Request> for ReadStateService {
         match req {
             // TODO: implement for lightwalletd before using this state in RPC methods
 
-            // get_block
+            // Used by get_block RPC.
             Request::Block(_hash_or_height) => unimplemented!("ReadStateService doesn't Block yet"),
 
-            // get_best_block_hash & get_blockchain_info (#3143)
-            // these methods can use Request::Tip or the ChainTip struct
+            // Used by get_best_block_hash & get_blockchain_info (#3143) RPCs.
+            //
+            // These RPC methods could use the ChainTip struct instead,
+            // if that's easier or more consistent.
             Request::Tip => unimplemented!("ReadStateService doesn't Tip yet"),
 
             // TODO: implement for lightwalletd as part of these tickets
@@ -860,7 +862,8 @@ impl Service<Request> for ReadStateService {
                 unimplemented!("ReadStateService doesn't Transaction yet")
             }
 
-            // TODO: split the Request enum, then implement new ReadRequests for lightwalletd
+            // TODO: split the Request enum, then implement these new ReadRequests for lightwalletd
+            //       as part of these tickets
 
             // z_get_tree_state (#3156)
 
