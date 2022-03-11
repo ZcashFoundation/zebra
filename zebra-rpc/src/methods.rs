@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use futures::{FutureExt, TryFutureExt};
-use hex::FromHex;
+use hex::{FromHex, ToHex};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
@@ -109,7 +109,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: <https://zcash.github.io/rpc/getrawmempool.html>
     #[rpc(name = "getrawmempool")]
-    fn get_raw_mempool(&self) -> BoxFuture<Result<GetRawMempool>>;
+    fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
 }
 
 /// RPC method implementations.
@@ -295,7 +295,7 @@ where
         .boxed()
     }
 
-    fn get_raw_mempool(&self) -> BoxFuture<Result<GetRawMempool>> {
+    fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
         let mut mempool = self.mempool.clone();
 
         async move {
@@ -313,11 +313,10 @@ where
 
             match response {
                 mempool::Response::TransactionIds(unmined_transaction_ids) => {
-                    let mined_hashes: HashSet<transaction::Hash> = unmined_transaction_ids
+                    Ok(unmined_transaction_ids
                         .iter()
-                        .map(|u| u.mined_id())
-                        .collect();
-                    Ok(GetRawMempool(mined_hashes))
+                        .map(|id| id.mined_id().encode_hex())
+                        .collect())
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
             }
