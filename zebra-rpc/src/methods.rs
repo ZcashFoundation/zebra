@@ -13,7 +13,7 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::SerializedBlock,
+    block::{self, SerializedBlock},
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, Transaction},
 };
@@ -80,10 +80,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: <https://zcash.github.io/rpc/getblock.html>
     ///
-    /// Result:
-    /// {
-    ///      "data": String, // The block encoded as hex
-    /// }
+    /// Result: [`GetBlock`]
     ///
     /// Note 1: We only expose the `data` field as lightwalletd uses the non-verbose
     /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
@@ -94,6 +91,17 @@ pub trait Rpc {
     /// Note 3: The `verbosity` parameter is ignored but required in the call.
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
+
+    /// getbestblockhash
+    ///
+    /// Returns the hash of the current best blockchain tip block.
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/getbestblockhash.html>
+    ///
+    /// Result: [`GetBestBlockHash`]
+    ///
+    #[rpc(name = "getbestblockhash")]
+    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
 }
 
 /// RPC method implementations.
@@ -248,6 +256,34 @@ where
         }
         .boxed()
     }
+
+    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>> {
+        let mut state = self.state.clone();
+
+        async move {
+            let request = zebra_state::Request::Tip;
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash(hash)),
+                zebra_state::Response::Tip(None) => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "No blocks in state".to_string(),
+                    data: None,
+                }),
+                _ => unreachable!("unmatched response to a tip request"),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -273,3 +309,7 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 #[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
 pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
+
+#[derive(Debug, PartialEq, serde::Serialize)]
+/// Response to a `getbestblockhash` RPC request.
+pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
