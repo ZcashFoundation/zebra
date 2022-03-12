@@ -7,7 +7,7 @@
 //! So this implementation follows the `lightwalletd` client implementation.
 
 use futures::{FutureExt, TryFutureExt};
-use hex::FromHex;
+use hex::{FromHex, ToHex};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
@@ -102,6 +102,12 @@ pub trait Rpc {
     ///
     #[rpc(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
+
+    /// Returns all transaction ids in the memory pool, as a JSON array.
+    ///
+    /// zcashd reference: <https://zcash.github.io/rpc/getrawmempool.html>
+    #[rpc(name = "getrawmempool")]
+    fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
 }
 
 /// RPC method implementations.
@@ -282,6 +288,35 @@ where
                     data: None,
                 }),
                 _ => unreachable!("unmatched response to a tip request"),
+            }
+        }
+        .boxed()
+    }
+
+    fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
+        let mut mempool = self.mempool.clone();
+
+        async move {
+            let request = mempool::Request::TransactionIds;
+
+            let response = mempool
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                mempool::Response::TransactionIds(unmined_transaction_ids) => {
+                    Ok(unmined_transaction_ids
+                        .iter()
+                        .map(|id| id.mined_id().encode_hex())
+                        .collect())
+                }
+                _ => unreachable!("unmatched response to a transactionids request"),
             }
         }
         .boxed()

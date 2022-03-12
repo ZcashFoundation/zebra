@@ -1708,20 +1708,7 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: add extra checks when we add new Zebra RPCs
 
-    // Unimplemented getrawmempool (repeated, in a separate lightwalletd thread)
-    //
-    // zcash/lightwalletd exits with a fatal error here.
-    // adityapk00/lightwalletd keeps trying the mempool,
-    // but it sometimes skips the "Method not found" log line.
-    //
-    // If a refresh is pending, we can get "Mempool refresh error" before the Ingestor log,
-    // and "Another refresh is in progress" after it.
-    let result =
-        lightwalletd.expect_stdout_line_matches("(Mempool refresh error: -32601: Method not found)|(Another refresh in progress, returning)");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
-
     // Cleanup both processes
-
     let result = lightwalletd.kill();
     let (_, mut zebrad) = zebrad.kill_on_error(result)?;
     zebrad.kill()?;
