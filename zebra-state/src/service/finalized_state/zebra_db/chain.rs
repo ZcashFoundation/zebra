@@ -25,12 +25,13 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        FinalizedBlock, FinalizedState,
+        zebra_db::ZebraDb,
+        FinalizedBlock,
     },
     BoxError,
 };
 
-impl FinalizedState {
+impl ZebraDb {
     /// Returns the ZIP-221 history tree of the finalized tip or `None`
     /// if it does not exist yet in the state (pre-Heartwood).
     pub fn history_tree(&self) -> HistoryTree {
@@ -89,9 +90,11 @@ impl DiskWriteBatch {
             self.zs_delete(history_tree_cf, h);
         }
 
-        // TODO: just store a single history tree, using `()` as the key,
-        //       and remove the delete (like the chain value pool balances).
-        //       This requires a database version update.
+        // TODO: if we ever need concurrent read-only access to the history tree,
+        // store it by `()`, not height.
+        // Otherwise, the ReadStateService could access a height
+        // that was just deleted by a concurrent StateService write.
+        // This requires a database version update.
         if let Some(history_tree) = history_tree.as_ref() {
             self.zs_insert(history_tree_cf, height, history_tree);
         }
