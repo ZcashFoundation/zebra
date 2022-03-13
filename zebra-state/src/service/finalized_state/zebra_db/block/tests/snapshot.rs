@@ -229,6 +229,14 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             let stored_block = state
                 .block(query_height.into())
                 .expect("heights up to tip have blocks");
+            let sapling_tree_by_height = state
+                .sapling_note_commitment_tree_by_height(&query_height)
+                .expect("heights up to tip have Sapling trees");
+            let orchard_tree_by_height = state
+                .orchard_note_commitment_tree_by_height(&query_height)
+                .expect("heights up to tip have Orchard trees");
+            let sapling_tree_at_tip = state.sapling_note_commitment_tree();
+            let orchard_tree_at_tip = state.db.orchard_note_commitment_tree();
 
             // We don't need to snapshot the heights,
             // because they are fully determined by the tip and block hashes.
@@ -238,6 +246,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
             if query_height == max_height {
                 assert_eq!(stored_block_hash, tip_block_hash);
+
+                assert_eq!(sapling_tree_at_tip, sapling_tree_by_height);
+                assert_eq!(orchard_tree_at_tip, orchard_tree_by_height);
             }
 
             assert_eq!(
