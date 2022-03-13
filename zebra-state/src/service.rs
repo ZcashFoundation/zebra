@@ -458,8 +458,8 @@ impl StateService {
         Some(tip.0 - height.0)
     }
 
-    /// Return the block identified by either its `height` or `hash`,
-    /// if it exists in the current best chain.
+    /// Returns the [`Block`] with [`Hash`](zebra_chain::block::Hash) or
+    /// [`Height`](zebra_chain::block::Height), if it exists in the current best chain.
     pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
