@@ -42,6 +42,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState, QueuedBlocks},
         pending_utxos::PendingUtxos,
+        watch_receiver::WatchReceiver,
     },
     BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request,
     Response, ValidateContextError,
@@ -49,6 +50,7 @@ use crate::{
 
 pub mod block_iter;
 pub mod chain_tip;
+pub mod watch_receiver;
 
 pub(crate) mod check;
 
@@ -144,7 +146,7 @@ pub struct ReadStateService {
     ///
     /// This chain is only updated between requests,
     /// so it might include some block data that is also on `disk`.
-    best_chain_receiver: watch::Receiver<Option<Arc<Chain>>>,
+    best_chain_receiver: WatchReceiver<Option<Arc<Chain>>>,
 
     /// The configured Zcash network.
     network: Network,
@@ -675,7 +677,7 @@ impl ReadStateService {
 
         let read_only_service = Self {
             db: disk.db().clone(),
-            best_chain_receiver,
+            best_chain_receiver: WatchReceiver::new(best_chain_receiver),
             network: disk.network(),
         };
 
@@ -849,12 +851,11 @@ impl Service<Request> for ReadStateService {
                 let state = self.clone();
 
                 async move {
-                    Ok(read::block(
-                        state.best_chain_receiver.borrow().as_ref(),
-                        &state.db,
-                        hash_or_height,
-                    ))
-                    .map(Response::Block)
+                    let block = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::block(best_chain, &state.db, hash_or_height)
+                    });
+
+                    Ok(Response::Block(block))
                 }
                 .boxed()
             }
