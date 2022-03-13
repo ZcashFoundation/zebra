@@ -126,9 +126,11 @@ where
     state: State,
 
     /// Allows efficient access to the best tip of the blockchain.
+    #[allow(dead_code)]
     latest_chain_tip: Tip,
 
     /// The configured network for this RPC service.
+    #[allow(dead_code)]
     network: Network,
 }
 
