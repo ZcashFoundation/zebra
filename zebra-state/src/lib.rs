@@ -40,6 +40,7 @@ pub use service::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
+    arbitrary::populated_state,
     chain_tip::{ChainTipBlock, ChainTipSender},
     init_test,
 };

@@ -1,3 +1,5 @@
+//! Randomised property tests for the non-finalized state.
+
 use std::{collections::BTreeMap, env, sync::Arc};
 
 use zebra_test::prelude::*;
@@ -419,7 +421,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             .iter()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
-                full_chain = full_chain.push(block.clone())?;
+                full_chain= full_chain.push(block.clone())?;
             }
 
         for _ in 0..finalized_count {

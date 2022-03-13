@@ -9,9 +9,9 @@ edition = "2021"
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
-zebra-node-services = { path = "../zebra-node-services" }
-
 zebra-network = { path = "../zebra-network" }
+zebra-node-services = { path = "../zebra-node-services" }
+zebra-state = { path = "../zebra-state" }
 
 futures = "0.3.21"
 
@@ -37,4 +37,5 @@ thiserror = "1.0.30"
 tokio = { version = "1.16.1", features = ["full", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

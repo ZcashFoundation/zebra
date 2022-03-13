@@ -1,5 +1,4 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
-#![allow(clippy::unit_arg)]
 
 mod address;
 mod keys;
@@ -11,26 +10,30 @@ pub use address::Address;
 pub use script::Script;
 pub use serialize::GENESIS_COINBASE_DATA;
 pub use utxo::{
-    new_ordered_outputs, new_outputs, utxos_from_ordered_utxos, CoinbaseSpendRestriction,
-    OrderedUtxo, Utxo,
+    new_ordered_outputs, new_outputs, outputs_from_utxos, utxos_from_ordered_utxos,
+    CoinbaseSpendRestriction, OrderedUtxo, Utxo,
 };
 
-pub(crate) use utxo::outputs_from_utxos;
-
 #[cfg(any(test, feature = "proptest-impl"))]
-pub(crate) use utxo::new_transaction_ordered_outputs;
+pub use utxo::{
+    new_ordered_outputs_with_height, new_outputs_with_height, new_transaction_ordered_outputs,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
+
 #[cfg(test)]
 mod tests;
 
 use crate::{
     amount::{Amount, NonNegative},
-    block, transaction,
+    block,
+    parameters::Network,
+    primitives::zcash_primitives,
+    transaction,
 };
 
 use std::{collections::HashMap, fmt, iter};
@@ -302,5 +305,12 @@ impl Output {
     /// This amount is subtracted from the transaction value pool by this output.
     pub fn value(&self) -> Amount<NonNegative> {
         self.value
+    }
+
+    /// Return the destination address from a transparent output.
+    ///
+    /// Returns None if the address type is not valid or unrecognized.
+    pub fn address(&self, network: Network) -> Option<Address> {
+        zcash_primitives::transparent_output_address(self, network)
     }
 }

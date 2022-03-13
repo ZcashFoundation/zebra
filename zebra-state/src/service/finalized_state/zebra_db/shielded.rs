@@ -20,7 +20,8 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        FinalizedBlock, FinalizedState,
+        zebra_db::ZebraDb,
+        FinalizedBlock,
     },
     BoxError,
 };
@@ -33,7 +34,7 @@ pub struct NoteCommitmentTrees {
     orchard: orchard::tree::NoteCommitmentTree,
 }
 
-impl FinalizedState {
+impl ZebraDb {
     // Read shielded methods
 
     /// Returns `true` if the finalized state contains `sprout_nullifier`.

@@ -39,7 +39,7 @@ fn blockheaderhash_debug() {
 fn blockheaderhash_from_blockheader() {
     zebra_test::init();
 
-    let blockheader = generate::block_header();
+    let (blockheader, _blockheader_bytes) = generate::block_header();
 
     let hash = Hash::from(&blockheader);
 
@@ -290,7 +290,7 @@ fn block_limits_single_tx() {
     // Test block limit with a big single transaction
 
     // Create a block just below the limit
-    let mut block = generate::large_single_transaction_block();
+    let mut block = generate::large_single_transaction_block_many_inputs();
 
     // Serialize the block
     let mut data = Vec::new();
@@ -305,7 +305,7 @@ fn block_limits_single_tx() {
         .expect("block should deserialize as we are just below limit");
 
     // Add 1 more input to the transaction, limit will be reached
-    block = generate::oversized_single_transaction_block();
+    block = generate::oversized_single_transaction_block_many_inputs();
 
     let mut data = Vec::new();
     block
@@ -326,7 +326,7 @@ fn node_time_check(
     block_header_time: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), BlockTimeError> {
-    let mut header = generate::block_header();
+    let (mut header, _header_bytes) = generate::block_header();
     header.time = block_header_time;
     // pass a zero height and hash - they are only used in the returned error
     header.time_is_valid_at(now, &Height(0), &Hash([0; 32]))

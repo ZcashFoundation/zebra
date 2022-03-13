@@ -2,8 +2,8 @@
 //!
 //! Zebra's database is implemented in 4 layers:
 //! - [`FinalizedState`]: queues, validates, and commits blocks, using...
-//! - [`zebra_db`]: reads and writes [`zebra_chain`] types to the database, using...
-//! - [`disk_db`]: reads and writes format-specific types to the database, using...
+//! - [`ZebraDb`]: reads and writes [`zebra_chain`] types to the database, using...
+//! - [`DiskDb`]: reads and writes format-specific types to the database, using...
 //! - [`disk_format`]: converts types to raw database bytes.
 //!
 //! These layers allow us to split [`zebra_chain`] types for efficient database storage.
@@ -18,17 +18,12 @@ use std::{
     collections::HashMap,
     io::{stderr, stdout, Write},
     path::Path,
-    sync::Arc,
 };
 
-use zebra_chain::{
-    block::{self, Block},
-    history_tree::HistoryTree,
-    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
-};
+use zebra_chain::{block, parameters::Network};
 
 use crate::{
-    service::{check, finalized_state::disk_db::DiskDb, QueuedFinalized},
+    service::{check, QueuedFinalized},
     BoxError, Config, FinalizedBlock,
 };
 
@@ -42,10 +37,13 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+pub(super) use zebra_db::ZebraDb;
+
 /// The finalized part of the chain state, stored in the db.
+#[derive(Debug)]
 pub struct FinalizedState {
     /// The underlying database.
-    db: DiskDb,
+    db: ZebraDb,
 
     /// Queued blocks that arrived out of order, indexed by their parent block hash.
     queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
@@ -67,7 +65,7 @@ pub struct FinalizedState {
 
 impl FinalizedState {
     pub fn new(config: &Config, network: Network) -> Self {
-        let db = DiskDb::new(config, network);
+        let db = ZebraDb::new(config, network);
 
         let new_state = Self {
             queued_by_prev_hash: HashMap::new(),
@@ -77,12 +75,13 @@ impl FinalizedState {
             network,
         };
 
-        if let Some(tip_height) = new_state.finalized_tip_height() {
+        // TODO: move debug_stop_at_height into a task in the start command (#3442)
+        if let Some(tip_height) = new_state.db.finalized_tip_height() {
             if new_state.is_at_stop_height(tip_height) {
                 let debug_stop_at_height = new_state
                     .debug_stop_at_height
                     .expect("true from `is_at_stop_height` implies `debug_stop_at_height` is Some");
-                let tip_hash = new_state.finalized_tip_hash();
+                let tip_hash = new_state.db.finalized_tip_hash();
 
                 if tip_height > debug_stop_at_height {
                     tracing::error!(
@@ -108,34 +107,24 @@ impl FinalizedState {
             }
         }
 
-        tracing::info!(tip = ?new_state.tip(), "loaded Zebra state cache");
+        tracing::info!(tip = ?new_state.db.tip(), "loaded Zebra state cache");
 
         new_state
     }
 
+    /// Returns the configured network for this database.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     /// Returns the `Path` where the files used by this database are located.
-    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         self.db.path()
     }
 
-    /// Returns the hash of the current finalized tip block.
-    pub fn finalized_tip_hash(&self) -> block::Hash {
-        self.tip()
-            .map(|(_, hash)| hash)
-            // if the state is empty, return the genesis previous block hash
-            .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
-    }
-
-    /// Returns the height of the current finalized tip block.
-    pub fn finalized_tip_height(&self) -> Option<block::Height> {
-        self.tip().map(|(height, _)| height)
-    }
-
-    /// Returns the tip block, if there is one.
-    pub fn tip_block(&self) -> Option<Arc<Block>> {
-        let (height, _hash) = self.tip()?;
-        self.block(height.into())
+    /// Returns a reference to the inner database instance.
+    pub(crate) fn db(&self) -> &ZebraDb {
+        &self.db
     }
 
     /// Queue a finalized block to be committed to the state.
@@ -156,7 +145,10 @@ impl FinalizedState {
         let height = queued.0.height;
         self.queued_by_prev_hash.insert(prev_hash, queued);
 
-        while let Some(queued_block) = self.queued_by_prev_hash.remove(&self.finalized_tip_hash()) {
+        while let Some(queued_block) = self
+            .queued_by_prev_hash
+            .remove(&self.db.finalized_tip_hash())
+        {
             if let Ok(finalized) = self.commit_finalized(queued_block) {
                 highest_queue_commit = Some(finalized);
             } else {
@@ -242,11 +234,11 @@ impl FinalizedState {
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let committed_tip_hash = self.finalized_tip_hash();
-        let committed_tip_height = self.finalized_tip_height();
+        let committed_tip_hash = self.db.finalized_tip_hash();
+        let committed_tip_height = self.db.finalized_tip_height();
 
         // Assert that callers (including unit tests) get the chain order correct
-        if self.is_empty() {
+        if self.db.is_empty() {
             assert_eq!(
                 committed_tip_hash, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {}",
@@ -280,7 +272,7 @@ impl FinalizedState {
         // the history tree root. While it _is_ checked during contextual validation,
         // that is not called by the checkpoint verifier, and keeping a history tree there
         // would be harder to implement.
-        let history_tree = self.history_tree();
+        let history_tree = self.db.history_tree();
         check::finalized_block_commitment_is_valid_for_chain_history(
             &finalized,
             self.network,
@@ -290,7 +282,9 @@ impl FinalizedState {
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
 
-        let result = self.write_block(finalized, history_tree, source);
+        let result = self
+            .db
+            .write_block(finalized, history_tree, self.network, source);
 
         // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(finalized_height) {
@@ -301,59 +295,13 @@ impl FinalizedState {
                 "stopping at configured height, flushing database to disk"
             );
 
-            self.db.shutdown();
+            // We're just about to do a forced exit, so it's ok to do a forced db shutdown
+            self.db.shutdown(true);
 
             Self::exit_process();
         }
 
         result
-    }
-
-    /// Write `finalized` to the finalized state.
-    ///
-    /// Uses:
-    /// - `history_tree`: the current tip's history tree
-    /// - `source`: the source of the block in log messages
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from writing to the DB
-    /// - Propagates any errors from updating history and note commitment trees
-    fn write_block(
-        &mut self,
-        finalized: FinalizedBlock,
-        history_tree: HistoryTree,
-        source: &str,
-    ) -> Result<block::Hash, BoxError> {
-        let finalized_hash = finalized.hash;
-
-        let all_utxos_spent_by_block = finalized
-            .block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.inputs().iter())
-            .flat_map(|input| input.outpoint())
-            .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
-            .collect();
-
-        let mut batch = disk_db::DiskWriteBatch::new();
-
-        // In case of errors, propagate and do not write the batch.
-        batch.prepare_block_batch(
-            &self.db,
-            finalized,
-            self.network,
-            all_utxos_spent_by_block,
-            self.note_commitment_trees(),
-            history_tree,
-            self.finalized_value_pool(),
-        )?;
-
-        self.db.write(batch)?;
-
-        tracing::trace!(?source, "committed block from");
-
-        Ok(finalized_hash)
     }
 
     /// Stop the process if `block_height` is greater than or equal to the

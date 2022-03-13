@@ -54,6 +54,10 @@ use zebrad::{
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
+/// The amount of time we wait after launching `lightwalletd`,
+/// and between expected `lightwalletd` log messages.
+const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
+
 /// The amount of time we wait between launching two
 /// conflicting nodes.
 const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
@@ -1669,42 +1673,42 @@ fn lightwalletd_integration() -> Result<()> {
     // Launch the lightwalletd process
     let result = ldir.spawn_lightwalletd_child(&[]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
-    let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
+    let mut lightwalletd = lightwalletd.with_timeout(LIGHTWALLETD_DELAY);
 
     // Wait until `lightwalletd` has launched
     let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // Check that `lightwalletd` is calling the expected Zebra RPCs
-    //
-    // TODO: add extra checks when we add new Zebra RPCs
 
-    // get_blockchain_info
+    // getblockchaininfo
     let result = lightwalletd.expect_stdout_line_matches("Got sapling height");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // Check that `lightwalletd` got to the first unimplemented Zebra RPC
+    // getblock with block 1 in Zebra's state
     //
-    // TODO: update the missing method name when we add a new Zebra RPC
-
     // zcash/lightwalletd calls getbestblockhash here, but
     // adityapk00/lightwalletd calls getblock
-    let result =
-        lightwalletd.expect_stdout_line_matches("Method not found.*error zcashd getblock rpc");
+    //
+    // Until block 1 has been downloaded, lightwalletd will log Zebra's RPC error:
+    // "error requesting block: 0: Block not found"
+    // But we can't check for that, because Zebra might download genesis before lightwalletd asks.
+    // We also get a similar log when lightwalletd reaches the end of Zebra's cache.
+    //
+    // After the first getblock call, lightwalletd will log:
+    // "Block hash changed, clearing mempool clients"
+    // But we can't check for that, because it can come before or after the Ingestor log.
+    let result = lightwalletd.expect_stdout_line_matches("Ingestor adding block to cache");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // zcash/lightwalletd exits with a fatal error here.
-    // adityapk00/lightwalletd keeps trying the mempool,
-    // but it sometimes skips the "Method not found" log line.
-    let result =
-        lightwalletd.expect_stdout_line_matches("(Mempool refresh error: -32601: Method not found)|(Another refresh in progress, returning)");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    // (next RPC)
+    //
+    // TODO: add extra checks when we add new Zebra RPCs
 
     // Cleanup both processes
-
     let result = lightwalletd.kill();
     let (_, mut zebrad) = zebrad.kill_on_error(result)?;
     zebrad.kill()?;

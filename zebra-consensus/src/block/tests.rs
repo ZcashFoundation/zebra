@@ -11,7 +11,9 @@ use zebra_chain::{
     amount::{Amount, MAX_MONEY},
     block::{
         self,
-        tests::generate::{large_multi_transaction_block, large_single_transaction_block},
+        tests::generate::{
+            large_multi_transaction_block, large_single_transaction_block_many_inputs,
+        },
         Block, Height,
     },
     parameters::{Network, NetworkUpgrade},
@@ -631,7 +633,7 @@ fn legacy_sigops_count_for_large_generated_blocks() {
 
     // We can't test sigops using the transaction verifier, because it looks up UTXOs.
 
-    let block = large_single_transaction_block();
+    let block = large_single_transaction_block_many_inputs();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
         let cached_ffi_transaction =

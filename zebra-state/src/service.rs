@@ -1,5 +1,17 @@
+//! [`tower::Service`]s for Zebra's cached chain state.
+//!
+//! Zebra provides cached state access via two main services:
+//! - [`StateService`]: a read-write service that waits for queued blocks.
+//! - [`ReadStateService`]: a read-only service that answers from the most recent committed block.
+//!
+//! Most users should prefer [`ReadStateService`], unless they need to wait for
+//! verified blocks to be committed. (For example, the syncer and mempool tasks.)
+//!
+//! Zebra also provides access to the best chain tip via:
+//! - [`LatestChainTip`]: a read-only channel that contains the latest committed tip.
+//! - [`ChainTipChange`]: a read-only channel that can asynchronously await chain tip changes.
+
 use std::{
-    convert::TryInto,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -8,7 +20,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tower::{util::BoxService, Service};
 use tracing::instrument;
 
@@ -24,18 +36,22 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants, request::HashOrHeight, service::chain_tip::ChainTipBlock, BoxError, CloneError,
-    CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request, Response,
-    ValidateContextError,
+    request::HashOrHeight,
+    service::{
+        chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
+        finalized_state::{FinalizedState, ZebraDb},
+        non_finalized_state::{Chain, NonFinalizedState, QueuedBlocks},
+        pending_utxos::PendingUtxos,
+    },
+    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request,
+    Response, ValidateContextError,
 };
 
-use self::{
-    chain_tip::{ChainTipChange, ChainTipSender, LatestChainTip},
-    non_finalized_state::{NonFinalizedState, QueuedBlocks},
-};
-
+pub mod block_iter;
 pub mod chain_tip;
+
 pub(crate) mod check;
+
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
@@ -46,8 +62,6 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-use self::{finalized_state::FinalizedState, pending_utxos::PendingUtxos};
-
 pub type QueuedBlock = (
     PreparedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
@@ -57,29 +71,97 @@ pub type QueuedFinalized = (
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
+/// A read-write service for Zebra's cached blockchain state.
+///
+/// This service modifies and provides access to:
+/// - the non-finalized state: the ~100 most recent blocks.
+///                            Zebra allows chain forks in the non-finalized state,
+///                            stores it in memory, and re-downloads it when restarted.
+/// - the finalized state: older blocks that have many confirmations.
+///                        Zebra stores the single best chain in the finalized state,
+///                        and re-loads it from disk when restarted.
+///
+/// Requests to this service are processed in series,
+/// so read requests wait for all queued write requests to complete,
+/// then return their answers.
+///
+/// This behaviour is implicitly used by Zebra's syncer,
+/// to delay the next ObtainTips until all queued blocks have been commited.
+///
+/// But most state users can ignore any queued blocks, and get faster read responses
+/// using the [`ReadOnlyStateService`].
+#[derive(Debug)]
 pub(crate) struct StateService {
-    /// Holds data relating to finalized chain state.
+    /// The finalized chain state, including its on-disk database.
     pub(crate) disk: FinalizedState,
-    /// Holds data relating to non-finalized chain state.
+
+    /// The non-finalized chain state, including its in-memory chain forks.
     mem: NonFinalizedState,
+
+    /// The configured Zcash network.
+    network: Network,
+
     /// Blocks awaiting their parent blocks for contextual verification.
     queued_blocks: QueuedBlocks,
-    /// The set of outpoints with pending requests for their associated transparent::Output
+
+    /// The set of outpoints with pending requests for their associated transparent::Output.
     pending_utxos: PendingUtxos,
-    /// The configured Zcash network
-    network: Network,
-    /// Instant tracking the last time `pending_utxos` was pruned
+
+    /// Instant tracking the last time `pending_utxos` was pruned.
     last_prune: Instant,
-    /// The current best chain tip height.
+
+    /// A sender channel for the current best chain tip.
     chain_tip_sender: ChainTipSender,
+
+    /// A sender channel for the current best non-finalized chain.
+    best_chain_sender: watch::Sender<Option<Arc<Chain>>>,
+}
+
+/// A read-only service for accessing Zebra's cached blockchain state.
+///
+/// This service provides read-only access to:
+/// - the non-finalized state: the ~100 most recent blocks.
+/// - the finalized state: older blocks that have many confirmations.
+///
+/// Requests to this service are processed in parallel,
+/// ignoring any blocks queued by the read-write [`StateService`].
+///
+/// This quick response behavior is better for most state users.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct ReadStateService {
+    /// The shared inner on-disk database for the finalized state.
+    ///
+    /// RocksDB allows reads and writes via a shared reference,
+    /// but [`ZebraDb`] doesn't expose any write methods or types.
+    ///
+    /// This chain is updated concurrently with requests,
+    /// so it might include some block data that is also in `best_mem`.
+    db: ZebraDb,
+
+    /// A watch channel for the current best in-memory chain.
+    ///
+    /// This chain is only updated between requests,
+    /// so it might include some block data that is also on `disk`.
+    best_chain_receiver: watch::Receiver<Option<Arc<Chain>>>,
+
+    /// The configured Zcash network.
+    network: Network,
 }
 
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub fn new(config: Config, network: Network) -> (Self, LatestChainTip, ChainTipChange) {
+    /// Create a new read-write state service.
+    /// Returns the read-write and read-only state services,
+    /// and read-only watch channels for its best chain tip.
+    pub fn new(
+        config: Config,
+        network: Network,
+    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let disk = FinalizedState::new(&config, network);
         let initial_tip = disk
+            .db()
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
@@ -87,6 +169,9 @@ impl StateService {
             ChainTipSender::new(initial_tip, network);
 
         let mem = NonFinalizedState::new(network);
+
+        let (read_only_service, best_chain_sender) = ReadStateService::new(&disk);
+
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
@@ -98,12 +183,13 @@ impl StateService {
             network,
             last_prune: Instant::now(),
             chain_tip_sender,
+            best_chain_sender,
         };
 
         tracing::info!("starting legacy chain check");
         if let Some(tip) = state.best_tip() {
             if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
-                if legacy_chain_check(
+                if check::legacy_chain(
                     nu5_activation_height,
                     state.any_ancestor_blocks(tip.1),
                     state.network,
@@ -124,7 +210,7 @@ impl StateService {
         }
         tracing::info!("no legacy chain found");
 
-        (state, latest_chain_tip, chain_tip_change)
+        (state, read_only_service, latest_chain_tip, chain_tip_change)
     }
 
     /// Queue a finalized block for verification and storage in the finalized state.
@@ -158,7 +244,8 @@ impl StateService {
         tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.mem.any_chain_contains(&prepared.hash) || self.disk.hash(prepared.height).is_some()
+        if self.mem.any_chain_contains(&prepared.hash)
+            || self.disk.db().hash(prepared.height).is_some()
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err("block is already committed to the state".into()));
@@ -197,12 +284,16 @@ impl StateService {
                 );
         }
 
-        let finalized_tip_height = self.disk.finalized_tip_height().expect(
+        let finalized_tip_height = self.disk.db().finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         );
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
-        let tip_block = self.mem.best_tip_block().map(ChainTipBlock::from);
+        let best_chain = self.mem.best_chain();
+        let tip_block = best_chain
+            .and_then(|chain| chain.tip_block())
+            .cloned()
+            .map(ChainTipBlock::from);
 
         // update metrics using the best non-finalized tip
         if let Some(tip_block) = tip_block.as_ref() {
@@ -215,6 +306,13 @@ impl StateService {
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
             metrics::gauge!("zcash.chain.verified.block.height", tip_block.height.0 as _);
+        }
+
+        // update the chain watch channels
+
+        if self.best_chain_sender.receiver_count() > 0 {
+            // If the final receiver was just dropped, ignore the error.
+            let _ = self.best_chain_sender.send(best_chain.cloned());
         }
 
         self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
@@ -230,10 +328,10 @@ impl StateService {
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.disk.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared, &self.disk)?;
+        if self.disk.db().finalized_tip_hash() == parent_hash {
+            self.mem.commit_new_chain(prepared, self.disk.db())?;
         } else {
-            self.mem.commit_block(prepared, &self.disk)?;
+            self.mem.commit_block(prepared, self.disk.db())?;
         }
 
         Ok(())
@@ -241,7 +339,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || &self.disk.finalized_tip_hash() == hash
+        self.mem.any_chain_contains(hash) || &self.disk.db().finalized_tip_hash() == hash
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -304,11 +402,11 @@ impl StateService {
         check::block_is_valid_for_recent_chain(
             prepared,
             self.network,
-            self.disk.finalized_tip_height(),
+            self.disk.db().finalized_tip_height(),
             relevant_chain,
         )?;
 
-        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk)?;
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, self.disk.db())?;
 
         Ok(())
     }
@@ -331,7 +429,7 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.best_tip().or_else(|| self.disk.tip())
+        self.mem.best_tip().or_else(|| self.disk.db().tip())
     }
 
     /// Return the depth of block `hash` in the current best chain.
@@ -340,7 +438,7 @@ impl StateService {
         let height = self
             .mem
             .best_height_by_hash(hash)
-            .or_else(|| self.disk.height(hash))?;
+            .or_else(|| self.disk.db().height(hash))?;
 
         Some(tip.0 - height.0)
     }
@@ -351,7 +449,7 @@ impl StateService {
         self.mem
             .best_block(hash_or_height)
             .map(|contextual| contextual.block)
-            .or_else(|| self.disk.block(hash_or_height))
+            .or_else(|| self.disk.db().block(hash_or_height))
     }
 
     /// Return the transaction identified by `hash` if it exists in the current
@@ -359,14 +457,14 @@ impl StateService {
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
         self.mem
             .best_transaction(hash)
-            .or_else(|| self.disk.transaction(hash))
+            .or_else(|| self.disk.db().transaction(hash))
     }
 
     /// Return the hash for the block at `height` in the current best chain.
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.mem
             .best_hash(height)
-            .or_else(|| self.disk.hash(height))
+            .or_else(|| self.disk.db().hash(height))
     }
 
     /// Return true if `hash` is in the current best chain.
@@ -378,14 +476,14 @@ impl StateService {
     pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .best_height_by_hash(hash)
-            .or_else(|| self.disk.height(hash))
+            .or_else(|| self.disk.db().height(hash))
     }
 
     /// Return the height for the block at `hash` in any chain.
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .any_height_by_hash(hash)
-            .or_else(|| self.disk.height(hash))
+            .or_else(|| self.disk.db().height(hash))
     }
 
     /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
@@ -393,7 +491,7 @@ impl StateService {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| self.disk.utxo(outpoint))
+            .or_else(|| self.disk.db().utxo(outpoint))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -401,10 +499,10 @@ impl StateService {
     ///
     /// The block identified by `hash` is included in the chain of blocks yielded
     /// by the iterator. `hash` can come from any chain.
-    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> Iter<'_> {
-        Iter {
+    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> block_iter::Iter<'_> {
+        block_iter::Iter {
             service: self,
-            state: IterState::NonFinalized(hash),
+            state: block_iter::IterState::NonFinalized(hash),
         }
     }
 
@@ -569,95 +667,23 @@ impl StateService {
     }
 }
 
-pub(crate) struct Iter<'a> {
-    service: &'a StateService,
-    state: IterState,
-}
+impl ReadStateService {
+    /// Creates a new read-only state service, using the provided finalized state.
+    ///
+    /// Returns the newly created service,
+    /// and a watch channel for updating its best non-finalized chain.
+    pub(crate) fn new(disk: &FinalizedState) -> (Self, watch::Sender<Option<Arc<Chain>>>) {
+        let (best_chain_sender, best_chain_receiver) = watch::channel(None);
 
-enum IterState {
-    NonFinalized(block::Hash),
-    Finalized(block::Height),
-    Finished,
-}
-
-impl Iter<'_> {
-    fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter { service, state } = self;
-
-        let hash = match state {
-            IterState::NonFinalized(hash) => *hash,
-            IterState::Finalized(_) | IterState::Finished => unreachable!(),
+        let read_only_service = Self {
+            db: disk.db().clone(),
+            best_chain_receiver,
+            network: disk.network(),
         };
 
-        if let Some(block) = service.mem.any_block_by_hash(hash) {
-            let hash = block.header.previous_block_hash;
-            self.state = IterState::NonFinalized(hash);
-            Some(block)
-        } else {
-            None
-        }
-    }
+        tracing::info!("created new read-only state service");
 
-    fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter { service, state } = self;
-
-        let hash_or_height: HashOrHeight = match *state {
-            IterState::Finalized(height) => height.into(),
-            IterState::NonFinalized(hash) => hash.into(),
-            IterState::Finished => unreachable!(),
-        };
-
-        if let Some(block) = service.disk.block(hash_or_height) {
-            let height = block
-                .coinbase_height()
-                .expect("valid blocks have a coinbase height");
-
-            if let Some(next_height) = height - 1 {
-                self.state = IterState::Finalized(next_height);
-            } else {
-                self.state = IterState::Finished;
-            }
-
-            Some(block)
-        } else {
-            self.state = IterState::Finished;
-            None
-        }
-    }
-}
-
-impl Iterator for Iter<'_> {
-    type Item = Arc<Block>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.state {
-            IterState::NonFinalized(_) => self
-                .next_non_finalized_block()
-                .or_else(|| self.next_finalized_block()),
-            IterState::Finalized(_) => self.next_finalized_block(),
-            IterState::Finished => None,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.len();
-        (len, Some(len))
-    }
-}
-
-impl std::iter::FusedIterator for Iter<'_> {}
-
-impl ExactSizeIterator for Iter<'_> {
-    fn len(&self) -> usize {
-        match self.state {
-            IterState::NonFinalized(hash) => self
-                .service
-                .any_height_by_hash(hash)
-                .map(|height| (height.0 + 1) as _)
-                .unwrap_or(0),
-            IterState::Finalized(height) => (height.0 + 1) as _,
-            IterState::Finished => 0,
-        }
+        (read_only_service, best_chain_sender)
     }
 }
 
@@ -807,13 +833,97 @@ impl Service<Request> for StateService {
     }
 }
 
+impl Service<Request> for ReadStateService {
+    type Response = Response;
+    type Error = BoxError;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    #[instrument(name = "read_state", skip(self, req))]
+    fn call(&mut self, req: Request) -> Self::Future {
+        match req {
+            // TODO: implement for lightwalletd before using this state in RPC methods
+
+            // Used by get_block RPC.
+            Request::Block(_hash_or_height) => unimplemented!("ReadStateService doesn't Block yet"),
+
+            // Used by get_best_block_hash & get_blockchain_info (#3143) RPCs.
+            //
+            // These RPC methods could use the ChainTip struct instead,
+            // if that's easier or more consistent.
+            Request::Tip => unimplemented!("ReadStateService doesn't Tip yet"),
+
+            // TODO: implement for lightwalletd as part of these tickets
+
+            // get_raw_transaction (#3145)
+            Request::Transaction(_hash) => {
+                unimplemented!("ReadStateService doesn't Transaction yet")
+            }
+
+            // TODO: split the Request enum, then implement these new ReadRequests for lightwalletd
+            //       as part of these tickets
+
+            // z_get_tree_state (#3156)
+
+            // depends on transparent address indexes (#3150)
+            // get_address_tx_ids (#3147)
+            // get_address_balance (#3157)
+            // get_address_utxos (#3158)
+
+            // Out of Scope
+            // TODO: delete when splitting the Request enum
+
+            // These requests don't need better performance at the moment.
+            Request::FindBlockHashes {
+                known_blocks: _,
+                stop: _,
+            } => {
+                unreachable!("ReadStateService doesn't need to FindBlockHashes")
+            }
+            Request::FindBlockHeaders {
+                known_blocks: _,
+                stop: _,
+            } => {
+                unreachable!("ReadStateService doesn't need to FindBlockHeaders")
+            }
+
+            // Some callers of this request need to wait for queued blocks.
+            Request::Depth(_hash) => unreachable!("ReadStateService could change depth behaviour"),
+
+            // This request needs to wait for queued blocks.
+            Request::BlockLocator => {
+                unreachable!("ReadStateService should not be used for block locators")
+            }
+
+            // Impossible Requests
+
+            // The read-only service doesn't have the shared internal state
+            // needed to await UTXOs.
+            Request::AwaitUtxo(_outpoint) => unreachable!("ReadStateService can't await UTXOs"),
+
+            // The read-only service can't write.
+            Request::CommitBlock(_prepared) => unreachable!("ReadStateService can't commit blocks"),
+            Request::CommitFinalizedBlock(_finalized) => {
+                unreachable!("ReadStateService can't commit blocks")
+            }
+        }
+    }
+}
+
 /// Initialize a state service from the provided [`Config`].
-/// Returns a boxed state service, and receivers for state chain tip updates.
+/// Returns a boxed state service, a read-only state service,
+/// and receivers for state chain tip updates.
 ///
 /// Each `network` has its own separate on-disk database.
 ///
-/// To share access to the state, wrap the returned service in a `Buffer`. It's
-/// possible to construct multiple state services in the same application (as
+/// To share access to the state, wrap the returned service in a `Buffer`,
+/// or clone the returned [`ReadStateService`].
+///
+/// It's possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
 pub fn init(
@@ -821,13 +931,16 @@ pub fn init(
     network: Network,
 ) -> (
     BoxService<Request, Response, BoxError>,
+    ReadStateService,
     LatestChainTip,
     ChainTipChange,
 ) {
-    let (state_service, latest_chain_tip, chain_tip_change) = StateService::new(config, network);
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
+        StateService::new(config, network);
 
     (
         BoxService::new(state_service),
+        read_only_state_service,
         latest_chain_tip,
         chain_tip_change,
     )
@@ -838,58 +951,7 @@ pub fn init(
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let (state_service, _, _) = StateService::new(Config::ephemeral(), network);
+    let (state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
-}
-
-/// Check if zebra is following a legacy chain and return an error if so.
-fn legacy_chain_check<I>(
-    nu5_activation_height: block::Height,
-    ancestors: I,
-    network: Network,
-) -> Result<(), BoxError>
-where
-    I: Iterator<Item = Arc<Block>>,
-{
-    for (count, block) in ancestors.enumerate() {
-        // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
-        // so the rest of our checks are useless.
-        //
-        // If the cached tip is close to NU5 activation, but there aren't any V5 transactions in the
-        // chain yet, we could reach MAX_BLOCKS_TO_CHECK in Canopy, and incorrectly return an error.
-        if block
-            .coinbase_height()
-            .expect("valid blocks have coinbase heights")
-            < nu5_activation_height
-        {
-            return Ok(());
-        }
-
-        // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
-        // the Zebra instance that verified those blocks had no NU5 activation height.
-        if count >= constants::MAX_LEGACY_CHAIN_BLOCKS {
-            return Err("giving up after checking too many blocks".into());
-        }
-
-        // If a transaction `network_upgrade` field is different from the network upgrade calculated
-        // using our activation heights, the Zebra instance that verified those blocks had different
-        // network upgrade heights.
-        block
-            .check_transaction_network_upgrade_consistency(network)
-            .map_err(|_| "inconsistent network upgrade found in transaction")?;
-
-        // If we find at least one transaction with a valid `network_upgrade` field, the Zebra instance that
-        // verified those blocks used the same network upgrade heights. (Up to this point in the chain.)
-        let has_network_upgrade = block
-            .transactions
-            .iter()
-            .find_map(|trans| trans.network_upgrade())
-            .is_some();
-        if has_network_upgrade {
-            return Ok(());
-        }
-    }
-
-    Ok(())
 }

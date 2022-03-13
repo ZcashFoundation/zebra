@@ -112,8 +112,8 @@ jobs:
             RUST_LOG=debug
             SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
@@ -135,13 +135,24 @@ jobs:
         with:
           credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
 
+      # Check if our destination compute instance exists and delete it
+      - name: Delete existing instance with same SHA
+        id: delete-old-instance
+        run: |
+          INSTANCE=$(gcloud compute instances list --filter=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
+
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
         id: create-instance
         run: |
           gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
-          --boot-disk-type pd-extreme \
+          --boot-disk-type pd-ssd \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -159,7 +170,7 @@ jobs:
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
-        if: steps.create-instance.outcome == 'success'
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
@@ -170,9 +181,11 @@ jobs:
           done
           CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
+          sleep 60
 
       - name: Full sync mainnet
         id: full-sync-mainnet
+        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
           full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -188,4 +201,4 @@ jobs:
         if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
         continue-on-error: true
         run: |
-          gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --delete-disks all --zone "${{ env.ZONE }}"
+          gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet

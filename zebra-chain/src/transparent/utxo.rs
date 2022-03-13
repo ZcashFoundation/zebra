@@ -3,7 +3,7 @@
 use std::{collections::HashMap, convert::TryInto};
 
 use crate::{
-    block::{self, Block},
+    block::{self, Block, Height},
     transaction::{self, Transaction},
     transparent,
 };
@@ -100,7 +100,7 @@ pub fn utxos_from_ordered_utxos(
 }
 
 /// Compute an index of [`Output`]s, given an index of [`Utxo`]s.
-pub(crate) fn outputs_from_utxos(
+pub fn outputs_from_utxos(
     utxos: HashMap<transparent::OutPoint, Utxo>,
 ) -> HashMap<transparent::OutPoint, transparent::Output> {
     utxos
@@ -118,14 +118,45 @@ pub fn new_outputs(
     utxos_from_ordered_utxos(new_ordered_outputs(block, transaction_hashes))
 }
 
+/// Compute an index of newly created [`Utxo`]s, given a block and a
+/// list of precomputed transaction hashes.
+///
+/// This is a test-only function, prefer [`new_outputs`].
+#[cfg(any(test, feature = "proptest-impl"))]
+pub fn new_outputs_with_height(
+    block: &Block,
+    height: Height,
+    transaction_hashes: &[transaction::Hash],
+) -> HashMap<transparent::OutPoint, Utxo> {
+    utxos_from_ordered_utxos(new_ordered_outputs_with_height(
+        block,
+        height,
+        transaction_hashes,
+    ))
+}
+
 /// Compute an index of newly created [`OrderedUtxo`]s, given a block and a
 /// list of precomputed transaction hashes.
 pub fn new_ordered_outputs(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> HashMap<transparent::OutPoint, OrderedUtxo> {
-    let mut new_ordered_outputs = HashMap::new();
     let height = block.coinbase_height().expect("block has coinbase height");
+
+    new_ordered_outputs_with_height(block, height, transaction_hashes)
+}
+
+/// Compute an index of newly created [`OrderedUtxo`]s, given a block and a
+/// list of precomputed transaction hashes.
+///
+/// This function is intended for use in this module, and in tests.
+/// Prefer [`new_ordered_outputs`].
+pub fn new_ordered_outputs_with_height(
+    block: &Block,
+    height: Height,
+    transaction_hashes: &[transaction::Hash],
+) -> HashMap<transparent::OutPoint, OrderedUtxo> {
+    let mut new_ordered_outputs = HashMap::new();
 
     for (tx_index_in_block, (transaction, hash)) in block
         .transactions
@@ -148,8 +179,8 @@ pub fn new_ordered_outputs(
 /// its precomputed transaction hash, the transaction's index in its block,
 /// and the block's height.
 ///
-/// This function is only intended for use in tests.
-pub(crate) fn new_transaction_ordered_outputs(
+/// This function is only for use in this module, and in tests.
+pub fn new_transaction_ordered_outputs(
     transaction: &Transaction,
     hash: transaction::Hash,
     tx_index_in_block: usize,

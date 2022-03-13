@@ -1,7 +1,6 @@
 use std::{convert::TryInto, env, sync::Arc};
 
-use futures::stream::FuturesUnordered;
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
     block::{self, Block, CountedHeader},
@@ -17,37 +16,12 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     constants, init_test,
-    service::{chain_tip::TipAction, StateService},
+    service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
     BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
-
-async fn populated_state(
-    blocks: impl IntoIterator<Item = Arc<Block>>,
-) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let requests = blocks
-        .into_iter()
-        .map(|block| Request::CommitFinalizedBlock(block.into()));
-
-    let network = Network::Mainnet;
-    let mut state = init_test(network);
-
-    let mut responses = FuturesUnordered::new();
-
-    for request in requests {
-        let rsp = state.ready().await.unwrap().call(request);
-        responses.push(rsp);
-    }
-
-    use futures::StreamExt;
-    while let Some(rsp) = responses.next().await {
-        rsp.expect("blocks should commit just fine");
-    }
-
-    state
-}
 
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -222,7 +196,7 @@ async fn test_populated_state_responds_correctly(
 
 #[tokio::main]
 async fn populate_and_check(blocks: Vec<Arc<Block>>) -> Result<()> {
-    let state = populated_state(blocks).await;
+    let state = populated_state(blocks, Network::Mainnet).await;
     test_populated_state_responds_correctly(state).await?;
     Ok(())
 }
@@ -331,7 +305,7 @@ proptest! {
     fn some_block_less_than_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -342,7 +316,7 @@ proptest! {
     fn no_transaction_with_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, OVER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -376,7 +350,7 @@ proptest! {
                 .is_err()
         );
 
-        let response = crate::service::legacy_chain_check(
+        let response = crate::service::check::legacy_chain(
             nu_activation_height,
             chain.clone().into_iter().rev(),
             network
@@ -396,7 +370,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::legacy_chain_check(nu_activation_height, chain.into_iter().rev(), network)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -416,7 +390,7 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);
@@ -469,7 +443,7 @@ proptest! {
     ) {
         zebra_test::init();
 
-        let (mut state_service, _, _) = StateService::new(Config::ephemeral(), network);
+        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 
         prop_assert_eq!(state_service.disk.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
