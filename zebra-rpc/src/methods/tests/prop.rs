@@ -31,7 +31,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
             let rpc = RpcImpl::new(
-                "RPC test".to_owned(),
+                "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
@@ -79,7 +79,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new(
-                "RPC test".to_owned(),
+                "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
@@ -132,7 +132,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new(
-                "RPC test".to_owned(),
+                "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
@@ -193,7 +193,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new(
-                "RPC test".to_owned(),
+                "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
@@ -243,7 +243,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new(
-                "RPC test".to_owned(),
+                "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
@@ -292,7 +292,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let rpc = RpcImpl::new(
-                "RPC test".to_owned(),
+                "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,

@@ -162,7 +162,7 @@ impl StartCmd {
         // Launch RPC server
         let rpc_task_handle = RpcServer::spawn(
             config.rpc,
-            app_version().to_string(),
+            app_version(),
             mempool.clone(),
             read_only_state_service,
             latest_chain_tip.clone(),

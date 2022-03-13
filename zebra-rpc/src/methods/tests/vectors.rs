@@ -28,7 +28,7 @@ async fn rpc_getinfo() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let rpc = RpcImpl::new(
-        "RPC test".to_string(),
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
@@ -65,7 +65,7 @@ async fn rpc_getblock() {
 
     // Init RPC
     let rpc = RpcImpl::new(
-        "RPC test".to_string(),
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         state,
         NoChainTip,
@@ -94,7 +94,7 @@ async fn rpc_getblock_error() {
 
     // Init RPC
     let rpc = RpcImpl::new(
-        "RPC test".to_string(),
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
@@ -135,7 +135,7 @@ async fn rpc_getbestblockhash() {
 
     // Init RPC
     let rpc = RpcImpl::new(
-        "RPC test".to_string(),
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         state,
         NoChainTip,

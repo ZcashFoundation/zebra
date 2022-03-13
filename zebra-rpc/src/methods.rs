@@ -143,15 +143,18 @@ where
     Tip: ChainTip + Send + Sync,
 {
     /// Create a new instance of the RPC handler.
-    pub fn new(
-        app_version: String,
+    pub fn new<Version>(
+        app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> Self {
+    ) -> Self
+    where
+        Version: ToString,
+    {
         RpcImpl {
-            app_version,
+            app_version: app_version.to_string(),
             mempool,
             state,
             latest_chain_tip,

@@ -30,15 +30,16 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<Mempool, State, Tip>(
+    pub fn spawn<Version, Mempool, State, Tip>(
         config: Config,
-        app_version: String,
+        app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
         network: Network,
     ) -> tokio::task::JoinHandle<()>
     where
+        Version: ToString,
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
             + 'static,
         Mempool::Future: Send,
