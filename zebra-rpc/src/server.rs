@@ -22,6 +22,7 @@ use crate::{
 };
 
 pub mod compatibility;
+mod tracing_middleware;
 
 /// Zebra RPC Server
 #[derive(Clone, Debug)]
