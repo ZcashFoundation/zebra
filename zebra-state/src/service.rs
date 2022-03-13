@@ -292,27 +292,40 @@ impl StateService {
         );
         self.queued_blocks.prune_by_height(finalized_tip_height);
 
-        let best_chain = self.mem.best_chain();
-        let tip_block = best_chain
-            .and_then(|chain| chain.tip_block())
-            .cloned()
-            .map(ChainTipBlock::from);
+        let tip_block_height = self.update_latest_chain_channels();
 
         // update metrics using the best non-finalized tip
-        if let Some(tip_block) = tip_block.as_ref() {
+        if let Some(tip_block_height) = tip_block_height {
             metrics::gauge!(
                 "state.full_verifier.committed.block.height",
-                tip_block.height.0 as _
+                tip_block_height.0 as _
             );
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
-            metrics::gauge!("zcash.chain.verified.block.height", tip_block.height.0 as _);
+            metrics::gauge!("zcash.chain.verified.block.height", tip_block_height.0 as _);
         }
 
-        // update the chain watch channels
+        tracing::trace!("finished processing queued block");
+        rsp_rx
+    }
 
+    /// Update the [`LatestChainTip`], [`ChainTipChange`], and [`LatestChain`] channels
+    /// with the latest non-finalized [`ChainTipBlock`] and [`Chain`].
+    ///
+    /// Returns the latest non-finalized chain tip height,
+    /// or `None` if the non-finalized state is empty.
+    #[instrument(level = "debug", skip(self))]
+    fn update_latest_chain_channels(&mut self) -> Option<block::Height> {
+        let best_chain = self.mem.best_chain();
+        let tip_block = best_chain
+            .and_then(|chain| chain.tip_block())
+            .cloned()
+            .map(ChainTipBlock::from);
+        let tip_block_height = tip_block.as_ref().map(|block| block.height);
+
+        // The RPC service uses the ReadStateService, but it is not turned on by default.
         if self.best_chain_sender.receiver_count() > 0 {
             // If the final receiver was just dropped, ignore the error.
             let _ = self.best_chain_sender.send(best_chain.cloned());
@@ -320,8 +333,7 @@ impl StateService {
 
         self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
-        tracing::trace!("finished processing queued block");
-        rsp_rx
+        tip_block_height
     }
 
     /// Run contextual validation on the prepared block and add it to the
