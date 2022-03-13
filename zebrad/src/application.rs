@@ -342,7 +342,11 @@ impl Application for ZebradApp {
             .as_ref()
             .expect("config is loaded before register_components");
 
-        let default_filter = if command.verbose { "debug" } else { "info" };
+        let default_filter = if command.verbose {
+            "debug,rpc=trace"
+        } else {
+            "info,rpc=trace"
+        };
         let is_server = command
             .command
             .as_ref()
