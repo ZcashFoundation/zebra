@@ -37,7 +37,9 @@ use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Block, Height},
+    orchard,
     parameters::Network::{self, *},
+    sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::Transaction,
 };
@@ -196,6 +198,18 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     insta::assert_ron_snapshot!("tip", tip.map(Tip::from));
 
     if let Some((max_height, tip_block_hash)) = tip {
+        // Check that the database returns empty note commitment trees for the
+        // genesis block.
+        let sapling_tree = state
+            .sapling_note_commitment_tree_by_height(&block::Height::MIN)
+            .expect("the genesis block in the database has a Sapling tree");
+        let orchard_tree = state
+            .orchard_note_commitment_tree_by_height(&block::Height::MIN)
+            .expect("the genesis block in the database has an Orchard tree");
+
+        assert_eq!(sapling_tree, sapling::tree::NoteCommitmentTree::default());
+        assert_eq!(orchard_tree, orchard::tree::NoteCommitmentTree::default());
+
         let mut stored_block_hashes = Vec::new();
         let mut stored_blocks = Vec::new();
 
