@@ -165,6 +165,8 @@ impl StartCmd {
             app_version().to_string(),
             mempool.clone(),
             read_only_state_service,
+            latest_chain_tip.clone(),
+            config.network.network,
         );
 
         let setup_data = InboundSetupData {

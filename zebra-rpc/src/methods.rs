@@ -14,6 +14,8 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, SerializedBlock},
+    chain_tip::ChainTip,
+    parameters::Network,
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, Transaction},
 };
@@ -104,7 +106,7 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
-pub struct RpcImpl<Mempool, State>
+pub struct RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
@@ -112,16 +114,25 @@ where
         Response = zebra_state::Response,
         Error = zebra_state::BoxError,
     >,
+    Tip: ChainTip,
 {
     /// Zebra's application version.
     app_version: String,
+
     /// A handle to the mempool service.
     mempool: Buffer<Mempool, mempool::Request>,
+
     /// A handle to the state service.
     state: State,
+
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: Tip,
+
+    /// The configured network for this RPC service.
+    network: Network,
 }
 
-impl<Mempool, State> RpcImpl<Mempool, State>
+impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
@@ -129,22 +140,27 @@ where
         Response = zebra_state::Response,
         Error = zebra_state::BoxError,
     >,
+    Tip: ChainTip + Send + Sync,
 {
     /// Create a new instance of the RPC handler.
     pub fn new(
         app_version: String,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
+        latest_chain_tip: Tip,
+        network: Network,
     ) -> Self {
         RpcImpl {
             app_version,
             mempool,
             state,
+            latest_chain_tip,
+            network,
         }
     }
 }
 
-impl<Mempool, State> Rpc for RpcImpl<Mempool, State>
+impl<Mempool, State, Tip> Rpc for RpcImpl<Mempool, State, Tip>
 where
     Mempool:
         tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
@@ -158,6 +174,7 @@ where
         + Sync
         + 'static,
     State::Future: Send,
+    Tip: ChainTip + Send + Sync + 'static,
 {
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
@@ -170,6 +187,8 @@ where
 
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
         // TODO: dummy output data, fix in the context of #3143
+        //       use self.latest_chain_tip.estimate_network_chain_tip_height()
+        //       to estimate the current block height on the network
         let response = GetBlockChainInfo {
             chain: "TODO: main".to_string(),
         };
