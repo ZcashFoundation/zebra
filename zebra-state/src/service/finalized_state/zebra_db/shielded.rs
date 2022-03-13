@@ -101,17 +101,6 @@ impl ZebraDb {
         self.db.zs_get(sprout_anchors, sprout_anchor)
     }
 
-    /// Returns the Sprout note commitment tree matching the given block height.
-    #[allow(dead_code)]
-    pub fn sprout_note_commitment_tree_by_height(
-        &self,
-        height: &Height,
-    ) -> Option<sprout::tree::NoteCommitmentTree> {
-        let sprout_trees = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-
-        self.db.zs_get(sprout_trees, height)
-    }
-
     /// Returns the Sapling note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
@@ -277,10 +266,16 @@ impl DiskWriteBatch {
         self.zs_insert(sapling_anchors, sapling_root, ());
         self.zs_insert(orchard_anchors, orchard_root, ());
 
-        // TODO: if we ever need concurrent read-only access to the sprout tree, store it by `()`, not height.
-        // Otherwise, the ReadStateService could access a height
-        // that was just deleted by a concurrent StateService write.
-        // This requires a database version update.
+        // Delete the previously stored Sprout note commitment tree.
+        let current_tip_height = *height - 1;
+        if let Some(h) = current_tip_height {
+            self.zs_delete(sprout_note_commitment_tree_cf, h);
+        }
+
+        // TODO: if we ever need concurrent read-only access to the sprout tree,
+        // store it by `()`, not height. Otherwise, the ReadStateService could
+        // access a height that was just deleted by a concurrent StateService
+        // write. This requires a database version update.
         self.zs_insert(
             sprout_note_commitment_tree_cf,
             height,
