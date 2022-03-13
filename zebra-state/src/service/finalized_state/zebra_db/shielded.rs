@@ -276,6 +276,10 @@ impl DiskWriteBatch {
         self.zs_insert(sapling_anchors, sapling_root, ());
         self.zs_insert(orchard_anchors, orchard_root, ());
 
+        // TODO: if we ever need concurrent read-only access to the sprout tree, store it by `()`, not height.
+        // Otherwise, the ReadStateService could access a height
+        // that was just deleted by a concurrent StateService write.
+        // This requires a database version update.
         self.zs_insert(
             sprout_note_commitment_tree_cf,
             height,
