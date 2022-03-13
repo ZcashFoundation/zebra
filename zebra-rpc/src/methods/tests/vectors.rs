@@ -4,7 +4,12 @@ use std::sync::Arc;
 
 use tower::buffer::Buffer;
 
-use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::Block,
+    chain_tip::NoChainTip,
+    parameters::Network::{self, *},
+    serialization::ZcashDeserializeInto,
+};
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
 
@@ -23,16 +28,18 @@ async fn rpc_getinfo() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let rpc = RpcImpl::new(
-        "Zebra version test".to_string(),
+        "RPC test".to_string(),
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
+        NoChainTip,
+        Mainnet,
     );
 
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
 
     // make sure there is a `build` field in the response,
     // and that is equal to the provided string.
-    assert_eq!(get_info.build, "Zebra version test");
+    assert_eq!(get_info.build, "RPC test");
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
@@ -57,11 +64,13 @@ async fn rpc_getblock() {
     let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl {
-        app_version: "Zebra version test".to_string(),
-        mempool: Buffer::new(mempool.clone(), 1),
+    let rpc = RpcImpl::new(
+        "RPC test".to_string(),
+        Buffer::new(mempool.clone(), 1),
         state,
-    };
+        NoChainTip,
+        Mainnet,
+    );
 
     // Make calls and check response
     for (i, block) in blocks.into_iter().enumerate() {
@@ -84,11 +93,13 @@ async fn rpc_getblock_error() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
-    let rpc = RpcImpl {
-        app_version: "Zebra version test".to_string(),
-        mempool: Buffer::new(mempool.clone(), 1),
-        state: Buffer::new(state.clone(), 1),
-    };
+    let rpc = RpcImpl::new(
+        "RPC test".to_string(),
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        NoChainTip,
+        Mainnet,
+    );
 
     // Make sure we get an error if Zebra can't parse the block height.
     assert!(rpc
@@ -123,11 +134,13 @@ async fn rpc_getbestblockhash() {
     let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl {
-        app_version: "Zebra version test".to_string(),
-        mempool: Buffer::new(mempool.clone(), 1),
+    let rpc = RpcImpl::new(
+        "RPC test".to_string(),
+        Buffer::new(mempool.clone(), 1),
         state,
-    };
+        NoChainTip,
+        Mainnet,
+    );
 
     // Get the tip hash using RPC method `get_best_block_hash`
     let get_best_block_hash = rpc

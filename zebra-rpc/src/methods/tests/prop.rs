@@ -1,3 +1,5 @@
+//! Randomised property tests for RPC methods.
+
 use std::collections::HashSet;
 
 use hex::ToHex;
@@ -7,6 +9,8 @@ use thiserror::Error;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
+    chain_tip::NoChainTip,
+    parameters::Network::*,
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{Transaction, UnminedTx, UnminedTxId},
 };
@@ -30,6 +34,8 @@ proptest! {
                 "RPC test".to_owned(),
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
             );
             let hash = SentTransactionHash(transaction.hash());
 
@@ -76,6 +82,8 @@ proptest! {
                 "RPC test".to_owned(),
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
             );
 
             let transaction_bytes = transaction
@@ -127,6 +135,8 @@ proptest! {
                 "RPC test".to_owned(),
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
             );
 
             let transaction_bytes = transaction
@@ -186,6 +196,8 @@ proptest! {
                 "RPC test".to_owned(),
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
             );
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
@@ -234,6 +246,8 @@ proptest! {
                 "RPC test".to_owned(),
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
             );
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
@@ -281,6 +295,8 @@ proptest! {
                 "RPC test".to_owned(),
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
             );
 
             let call_task = tokio::spawn(rpc.get_raw_mempool());
