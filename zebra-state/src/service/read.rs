@@ -16,6 +16,9 @@ use crate::{
     HashOrHeight,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
 /// [`Height`](zebra_chain::block::Height),
 /// if it exists in the non-finalized `chain` or finalized `db`.

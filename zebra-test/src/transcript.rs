@@ -37,6 +37,7 @@ impl ExpectedTranscriptError {
     }
 
     /// Check the actual error `e` against this expected error.
+    #[track_caller]
     fn check(&self, e: BoxError) -> Result<(), Report> {
         match self {
             ExpectedTranscriptError::Any => Ok(()),
@@ -89,6 +90,7 @@ where
     S: Debug + Eq,
 {
     /// Check this transcript against the responses from the `to_check` service
+    #[track_caller]
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
         C: Service<R, Response = S>,
@@ -169,6 +171,7 @@ where
         Poll::Ready(Ok(()))
     }
 
+    #[track_caller]
     fn call(&mut self, request: R) -> Self::Future {
         if let Some((expected_request, response)) = self.messages.next() {
             match response {

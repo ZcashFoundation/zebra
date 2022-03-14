@@ -42,7 +42,7 @@ pub use service::{
 pub use service::{
     arbitrary::populated_state,
     chain_tip::{ChainTipBlock, ChainTipSender},
-    init_test,
+    init_test, init_test_services,
 };
 
 pub(crate) use request::ContextuallyValidBlock;
