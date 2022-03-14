@@ -850,7 +850,7 @@ impl Service<Request> for ReadStateService {
 
                 async move {
                     Ok(read::block(
-                        state.best_chain_receiver.borrow().clone().as_ref(),
+                        state.best_chain_receiver.borrow().as_ref(),
                         &state.db,
                         hash_or_height,
                     ))
