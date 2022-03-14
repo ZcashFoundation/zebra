@@ -86,7 +86,7 @@ pub type QueuedFinalized = (
 /// then return their answers.
 ///
 /// This behaviour is implicitly used by Zebra's syncer,
-/// to delay the next ObtainTips until all queued blocks have been commited.
+/// to delay the next ObtainTips until all queued blocks have been committed.
 ///
 /// But most state users can ignore any queued blocks, and get faster read responses
 /// using the [`ReadOnlyStateService`].
