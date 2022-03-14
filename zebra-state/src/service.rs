@@ -937,7 +937,7 @@ impl Service<Request> for ReadStateService {
             }
 
             // For the get_raw_transaction RPC, to be implemented in #3145.
-            Request::Transaction(_hash) => {
+            Request::Transaction(hash) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -945,7 +945,16 @@ impl Service<Request> for ReadStateService {
                     "type" => "transaction",
                 );
 
-                unimplemented!("ReadStateService doesn't Transaction yet")
+                let state = self.clone();
+
+                async move {
+                    let transaction = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transaction(best_chain, &state.db, hash)
+                    });
+
+                    Ok(Response::Transaction(transaction))
+                }
+                .boxed()
             }
 
             // TODO: split the Request enum, then implement these new ReadRequests for lightwalletd
