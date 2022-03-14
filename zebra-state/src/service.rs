@@ -464,12 +464,10 @@ impl StateService {
         read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
 
-    /// Return the transaction identified by `hash` if it exists in the current
-    /// best chain.
+    /// Returns the [`Transaction`] with [`transaction::Hash`],
+    /// if it exists in the current best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        self.mem
-            .best_transaction(hash)
-            .or_else(|| self.disk.db().transaction(hash))
+        read::transaction(self.mem.best_chain(), self.disk.db(), hash)
     }
 
     /// Return the hash for the block at `height` in the current best chain.
