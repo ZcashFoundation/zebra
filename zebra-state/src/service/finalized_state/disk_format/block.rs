@@ -15,10 +15,27 @@ use zebra_chain::{
     transaction,
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk, IntoDiskFixedLen};
+use crate::service::finalized_state::disk_format::{
+    expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk, IntoDiskFixedLen,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+/// The maximum value of an on-disk serialized [`Height`].
+///
+/// This allows us to store [`OutputIndex`]es in 8 bytes,
+/// which makes database searches more efficient.
+///
+/// # Consensus
+///
+/// This maximum height supports on-disk storage of blocks until around 2050.
+///
+/// Since Zebra only stores fully verified blocks on disk, blocks with heights
+/// larger than this height are rejected before reaching the database.
+/// (It would take decades to generate a valid chain this high.)
+#[allow(dead_code)]
+pub const MAX_ON_DISK_HEIGHT: Height = Height(Height::MAX.0 / 256);
 
 // Transaction types
 
@@ -90,17 +107,22 @@ impl FromDisk for Block {
 }
 
 impl IntoDisk for Height {
-    type Bytes = [u8; 4];
+    /// Consensus: see the note at [`MAX_ON_DISK_HEIGHT`].
+    type Bytes = [u8; 3];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0.to_be_bytes()
+        let mem_bytes = self.0.to_be_bytes();
+
+        let disk_bytes = truncate_zero_be_bytes(&mem_bytes, Height::fixed_disk_byte_len());
+
+        disk_bytes.try_into().unwrap()
     }
 }
 
 impl FromDisk for Height {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        Height(u32::from_be_bytes(array))
+        let mem_bytes = expand_zero_be_bytes(bytes.as_ref(), 4);
+        Height(u32::from_be_bytes(mem_bytes.try_into().unwrap()))
     }
 }
 
@@ -136,11 +158,11 @@ impl FromDisk for TransactionIndex {
 }
 
 impl IntoDisk for TransactionLocation {
-    type Bytes = [u8; 8];
+    type Bytes = [u8; 7];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.as_bytes();
-        let index_bytes = self.index.as_bytes();
+        let height_bytes = self.height.as_bytes().to_vec();
+        let index_bytes = self.index.as_bytes().to_vec();
 
         [height_bytes, index_bytes].concat().try_into().unwrap()
     }
