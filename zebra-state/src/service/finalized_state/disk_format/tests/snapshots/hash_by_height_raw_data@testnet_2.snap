@@ -1,20 +1,18 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 125
 expression: cf_data
-
 ---
 [
   KV(
-    k: "00000000",
+    k: "000000",
     v: "382c4a332661c7ed0671f32a34d724619f086c61873bce7c99859dd9920aa605",
   ),
   KV(
-    k: "00000001",
+    k: "000001",
     v: "238d665a062b9007836a7d8f968ba2f3847af5f542733389a952cf9b86795502",
   ),
   KV(
-    k: "00000002",
+    k: "000002",
     v: "181ac2d6dc0ae73a82d7db472ac2879a7c24d8b12e5f73efc33a55549ea4f100",
   ),
 ]
