@@ -32,10 +32,10 @@
 
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock},
     orchard,
     parameters::Network::{self, *},
     sapling,
@@ -52,7 +52,7 @@ use crate::{
 ///
 /// This structure snapshots the height and hash on separate lines,
 /// which looks good for a single entry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct Tip {
     height: u32,
     block_hash: String,
@@ -71,28 +71,25 @@ impl From<(Height, block::Hash)> for Tip {
 ///
 /// This structure is used to snapshot the height and hash on the same line,
 /// which looks good for a vector of heights and hashes.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 struct BlockHash(String);
 
 /// Block data structure for RON snapshots.
 ///
 /// This structure is used to snapshot the height and block data on separate lines,
 /// which looks good for a vector of heights and block data.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct BlockData {
     height: u32,
-    block: String,
+    #[serde(with = "hex")]
+    block: SerializedBlock,
 }
 
 impl BlockData {
     pub fn new(height: Height, block: &Block) -> BlockData {
-        let block = block
-            .zcash_serialize_to_vec()
-            .expect("serialization of stored block succeeds");
-
         BlockData {
             height: height.0,
-            block: hex::encode(block),
+            block: block.into(),
         }
     }
 }
@@ -101,10 +98,11 @@ impl BlockData {
 ///
 /// This structure is used to snapshot the location and transaction hash on separate lines,
 /// which looks good for a vector of locations and transaction hashes.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct TransactionHashByLocation {
     loc: Option<TransactionLocation>,
-    hash: String,
+    #[serde(with = "hex")]
+    hash: transaction::Hash,
 }
 
 impl TransactionHashByLocation {
@@ -112,10 +110,7 @@ impl TransactionHashByLocation {
         loc: Option<TransactionLocation>,
         hash: transaction::Hash,
     ) -> TransactionHashByLocation {
-        TransactionHashByLocation {
-            loc,
-            hash: hash.to_string(),
-        }
+        TransactionHashByLocation { loc, hash }
     }
 }
 
@@ -123,9 +118,12 @@ impl TransactionHashByLocation {
 ///
 /// This structure is used to snapshot the location and transaction data on separate lines,
 /// which looks good for a vector of locations and transaction data.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 struct TransactionData {
     loc: TransactionLocation,
+    // TODO: after #3145, replace with:
+    // #[serde(with = "hex")]
+    // transaction: SerializedTransaction,
     transaction: String,
 }
 
@@ -321,13 +319,6 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             is_sorted(&stored_block_hashes),
             "unsorted: {:?}",
             stored_block_hashes
-        );
-        assert!(is_sorted(&stored_blocks), "unsorted: {:?}", stored_blocks);
-
-        assert!(
-            is_sorted(&stored_transaction_hashes),
-            "unsorted: {:?}",
-            stored_transaction_hashes
         );
         assert!(
             is_sorted(&stored_transactions),
