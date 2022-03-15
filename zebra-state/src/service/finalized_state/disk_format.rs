@@ -113,3 +113,60 @@ where
         Self::Bytes::default().into_iter().count()
     }
 }
+
+// Serialization Modification Functions
+
+/// Truncate `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
+/// Used to discard unused zero bytes during serialization.
+///
+/// # Panics
+///
+/// - if `mem_bytes` is shorter than `disk_len`
+/// - if any of the truncated bytes are non-zero
+pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> &[u8] {
+    let truncated_bytes = mem_bytes
+        .len()
+        .checked_sub(disk_len)
+        .expect("unexpected `mem_bytes` length: must be at least `disk_len`");
+
+    if truncated_bytes == 0 {
+        return mem_bytes;
+    }
+
+    let (discarded, truncated) = mem_bytes.split_at(truncated_bytes);
+
+    assert!(
+        discarded.iter().all(|&byte| byte == 0),
+        "unexpected `mem_bytes` content: non-zero discarded bytes: {:?}\n\
+         truncated: {:?}",
+        discarded,
+        truncated,
+    );
+
+    assert_eq!(truncated.len(), disk_len);
+
+    truncated
+}
+
+/// Expand `disk_bytes` to `mem_len`, by adding zero bytes at the start of the slice.
+/// Used to zero-fill bytes that were discarded during serialization.
+///
+/// # Panics
+///
+/// - if `disk_bytes` is longer than `mem_len`
+pub fn expand_zero_be_bytes(disk_bytes: &[u8], mem_len: usize) -> Vec<u8> {
+    let extra_bytes = mem_len
+        .checked_sub(disk_bytes.len())
+        .expect("unexpected `disk_bytes` length: must not exceed `mem_len`");
+
+    if extra_bytes == 0 {
+        return disk_bytes.to_vec();
+    }
+
+    let mut expanded = vec![0; extra_bytes];
+    expanded.extend(disk_bytes);
+
+    assert_eq!(expanded.len(), mem_len);
+
+    expanded
+}
