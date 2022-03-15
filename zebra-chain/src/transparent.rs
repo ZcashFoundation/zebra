@@ -110,6 +110,22 @@ pub struct OutPoint {
     pub index: u32,
 }
 
+impl OutPoint {
+    /// Returns a new OutPoint from an in-memory output `index`.
+    ///
+    /// # Panics
+    ///
+    /// If `index` doesn't fit in a [`u32`].
+    pub fn from_usize(hash: transaction::Hash, index: usize) -> OutPoint {
+        OutPoint {
+            hash,
+            index: index
+                .try_into()
+                .expect("valid in-memory output indexes fit in a u32"),
+        }
+    }
+}
+
 /// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]

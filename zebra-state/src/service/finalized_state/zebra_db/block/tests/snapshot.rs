@@ -41,10 +41,14 @@ use zebra_chain::{
     sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction},
+    transparent,
 };
 
 use crate::{
-    service::finalized_state::{disk_format::TransactionLocation, FinalizedState},
+    service::finalized_state::{
+        disk_format::{block::TransactionIndex, transparent::OutputLocation, TransactionLocation},
+        FinalizedState,
+    },
     Config,
 };
 
@@ -221,6 +225,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         let mut stored_transaction_hashes = Vec::new();
         let mut stored_transactions = Vec::new();
 
+        let mut stored_utxos = Vec::new();
+
         let sapling_tree_at_tip = state.sapling_note_commitment_tree();
         let orchard_tree_at_tip = state.orchard_note_commitment_tree();
 
@@ -311,6 +317,36 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                 stored_transaction_hashes.push(stored_transaction_hash);
                 stored_transactions.push(transaction_data);
+
+                for output_index in 0..stored_block.transactions[tx_index].outputs().len() {
+                    let output = &stored_block.transactions[tx_index].outputs()[output_index];
+                    let outpoint =
+                        transparent::OutPoint::from_usize(transaction_hash, output_index);
+
+                    let output_location =
+                        OutputLocation::from_usize(transaction_hash, output_index);
+
+                    let stored_utxo = state.utxo(&outpoint);
+
+                    if let Some(stored_utxo) = &stored_utxo {
+                        assert_eq!(&stored_utxo.output, output);
+                        assert_eq!(stored_utxo.height, query_height);
+
+                        assert_eq!(
+                            stored_utxo.from_coinbase,
+                            transaction_location.index == TransactionIndex::from_usize(0),
+                            "coinbase transactions must be the first transaction in a block:\n\
+                             from_coinbase was: {from_coinbase},\n\
+                             but transaction index was: {tx_index},\n\
+                             at: {transaction_location:?},\n\
+                             {output_location:?}",
+                            from_coinbase = stored_utxo.from_coinbase,
+                        );
+                    }
+
+                    // TODO: use output_location in #3151
+                    stored_utxos.push((outpoint, stored_utxo));
+                }
             }
         }
 
@@ -332,14 +368,16 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
         insta::assert_ron_snapshot!("blocks", stored_blocks);
 
+        insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
+        insta::assert_ron_snapshot!("transactions", stored_transactions);
+
+        insta::assert_ron_snapshot!("utxos", stored_utxos);
+
         // These snapshots will change if the trees do not have cached roots.
         // But we expect them to always have cached roots,
         // because those roots are used to populate the anchor column families.
         insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
         insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
-
-        insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
-        insta::assert_ron_snapshot!("transactions", stored_transactions);
 
         // The zcash_history types used in this tree don't support serde.
         insta::assert_debug_snapshot!("history_tree", (max_height, history_tree_at_tip));
