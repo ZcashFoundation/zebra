@@ -45,7 +45,7 @@ use zebra_chain::{
     parameters::Network::{self, *},
     sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::Transaction,
+    transaction::{self, Transaction},
 };
 
 use crate::{
@@ -107,16 +107,19 @@ impl BlockData {
 /// This structure is used to snapshot the location and transaction hash on separate lines,
 /// which looks good for a vector of locations and transaction hashes.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-struct TransactionHash {
-    loc: TransactionLocation,
+struct TransactionHashByLocation {
+    loc: Option<TransactionLocation>,
     hash: String,
 }
 
-impl TransactionHash {
-    pub fn new(loc: TransactionLocation, transaction: &Transaction) -> TransactionHash {
-        TransactionHash {
+impl TransactionHashByLocation {
+    pub fn new(
+        loc: Option<TransactionLocation>,
+        hash: transaction::Hash,
+    ) -> TransactionHashByLocation {
+        TransactionHashByLocation {
             loc,
-            hash: transaction.hash().to_string(),
+            hash: hash.to_string(),
         }
     }
 }
@@ -277,10 +280,24 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 let transaction = &stored_block.transactions[tx_index];
                 let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
 
-                let transaction_hash = TransactionHash::new(transaction_location, transaction);
+                let transaction_hash = transaction.hash();
                 let transaction_data = TransactionData::new(transaction_location, transaction);
 
-                stored_transaction_hashes.push(transaction_hash);
+                // Check all the transaction column families,
+                // using transaction location queries.
+                let stored_transaction_location = state.transaction_location(transaction_hash);
+
+                // Consensus: the genesis transaction is not indexed.
+                if query_height.0 > 0 {
+                    assert_eq!(stored_transaction_location, Some(transaction_location));
+                } else {
+                    assert_eq!(stored_transaction_location, None);
+                }
+
+                let stored_transaction_hash =
+                    TransactionHashByLocation::new(stored_transaction_location, transaction_hash);
+
+                stored_transaction_hashes.push(stored_transaction_hash);
                 stored_transactions.push(transaction_data);
             }
         }
