@@ -26,86 +26,79 @@ mod tests;
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
-    /// getinfo
+    /// Returns software information from the RPC server, as a [`GetInfo`] JSON struct.
     ///
-    /// Returns software information from the RPC server running Zebra.
+    /// zcashd reference: [`getinfo`](https://zcash.github.io/rpc/getinfo.html)
     ///
-    /// zcashd reference: <https://zcash.github.io/rpc/getinfo.html>
+    /// # Notes
     ///
-    /// Result:
-    /// {
-    ///      "build": String, // Full application version
-    ///      "subversion", String, // Zebra user agent
-    /// }
+    /// [The zcashd reference](https://zcash.github.io/rpc/getinfo.html) might not show some fields
+    /// in Zebra's [`GetInfo`]. Zebra uses the field names and formats from the
+    /// [zcashd code](https://github.com/zcash/zcash/blob/v4.6.0-1/src/rpc/misc.cpp#L86-L87).
     ///
-    /// Note 1: We only expose 2 fields as they are the only ones needed for
-    /// lightwalletd: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95>
-    ///
-    /// Note 2: <https://zcash.github.io/rpc/getinfo.html> is outdated so it does not
-    /// show the fields we are exposing. However, this fields are part of the output
-    /// as shown in the following zcashd code:
-    /// <https://github.com/zcash/zcash/blob/v4.6.0-1/src/rpc/misc.cpp#L86-L87>
-    /// Zcash open ticket to add this fields to the docs: <https://github.com/zcash/zcash/issues/5606>
+    /// Some fields from the zcashd reference are missing from Zebra's [`GetInfo`]. It only contains the fields
+    /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)
     #[rpc(name = "getinfo")]
     fn get_info(&self) -> Result<GetInfo>;
 
-    /// getblockchaininfo
+    /// Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
     ///
-    /// TODO: explain what the method does
-    ///       link to the zcashd RPC reference
-    ///       list the arguments and fields that lightwalletd uses
-    ///       note any other lightwalletd changes
+    /// zcashd reference: [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html)
+    ///
+    /// TODO in the context of https://github.com/ZcashFoundation/zebra/issues/3143:
+    /// - list the arguments and fields that lightwalletd uses
+    /// - note any other lightwalletd changes
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
 
-    /// sendrawtransaction
+    /// Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.
+    /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
     ///
-    /// Sends the raw bytes of a signed transaction to the network, if the transaction is valid.
+    /// zcashd reference: [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html)
     ///
-    /// zcashd reference: <https://zcash.github.io/rpc/sendrawtransaction.html>
+    /// # Parameters
     ///
-    /// Result: a hexadecimal string of the hash of the sent transaction.
+    /// - `raw_transaction_hex`: (string, required) The hex-encoded raw transaction bytes.
     ///
-    /// Note: zcashd provides an extra `allowhighfees` parameter, but we don't yet because
-    /// lightwalletd doesn't use it.
+    /// # Notes
+    ///
+    /// zcashd accepts an optional `allowhighfees` parameter. Zebra doesn't support this parameter,
+    /// because lightwalletd doesn't use it.
     #[rpc(name = "sendrawtransaction")]
     fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
     ) -> BoxFuture<Result<SentTransactionHash>>;
 
-    /// getblock
+    /// Returns the requested block by height, as a [`GetBlock`] JSON string.
     ///
-    /// Returns requested block by height, encoded as hex.
+    /// zcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)
     ///
-    /// zcashd reference: <https://zcash.github.io/rpc/getblock.html>
+    /// # Parameters
     ///
-    /// Result: [`GetBlock`]
+    /// - `height`: (string, required) The height number for the block to be returned.
     ///
-    /// Note 1: We only expose the `data` field as lightwalletd uses the non-verbose
+    /// # Notes
+    ///
+    /// We only expose the `data` field as lightwalletd uses the non-verbose
     /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
     ///
-    /// Note 2: `lightwalletd` only requests blocks by height, so we don't support
-    /// getting blocks by hash.
+    /// `lightwalletd` only requests blocks by height, so we don't support
+    /// getting blocks by hash but we do need to send the height number as a string.
     ///
-    /// Note 3: The `verbosity` parameter is ignored but required in the call.
+    /// The `verbosity` parameter is ignored but required in the call.
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 
-    /// getbestblockhash
+    /// Returns the hash of the current best blockchain tip block, as a [`GetBestBlockHash`] JSON string.
     ///
-    /// Returns the hash of the current best blockchain tip block.
-    ///
-    /// zcashd reference: <https://zcash.github.io/rpc/getbestblockhash.html>
-    ///
-    /// Result: [`GetBestBlockHash`]
-    ///
+    /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
-    /// zcashd reference: <https://zcash.github.io/rpc/getrawmempool.html>
+    /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     #[rpc(name = "getrawmempool")]
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
 }
@@ -325,6 +318,8 @@ where
 
 #[derive(serde::Serialize, serde::Deserialize)]
 /// Response to a `getinfo` RPC request.
+///
+/// See the notes for the [`Rpc::get_info` method].
 pub struct GetInfo {
     build: String,
     subversion: String,
@@ -332,6 +327,8 @@ pub struct GetInfo {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 /// Response to a `getblockchaininfo` RPC request.
+///
+/// See the notes for the [`Rpc::get_blockchain_info` method].
 pub struct GetBlockChainInfo {
     chain: String,
     // TODO: add other fields used by lightwalletd (#3143)
@@ -340,13 +337,21 @@ pub struct GetBlockChainInfo {
 #[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 /// Response to a `sendrawtransaction` RPC request.
 ///
-/// A JSON string with the transaction hash in hexadecimal.
+/// Contains the hex-encoded hash of the sent transaction.
+///
+/// See the notes for the [`Rpc::send_raw_transaction` method].
 pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
 #[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
+///
+/// See the notes for the [`Rpc::get_block` method].
 pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 
 #[derive(Debug, PartialEq, serde::Serialize)]
 /// Response to a `getbestblockhash` RPC request.
+///
+/// Contains the hex-encoded hash of the tip block.
+///
+/// Also see the notes for the [`Rpc::get_best_block_hash` method].
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
