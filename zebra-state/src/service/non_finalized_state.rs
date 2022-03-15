@@ -17,7 +17,7 @@ use zebra_chain::{
 use crate::{
     request::ContextuallyValidBlock,
     service::{check, finalized_state::ZebraDb},
-    FinalizedBlock, HashOrHeight, PreparedBlock, ValidateContextError,
+    FinalizedBlock, PreparedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -302,15 +302,6 @@ impl NonFinalizedState {
         }
 
         None
-    }
-
-    /// Returns the [`ContextuallyValidBlock`] at a given height or hash in the best chain.
-    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<ContextuallyValidBlock> {
-        let best_chain = self.best_chain()?;
-        let height =
-            hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
-
-        best_chain.blocks.get(&height).map(Clone::clone)
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.

@@ -55,6 +55,7 @@ pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
+mod read;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -443,13 +444,10 @@ impl StateService {
         Some(tip.0 - height.0)
     }
 
-    /// Return the block identified by either its `height` or `hash` if it exists
-    /// in the current best chain.
+    /// Return the block identified by either its `height` or `hash`,
+    /// if it exists in the current best chain.
     pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
-        self.mem
-            .best_block(hash_or_height)
-            .map(|contextual| contextual.block)
-            .or_else(|| self.disk.db().block(hash_or_height))
+        read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
 
     /// Return the transaction identified by `hash` if it exists in the current
@@ -843,13 +841,23 @@ impl Service<Request> for ReadStateService {
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "read_state", skip(self, req))]
+    #[instrument(name = "read_state", skip(self))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            // TODO: implement for lightwalletd before using this state in RPC methods
-
             // Used by get_block RPC.
-            Request::Block(_hash_or_height) => unimplemented!("ReadStateService doesn't Block yet"),
+            Request::Block(hash_or_height) => {
+                let state = self.clone();
+
+                async move {
+                    Ok(read::block(
+                        state.best_chain_receiver.borrow().clone().as_ref(),
+                        &state.db,
+                        hash_or_height,
+                    ))
+                    .map(Response::Block)
+                }
+                .boxed()
+            }
 
             // Used by get_best_block_hash & get_blockchain_info (#3143) RPCs.
             //

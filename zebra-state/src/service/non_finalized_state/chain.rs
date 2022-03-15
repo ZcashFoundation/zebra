@@ -1,4 +1,5 @@
-//! Chain that is a part of the non-finalized state.
+//! [`Chain`] implements a single non-finalized blockchain,
+//! starting at the finalized tip.
 
 use std::{
     cmp::Ordering,
@@ -23,7 +24,7 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{service::check, ContextuallyValidBlock, ValidateContextError};
+use crate::{service::check, ContextuallyValidBlock, HashOrHeight, ValidateContextError};
 
 #[derive(Debug, Clone)]
 pub struct Chain {
@@ -315,6 +316,14 @@ impl Chain {
         }
 
         Ok(Some(forked))
+    }
+
+    /// Returns the [`ContextuallyValidBlock`] at a given height or hash in this chain.
+    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyValidBlock> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.blocks.get(&height)
     }
 
     /// Returns the block hash of the tip block.
