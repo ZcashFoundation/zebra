@@ -310,6 +310,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
         insta::assert_ron_snapshot!("blocks", stored_blocks);
 
+        // These snapshots will change if the trees do not have cached roots.
+        // But we expect them to always have cached roots,
+        // because those roots are used to populate the anchor column families.
         insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
         insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
 
