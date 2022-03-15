@@ -600,8 +600,11 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // note commitment trees
                 chain1.sprout_note_commitment_tree = chain2.sprout_note_commitment_tree.clone();
+                chain1.sprout_trees_by_anchor = chain2.sprout_trees_by_anchor.clone();
                 chain1.sapling_note_commitment_tree = chain2.sapling_note_commitment_tree.clone();
+                chain1.sapling_trees_by_height = chain2.sapling_trees_by_height.clone();
                 chain1.orchard_note_commitment_tree = chain2.orchard_note_commitment_tree.clone();
+                chain1.orchard_trees_by_height = chain2.orchard_trees_by_height.clone();
 
                 // history tree
                 chain1.history_tree = chain2.history_tree.clone();
@@ -609,7 +612,6 @@ fn different_blocks_different_chains() -> Result<()> {
                 // anchors
                 chain1.sprout_anchors = chain2.sprout_anchors.clone();
                 chain1.sprout_anchors_by_height = chain2.sprout_anchors_by_height.clone();
-                chain1.sprout_trees_by_anchor = chain2.sprout_trees_by_anchor.clone();
                 chain1.sapling_anchors = chain2.sapling_anchors.clone();
                 chain1.sapling_anchors_by_height = chain2.sapling_anchors_by_height.clone();
                 chain1.orchard_anchors = chain2.orchard_anchors.clone();

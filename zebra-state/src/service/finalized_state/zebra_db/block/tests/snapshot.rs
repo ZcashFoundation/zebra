@@ -24,12 +24,16 @@
 //!
 //! # Fixing Test Failures
 //!
-//! If this test fails, run `cargo insta review` to update the test snapshots,
-//! then commit the `test_*.snap` files using git.
+//! If this test fails, run:
+//! ```sh
+//! cargo insta test --review --delete-unreferenced-snapshots
+//! ```
+//! to update the test snapshots, then commit the `test_*.snap` files using git.
 //!
 //! # TODO
 //!
-//! Test shielded data, and data activated in Overwinter and later network upgrades.
+//! Test the rest of the shielded data,
+//! and data activated in Overwinter and later network upgrades.
 
 use std::sync::Arc;
 
@@ -37,7 +41,9 @@ use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Block, Height},
+    orchard,
     parameters::Network::{self, *},
+    sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::Transaction,
 };
@@ -196,8 +202,23 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     insta::assert_ron_snapshot!("tip", tip.map(Tip::from));
 
     if let Some((max_height, tip_block_hash)) = tip {
+        // Check that the database returns empty note commitment trees for the
+        // genesis block.
+        let sapling_tree = state
+            .sapling_note_commitment_tree_by_height(&block::Height::MIN)
+            .expect("the genesis block in the database has a Sapling tree");
+        let orchard_tree = state
+            .orchard_note_commitment_tree_by_height(&block::Height::MIN)
+            .expect("the genesis block in the database has an Orchard tree");
+
+        assert_eq!(sapling_tree, sapling::tree::NoteCommitmentTree::default());
+        assert_eq!(orchard_tree, orchard::tree::NoteCommitmentTree::default());
+
         let mut stored_block_hashes = Vec::new();
         let mut stored_blocks = Vec::new();
+
+        let mut stored_sapling_trees = Vec::new();
+        let mut stored_orchard_trees = Vec::new();
 
         let mut stored_transaction_hashes = Vec::new();
         let mut stored_transactions = Vec::new();
@@ -216,6 +237,15 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .block(query_height.into())
                 .expect("heights up to tip have blocks");
 
+            let sapling_tree_by_height = state
+                .sapling_note_commitment_tree_by_height(&query_height)
+                .expect("heights up to tip have Sapling trees");
+            let orchard_tree_by_height = state
+                .orchard_note_commitment_tree_by_height(&query_height)
+                .expect("heights up to tip have Orchard trees");
+            let sapling_tree_at_tip = state.sapling_note_commitment_tree();
+            let orchard_tree_at_tip = state.db.orchard_note_commitment_tree();
+
             // We don't need to snapshot the heights,
             // because they are fully determined by the tip and block hashes.
             //
@@ -224,6 +254,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
             if query_height == max_height {
                 assert_eq!(stored_block_hash, tip_block_hash);
+
+                assert_eq!(sapling_tree_at_tip, sapling_tree_by_height);
+                assert_eq!(orchard_tree_at_tip, orchard_tree_by_height);
             }
 
             assert_eq!(
@@ -235,6 +268,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
             stored_block_hashes.push((stored_height, BlockHash(stored_block_hash.to_string())));
             stored_blocks.push(BlockData::new(stored_height, &stored_block));
+
+            stored_sapling_trees.push((stored_height, sapling_tree_by_height));
+            stored_orchard_trees.push((stored_height, orchard_tree_by_height));
 
             // Check block transaction hashes and transactions.
             for tx_index in 0..stored_block.transactions.len() {
@@ -256,6 +292,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             stored_block_hashes
         );
         assert!(is_sorted(&stored_blocks), "unsorted: {:?}", stored_blocks);
+
         assert!(
             is_sorted(&stored_transaction_hashes),
             "unsorted: {:?}",
@@ -267,10 +304,18 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             stored_transactions
         );
 
-        // The blocks, transactions, and their hashes are in height/index order, and we want to snapshot that order.
+        // The blocks, trees, transactions, and their hashes are in height/index order,
+        // and we want to snapshot that order.
         // So we don't sort the vectors before snapshotting.
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
         insta::assert_ron_snapshot!("blocks", stored_blocks);
+
+        // These snapshots will change if the trees do not have cached roots.
+        // But we expect them to always have cached roots,
+        // because those roots are used to populate the anchor column families.
+        insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
+        insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
+
         insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
         insta::assert_ron_snapshot!("transactions", stored_transactions);
     }
