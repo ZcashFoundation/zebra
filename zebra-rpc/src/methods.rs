@@ -6,6 +6,8 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `lightwalletd` client implementation.
 
+use std::{collections::HashSet, io, sync::Arc};
+
 use futures::{FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -16,7 +18,7 @@ use zebra_chain::{
     block::{self, SerializedBlock},
     chain_tip::ChainTip,
     parameters::Network,
-    serialization::{SerializationError, ZcashDeserialize},
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction},
 };
 use zebra_network::constants::USER_AGENT;
@@ -103,6 +105,22 @@ pub trait Rpc {
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     #[rpc(name = "getrawmempool")]
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
+
+    /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
+    ///
+    /// zcashd reference: [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required) The transaction ID of the transaction to be returned.
+    /// - `verbose`: (numeric, optional, default=0) If 0, return a string of hex-encoded data, otherwise return a JSON object.
+    /// - `blockhash`: (string, optional) The block in which to look for the transaction.
+    #[rpc(name = "getrawtransaction")]
+    fn get_raw_transaction(
+        &self,
+        txid: String,
+        verbose: u8,
+    ) -> BoxFuture<Result<GetRawTransaction>>;
 }
 
 /// RPC method implementations.
@@ -321,6 +339,85 @@ where
         }
         .boxed()
     }
+
+    fn get_raw_transaction(
+        &self,
+        hex_txid: String,
+        verbose: u8,
+    ) -> BoxFuture<Result<GetRawTransaction>> {
+        let mut state = self.state.clone();
+        let mut mempool = self.mempool.clone();
+
+        async move {
+            let txid = transaction::Hash::from_hex(hex_txid).map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
+            // Check the mempool first
+            let mut txid_set = HashSet::new();
+            txid_set.insert(txid);
+            let request = mempool::Request::TransactionsByMinedId(txid_set);
+
+            let response = mempool
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                mempool::Response::Transactions(unmined_transactions) => {
+                    if !unmined_transactions.is_empty() {
+                        let tx = unmined_transactions[0].transaction.clone();
+                        return GetRawTransaction::from_transaction(tx, None, verbose != 0)
+                            .map_err(|error| Error {
+                                code: ErrorCode::ServerError(0),
+                                message: error.to_string(),
+                                data: None,
+                            });
+                    }
+                }
+                _ => unreachable!("unmatched response to a transactionids request"),
+            };
+
+            // Now check the state
+
+            let request = zebra_state::ReadRequest::Transaction(txid);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::Transaction(Some((tx, height))) => Ok(
+                    GetRawTransaction::from_transaction(tx, Some(height), verbose != 0).map_err(
+                        |error| Error {
+                            code: ErrorCode::ServerError(0),
+                            message: error.to_string(),
+                            data: None,
+                        },
+                    )?,
+                ),
+                zebra_state::ReadResponse::Transaction(None) => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Transaction not found".to_string(),
+                    data: None,
+                }),
+                _ => unreachable!("unmatched response to a transaction request"),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -362,3 +459,44 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 ///
 /// Also see the notes for the [`Rpc::get_best_block_hash` method].
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+
+/// Response to a `getrawtransaction` RPC request.
+///
+/// See the notes for the [`Rpc::get_raw_transaction` method].
+// pub struct GetRawTransaction(pub(super) SerializedTransaction);
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GetRawTransaction {
+    /// The raw transaction, encoded as hex bytes.
+    Raw(#[serde(with = "hex")] Vec<u8>),
+    /// The transaction object.
+    Object {
+        /// The raw transaction, encoded as hex bytes.
+        #[serde(with = "hex")]
+        hex: Vec<u8>,
+        /// The height of the block that contains the transaction, or -1 if
+        /// not applicable.
+        height: i32,
+    },
+}
+
+impl GetRawTransaction {
+    fn from_transaction(
+        tx: Arc<Transaction>,
+        height: Option<block::Height>,
+        verbose: bool,
+    ) -> std::result::Result<Self, io::Error> {
+        let serialized_tx = tx.zcash_serialize_to_vec()?;
+        if verbose {
+            Ok(GetRawTransaction::Object {
+                hex: serialized_tx,
+                height: match height {
+                    Some(height) => height.0 as i32,
+                    None => -1,
+                },
+            })
+        } else {
+            Ok(GetRawTransaction::Raw(serialized_tx))
+        }
+    }
+}
