@@ -217,6 +217,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         let mut stored_block_hashes = Vec::new();
         let mut stored_blocks = Vec::new();
 
+        let mut stored_sapling_trees = Vec::new();
+        let mut stored_orchard_trees = Vec::new();
+
         let mut stored_transaction_hashes = Vec::new();
         let mut stored_transactions = Vec::new();
 
@@ -233,6 +236,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             let stored_block = state
                 .block(query_height.into())
                 .expect("heights up to tip have blocks");
+
             let sapling_tree_by_height = state
                 .sapling_note_commitment_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
@@ -265,6 +269,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             stored_block_hashes.push((stored_height, BlockHash(stored_block_hash.to_string())));
             stored_blocks.push(BlockData::new(stored_height, &stored_block));
 
+            stored_sapling_trees.push((stored_height, sapling_tree_by_height));
+            stored_orchard_trees.push((stored_height, orchard_tree_by_height));
+
             // Check block transaction hashes and transactions.
             for tx_index in 0..stored_block.transactions.len() {
                 let transaction = &stored_block.transactions[tx_index];
@@ -285,6 +292,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             stored_block_hashes
         );
         assert!(is_sorted(&stored_blocks), "unsorted: {:?}", stored_blocks);
+
         assert!(
             is_sorted(&stored_transaction_hashes),
             "unsorted: {:?}",
@@ -296,10 +304,15 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             stored_transactions
         );
 
-        // The blocks, transactions, and their hashes are in height/index order, and we want to snapshot that order.
+        // The blocks, trees, transactions, and their hashes are in height/index order,
+        // and we want to snapshot that order.
         // So we don't sort the vectors before snapshotting.
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
         insta::assert_ron_snapshot!("blocks", stored_blocks);
+
+        insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
+        insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
+
         insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
         insta::assert_ron_snapshot!("transactions", stored_transactions);
     }
