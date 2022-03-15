@@ -217,20 +217,20 @@ jobs:
         uses: tj-actions/changed-files@v17.3
         with:
           files: |
-            /zebra-state/**/config.rs
-            /zebra-state/**/constants.rs
-            /zebra-state/**/finalized_state.rs
-            /zebra-state/**/disk_format.rs
-            /zebra-state/**/disk_format/block.rs
-            /zebra-state/**/disk_format/chain.rs
-            /zebra-state/**/disk_format/shielded.rs
-            /zebra-state/**/disk_format/transparent.rs
-            /zebra-state/**/disk_db.rs
-            /zebra-state/**/zebra_db.rs
-            /zebra-state/**/zebra_db/block.rs
-            /zebra-state/**/zebra_db/chain.rs
-            /zebra-state/**/zebra_db/shielded.rs
-            /zebra-state/**/zebra_db/transparent.rs
+            zebra-state/**/config.rs
+            zebra-state/**/constants.rs
+            zebra-state/**/finalized_state.rs
+            zebra-state/**/disk_format.rs
+            zebra-state/**/disk_format/block.rs
+            zebra-state/**/disk_format/chain.rs
+            zebra-state/**/disk_format/shielded.rs
+            zebra-state/**/disk_format/transparent.rs
+            zebra-state/**/disk_db.rs
+            zebra-state/**/zebra_db.rs
+            zebra-state/**/zebra_db/block.rs
+            zebra-state/**/zebra_db/chain.rs
+            zebra-state/**/zebra_db/shielded.rs
+            zebra-state/**/zebra_db/transparent.rs
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
