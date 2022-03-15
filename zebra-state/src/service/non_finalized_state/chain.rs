@@ -49,12 +49,20 @@ pub struct Chain {
     /// The Sprout note commitment tree of the tip of this `Chain`,
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+    /// The Sprout note commitment tree for each anchor.
+    /// This is required for interstitial states.
+    pub(crate) sprout_trees_by_anchor:
+        HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
     /// The Sapling note commitment tree of the tip of this `Chain`,
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    /// The Sapling note commitment tree for each height.
+    pub(crate) sapling_trees_by_height: BTreeMap<block::Height, sapling::tree::NoteCommitmentTree>,
     /// The Orchard note commitment tree of the tip of this `Chain`,
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    /// The Orchard note commitment tree for each height.
+    pub(crate) orchard_trees_by_height: BTreeMap<block::Height, orchard::tree::NoteCommitmentTree>,
     /// The ZIP-221 history tree of the tip of this `Chain`,
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: HistoryTree,
@@ -63,10 +71,6 @@ pub struct Chain {
     pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
     /// The Sprout anchors created by each block in `blocks`.
     pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
-    /// The Sprout note commitment tree for each anchor.
-    /// This is required for interstitial states.
-    pub(crate) sprout_trees_by_anchor:
-        HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
     /// The Sapling anchors created by `blocks`.
     pub(crate) sapling_anchors: MultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
@@ -124,8 +128,10 @@ impl Chain {
             sprout_trees_by_anchor: Default::default(),
             sapling_anchors: MultiSet::new(),
             sapling_anchors_by_height: Default::default(),
+            sapling_trees_by_height: Default::default(),
             orchard_anchors: MultiSet::new(),
             orchard_anchors_by_height: Default::default(),
+            orchard_trees_by_height: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -162,7 +168,9 @@ impl Chain {
             self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
+            self.sapling_trees_by_height== other.sapling_trees_by_height &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
+            self.orchard_trees_by_height== other.orchard_trees_by_height &&
 
             // history tree
             self.history_tree.as_ref().map(NonEmptyHistoryTree::hash) == other.history_tree.as_ref().map(NonEmptyHistoryTree::hash) &&
@@ -416,12 +424,14 @@ impl Chain {
             created_utxos: self.created_utxos.clone(),
             spent_utxos: self.spent_utxos.clone(),
             sprout_note_commitment_tree,
+            sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
             sapling_note_commitment_tree,
+            sapling_trees_by_height: self.sapling_trees_by_height.clone(),
             orchard_note_commitment_tree,
+            orchard_trees_by_height: self.orchard_trees_by_height.clone(),
             sprout_anchors: self.sprout_anchors.clone(),
             sapling_anchors: self.sapling_anchors.clone(),
             orchard_anchors: self.orchard_anchors.clone(),
-            sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
             sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
             sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
             orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
@@ -552,6 +562,12 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
             self.update_chain_tip_with(orchard_shielded_data)?;
         }
+
+        // Update the note commitment trees indexed by height.
+        self.sapling_trees_by_height
+            .insert(height, self.sapling_note_commitment_tree.clone());
+        self.orchard_trees_by_height
+            .insert(height, self.orchard_note_commitment_tree.clone());
 
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
@@ -688,6 +704,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.sapling_anchors.remove(&anchor),
             "Sapling anchor must be present if block was added to chain"
         );
+        self.sapling_trees_by_height
+            .remove(&height)
+            .expect("Sapling note commitment tree must be present if block was added to chain");
 
         let anchor = self
             .orchard_anchors_by_height
@@ -697,6 +716,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.orchard_anchors.remove(&anchor),
             "Orchard anchor must be present if block was added to chain"
         );
+        self.orchard_trees_by_height
+            .remove(&height)
+            .expect("Orchard note commitment tree must be present if block was added to chain");
 
         // revert the chain value pool balances, if needed
         self.revert_chain_with(chain_value_pool_change, position);
