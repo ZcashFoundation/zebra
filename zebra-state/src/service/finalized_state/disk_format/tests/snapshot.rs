@@ -9,8 +9,11 @@
 //!
 //! # Fixing Test Failures
 //!
-//! If this test fails, run `cargo insta review` to update the test snapshots,
-//! then commit the `test_*.snap` files using git.
+//! If this test fails, run:
+//! ```sh
+//! cargo insta test --review --delete-unreferenced-snapshots
+//! ```
+//! to update the test snapshots, then commit the `test_*.snap` files using git.
 //!
 //! # Snapshot Format
 //!

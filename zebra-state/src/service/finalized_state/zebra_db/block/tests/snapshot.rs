@@ -24,12 +24,16 @@
 //!
 //! # Fixing Test Failures
 //!
-//! If this test fails, run `cargo insta review` to update the test snapshots,
-//! then commit the `test_*.snap` files using git.
+//! If this test fails, run:
+//! ```sh
+//! cargo insta test --review --delete-unreferenced-snapshots
+//! ```
+//! to update the test snapshots, then commit the `test_*.snap` files using git.
 //!
 //! # TODO
 //!
-//! Test shielded data, and data activated in Overwinter and later network upgrades.
+//! Test the rest of the shielded data,
+//! and data activated in Overwinter and later network upgrades.
 
 use std::sync::Arc;
 
