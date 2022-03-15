@@ -29,11 +29,6 @@
 //! cargo insta test --review --delete-unreferenced-snapshots
 //! ```
 //! to update the test snapshots, then commit the `test_*.snap` files using git.
-//!
-//! # TODO
-//!
-//! Test the rest of the shielded data,
-//! and data activated in Overwinter and later network upgrades.
 
 use std::sync::Arc;
 
@@ -180,6 +175,8 @@ fn test_block_and_transaction_data_with_network(network: Network) {
     };
 
     // We limit the number of blocks, because the serialized data is a few kilobytes per block.
+    //
+    // TODO: Test data activated in Overwinter and later network upgrades.
     for height in 0..=2 {
         let block: Arc<Block> = blocks
             .get(&height)
@@ -238,7 +235,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         for query_height in 0..=max_height.0 {
             let query_height = Height(query_height);
 
-            // Check block height, block hash, and block database queries.
+            // Check all the block column families,
+            // using block height, block hash, and block database queries.
             let stored_block_hash = state
                 .hash(query_height)
                 .expect("heights up to tip have hashes");
@@ -249,6 +247,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .block(query_height.into())
                 .expect("heights up to tip have blocks");
 
+            // Check the sapling and orchard note commitment trees.
+            //
+            // TODO: test the rest of the shielded data (anchors, nullifiers, sprout)
             let sapling_tree_by_height = state
                 .sapling_note_commitment_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
