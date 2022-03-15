@@ -17,15 +17,21 @@ mod tests;
 
 pub use block::TransactionLocation;
 
-/// Helper trait for defining the exact format used to store to disk,
-/// for each type.
+/// Helper type for writing types to disk as raw bytes.
+/// Also used to convert key types to raw bytes for disk lookups.
 pub trait IntoDisk {
-    /// The type used to compare a value as a key to other keys stored in a
-    /// database.
+    /// The type used to write bytes to disk,
+    /// and compare a value as a key to on-disk keys.
     type Bytes: AsRef<[u8]>;
 
-    /// Converts the current type to its disk format in `zs_get()`,
-    /// without necessarily allocating a new ivec.
+    /// Converts the current type into serialized raw bytes.
+    ///
+    /// Used to convert keys to bytes in [`ReadDisk`],
+    /// and keys and values to bytes in [`WriteDisk`].
+    ///
+    /// # Panics
+    ///
+    /// - if the input data doesn't serialize correctly
     fn as_bytes(&self) -> Self::Bytes;
 }
 
@@ -37,11 +43,11 @@ pub trait IntoDiskFixedLen: IntoDisk {
     fn fixed_byte_len() -> usize;
 }
 
-/// Helper type for retrieving types from the disk with the correct format.
-///
-/// The ivec should be correctly encoded by IntoDisk.
+/// Helper type for reading types from disk as raw bytes.
 pub trait FromDisk: Sized {
-    /// Function to convert the disk bytes back into the deserialized type.
+    /// Converts raw disk bytes back into the deserialized type.
+    ///
+    /// Used to convert keys and values from bytes in [`ReadDisk`].
     ///
     /// # Panics
     ///
