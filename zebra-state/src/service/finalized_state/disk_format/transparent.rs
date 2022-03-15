@@ -123,7 +123,7 @@ impl IntoDisk for OutputLocation {
 
 impl FromDisk for OutputLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let hash_len = transaction::Hash::fixed_byte_len();
+        let hash_len = transaction::Hash::fixed_disk_byte_len();
 
         let (hash_bytes, index_bytes) = disk_bytes.as_ref().split_at(hash_len);
 
@@ -152,7 +152,7 @@ impl IntoDisk for transparent::Utxo {
 
 impl FromDisk for transparent::Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let height_len = Height::fixed_byte_len();
+        let height_len = Height::fixed_disk_byte_len();
 
         let (height_bytes, rest_bytes) = bytes.as_ref().split_at(height_len);
         let (coinbase_flag_bytes, output_bytes) = rest_bytes.split_at(1);

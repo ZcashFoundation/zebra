@@ -148,7 +148,7 @@ impl IntoDisk for TransactionLocation {
 
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let height_len = Height::fixed_byte_len();
+        let height_len = Height::fixed_disk_byte_len();
 
         let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(height_len);
 

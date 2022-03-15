@@ -40,7 +40,7 @@ pub trait IntoDisk {
 /// This trait must not be implemented for types with variable-length disk storage.
 pub trait IntoDiskFixedLen: IntoDisk {
     /// Returns the fixed serialized length of `Bytes`.
-    fn fixed_byte_len() -> usize;
+    fn fixed_disk_byte_len() -> usize;
 }
 
 /// Helper type for reading types from disk as raw bytes.
@@ -108,7 +108,7 @@ where
     /// Returns the fixed size of `Bytes`.
     ///
     /// Assumes that `Copy` types are fixed-sized byte arrays.
-    fn fixed_byte_len() -> usize {
+    fn fixed_disk_byte_len() -> usize {
         // Bytes is probably a [u8; N]
         Self::Bytes::default().into_iter().count()
     }
