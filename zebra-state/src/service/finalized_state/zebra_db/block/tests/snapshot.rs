@@ -226,6 +226,15 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         let mut stored_transaction_hashes = Vec::new();
         let mut stored_transactions = Vec::new();
 
+        let sapling_tree_at_tip = state.sapling_note_commitment_tree();
+        let orchard_tree_at_tip = state.orchard_note_commitment_tree();
+
+        // Test the history tree.
+        //
+        // TODO: test non-empty history trees, using Heartwood or later blocks.
+        //       test the rest of the chain data (value balance).
+        let history_tree_at_tip = state.history_tree();
+
         for query_height in 0..=max_height.0 {
             let query_height = Height(query_height);
 
@@ -246,8 +255,6 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             let orchard_tree_by_height = state
                 .orchard_note_commitment_tree_by_height(&query_height)
                 .expect("heights up to tip have Orchard trees");
-            let sapling_tree_at_tip = state.sapling_note_commitment_tree();
-            let orchard_tree_at_tip = state.db.orchard_note_commitment_tree();
 
             // We don't need to snapshot the heights,
             // because they are fully determined by the tip and block hashes.
@@ -260,6 +267,12 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                 assert_eq!(sapling_tree_at_tip, sapling_tree_by_height);
                 assert_eq!(orchard_tree_at_tip, orchard_tree_by_height);
+
+                // Skip these checks for empty history trees.
+                if let Some(history_tree_at_tip) = history_tree_at_tip.as_ref() {
+                    assert_eq!(history_tree_at_tip.current_height(), max_height);
+                    assert_eq!(history_tree_at_tip.network(), state.network());
+                }
             }
 
             assert_eq!(
@@ -335,6 +348,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
         insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
         insta::assert_ron_snapshot!("transactions", stored_transactions);
+
+        // The zcash_history types used in this tree don't support serde.
+        insta::assert_debug_snapshot!("history_tree", (max_height, history_tree_at_tip));
     }
 }
 
