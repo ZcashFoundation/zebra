@@ -90,10 +90,16 @@ impl Network {
     /// If a Zcash consensus rule only applies before the mandatory checkpoint,
     /// Zebra can skip validation of that rule.
     pub fn mandatory_checkpoint_height(&self) -> Height {
-        // Currently this is the Canopy activation height for both networks.
-        Canopy
+        // Currently this is after the ZIP-212 grace period.
+        //
+        // See the `ZIP_212_GRACE_PERIOD_DOCUMENTATION` for more information.
+
+        let canopy_activation = Canopy
             .activation_height(*self)
-            .expect("Canopy activation height must be present for both networks")
+            .expect("Canopy activation height must be present for both networks");
+
+        (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
+            .expect("ZIP-212 grace period ends at a valid block height")
     }
 }
 
