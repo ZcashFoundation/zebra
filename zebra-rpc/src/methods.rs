@@ -96,7 +96,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]
-    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
+    fn get_best_block_hash(&self) -> Result<GetBestBlockHash>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -126,7 +126,6 @@ where
     state: State,
 
     /// Allows efficient access to the best tip of the blockchain.
-    #[allow(dead_code)]
     latest_chain_tip: Tip,
 
     /// The configured network for this RPC service.
@@ -282,32 +281,15 @@ where
         .boxed()
     }
 
-    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>> {
-        let mut state = self.state.clone();
-
-        async move {
-            let request = zebra_state::Request::Tip;
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
-            match response {
-                zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash(hash)),
-                zebra_state::Response::Tip(None) => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "No blocks in state".to_string(),
-                    data: None,
-                }),
-                _ => unreachable!("unmatched response to a tip request"),
-            }
-        }
-        .boxed()
+    fn get_best_block_hash(&self) -> Result<GetBestBlockHash> {
+        self.latest_chain_tip
+            .best_tip_hash()
+            .map(GetBestBlockHash)
+            .ok_or(Error {
+                code: ErrorCode::ServerError(0),
+                message: "No blocks in state".to_string(),
+                data: None,
+            })
     }
 
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {

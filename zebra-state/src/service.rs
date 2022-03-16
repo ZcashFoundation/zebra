@@ -859,12 +859,6 @@ impl Service<Request> for ReadStateService {
                 .boxed()
             }
 
-            // Used by get_best_block_hash & get_blockchain_info (#3143) RPCs.
-            //
-            // These RPC methods could use the ChainTip struct instead,
-            // if that's easier or more consistent.
-            Request::Tip => unimplemented!("ReadStateService doesn't Tip yet"),
-
             // TODO: implement for lightwalletd as part of these tickets
 
             // get_raw_transaction (#3145)
@@ -884,6 +878,9 @@ impl Service<Request> for ReadStateService {
 
             // Out of Scope
             // TODO: delete when splitting the Request enum
+
+            // Use ChainTip instead.
+            Request::Tip => unreachable!("ReadStateService doesn't need to Tip"),
 
             // These requests don't need better performance at the moment.
             Request::FindBlockHashes {
