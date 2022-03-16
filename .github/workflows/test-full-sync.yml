@@ -29,9 +29,9 @@ env:
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
-  GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: zealous-zebra
+  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  GCR_BASE: gcr.io/zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-16
@@ -133,7 +133,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.5.0
         with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
