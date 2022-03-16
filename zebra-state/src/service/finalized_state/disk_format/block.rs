@@ -54,7 +54,7 @@ pub const MAX_ON_DISK_HEIGHT: Height = Height(Height::MAX.0 / 256);
 pub struct TransactionIndex(u16);
 
 impl TransactionIndex {
-    /// Create a transaction index from the native index integer type.
+    /// Creates a transaction index from the native index integer type.
     pub fn from_usize(transaction_index: usize) -> TransactionIndex {
         TransactionIndex(
             transaction_index
@@ -63,7 +63,7 @@ impl TransactionIndex {
         )
     }
 
-    /// Return this index as the native index integer type.
+    /// Returns this index as the native index integer type.
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
@@ -85,7 +85,7 @@ pub struct TransactionLocation {
 }
 
 impl TransactionLocation {
-    /// Create a transaction location from a block height and index (as the native index integer type).
+    /// Creates a transaction location from a block height and index (as the native index integer type).
     pub fn from_usize(height: Height, transaction_index: usize) -> TransactionLocation {
         TransactionLocation {
             height,

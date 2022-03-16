@@ -116,7 +116,7 @@ where
 
 // Serialization Modification Functions
 
-/// Truncate `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
+/// Truncates `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
 /// Used to discard unused zero bytes during serialization.
 ///
 /// # Panics
@@ -148,7 +148,7 @@ pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> &[u8] {
     truncated
 }
 
-/// Expand `disk_bytes` to `mem_len`, by adding zero bytes at the start of the slice.
+/// Expands `disk_bytes` to `mem_len`, by adding zero bytes at the start of the slice.
 /// Used to zero-fill bytes that were discarded during serialization.
 ///
 /// # Panics
