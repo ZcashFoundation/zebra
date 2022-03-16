@@ -56,6 +56,15 @@ impl Network {
             .activation_height(*self)
             .expect("Canopy activation height must be present for both networks")
     }
+
+    /// Return the network name as defined in
+    /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
+    pub fn bip70_network_name(&self) -> String {
+        match self {
+            Network::Mainnet => "main".to_string(),
+            Network::Testnet => "test".to_string(),
+        }
+    }
 }
 
 impl Default for Network {

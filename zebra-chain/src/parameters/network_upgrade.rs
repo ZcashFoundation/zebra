@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::*;
 
 use chrono::{DateTime, Duration, Utc};
+use hex::{FromHex, ToHex};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -118,12 +119,57 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+
 pub struct ConsensusBranchId(u32);
+
+impl ConsensusBranchId {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    fn bytes_in_display_order(&self) -> [u8; 4] {
+        let mut reversed_bytes = self.0.to_le_bytes();
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+}
 
 impl From<ConsensusBranchId> for u32 {
     fn from(branch: ConsensusBranchId) -> u32 {
         branch.0
+    }
+}
+
+impl ToHex for &ConsensusBranchId {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl FromHex for ConsensusBranchId {
+    type Error = <[u8; 4] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let branch = <[u8; 4]>::from_hex(hex)?;
+
+        Ok(ConsensusBranchId(u32::from_le_bytes(branch)))
     }
 }
 
@@ -186,7 +232,7 @@ impl NetworkUpgrade {
     /// When the environment variable TEST_FAKE_ACTIVATION_HEIGHTS is set
     /// and it's a test build, this returns a list of fake activation heights
     /// used by some tests.
-    pub(crate) fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
+    pub fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
         let (mainnet_heights, testnet_heights) = {
             #[cfg(not(feature = "zebra-test"))]
             {

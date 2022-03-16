@@ -13,6 +13,7 @@ zebra-network = { path = "../zebra-network" }
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-state = { path = "../zebra-state" }
 
+chrono = "0.4.19"
 futures = "0.3.21"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
