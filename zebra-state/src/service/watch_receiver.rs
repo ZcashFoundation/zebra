@@ -75,7 +75,19 @@ where
     where
         F: FnOnce(T) -> U,
     {
-        let cloned_data = self.receiver.borrow().clone();
+        // Make sure that the borrow's watch channel read lock
+        // is dropped before the closure is executed.
+        //
+        // Without this change, an eager reader can repeatedly block the channel writer.
+        // This seems to happen easily in RPC & ReadStateService futures.
+        // (For example, when lightwalletd syncs from Zebra, while Zebra syncs from peers.)
+        let cloned_data = {
+            let borrow_guard = self.receiver.borrow();
+            let cloned_data = borrow_guard.clone();
+            std::mem::drop(borrow_guard);
+
+            cloned_data
+        };
 
         f(cloned_data)
     }
