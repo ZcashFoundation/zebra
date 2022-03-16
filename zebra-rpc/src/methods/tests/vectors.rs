@@ -5,9 +5,7 @@ use std::sync::Arc;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::Block,
-    chain_tip::NoChainTip,
-    parameters::Network::{self, *},
+    block::Block, chain_tip::NoChainTip, parameters::Network::*,
     serialization::ZcashDeserializeInto,
 };
 use zebra_network::constants::USER_AGENT;
@@ -61,14 +59,15 @@ async fn rpc_getblock() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
     let rpc = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
-        state,
-        NoChainTip,
+        read_state,
+        latest_chain_tip,
         Mainnet,
     );
 
@@ -131,21 +130,21 @@ async fn rpc_getbestblockhash() {
     // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
-    let state = zebra_state::populated_state(blocks.clone(), Network::Mainnet).await;
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
     let rpc = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
-        state,
-        NoChainTip,
+        read_state,
+        latest_chain_tip,
         Mainnet,
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
-        .await
         .expect("We should have a GetBestBlockHash struct");
     let response_hash = get_best_block_hash.0;
 

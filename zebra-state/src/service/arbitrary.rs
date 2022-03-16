@@ -20,7 +20,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    arbitrary::Prepare, init_test, service::check, BoxError, PreparedBlock, Request, Response,
+    arbitrary::Prepare,
+    service::{check, ReadStateService, StateService},
+    BoxError, ChainTipChange, Config, LatestChainTip, PreparedBlock, Request, Response,
 };
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
@@ -166,16 +168,27 @@ impl Strategy for PreparedChain {
     }
 }
 
-/// Initialize a state service with blocks.
+/// Initialize a state service with blocks, and return:
+/// - a read-write [`StateService`]
+/// - a read-only [`ReadStateService`]
+/// - a [`LatestChainTip`]
+/// - a [`ChainTipChange`] tracker
 pub async fn populated_state(
     blocks: impl IntoIterator<Item = Arc<Block>>,
     network: Network,
-) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
     let requests = blocks
         .into_iter()
         .map(|block| Request::CommitFinalizedBlock(block.into()));
 
-    let mut state = init_test(network);
+    let (state, read_state, latest_chain_tip, chain_tip_change) =
+        StateService::new(Config::ephemeral(), network);
+    let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();
 
@@ -188,5 +201,5 @@ pub async fn populated_state(
         rsp.expect("blocks should commit just fine");
     }
 
-    state
+    (state, read_state, latest_chain_tip, chain_tip_change)
 }
