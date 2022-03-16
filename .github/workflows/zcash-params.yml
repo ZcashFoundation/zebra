@@ -27,6 +27,9 @@ jobs:
     # TODO: remove timeout until we have an average build time
     # timeout-minutes: 180
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     steps:
     - uses: actions/checkout@v3.0.0
@@ -54,13 +57,6 @@ jobs:
           type=semver,pattern={{major}}
           type=sha
 
-    # Setup gcloud CLI
-    - name: Authenticate to Google Cloud
-      id: auth
-      uses: google-github-actions/auth@v0.6.0
-      with:
-        credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
     - name: Set up QEMU
       id: qemu
       uses: docker/setup-qemu-action@v1
@@ -73,12 +69,21 @@ jobs:
       id: buildx
       uses: docker/setup-buildx-action@v1
 
+    # Setup gcloud CLI
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: google-github-actions/auth@v0.6.0
+      with:
+        workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+        service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+        token_format: 'access_token'
+
     - name: Login to Google Artifact Registry
       uses: docker/login-action@v1.14.1
       with:
         registry: us-docker.pkg.dev
-        username: _json_key
-        password: ${{ secrets.GOOGLE_CREDENTIALS }}
+        username: oauth2accesstoken
+        password: ${{ steps.auth.outputs.access_token }}
 
     # Build and push image to Google Artifact Registry
     - name: Build & push
