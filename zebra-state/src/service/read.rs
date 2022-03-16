@@ -13,15 +13,28 @@ use crate::{
     HashOrHeight,
 };
 
-/// Return the block identified by either its `height` or `hash` if it exists
-/// in the non-finalized `chain` or finalized `db`.
-pub(crate) fn block(
-    chain: Option<&Arc<Chain>>,
+/// Returns the [`Block`] with [`Hash`](zebra_chain::block::Hash) or
+/// [`Height`](zebra_chain::block::Height),
+/// if it exists in the non-finalized `chain` or finalized `db`.
+pub(crate) fn block<C>(
+    chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<Arc<Block>> {
+) -> Option<Arc<Block>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // The StateService commits blocks to the finalized state before updating the latest chain,
+    // and it can commit additional blocks after we've cloned this `chain` variable.
+    //
+    // Since blocks are the same in the finalized and non-finalized state,
+    // we check the most efficient alternative first.
+    // (`chain` is always in memory, but `db` stores blocks on disk, with a memory cache.)
     chain
-        .and_then(|chain| chain.block(hash_or_height))
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.clone())
         .or_else(|| db.block(hash_or_height))
 }

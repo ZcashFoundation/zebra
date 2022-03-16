@@ -318,7 +318,8 @@ impl Chain {
         Ok(Some(forked))
     }
 
-    /// Returns the [`ContextuallyValidBlock`] at a given height or hash in this chain.
+    /// Returns the [`ContextuallyValidBlock`] with [`Hash`](zebra_chain::block::Hash) or
+    /// [`Height`](zebra_chain::block::Height), if it exists in this chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyValidBlock> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
