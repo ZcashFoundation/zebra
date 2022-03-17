@@ -233,6 +233,7 @@ pub fn check_failure_regexes(line: &std::io::Result<String>, failure_regexes: &R
 
 impl<T> TestChild<T> {
     /// Sets up command output so it is checked against a failure regex set.
+    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// [`TestChild::with_failure_regexes`] wrapper for strings, [`Regex`]es,
     /// and [`RegexSet`]s.
@@ -253,6 +254,7 @@ impl<T> TestChild<T> {
     }
 
     /// Sets up command output so it is checked against a failure regex set.
+    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// [`TestChild::with_failure_regexes`] wrapper for regular expression iterators.
     ///
@@ -272,6 +274,7 @@ impl<T> TestChild<T> {
     }
 
     /// Sets up command output so it is checked against a failure regex set.
+    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// # Panics
     ///
@@ -284,6 +287,7 @@ impl<T> TestChild<T> {
     }
 
     /// Applies the failure regex set to command output.
+    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// # Panics
     ///
@@ -344,7 +348,7 @@ impl<T> TestChild<T> {
 
     /// Waits for the child process to exit, then returns its output.
     ///
-    /// Ignores any configured timeouts.
+    /// Ignores any configured timeouts or failure regexes.
     #[spandoc::spandoc]
     pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
         let child = match self.child.take() {
