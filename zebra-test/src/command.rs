@@ -130,9 +130,13 @@ where
     }
 }
 
+/// Test command exit status information.
 #[derive(Debug)]
 pub struct TestStatus {
+    /// The original command string.
     pub cmd: String,
+
+    /// The exit status of the command.
     pub status: ExitStatus,
 }
 
@@ -154,14 +158,31 @@ impl TestStatus {
     }
 }
 
+/// A test command child process.
 #[derive(Debug)]
 pub struct TestChild<T> {
+    /// The working directory of the command.
     pub dir: T,
+
+    /// The original command string.
     pub cmd: String,
+
+    /// The child process itself.
     pub child: Child,
+
+    /// The standard output stream of the child process.
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
+
+    /// The standard error stream of the child process.
     pub stderr: Option<Lines<BufReader<ChildStderr>>>,
+
+    /// The deadline for this command to finish.
+    ///
+    /// Only checked when the command outputs each new line (#1140).
     pub deadline: Option<Instant>,
+
+    /// If true, write child output directly to standard output,
+    /// bypassing the Rust test harness output capture.
     bypass_test_capture: bool,
 }
 
