@@ -229,8 +229,8 @@ where
         // `upgrades` object
         let mut upgrades = BTreeMap::new();
         for (activation_height, network_upgrade) in NetworkUpgrade::activation_list(network) {
+            // zcashd output network upgrades greater than height 1.
             if activation_height > Height(1) {
-                // zcashd output network upgrades greater than height 1.
                 let status = if tip_height >= activation_height {
                     NetworkUpgradeStatus::Active
                 } else {
