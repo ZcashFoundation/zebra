@@ -120,6 +120,12 @@ where
 pub trait CollectRegexSet {
     /// Collects the iterator values to a [`RegexSet`].
     ///
+    /// When converting from a [`Regex`] or [`RegexBuilder`],
+    /// resets match flags and limits to the defaults.
+    ///
+    /// Use a [`RegexSet`] or [`RegexSetBuilder`] to preserve these settings,
+    /// via the `*_regex_set` methods.
+    ///
     /// Returns an [`Error`] if any conversion fails.
     fn collect_regex_set(self) -> Result<RegexSet, Error>;
 }
