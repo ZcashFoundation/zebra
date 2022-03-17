@@ -6,6 +6,8 @@ use std::io::Cursor;
 
 use zebra_test::prelude::*;
 
+use hex::{FromHex, ToHex};
+
 use super::super::*;
 
 use crate::{
@@ -49,6 +51,15 @@ proptest! {
             let display = format!("{}", parsed);
             prop_assert_eq!(hash, display);
         }
+    }
+
+    #[test]
+    fn transaction_hash_hex_roundtrip(hash in any::<Hash>()) {
+        zebra_test::init();
+
+        let hex_hash: String = hash.encode_hex();
+        let new_hash = Hash::from_hex(hex_hash).expect("hex hash should parse");
+        prop_assert_eq!(hash, new_hash);
     }
 
     #[test]
