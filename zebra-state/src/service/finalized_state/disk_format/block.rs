@@ -137,7 +137,10 @@ impl IntoDisk for Height {
 
 impl FromDisk for Height {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let mem_bytes = expand_zero_be_bytes(bytes.as_ref(), 4);
+        let mem_len = u32::BITS / 8;
+        let mem_len = mem_len.try_into().unwrap();
+
+        let mem_bytes = expand_zero_be_bytes(bytes.as_ref(), mem_len);
         Height(u32::from_be_bytes(mem_bytes.try_into().unwrap()))
     }
 }
