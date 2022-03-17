@@ -751,9 +751,7 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
 
         // Reading test child process output could hang if the child process is still running,
         // so kill it first.
-        if let Some(child) = source.child.as_mut() {
-            let _ = child.kill();
-        }
+        let _ = source.child.kill();
 
         let mut stdout_buf = String::new();
         let mut stderr_buf = String::new();
