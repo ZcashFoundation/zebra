@@ -15,10 +15,20 @@ use zebra_chain::{
     transaction, transparent,
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk, IntoDiskFixedLen};
+use crate::service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+/// Output transaction locations are stored as a 32 byte transaction hash on disk.
+///
+/// TODO: change to TransactionLocation to reduce database size and increases lookup performance (#3151)
+pub const OUTPUT_TX_HASH_DISK_BYTES: usize = 32;
+
+/// [`OutputIndex`]es are stored as 4 bytes on disk.
+///
+/// TODO: change to 3 bytes to reduce database size and increases lookup performance (#3151)
+pub const OUTPUT_INDEX_DISK_BYTES: usize = 4;
 
 // Transparent types
 
@@ -97,7 +107,7 @@ impl OutputLocation {
 // TODO: serialize the index into a smaller number of bytes (#3152)
 //       serialize the index in big-endian order (#3150)
 impl IntoDisk for OutputIndex {
-    type Bytes = [u8; 4];
+    type Bytes = [u8; OUTPUT_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0.to_le_bytes()
@@ -111,7 +121,7 @@ impl FromDisk for OutputIndex {
 }
 
 impl IntoDisk for OutputLocation {
-    type Bytes = [u8; 36];
+    type Bytes = [u8; OUTPUT_TX_HASH_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         let hash_bytes = self.hash.as_bytes().to_vec();
@@ -123,9 +133,7 @@ impl IntoDisk for OutputLocation {
 
 impl FromDisk for OutputLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let hash_len = transaction::Hash::fixed_disk_byte_len();
-
-        let (hash_bytes, index_bytes) = disk_bytes.as_ref().split_at(hash_len);
+        let (hash_bytes, index_bytes) = disk_bytes.as_ref().split_at(OUTPUT_TX_HASH_DISK_BYTES);
 
         let hash = transaction::Hash::from_bytes(hash_bytes);
         let index = OutputIndex::from_bytes(index_bytes);
@@ -152,9 +160,7 @@ impl IntoDisk for transparent::Utxo {
 
 impl FromDisk for transparent::Utxo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let height_len = Height::fixed_disk_byte_len();
-
-        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(height_len);
+        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
         let (coinbase_flag_bytes, output_bytes) = rest_bytes.split_at(1);
 
         let height = Height::from_bytes(height_bytes);

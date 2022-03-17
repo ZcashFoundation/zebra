@@ -16,7 +16,7 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::disk_format::{
-    expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk, IntoDiskFixedLen,
+    expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -34,7 +34,17 @@ use proptest_derive::Arbitrary;
 /// Since Zebra only stores fully verified blocks on disk, blocks with heights
 /// larger than this height are rejected before reaching the database.
 /// (It would take decades to generate a valid chain this high.)
-pub const MAX_ON_DISK_HEIGHT: Height = Height(Height::MAX.0 / 256);
+pub const MAX_ON_DISK_HEIGHT: Height = Height(1 << (HEIGHT_DISK_BYTES * 8));
+
+/// [`Height`]s are stored as 3 bytes on disk.
+///
+/// This reduces database size and increases lookup performance.
+pub const HEIGHT_DISK_BYTES: usize = 3;
+
+/// [`TransactionIndex`]es are stored as 2 bytes on disk.
+///
+/// This reduces database size and increases lookup performance.
+pub const TX_INDEX_DISK_BYTES: usize = 2;
 
 // Transaction types
 
@@ -114,12 +124,12 @@ impl FromDisk for Block {
 
 impl IntoDisk for Height {
     /// Consensus: see the note at [`MAX_ON_DISK_HEIGHT`].
-    type Bytes = [u8; 3];
+    type Bytes = [u8; HEIGHT_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         let mem_bytes = self.0.to_be_bytes();
 
-        let disk_bytes = truncate_zero_be_bytes(&mem_bytes, Height::fixed_disk_byte_len());
+        let disk_bytes = truncate_zero_be_bytes(&mem_bytes, HEIGHT_DISK_BYTES);
 
         disk_bytes.try_into().unwrap()
     }
@@ -150,7 +160,7 @@ impl FromDisk for block::Hash {
 // Transaction trait impls
 
 impl IntoDisk for TransactionIndex {
-    type Bytes = [u8; 2];
+    type Bytes = [u8; TX_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0.to_be_bytes()
@@ -164,7 +174,7 @@ impl FromDisk for TransactionIndex {
 }
 
 impl IntoDisk for TransactionLocation {
-    type Bytes = [u8; 5];
+    type Bytes = [u8; HEIGHT_DISK_BYTES + TX_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         let height_bytes = self.height.as_bytes().to_vec();
@@ -176,9 +186,7 @@ impl IntoDisk for TransactionLocation {
 
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let height_len = Height::fixed_disk_byte_len();
-
-        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(height_len);
+        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
 
         let height = Height::from_bytes(height_bytes);
         let index = TransactionIndex::from_bytes(index_bytes);
