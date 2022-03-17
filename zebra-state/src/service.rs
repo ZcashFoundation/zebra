@@ -44,8 +44,8 @@ use crate::{
         pending_utxos::PendingUtxos,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request,
-    Response, ValidateContextError,
+    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, ReadRequest,
+    ReadResponse, Request, Response, ValidateContextError,
 };
 
 pub mod block_iter;
@@ -902,8 +902,8 @@ impl Service<Request> for StateService {
     }
 }
 
-impl Service<Request> for ReadStateService {
-    type Response = Response;
+impl Service<ReadRequest> for ReadStateService {
+    type Response = ReadResponse;
     type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -913,10 +913,19 @@ impl Service<Request> for ReadStateService {
     }
 
     #[instrument(name = "read_state", skip(self))]
-    fn call(&mut self, req: Request) -> Self::Future {
+    fn call(&mut self, req: ReadRequest) -> Self::Future {
         match req {
+            // TODO: implement these new ReadRequests for lightwalletd, as part of these tickets
+
+            // z_get_tree_state (#3156)
+
+            // depends on transparent address indexes (#3150)
+            // get_address_tx_ids (#3147)
+            // get_address_balance (#3157)
+            // get_address_utxos (#3158)
+
             // Used by get_block RPC.
-            Request::Block(hash_or_height) => {
+            ReadRequest::Block(hash_or_height) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -931,13 +940,13 @@ impl Service<Request> for ReadStateService {
                         read::block(best_chain, &state.db, hash_or_height)
                     });
 
-                    Ok(Response::Block(block))
+                    Ok(ReadResponse::Block(block))
                 }
                 .boxed()
             }
 
             // For the get_raw_transaction RPC, to be implemented in #3145.
-            Request::Transaction(hash) => {
+            ReadRequest::Transaction(hash) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -952,59 +961,9 @@ impl Service<Request> for ReadStateService {
                         read::transaction(best_chain, &state.db, hash)
                     });
 
-                    Ok(Response::Transaction(transaction))
+                    Ok(ReadResponse::Transaction(transaction))
                 }
                 .boxed()
-            }
-
-            // TODO: split the Request enum, then implement these new ReadRequests for lightwalletd
-            //       as part of these tickets
-
-            // z_get_tree_state (#3156)
-
-            // depends on transparent address indexes (#3150)
-            // get_address_tx_ids (#3147)
-            // get_address_balance (#3157)
-            // get_address_utxos (#3158)
-
-            // Out of Scope
-            // TODO: delete when splitting the Request enum
-
-            // Use ChainTip instead.
-            Request::Tip => unreachable!("ReadStateService doesn't need to Tip"),
-
-            // These requests don't need better performance at the moment.
-            Request::FindBlockHashes {
-                known_blocks: _,
-                stop: _,
-            } => {
-                unreachable!("ReadStateService doesn't need to FindBlockHashes")
-            }
-            Request::FindBlockHeaders {
-                known_blocks: _,
-                stop: _,
-            } => {
-                unreachable!("ReadStateService doesn't need to FindBlockHeaders")
-            }
-
-            // Some callers of this request need to wait for queued blocks.
-            Request::Depth(_hash) => unreachable!("ReadStateService could change depth behaviour"),
-
-            // This request needs to wait for queued blocks.
-            Request::BlockLocator => {
-                unreachable!("ReadStateService should not be used for block locators")
-            }
-
-            // Impossible Requests
-
-            // The read-only service doesn't have the shared internal state
-            // needed to await UTXOs.
-            Request::AwaitUtxo(_outpoint) => unreachable!("ReadStateService can't await UTXOs"),
-
-            // The read-only service can't write.
-            Request::CommitBlock(_prepared) => unreachable!("ReadStateService can't commit blocks"),
-            Request::CommitFinalizedBlock(_finalized) => {
-                unreachable!("ReadStateService can't commit blocks")
             }
         }
     }
@@ -1042,12 +1001,40 @@ pub fn init(
     )
 }
 
-/// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.
+/// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
 ///
-/// This can be used to create a state service for testing. See also [`init`].
+/// This can be used to create a state service for testing.
+///
+/// See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     let (state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
+}
+
+/// Initializes a state service with an ephemeral [`Config`] and a buffer with a single slot,
+/// then returns the read-write service, read-only service, and tip watch channels.
+///
+/// This can be used to create a state service for testing. See also [`init`].
+#[cfg(any(test, feature = "proptest-impl"))]
+pub fn init_test_services(
+    network: Network,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
+        StateService::new(Config::ephemeral(), network);
+
+    let state_service = Buffer::new(BoxService::new(state_service), 1);
+
+    (
+        state_service,
+        read_state_service,
+        latest_chain_tip,
+        chain_tip_change,
+    )
 }
