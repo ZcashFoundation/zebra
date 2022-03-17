@@ -25,6 +25,11 @@ use to_regex::{CollectRegexSet, ToRegex};
 
 use self::to_regex::ToRegexSet;
 
+/// A super-trait for [`Iterator`] + [`Debug`].
+pub trait IteratorDebug: Iterator + Debug {}
+
+impl<T> IteratorDebug for T where T: Iterator + Debug {}
+
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
     let mut cmd = Command::new(command_path);
@@ -163,6 +168,7 @@ impl TestStatus {
 }
 
 /// A test command child process.
+#[derive(Debug)]
 pub struct TestChild<T> {
     /// The working directory of the command.
     pub dir: T,
@@ -174,10 +180,10 @@ pub struct TestChild<T> {
     pub child: Child,
 
     /// The standard output stream of the child process.
-    pub stdout: Option<Box<dyn Iterator<Item = std::io::Result<String>>>>,
+    pub stdout: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>>>>,
 
     /// The standard error stream of the child process.
-    pub stderr: Option<Box<dyn Iterator<Item = std::io::Result<String>>>>,
+    pub stderr: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>>>>,
 
     /// Command outputs which indicate test failure.
     ///
