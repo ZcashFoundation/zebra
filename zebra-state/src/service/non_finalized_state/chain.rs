@@ -5,6 +5,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
+    sync::Arc,
 };
 
 use mset::MultiSet;
@@ -17,8 +18,9 @@ use zebra_chain::{
     orchard,
     parameters::Network,
     primitives::Groth16Proof,
-    sapling, sprout, transaction,
+    sapling, sprout,
     transaction::Transaction::*,
+    transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
@@ -318,13 +320,20 @@ impl Chain {
         Ok(Some(forked))
     }
 
-    /// Returns the [`ContextuallyValidBlock`] with [`Hash`](zebra_chain::block::Hash) or
+    /// Returns the [`ContextuallyValidBlock`] with [`block::Hash`] or
     /// [`Height`](zebra_chain::block::Height), if it exists in this chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyValidBlock> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.blocks.get(&height)
+    }
+
+    /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in this chain.
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<&Arc<Transaction>> {
+        self.tx_by_hash
+            .get(&hash)
+            .map(|(height, index)| &self.blocks[height].block.transactions[*index])
     }
 
     /// Returns the block hash of the tip block.

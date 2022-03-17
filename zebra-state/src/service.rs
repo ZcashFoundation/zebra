@@ -464,12 +464,10 @@ impl StateService {
         read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
 
-    /// Return the transaction identified by `hash` if it exists in the current
-    /// best chain.
+    /// Returns the [`Transaction`] with [`transaction::Hash`],
+    /// if it exists in the current best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        self.mem
-            .best_transaction(hash)
-            .or_else(|| self.disk.db().transaction(hash))
+        read::transaction(self.mem.best_chain(), self.disk.db(), hash)
     }
 
     /// Return the hash for the block at `height` in the current best chain.
@@ -739,7 +737,12 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock(prepared) => {
-                metrics::counter!("state.requests", 1, "type" => "commit_block");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "commit_block",
+                );
 
                 self.assert_block_can_be_validated(&prepared);
 
@@ -757,7 +760,12 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::CommitFinalizedBlock(finalized) => {
-                metrics::counter!("state.requests", 1, "type" => "commit_finalized_block");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "commit_finalized_block",
+                );
 
                 self.pending_utxos.check_against(&finalized.new_outputs);
                 let rsp_rx = self.queue_and_commit_finalized(finalized);
@@ -772,32 +780,67 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::Depth(hash) => {
-                metrics::counter!("state.requests", 1, "type" => "depth");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "depth",
+                );
+
                 let rsp = Ok(self.best_depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
             Request::Tip => {
-                metrics::counter!("state.requests", 1, "type" => "tip");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "tip",
+                );
+
                 let rsp = Ok(self.best_tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
             Request::BlockLocator => {
-                metrics::counter!("state.requests", 1, "type" => "block_locator");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "block_locator",
+                );
+
                 let rsp = Ok(self.block_locator().unwrap_or_default()).map(Response::BlockLocator);
                 async move { rsp }.boxed()
             }
             Request::Transaction(hash) => {
-                metrics::counter!("state.requests", 1, "type" => "transaction");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "transaction",
+                );
+
                 let rsp = Ok(self.best_transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
             Request::Block(hash_or_height) => {
-                metrics::counter!("state.requests", 1, "type" => "block");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "block",
+                );
+
                 let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {
-                metrics::counter!("state.requests", 1, "type" => "await_utxo");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "await_utxo",
+                );
 
                 let fut = self.pending_utxos.queue(outpoint);
 
@@ -808,12 +851,26 @@ impl Service<Request> for StateService {
                 fut.boxed()
             }
             Request::FindBlockHashes { known_blocks, stop } => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "find_block_hashes",
+                );
+
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
                 let res =
                     self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "find_block_headers",
+                );
+
                 const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
                 // Zcashd will blindly request more block headers as long as it
                 // got 160 block headers in response to a previous query, EVEN
@@ -860,6 +917,13 @@ impl Service<Request> for ReadStateService {
         match req {
             // Used by get_block RPC.
             Request::Block(hash_or_height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "block",
+                );
+
                 let state = self.clone();
 
                 async move {
@@ -872,11 +936,25 @@ impl Service<Request> for ReadStateService {
                 .boxed()
             }
 
-            // TODO: implement for lightwalletd as part of these tickets
+            // For the get_raw_transaction RPC, to be implemented in #3145.
+            Request::Transaction(hash) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "transaction",
+                );
 
-            // get_raw_transaction (#3145)
-            Request::Transaction(_hash) => {
-                unimplemented!("ReadStateService doesn't Transaction yet")
+                let state = self.clone();
+
+                async move {
+                    let transaction = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transaction(best_chain, &state.db, hash)
+                    });
+
+                    Ok(Response::Transaction(transaction))
+                }
+                .boxed()
             }
 
             // TODO: split the Request enum, then implement these new ReadRequests for lightwalletd
