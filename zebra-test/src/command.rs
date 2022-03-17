@@ -301,38 +301,39 @@ impl<T> TestChild<T> {
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    ///
-    /// - if the child process was already been taken using wait_with_output
     pub fn apply_failure_regexes_to_outputs(&mut self) {
         if self.stdout.is_none() {
-            let failure_regexes = self.failure_regexes.clone();
-
             self.stdout = self
                 .child
                 .as_mut()
-                .expect("child has not been taken")
-                .stdout
-                .take()
-                .map(BufReader::new)
-                .map(BufRead::lines)
-                .map(|iter| iter.inspect(move |line| check_failure_regexes(line, &failure_regexes)))
-                .map(|iter| Box::new(iter) as _);
+                .and_then(|child| child.stdout.take())
+                .map(|output| self.map_into_string_lines(output))
         }
 
         if self.stderr.is_none() {
-            let failure_regexes = self.failure_regexes.clone();
-
             self.stderr = self
                 .child
                 .as_mut()
-                .expect("child has not been taken")
-                .stderr
-                .take()
-                .map(BufReader::new)
-                .map(BufRead::lines)
-                .map(|iter| iter.inspect(move |line| check_failure_regexes(line, &failure_regexes)))
-                .map(|iter| Box::new(iter) as _);
+                .and_then(|child| child.stderr.take())
+                .map(|output| self.map_into_string_lines(output))
         }
+    }
+
+    /// Maps a reader into a string line iterator.
+    fn map_into_string_lines<R>(
+        &self,
+        reader: R,
+    ) -> Box<dyn IteratorDebug<Item = std::io::Result<String>>>
+    where
+        R: Read + Debug + 'static,
+    {
+        let failure_regexes = self.failure_regexes.clone();
+
+        let reader = BufReader::new(reader);
+        let lines = BufRead::lines(reader)
+            .inspect(move |line| check_failure_regexes(line, &failure_regexes));
+
+        Box::new(lines) as _
     }
 
     /// Kill the child process.
