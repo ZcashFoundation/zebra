@@ -741,11 +741,18 @@ impl ContextFrom<&TestStatus> for Report {
 impl<T> ContextFrom<&mut TestChild<T>> for Report {
     type Return = Report;
 
+    #[allow(clippy::print_stdout)]
     fn context_from(mut self, source: &mut TestChild<T>) -> Self::Return {
         self = self.section(source.cmd.clone().header("Command:"));
 
         if let Ok(Some(status)) = source.child.try_wait() {
             self = self.context_from(&status);
+        }
+
+        // Reading test child process output could hang if the child process is still running,
+        // so kill it first.
+        if let Some(child) = source.child.as_mut() {
+            let _ = child.kill();
         }
 
         let mut stdout_buf = String::new();
