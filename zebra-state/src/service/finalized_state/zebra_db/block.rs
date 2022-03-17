@@ -69,7 +69,8 @@ impl ZebraDb {
         self.db.zs_get(height_by_hash, &hash)
     }
 
-    /// Returns the given block if it exists.
+    /// Returns the [`Block`] with [`Hash`](zebra_chain::block::Hash) or
+    /// [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
         let block_by_height = self.db.cf_handle("block_by_height").unwrap();
