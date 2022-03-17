@@ -44,8 +44,8 @@ impl RpcServer {
             + 'static,
         Mempool::Future: Send,
         State: Service<
-                zebra_state::Request,
-                Response = zebra_state::Response,
+                zebra_state::ReadRequest,
+                Response = zebra_state::ReadResponse,
                 Error = zebra_state::BoxError,
             > + Clone
             + Send
