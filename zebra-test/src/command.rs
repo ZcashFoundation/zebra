@@ -224,9 +224,10 @@ pub fn check_failure_regexes(line: &std::io::Result<String>, failure_regexes: &R
 
         assert!(
             failure_matches.is_empty(),
-            "test command output a failure log\n\
-             Matched Failures: {failure_matches:?}\n\
-             Regex Set: {failure_regexes:?}",
+            "test command output a failure message:\n\n\
+             {line}\n\n\
+             Matching: {failure_matches:#?}\n\
+             Match Regexes: {failure_regexes:#?}\n",
         );
     }
 }
