@@ -243,7 +243,7 @@ impl<T> TestChild<T> {
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    pub fn with_failure_regex_set<R>(&mut self, failure_regexes: R)
+    pub fn with_failure_regex_set<R>(self, failure_regexes: R) -> Self
     where
         R: ToRegexSet,
     {
@@ -263,7 +263,7 @@ impl<T> TestChild<T> {
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    pub fn with_failure_regex_iter<I>(&mut self, failure_regexes: I)
+    pub fn with_failure_regex_iter<I>(self, failure_regexes: I) -> Self
     where
         I: CollectRegexSet,
     {
@@ -281,10 +281,12 @@ impl<T> TestChild<T> {
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    pub fn with_failure_regexes(&mut self, failure_regexes: RegexSet) {
+    pub fn with_failure_regexes(mut self, failure_regexes: RegexSet) -> Self {
         self.failure_regexes = failure_regexes;
 
         self.apply_failure_regexes_to_outputs();
+
+        self
     }
 
     /// Applies the failure regex set to command output.
