@@ -726,12 +726,11 @@ impl<T> AsMut<TestChild<T>> for TestChild<T> {
 
 impl<T> Drop for TestChild<T> {
     fn drop(&mut self) {
-        // Read unread child output.
+        // Clean up child processes when the test finishes,
+        // and check for failure logs.
         //
-        // This checks for failure logs,
-        // and prevents some test hangs and deadlocks.
-        self.stdout.as_mut().map(|iter| iter.last());
-        self.stderr.as_mut().map(|iter| iter.last());
+        // We don't care about the kill result here.
+        let _ = self.kill_and_consume_output();
     }
 }
 
