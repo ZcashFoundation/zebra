@@ -355,6 +355,94 @@ impl<T> TestChild<T> {
         Ok(())
     }
 
+    /// Kill the process, and consume all its remaining output.
+    ///
+    /// Returns the result of the kill.
+    pub fn kill_and_consume_output(&mut self) -> Result<()> {
+        self.apply_failure_regexes_to_outputs();
+
+        // Prevent a hang when consuming output,
+        // by making sure the child's output actually finishes.
+        let kill_result = self.kill();
+
+        // Read unread child output.
+        //
+        // This checks for failure logs, and prevents some test hangs and deadlocks.
+        if self.child.is_some() || self.stdout.is_some() {
+            let wrote_lines = self.wait_for_stdout_line("Child Stdout:".to_string());
+
+            while self.wait_for_stdout_line(None) {}
+
+            if wrote_lines {
+                self.write_to_test_logs("");
+            }
+        }
+
+        if self.child.is_some() || self.stderr.is_some() {
+            let wrote_lines = self.wait_for_stderr_line("Child Stderr:".to_string());
+
+            while self.wait_for_stderr_line(None) {}
+
+            if wrote_lines {
+                self.write_to_test_logs("");
+            }
+        }
+
+        kill_result
+    }
+
+    /// Waits until a line of standard output is available, then consumes it.
+    ///
+    /// If there is a line, and `write_context` is `Some`, writes the context to the test logs.
+    /// Then writes the line to the test logs.
+    ///
+    /// Returns `true` if a line was available,
+    /// or `false` if the standard output has finished.
+    pub fn wait_for_stdout_line<OptS>(&mut self, write_context: OptS) -> bool
+    where
+        OptS: Into<Option<String>>,
+    {
+        self.apply_failure_regexes_to_outputs();
+
+        if let Some(Ok(line)) = self.stdout.as_mut().and_then(|iter| iter.next()) {
+            if let Some(write_context) = write_context.into() {
+                self.write_to_test_logs(write_context);
+            }
+
+            self.write_to_test_logs(line);
+
+            return true;
+        }
+
+        false
+    }
+
+    /// Waits until a line of standard error is available, then consumes it.
+    ///
+    /// If there is a line, and `write_context` is `Some`, writes the context to the test logs.
+    /// Then writes the line to the test logs.
+    ///
+    /// Returns `true` if a line was available,
+    /// or `false` if the standard error has finished.
+    pub fn wait_for_stderr_line<OptS>(&mut self, write_context: OptS) -> bool
+    where
+        OptS: Into<Option<String>>,
+    {
+        self.apply_failure_regexes_to_outputs();
+
+        if let Some(Ok(line)) = self.stderr.as_mut().and_then(|iter| iter.next()) {
+            if let Some(write_context) = write_context.into() {
+                self.write_to_test_logs(write_context);
+            }
+
+            self.write_to_test_logs(line);
+
+            return true;
+        }
+
+        false
+    }
+
     /// Waits for the child process to exit, then returns its output.
     ///
     /// Ignores any configured timeouts or failure regexes.
@@ -494,7 +582,6 @@ impl<T> TestChild<T> {
     /// Note: the timeout is only checked after each full line is received from
     /// the child (#1140).
     #[instrument(skip(self, lines))]
-    #[allow(clippy::print_stdout)]
     pub fn expect_line_matching_regexes<L>(
         &mut self,
         lines: &mut L,
@@ -517,19 +604,8 @@ impl<T> TestChild<T> {
                 break;
             };
 
-            // Since we're about to discard this line write it to stdout, so it
-            // can be preserved. May cause weird reordering for stdout / stderr.
-            // Uses stdout even if the original lines were from stderr.
-            if self.bypass_test_capture {
-                // Send lines directly to the terminal (or process stdout file redirect).
-                #[allow(clippy::explicit_write)]
-                writeln!(std::io::stdout(), "{}", line).unwrap();
-            } else {
-                // If the test fails, the test runner captures and displays this output.
-                println!("{}", line);
-            }
-            // Some OSes require a flush to send all output to the terminal.
-            std::io::stdout().lock().flush()?;
+            // Since we're about to discard this line write it to stdout.
+            self.write_to_test_logs(&line);
 
             if success_regexes.is_match(&line) {
                 return Ok(());
@@ -551,6 +627,34 @@ impl<T> TestChild<T> {
         .with_section(|| format!("{:?}", success_regexes).header("Match Regex:"));
 
         Err(report)
+    }
+
+    /// Write `line` to stdout, so it can be seen in the test logs.
+    ///
+    /// Use [bypass_test_capture(true)](TestChild::bypass_test_capture) or
+    /// `cargo test -- --nocapture` to see this output.
+    ///
+    /// May cause weird reordering for stdout / stderr.
+    /// Uses stdout even if the original lines were from stderr.
+    #[allow(clippy::print_stdout)]
+    fn write_to_test_logs<S>(&self, line: S)
+    where
+        S: AsRef<str>,
+    {
+        let line = line.as_ref();
+
+        if self.bypass_test_capture {
+            // Send lines directly to the terminal (or process stdout file redirect).
+            #[allow(clippy::explicit_write)]
+            writeln!(std::io::stdout(), "{}", line).unwrap();
+        } else {
+            // If the test fails, the test runner captures and displays this output.
+            // To show this output unconditionally, use `cargo test -- --nocapture`.
+            println!("{}", line);
+        }
+
+        // Some OSes require a flush to send all output to the terminal.
+        let _ = std::io::stdout().lock().flush();
     }
 
     /// Kill `child`, wait for its output, and use that output as the context for
