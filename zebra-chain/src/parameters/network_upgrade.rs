@@ -6,6 +6,7 @@ use crate::block;
 use crate::parameters::{Network, Network::*};
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::ops::Bound::*;
 
 use chrono::{DateTime, Duration, Utc};
@@ -141,9 +142,7 @@ impl ConsensusBranchId {
     /// Zebra displays transaction and block hashes in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
     fn bytes_in_display_order(&self) -> [u8; 4] {
-        let mut reversed_bytes = self.0.to_le_bytes();
-        reversed_bytes.reverse();
-        reversed_bytes
+        self.0.to_be_bytes()
     }
 }
 
@@ -168,8 +167,13 @@ impl FromHex for ConsensusBranchId {
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
         let branch = <[u8; 4]>::from_hex(hex)?;
+        Ok(ConsensusBranchId(u32::from_be_bytes(branch)))
+    }
+}
 
-        Ok(ConsensusBranchId(u32::from_le_bytes(branch)))
+impl fmt::Display for ConsensusBranchId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
     }
 }
 
