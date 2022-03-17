@@ -38,6 +38,8 @@ pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
     Ok(cmd)
 }
 
+// TODO: split these extensions into their own module
+
 /// Wrappers for `Command` methods to integrate with [`zebra_test`].
 pub trait CommandExt {
     /// wrapper for `status` fn on `Command` that constructs informative error
@@ -168,6 +170,7 @@ impl TestStatus {
 }
 
 /// A test command child process.
+// TODO: split this struct into its own module (or multiple modules)
 #[derive(Debug)]
 pub struct TestChild<T> {
     /// The working directory of the command.
@@ -186,6 +189,8 @@ pub struct TestChild<T> {
     pub child: Option<Child>,
 
     /// The standard output stream of the child process.
+    ///
+    /// TODO: replace with `Option<ChildOutput { stdout, stderr }>.
     pub stdout: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>>>>,
 
     /// The standard error stream of the child process.
@@ -625,6 +630,9 @@ impl<T> Drop for TestChild<T> {
     }
 }
 
+/// Test command output logs.
+// TODO: split this struct into its own module
+#[derive(Debug)]
 pub struct TestOutput<T> {
     /// The test directory for this test output.
     ///
@@ -884,6 +892,7 @@ impl<T> TestOutput<T> {
 }
 
 /// Add context to an error report
+// TODO: split this trait into its own module
 pub trait ContextFrom<S> {
     type Return;
 
