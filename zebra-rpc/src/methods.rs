@@ -220,7 +220,11 @@ where
         let estimated_height = self
             .latest_chain_tip
             .estimate_network_chain_tip_height(network, Utc::now())
-            .unwrap();
+            .ok_or_else(|| Error {
+                code: ErrorCode::ServerError(0),
+                message: "No Chain tip available yet".to_string(),
+                data: None,
+            })?;
 
         // `upgrades` object
         let mut upgrades = BTreeMap::new();
@@ -402,7 +406,7 @@ pub struct GetInfo {
     subversion: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
@@ -417,10 +421,10 @@ pub struct GetBlockChainInfo {
     consensus: Consensus,
 }
 
-#[derive(Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct NetworkUpgradeInfo {
     name: NetworkUpgrade,
     #[serde(rename = "activationheight")]
@@ -428,7 +432,7 @@ struct NetworkUpgradeInfo {
     status: NetworkUpgradeStatus,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 enum NetworkUpgradeStatus {
     #[serde(rename = "active")]
     Active,
@@ -438,7 +442,7 @@ enum NetworkUpgradeStatus {
     Pending,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Consensus {
     #[serde(rename = "chaintip")]
     chain_tip: ConsensusBranchIdHex,
