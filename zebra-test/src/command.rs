@@ -4,6 +4,7 @@ use std::{
     convert::Infallible as NoDir,
     fmt::{self, Debug, Write as _},
     io::{BufRead, BufReader, Lines, Read, Write as _},
+    iter,
     path::Path,
     process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
@@ -20,7 +21,7 @@ use tracing::instrument;
 
 pub mod to_regex;
 
-use to_regex::ToRegex;
+use to_regex::{CollectRegexSet, ToRegex};
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
@@ -258,7 +259,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching(&mut lines, regex, "stdout") {
+        match self.expect_line_matching(&mut lines, iter::once(regex), "stdout") {
             Ok(()) => {
                 self.stdout = Some(lines);
                 Ok(self)
@@ -291,7 +292,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching(&mut lines, regex, "stderr") {
+        match self.expect_line_matching(&mut lines, iter::once(regex), "stderr") {
             Ok(()) => {
                 self.stderr = Some(lines);
                 Ok(self)
@@ -311,14 +312,16 @@ impl<T> TestChild<T> {
     pub fn expect_line_matching<L, R>(
         &mut self,
         lines: &mut L,
-        regex: R,
+        regex_set: R,
         stream_name: &str,
     ) -> Result<()>
     where
         L: Iterator<Item = std::io::Result<String>>,
-        R: ToRegex + Debug,
+        R: CollectRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex_set
+            .collect_regex_set()
+            .expect("regexes must be valid");
 
         // We don't check `is_running` here,
         // because we want to read to the end of the buffered output,
@@ -364,7 +367,7 @@ impl<T> TestChild<T> {
             stream_name
         )
         .context_from(self)
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"));
+        .with_section(|| format!("{:?}", re).header("Match Regex:"));
 
         Err(report)
     }
