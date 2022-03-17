@@ -399,3 +399,36 @@ fn failure_regex_timeout_continuous_output() {
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
 }
+
+/// Make sure failure regexes are checked when a child process prints a failure message to stdout,
+/// then the child process' output is waited for.
+///
+/// This is an error, but we still want to check failure logs.
+#[test]
+#[should_panic(expected = "test command output a failure message")]
+fn failure_regex_matches_stdout_failure_message_wait_for_output() {
+    zebra_test::init();
+
+    const TEST_CMD: &str = "echo";
+    // Skip the test if the test system does not have the command
+    if !is_command_available(TEST_CMD, &[]) {
+        panic!(
+            "skipping test: command not available\n\
+             fake panic message: test command output a failure message"
+        );
+    }
+
+    let child = tempdir()
+        .unwrap()
+        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .unwrap()
+        .with_timeout(Duration::from_secs(5))
+        .with_failure_regex_set("fail");
+
+    // Give the child process enough time to print its output.
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Wait with output should read all unread output to generate the error context,
+    // or the output should be read on drop.
+    child.wait_with_output().unwrap_err();
+}
