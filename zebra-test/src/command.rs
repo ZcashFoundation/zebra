@@ -4,7 +4,6 @@ use std::{
     convert::Infallible as NoDir,
     fmt::{self, Debug, Write as _},
     io::{BufRead, BufReader, Lines, Read, Write as _},
-    iter,
     path::Path,
     process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
@@ -17,11 +16,14 @@ use color_eyre::{
     eyre::{eyre, Context, Report, Result},
     Help, SectionExt,
 };
+use regex::RegexSet;
 use tracing::instrument;
 
 pub mod to_regex;
 
 use to_regex::{CollectRegexSet, ToRegex};
+
+use self::to_regex::ToRegexSet;
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
@@ -259,7 +261,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching(&mut lines, iter::once(regex), "stdout") {
+        match self.expect_line_matching_regex_set(&mut lines, regex, "stdout") {
             Ok(()) => {
                 self.stdout = Some(lines);
                 Ok(self)
@@ -292,7 +294,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching(&mut lines, iter::once(regex), "stderr") {
+        match self.expect_line_matching_regex_set(&mut lines, regex, "stderr") {
             Ok(()) => {
                 self.stderr = Some(lines);
                 Ok(self)
@@ -301,15 +303,9 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line in `lines` against `regex`, and returns Ok if a line
-    /// matches. Uses `stream_name` as the name for `lines` in error reports.
-    ///
-    /// Kills the child on error, or after the configured timeout has elapsed.
-    /// Note: the timeout is only checked after each full line is received from
-    /// the child.
-    #[instrument(skip(self, lines))]
-    #[allow(clippy::print_stdout)]
-    pub fn expect_line_matching<L, R>(
+    /// [`TestChild::expect_line_matching`] wrapper for strings, [`Regex`]es,
+    /// and [`RegexSet`]s.
+    pub fn expect_line_matching_regex_set<L, R>(
         &mut self,
         lines: &mut L,
         regex_set: R,
@@ -317,12 +313,49 @@ impl<T> TestChild<T> {
     ) -> Result<()>
     where
         L: Iterator<Item = std::io::Result<String>>,
-        R: CollectRegexSet + Debug,
+        R: ToRegexSet,
     {
-        let re = regex_set
+        let regex_set = regex_set.to_regex_set().expect("regexes must be valid");
+
+        self.expect_line_matching(lines, regex_set, stream_name)
+    }
+
+    /// [`TestChild::expect_line_matching`] wrapper for regular expression iterators.
+    pub fn expect_line_matching_regex_iter<L, I>(
+        &mut self,
+        lines: &mut L,
+        regex_iter: I,
+        stream_name: &str,
+    ) -> Result<()>
+    where
+        L: Iterator<Item = std::io::Result<String>>,
+        I: CollectRegexSet,
+    {
+        let regex_set = regex_iter
             .collect_regex_set()
             .expect("regexes must be valid");
 
+        self.expect_line_matching(lines, regex_set, stream_name)
+    }
+
+    /// Checks each line in `lines` against `regex_set`, and returns Ok if a line
+    /// matches. Uses `stream_name` as the name for `lines` in error reports.
+    ///
+    /// Kills the child on error, or after the configured timeout has elapsed.
+    ///
+    /// Note: the timeout is only checked after each full line is received from
+    /// the child (#1140).
+    #[instrument(skip(self, lines))]
+    #[allow(clippy::print_stdout)]
+    pub fn expect_line_matching<L>(
+        &mut self,
+        lines: &mut L,
+        regex_set: RegexSet,
+        stream_name: &str,
+    ) -> Result<()>
+    where
+        L: Iterator<Item = std::io::Result<String>>,
+    {
         // We don't check `is_running` here,
         // because we want to read to the end of the buffered output,
         // even if the child process has exited.
@@ -350,7 +383,7 @@ impl<T> TestChild<T> {
             // Some OSes require a flush to send all output to the terminal.
             std::io::stdout().lock().flush()?;
 
-            if re.is_match(&line) {
+            if regex_set.is_match(&line) {
                 return Ok(());
             }
         }
@@ -367,7 +400,7 @@ impl<T> TestChild<T> {
             stream_name
         )
         .context_from(self)
-        .with_section(|| format!("{:?}", re).header("Match Regex:"));
+        .with_section(|| format!("{:?}", regex_set).header("Match Regex:"));
 
         Err(report)
     }
