@@ -1,3 +1,7 @@
+//! StateService test vectors.
+//!
+//! TODO: move these tests into tests::vectors and tests::prop modules.
+
 use std::{convert::TryInto, env, sync::Arc};
 
 use tower::{buffer::Buffer, util::BoxService};
@@ -11,6 +15,7 @@ use zebra_chain::{
     transaction, transparent,
     value_balance::ValueBalance,
 };
+
 use zebra_test::{prelude::*, transcript::Transcript};
 
 use crate::{
@@ -196,7 +201,7 @@ async fn test_populated_state_responds_correctly(
 
 #[tokio::main]
 async fn populate_and_check(blocks: Vec<Arc<Block>>) -> Result<()> {
-    let state = populated_state(blocks, Network::Mainnet).await;
+    let (state, _, _, _) = populated_state(blocks, Network::Mainnet).await;
     test_populated_state_responds_correctly(state).await?;
     Ok(())
 }

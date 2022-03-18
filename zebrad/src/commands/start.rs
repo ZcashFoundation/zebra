@@ -106,7 +106,7 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+        let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
@@ -162,9 +162,11 @@ impl StartCmd {
         // Launch RPC server
         let rpc_task_handle = RpcServer::spawn(
             config.rpc,
-            app_version().to_string(),
+            app_version(),
             mempool.clone(),
-            state.clone(),
+            read_only_state_service,
+            latest_chain_tip.clone(),
+            config.network.network,
         );
 
         let setup_data = InboundSetupData {

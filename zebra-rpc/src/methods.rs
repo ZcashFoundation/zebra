@@ -14,6 +14,8 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, SerializedBlock},
+    chain_tip::ChainTip,
+    parameters::Network,
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, Transaction},
 };
@@ -94,7 +96,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]
-    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>>;
+    fn get_best_block_hash(&self) -> Result<GetBestBlockHash>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -104,60 +106,79 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
-pub struct RpcImpl<Mempool, State>
+pub struct RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
-        zebra_state::Request,
-        Response = zebra_state::Response,
+        zebra_state::ReadRequest,
+        Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
+    Tip: ChainTip,
 {
     /// Zebra's application version.
     app_version: String,
+
     /// A handle to the mempool service.
     mempool: Buffer<Mempool, mempool::Request>,
+
     /// A handle to the state service.
     state: State,
+
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: Tip,
+
+    /// The configured network for this RPC service.
+    #[allow(dead_code)]
+    network: Network,
 }
 
-impl<Mempool, State> RpcImpl<Mempool, State>
+impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
-        zebra_state::Request,
-        Response = zebra_state::Response,
+        zebra_state::ReadRequest,
+        Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
+    Tip: ChainTip + Send + Sync,
 {
     /// Create a new instance of the RPC handler.
-    pub fn new(
-        app_version: String,
+    pub fn new<Version>(
+        app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
-    ) -> Self {
+        latest_chain_tip: Tip,
+        network: Network,
+    ) -> Self
+    where
+        Version: ToString,
+    {
         RpcImpl {
-            app_version,
+            app_version: app_version.to_string(),
             mempool,
             state,
+            latest_chain_tip,
+            network,
         }
     }
 }
 
-impl<Mempool, State> Rpc for RpcImpl<Mempool, State>
+impl<Mempool, State, Tip> Rpc for RpcImpl<Mempool, State, Tip>
 where
     Mempool:
         tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
     Mempool::Future: Send,
     State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
         > + Clone
         + Send
         + Sync
         + 'static,
     State::Future: Send,
+    Tip: ChainTip + Send + Sync + 'static,
 {
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
@@ -170,6 +191,8 @@ where
 
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
         // TODO: dummy output data, fix in the context of #3143
+        //       use self.latest_chain_tip.estimate_network_chain_tip_height()
+        //       to estimate the current block height on the network
         let response = GetBlockChainInfo {
             chain: "TODO: main".to_string(),
         };
@@ -234,7 +257,8 @@ where
                 data: None,
             })?;
 
-            let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));
+            let request =
+                zebra_state::ReadRequest::Block(zebra_state::HashOrHeight::Height(height));
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -246,8 +270,8 @@ where
                 })?;
 
             match response {
-                zebra_state::Response::Block(Some(block)) => Ok(GetBlock(block.into())),
-                zebra_state::Response::Block(None) => Err(Error {
+                zebra_state::ReadResponse::Block(Some(block)) => Ok(GetBlock(block.into())),
+                zebra_state::ReadResponse::Block(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
                     data: None,
@@ -258,32 +282,15 @@ where
         .boxed()
     }
 
-    fn get_best_block_hash(&self) -> BoxFuture<Result<GetBestBlockHash>> {
-        let mut state = self.state.clone();
-
-        async move {
-            let request = zebra_state::Request::Tip;
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
-            match response {
-                zebra_state::Response::Tip(Some((_height, hash))) => Ok(GetBestBlockHash(hash)),
-                zebra_state::Response::Tip(None) => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "No blocks in state".to_string(),
-                    data: None,
-                }),
-                _ => unreachable!("unmatched response to a tip request"),
-            }
-        }
-        .boxed()
+    fn get_best_block_hash(&self) -> Result<GetBestBlockHash> {
+        self.latest_chain_tip
+            .best_tip_hash()
+            .map(GetBestBlockHash)
+            .ok_or(Error {
+                code: ErrorCode::ServerError(0),
+                message: "No blocks in state".to_string(),
+                data: None,
+            })
     }
 
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {

@@ -79,3 +79,16 @@ pub fn random_known_port() -> u16 {
 
     rand::thread_rng().gen_range(53500..60999)
 }
+
+/// Returns the "magic" port number that tells the operating system to
+/// choose a random unallocated port.
+///
+/// The OS chooses a different port each time it opens a connection or
+/// listener with this magic port number.
+///
+/// ## Usage
+///
+/// See the usage note for `random_known_port`.
+pub fn random_unallocated_port() -> u16 {
+    0
+}

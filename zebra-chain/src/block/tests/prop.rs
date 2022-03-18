@@ -2,6 +2,8 @@ use std::{env, io::ErrorKind};
 
 use proptest::{arbitrary::any, prelude::*, test_runner::Config};
 
+use hex::{FromHex, ToHex};
+
 use zebra_test::prelude::*;
 
 use crate::{
@@ -41,6 +43,15 @@ proptest! {
         let display = format!("{}", hash);
         let parsed = display.parse::<Hash>().expect("hash should parse");
         prop_assert_eq!(hash, parsed);
+    }
+
+    #[test]
+    fn block_hash_hex_roundtrip(hash in any::<Hash>()) {
+        zebra_test::init();
+
+        let hex_hash: String = hash.encode_hex();
+        let new_hash = Hash::from_hex(hex_hash).expect("hex hash should parse");
+        prop_assert_eq!(hash, new_hash);
     }
 
     #[test]

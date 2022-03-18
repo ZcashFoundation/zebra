@@ -7,12 +7,19 @@ use crate::serialization::{
 };
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary)
+    derive(proptest_derive::Arbitrary, serde::Serialize)
 )]
-pub struct Script(Vec<u8>);
+pub struct Script(
+    /// # Correctness
+    ///
+    /// Consensus-critical serialization uses [`ZcashSerialize`].
+    /// [`serde`]-based hex serialization must only be used for testing.
+    #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))]
+    Vec<u8>,
+);
 
 impl Script {
     /// Create a new Bitcoin script from its raw bytes.

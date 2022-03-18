@@ -1,3 +1,5 @@
+//! State [`tower::Service`] request types.
+
 use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
@@ -229,7 +231,7 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A query about or modification to the chain state.
+/// A query about or modification to the chain state, via the [`StateService`].
 pub enum Request {
     /// Performs contextual validation of the given block, committing it to the
     /// state if successful.
@@ -376,4 +378,27 @@ pub enum Request {
         /// Optionally, the hash of the last header to request.
         stop: Option<block::Hash>,
     },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// A read-only query about the chain state, via the [`ReadStateService`].
+pub enum ReadRequest {
+    /// Looks up a block by hash or height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
+    /// * [`Response::Block(None)`](Response::Block) otherwise.
+    ///
+    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
+    /// [`block::Height`] using `.into()`.
+    Block(HashOrHeight),
+
+    /// Looks up a transaction by hash in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
+    /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
+    Transaction(transaction::Hash),
 }

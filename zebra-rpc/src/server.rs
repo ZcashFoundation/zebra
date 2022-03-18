@@ -13,6 +13,7 @@ use tower::{buffer::Buffer, Service};
 use tracing::*;
 use tracing_futures::Instrument;
 
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 use zebra_node_services::{mempool, BoxError};
 
 use crate::{
@@ -29,31 +30,35 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<Mempool, State>(
+    pub fn spawn<Version, Mempool, State, Tip>(
         config: Config,
-        app_version: String,
+        app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
+        latest_chain_tip: Tip,
+        network: Network,
     ) -> tokio::task::JoinHandle<()>
     where
+        Version: ToString,
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
             + 'static,
         Mempool::Future: Send,
         State: Service<
-                zebra_state::Request,
-                Response = zebra_state::Response,
+                zebra_state::ReadRequest,
+                Response = zebra_state::ReadResponse,
                 Error = zebra_state::BoxError,
             > + Clone
             + Send
             + Sync
             + 'static,
         State::Future: Send,
+        Tip: ChainTip + Send + Sync + 'static,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl::new(app_version, mempool, state);
+            let rpc_impl = RpcImpl::new(app_version, mempool, state, latest_chain_tip, network);
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
