@@ -14,7 +14,7 @@ pub mod arbitrary;
 #[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
 pub mod tests;
 
-use std::{collections::HashMap, convert::TryInto, fmt, ops::Neg};
+use std::{collections::HashMap, fmt, ops::Neg};
 
 pub use commitment::{
     ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
@@ -26,8 +26,6 @@ pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use arbitrary::LedgerState;
-
-use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::NegativeAllowed,
@@ -44,7 +42,8 @@ use crate::{
 };
 
 /// A Zcash block, containing a header and a list of transactions.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct Block {
     /// The block header, containing block metadata.
     pub header: Header,

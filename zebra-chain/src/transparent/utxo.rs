@@ -12,7 +12,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary)
+    derive(proptest_derive::Arbitrary, serde::Serialize)
 )]
 pub struct Utxo {
     /// The output itself.

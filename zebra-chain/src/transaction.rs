@@ -1,7 +1,8 @@
 //! Transactions and transaction-related structures.
 
+use std::{collections::HashMap, fmt, iter};
+
 use halo2::pasta::pallas;
-use serde::{Deserialize, Serialize};
 
 mod auth_digest;
 mod hash;
@@ -40,8 +41,6 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-use std::{collections::HashMap, fmt, iter};
-
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
@@ -53,7 +52,8 @@ use std::{collections::HashMap, fmt, iter};
 /// Zcash has a number of different transaction formats. They are represented
 /// internally by different enum variants. Because we checkpoint on Canopy
 /// activation, we do not validate any pre-Sapling transaction types.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 // XXX consider boxing the Optional fields of V4 and V5 txs
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction {

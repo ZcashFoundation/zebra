@@ -102,12 +102,17 @@ impl ZebraDb {
 
     // Read transaction methods
 
+    /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
+    /// if it exists in the finalized chain.
+    pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
+        let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
+        self.db.zs_get(tx_by_hash, &hash)
+    }
+
     /// Returns the [`Transaction`] with [`transaction::Hash`],
     /// if it exists in the finalized chain.
     pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        self.db
-            .zs_get(tx_by_hash, &hash)
+        self.transaction_location(hash)
             .map(|TransactionLocation { index, height }| {
                 let block = self
                     .block(height.into())
