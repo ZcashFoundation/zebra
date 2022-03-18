@@ -994,11 +994,12 @@ const PROCESS_FAILURE_MESSAGES: &[&str] = &[
     "Aborted",
     // macOS / BSDs
     "Abort trap",
+    // TODO: add other OS or C library errors?
 ];
 
 /// Failure log messages from Zebra.
 const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
-    // Rust-specific
+    // Rust-specific panics
     "The application panicked",
     // RPC port errors
     "Unable to start RPC server",
@@ -1029,18 +1030,16 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     //
     // jsonrpc_core error messages from Zebra,
     // received by lightwalletd and written to its logs
-    //
-    // TODO: log these errors in Zebra, and check for them in the Zebra logs?
     "Invalid params",
     "Method not found",
     // Early termination
     //
     // TODO: temporarily disable until enough RPCs are implemented, if needed
     "Lightwalletd died with a Fatal error",
-    // JSON error messages:
+    // Go json package error messages:
     "json: cannot unmarshal",
     "into Go value of type",
-    // RPC error messages from:
+    // lightwalletd RPC error messages from:
     // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
     "block requested is newer than latest block",
     "Cache add failed",
@@ -1058,8 +1057,6 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "unable to issue RPC call",
     // Missing fields for each specific RPC
     //
-    // TODO: complete this list for each RPC field?
-    //
     // get_block_chain_info
     //
     // missing branchID, should be the 8 hex digits "76b809bb"
@@ -1072,6 +1069,14 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     //" chain  ",
     // missing branchID, should be the 8 hex digits "76b809bb"
     //" branchID \"",
+    //
+    // TODO: complete this list for each RPC with fields?
+    // get_info
+    // get_raw_transaction
+    // z_get_tree_state
+    // get_address_txids
+    // get_address_balance
+    // get_address_utxos
 ];
 
 /// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
