@@ -182,7 +182,7 @@ fn kill_on_timeout_no_output() -> Result<()> {
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// and panic with a test failure message.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message() {
     zebra_test::init();
 
@@ -191,7 +191,7 @@ fn failure_regex_matches_stdout_failure_message() {
     if !is_command_available(TEST_CMD, &[]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
@@ -212,7 +212,7 @@ fn failure_regex_matches_stdout_failure_message() {
 /// Make sure failure regexes detect when a child process prints a failure message to stderr,
 /// and panic with a test failure message.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stderr_failure_message() {
     zebra_test::init();
 
@@ -227,7 +227,7 @@ fn failure_regex_matches_stderr_failure_message() {
     if !is_command_available(TEST_CMD, &["-c", "read -t 1 -p failure_message"]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
@@ -248,7 +248,7 @@ fn failure_regex_matches_stderr_failure_message() {
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// then the child process is dropped without being killed.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_drop() {
     zebra_test::init();
 
@@ -257,7 +257,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
     if !is_command_available(TEST_CMD, &[]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
@@ -277,7 +277,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// then the child process is killed.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_kill() {
     zebra_test::init();
 
@@ -286,7 +286,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
     if !is_command_available(TEST_CMD, &[]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
@@ -308,7 +308,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// then the child process is killed on error.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_kill_on_error() {
     zebra_test::init();
 
@@ -317,7 +317,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
     if !is_command_available(TEST_CMD, &[]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
@@ -340,7 +340,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// then the child process is not killed because there is no error.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
     zebra_test::init();
 
@@ -349,7 +349,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
     if !is_command_available(TEST_CMD, &[]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
@@ -374,7 +374,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
 ///
 /// TODO: test the failure regex on timeouts with no output (#1140)
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_timeout_continuous_output() {
     zebra_test::init();
 
@@ -384,7 +384,10 @@ fn failure_regex_timeout_continuous_output() {
     const TEST_CMD: &str = "hexdump";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &["/dev/null"]) {
-        return;
+        panic!(
+            "skipping test: command not available\n\
+             fake panic message: Logged a failure message"
+        );
     }
 
     // Without '-v', hexdump hides duplicate lines. But we want duplicate lines
@@ -408,7 +411,7 @@ fn failure_regex_timeout_continuous_output() {
 ///
 /// This is an error, but we still want to check failure logs.
 #[test]
-#[should_panic(expected = "test command output a failure message")]
+#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_wait_for_output() {
     zebra_test::init();
 
@@ -417,7 +420,7 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
     if !is_command_available(TEST_CMD, &[]) {
         panic!(
             "skipping test: command not available\n\
-             fake panic message: test command output a failure message"
+             fake panic message: Logged a failure message"
         );
     }
 
