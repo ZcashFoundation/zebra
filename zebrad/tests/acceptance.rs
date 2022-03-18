@@ -659,7 +659,7 @@ fn full_sync_testnet() {
 /// The timeout is specified using an environment variable, with the name configured by the
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
-fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Result<()> {
+fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
         .and_then(|timeout_string| timeout_string.parse().ok());
@@ -678,8 +678,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
             // TODO: if full validation performance improves, do another test with checkpoint_sync off
             true,
             true,
-        )
-        .map(|_| ())
+        )?;
     } else {
         tracing::info!(
             ?network,
@@ -687,9 +686,9 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
              set the {:?} environmental variable to run the test",
             timeout_argument_name,
         );
-
-        Ok(())
     }
+
+    Ok(())
 }
 
 fn create_cached_database(network: Network) -> Result<()> {
