@@ -48,7 +48,8 @@ use std::{collections::HashMap, fmt, iter};
 pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct CoinbaseData(
     /// Invariant: this vec, together with the coinbase height, must be less than
     /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
@@ -92,10 +93,16 @@ impl std::fmt::Debug for CoinbaseData {
 /// OutPoint
 ///
 /// A particular transaction output reference.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Serialize))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
+    ///
+    /// # Correctness
+    ///
+    /// Consensus-critical serialization uses [`ZcashSerialize`].
+    /// [`serde`]-based hex serialization must only be used for testing.
+    #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))]
     pub hash: transaction::Hash,
 
     /// Identifies which UTXO from that transaction is referenced; the
@@ -103,8 +110,25 @@ pub struct OutPoint {
     pub index: u32,
 }
 
+impl OutPoint {
+    /// Returns a new OutPoint from an in-memory output `index`.
+    ///
+    /// # Panics
+    ///
+    /// If `index` doesn't fit in a [`u32`].
+    pub fn from_usize(hash: transaction::Hash, index: usize) -> OutPoint {
+        OutPoint {
+            hash,
+            index: index
+                .try_into()
+                .expect("valid in-memory output indexes fit in a u32"),
+        }
+    }
+}
+
 /// A transparent input to a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub enum Input {
     /// A reference to an output of a previous transaction.
     PrevOut {
@@ -289,8 +313,8 @@ impl Input {
 /// I only own one UTXO worth 2 ZEC, I would construct a transaction
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Serialize))]
 pub struct Output {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.

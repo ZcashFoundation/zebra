@@ -1,22 +1,17 @@
 ---
 source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
-assertion_line: 274
 expression: stored_transaction_hashes
-
 ---
 [
-  TransactionHash(
-    loc: TransactionLocation(
-      height: Height(0),
-      index: TransactionIndex(0),
-    ),
+  TransactionHashByLocation(
+    loc: None,
     hash: "c4eaa58879081de3c24a7b117ed2b28300e7ec4c4c1dff1d3f1268b7857a4ddb",
   ),
-  TransactionHash(
-    loc: TransactionLocation(
+  TransactionHashByLocation(
+    loc: Some(TransactionLocation(
       height: Height(1),
       index: TransactionIndex(0),
-    ),
+    )),
     hash: "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609",
   ),
 ]
