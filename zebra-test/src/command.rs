@@ -214,12 +214,17 @@ pub struct TestChild<T> {
     bypass_test_capture: bool,
 }
 
-/// Checks command output against a failure regex set.
+/// Checks command output log `line` from `cmd` against a `failure_regexes` regex set,
+/// and panics if any regex matches the log line.
 ///
 /// # Panics
 ///
 /// - if any stdout or stderr lines match any failure regex
-pub fn check_failure_regexes(line: &std::io::Result<String>, failure_regexes: &RegexSet) {
+pub fn check_failure_regexes(
+    line: &std::io::Result<String>,
+    failure_regexes: &RegexSet,
+    cmd: &str,
+) {
     if let Ok(line) = line {
         let failure_matches = failure_regexes.matches(line);
         let failure_matches: Vec<&str> = failure_matches
@@ -229,10 +234,14 @@ pub fn check_failure_regexes(line: &std::io::Result<String>, failure_regexes: &R
 
         assert!(
             failure_matches.is_empty(),
-            "test command output a failure message:\n\n\
+            "test command:\n\
+             {cmd}\n\n\
+             Logged a failure message:\n\
              {line}\n\n\
-             Matching: {failure_matches:#?}\n\
-             Match Regexes: {:#?}\n",
+             Matching failure regex: \
+             {failure_matches:#?}\n\n\
+             All Failure regexes: \
+             {:#?}\n",
             failure_regexes.patterns(),
         );
     }
@@ -329,10 +338,11 @@ impl<T> TestChild<T> {
         R: Read + Debug + 'static,
     {
         let failure_regexes = self.failure_regexes.clone();
+        let cmd = self.cmd.clone();
 
         let reader = BufReader::new(reader);
         let lines = BufRead::lines(reader)
-            .inspect(move |line| check_failure_regexes(line, &failure_regexes));
+            .inspect(move |line| check_failure_regexes(line, &failure_regexes, &cmd));
 
         Box::new(lines) as _
     }
