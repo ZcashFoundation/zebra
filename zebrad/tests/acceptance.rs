@@ -48,14 +48,20 @@ use zebrad::{
     config::{SyncSection, TracingSection, ZebradConfig},
 };
 
-/// The amount of time we wait after launching `zebrad`.
+mod lightwalletd;
+
+/// After we launch `zebrad`, wait this long for the command to start up,
+/// take the actions expected by the tests, and log the expected logs.
 ///
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
 const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
-/// The amount of time we wait after launching `lightwalletd`,
-/// and between expected `lightwalletd` log messages.
+/// After we launch `lightwalletd`, wait this long for the command to start up,
+/// take the actions expected by the tests, and log the expected logs.
+///
+/// `lightwalletd`'s actions also depend on the actions of the `zebrad` instance
+/// it is using for its RPCs.
 const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 
 /// The amount of time we wait between launching two
