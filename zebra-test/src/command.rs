@@ -96,9 +96,9 @@ impl CommandExt for Command {
             .with_section(|| cmd.clone().header("Command:"))?;
 
         Ok(TestChild {
-            dir,
+            dir: Some(dir),
             cmd,
-            child,
+            child: Some(child),
             stdout: None,
             stderr: None,
             failure_regexes: RegexSet::empty(),
@@ -171,13 +171,19 @@ impl TestStatus {
 #[derive(Debug)]
 pub struct TestChild<T> {
     /// The working directory of the command.
-    pub dir: T,
+    ///
+    /// `None` when the command has been waited on,
+    /// and its output has been taken.
+    pub dir: Option<T>,
 
     /// The original command string.
     pub cmd: String,
 
     /// The child process itself.
-    pub child: Child,
+    ///
+    /// `None` when the command has been waited on,
+    /// and its output has been taken.
+    pub child: Option<Child>,
 
     /// The standard output stream of the child process.
     pub stdout: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>>>>,
@@ -283,12 +289,16 @@ impl<T> TestChild<T> {
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
+    ///
+    /// - if the child process was already been taken using wait_with_output
     pub fn apply_failure_regexes_to_outputs(&mut self) {
         if self.stdout.is_none() {
             let failure_regexes = self.failure_regexes.clone();
 
             self.stdout = self
                 .child
+                .as_mut()
+                .expect("child has not been taken")
                 .stdout
                 .take()
                 .map(BufReader::new)
@@ -302,6 +312,8 @@ impl<T> TestChild<T> {
 
             self.stderr = self
                 .child
+                .as_mut()
+                .expect("child has not been taken")
                 .stderr
                 .take()
                 .map(BufReader::new)
@@ -319,8 +331,13 @@ impl<T> TestChild<T> {
     /// processes that have panicked. See #1781.
     #[spandoc::spandoc]
     pub fn kill(&mut self) -> Result<()> {
+        let child = match self.child.as_mut() {
+            Some(child) => child,
+            None => return Err(eyre!("child was already taken")).context_from(self.as_mut()),
+        };
+
         /// SPANDOC: Killing child process
-        self.child.kill().context_from(self)?;
+        child.kill().context_from(self.as_mut())?;
 
         Ok(())
     }
@@ -329,17 +346,22 @@ impl<T> TestChild<T> {
     ///
     /// Ignores any configured timeouts.
     #[spandoc::spandoc]
-    pub fn wait_with_output(self) -> Result<TestOutput<T>> {
+    pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
+        let child = match self.child.take() {
+            Some(child) => child,
+            None => return Err(eyre!("child was already taken")).context_from(self.as_mut()),
+        };
+
         /// SPANDOC: waiting for command to exit
-        let output = self.child.wait_with_output().with_section({
+        let output = child.wait_with_output().with_section({
             let cmd = self.cmd.clone();
             || cmd.header("Command:")
         })?;
 
         Ok(TestOutput {
             output,
-            cmd: self.cmd,
-            dir: Some(self.dir),
+            cmd: self.cmd.clone(),
+            dir: self.dir.take(),
         })
     }
 
@@ -554,12 +576,45 @@ impl<T> TestChild<T> {
 
     /// Is this process currently running?
     ///
-    /// ## BUGS
+    /// ## Bugs
     ///
     /// On Windows and macOS, this function can return `true` for processes that
     /// have panicked. See #1781.
+    ///
+    /// ## Panics
+    ///
+    /// If the child process was already been taken using wait_with_output.
     pub fn is_running(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        matches!(
+            self.child
+                .as_mut()
+                .expect("child has not been taken")
+                .try_wait(),
+            Ok(None),
+        )
+    }
+}
+
+impl<T> AsRef<TestChild<T>> for TestChild<T> {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
+impl<T> AsMut<TestChild<T>> for TestChild<T> {
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
+}
+
+impl<T> Drop for TestChild<T> {
+    fn drop(&mut self) {
+        // Read unread child output.
+        //
+        // This checks for failure logs,
+        // and prevents some test hangs and deadlocks.
+        self.stdout.as_mut().map(|iter| iter.last());
+        self.stderr.as_mut().map(|iter| iter.last());
     }
 }
 
@@ -858,8 +913,10 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
     fn context_from(mut self, source: &mut TestChild<T>) -> Self::Return {
         self = self.section(source.cmd.clone().header("Command:"));
 
-        if let Ok(Some(status)) = source.child.try_wait() {
-            self = self.context_from(&status);
+        if let Some(child) = &mut source.child {
+            if let Ok(Some(status)) = child.try_wait() {
+                self = self.context_from(&status);
+            }
         }
 
         // Reading test child process output could hang if the child process is still running,
@@ -876,8 +933,10 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
                 let line = if let Ok(line) = line { line } else { break };
                 let _ = writeln!(&mut stdout_buf, "{}", line);
             }
-        } else if let Some(stdout) = &mut source.child.stdout {
-            let _ = stdout.read_to_string(&mut stdout_buf);
+        } else if let Some(child) = &mut source.child {
+            if let Some(stdout) = &mut child.stdout {
+                let _ = stdout.read_to_string(&mut stdout_buf);
+            }
         }
 
         if let Some(stderr) = &mut source.stderr {
@@ -885,8 +944,10 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
                 let line = if let Ok(line) = line { line } else { break };
                 let _ = writeln!(&mut stderr_buf, "{}", line);
             }
-        } else if let Some(stderr) = &mut source.child.stderr {
-            let _ = stderr.read_to_string(&mut stderr_buf);
+        } else if let Some(child) = &mut source.child {
+            if let Some(stderr) = &mut child.stderr {
+                let _ = stderr.read_to_string(&mut stderr_buf);
+            }
         }
 
         self.section(stdout_buf.header("Unread Stdout:"))
