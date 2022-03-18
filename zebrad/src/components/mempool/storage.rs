@@ -15,7 +15,7 @@ use std::{
 
 use thiserror::Error;
 
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx};
+use zebra_chain::transaction::{self, Hash, UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
@@ -336,6 +336,19 @@ impl Storage {
         self.verified
             .transactions()
             .filter(move |tx| tx_ids.contains(&tx.id))
+    }
+
+    /// Returns the set of [`UnminedTx`]es with matching [`transaction::Hash`]es
+    /// in the mempool.
+    ///
+    /// This matches transactions with the same effects, regardless of [`AuthDigest`].
+    pub fn transactions_same_effects(
+        &self,
+        tx_ids: HashSet<Hash>,
+    ) -> impl Iterator<Item = &UnminedTx> {
+        self.verified
+            .transactions()
+            .filter(move |tx| tx_ids.contains(&tx.id.mined_id()))
     }
 
     /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
