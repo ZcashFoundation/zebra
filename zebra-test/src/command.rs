@@ -232,7 +232,8 @@ pub fn check_failure_regexes(line: &std::io::Result<String>, failure_regexes: &R
             "test command output a failure message:\n\n\
              {line}\n\n\
              Matching: {failure_matches:#?}\n\
-             Match Regexes: {failure_regexes:#?}\n",
+             Match Regexes: {:#?}\n",
+            failure_regexes.patterns(),
         );
     }
 }
