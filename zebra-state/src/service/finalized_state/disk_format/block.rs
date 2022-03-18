@@ -34,7 +34,7 @@ use proptest_derive::Arbitrary;
 /// Since Zebra only stores fully verified blocks on disk, blocks with heights
 /// larger than this height are rejected before reaching the database.
 /// (It would take decades to generate a valid chain this high.)
-pub const MAX_ON_DISK_HEIGHT: Height = Height(1 << (HEIGHT_DISK_BYTES * 8));
+pub const MAX_ON_DISK_HEIGHT: Height = Height((1 << (HEIGHT_DISK_BYTES * 8)) - 1);
 
 /// [`Height`]s are stored as 3 bytes on disk.
 ///

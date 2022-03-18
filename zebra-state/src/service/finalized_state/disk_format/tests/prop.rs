@@ -4,7 +4,7 @@ use proptest::{arbitrary::any, prelude::*};
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block},
+    block::{self, Block, Height},
     transparent,
     value_balance::ValueBalance,
 };
@@ -23,7 +23,7 @@ fn roundtrip_block_height() {
             // Limit the random height to the valid on-disk range.
             // Blocks outside this range are rejected before they reach the state.
             // (It would take decades to generate a valid chain this high.)
-            val.0 %= MAX_ON_DISK_HEIGHT.0;
+            val = val.clamp(Height(0), MAX_ON_DISK_HEIGHT);
             assert_value_properties(val)
         }
     );
@@ -35,7 +35,7 @@ fn roundtrip_transaction_location() {
 
     proptest!(
         |(mut val in any::<TransactionLocation>())| {
-            val.height.0 %= MAX_ON_DISK_HEIGHT.0;
+            val.height = val.height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
             assert_value_properties(val)
         }
     );
@@ -66,7 +66,7 @@ fn roundtrip_transparent_output() {
 
     proptest!(
         |(mut val in any::<transparent::Utxo>())| {
-            val.height.0 %= MAX_ON_DISK_HEIGHT.0;
+            val.height = val.height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
             assert_value_properties(val)
         }
     );
