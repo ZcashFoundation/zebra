@@ -217,11 +217,14 @@ fn failure_regex_matches_stderr_failure_message() {
     zebra_test::init();
 
     // The read command prints its prompt to stderr.
-    // Some read versions only accept integer timeouts.
-    // Some installs only have read as a shell builtin.
-    const TEST_CMD: &str = "sh";
+    //
+    // This is tricky to get right, because:
+    // - some read command versions only accept integer timeouts
+    // - some installs only have read as a shell builtin
+    // - some `sh` shells don't allow the `-t` option for read
+    const TEST_CMD: &str = "bash";
     // Skip the test if the test system does not have the command
-    if !is_command_available(TEST_CMD, &["-c", "echo"]) {
+    if !is_command_available(TEST_CMD, &["-c", "read -t 1 -p failure_message"]) {
         panic!(
             "skipping test: command not available\n\
              fake panic message: test command output a failure message"
