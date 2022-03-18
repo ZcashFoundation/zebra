@@ -5,14 +5,63 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{net::SocketAddr, path::Path};
+use std::{env, net::SocketAddr, path::Path};
 
 use zebra_test::{
     command::{TestChild, TestDirExt},
+    net::random_known_port,
     prelude::*,
 };
+use zebrad::config::ZebradConfig;
 
-use super::launch::ZebradTestDirExt;
+use super::{config::default_test_config, launch::ZebradTestDirExt};
+
+/// The name of the env var that enables Zebra lightwalletd integration tests.
+/// These tests need a `lightwalletd` binary in the test machine's path.
+///
+/// We use a constant so that the compiler detects typos.
+///
+/// # Note
+///
+/// This environmental variable is used to enable the lightwalletd tests.
+/// But the network tests are *disabled* by their environmental variables.
+const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+
+/// Should we skip Zebra lightwalletd integration tests?
+#[allow(clippy::print_stderr)]
+pub fn zebra_skip_lightwalletd_tests() -> bool {
+    // TODO: check if the lightwalletd binary is in the PATH?
+    //       (this doesn't seem to be implemented in the standard library)
+    //
+    // See is_command_available in zebra-test/tests/command.rs for one way to do this.
+
+    if env::var_os(ZEBRA_TEST_LIGHTWALLETD).is_none() {
+        // This message is captured by the test runner, use
+        // `cargo test -- --nocapture` to see it.
+        eprintln!(
+            "Skipped lightwalletd integration test, \
+             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
+        );
+        return true;
+    }
+
+    false
+}
+
+/// Returns a `zebrad` config with a random known RPC port.
+pub fn random_known_rpc_port_config() -> Result<ZebradConfig> {
+    // [Note on port conflict](#Note on port conflict)
+    let listen_port = random_known_port();
+    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
+    let zebra_rpc_listener = SocketAddr::new(listen_ip, listen_port);
+
+    // Write a configuration that has the rpc listen_addr option set
+    // TODO: split this config into another function?
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(zebra_rpc_listener);
+
+    Ok(config)
+}
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.

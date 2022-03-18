@@ -21,9 +21,7 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
-use std::{
-    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::PathBuf, time::Duration,
-};
+use std::{collections::HashSet, convert::TryInto, env, path::PathBuf, time::Duration};
 
 use color_eyre::{
     eyre::{Result, WrapErr},
@@ -45,7 +43,9 @@ use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{default_test_config, persistent_test_config, testdir},
     launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
-    lightwalletd::LightWalletdTestDirExt,
+    lightwalletd::{
+        random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+    },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
         LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
@@ -932,20 +932,18 @@ async fn rpc_endpoint() -> Result<()> {
         return Ok(());
     }
 
-    // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let endpoint = format!("127.0.0.1:{}", port);
-    let url = format!("http://{}", endpoint);
-
     // Write a configuration that has RPC listen_addr set
-    let mut config = default_test_config()?;
-    config.rpc.listen_addr = Some(endpoint.parse().unwrap());
+    // [Note on port conflict](#Note on port conflict)
+    let mut config = random_known_rpc_port_config()?;
+    let url = format!("http://{}", config.rpc.listen_addr.unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(&["start"])?;
 
     // Wait until port is open.
-    child.expect_stdout_line_matches(format!("Opened RPC endpoint at {}", endpoint).as_str())?;
+    child.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    )?;
 
     // Create an http client
     let client = Client::new();
@@ -1001,44 +999,30 @@ async fn rpc_endpoint() -> Result<()> {
 fn lightwalletd_integration() -> Result<()> {
     zebra_test::init();
 
-    // Skip the test unless we specifically asked for it
-    //
-    // TODO: check if the lightwalletd binary is in the PATH?
-    //       (this doesn't seem to be implemented in the standard library)
-    if env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
-        tracing::info!(
-            "skipped lightwalletd integration test, \
-             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
-        );
-
+    // Skip the test unless the user specifically asked for it
+    if zebra_skip_lightwalletd_tests() {
         return Ok(());
     }
 
     // Launch zebrad
 
+    // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let listen_port = random_known_port();
-    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
-    let zebra_rpc_listener = SocketAddr::new(listen_ip, listen_port);
-
-    // Write a configuration that has the rpc listen_addr option set
-    // TODO: split this config into another function?
-    let mut config = default_test_config()?;
-    config.rpc.listen_addr = Some(zebra_rpc_listener);
+    let mut config = random_known_rpc_port_config()?;
 
     let zdir = testdir()?.with_config(&mut config)?;
     let mut zebrad = zdir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
 
     // Wait until `zebrad` has opened the RPC endpoint
     zebrad.expect_stdout_line_matches(
-        format!("Opened RPC endpoint at {}", zebra_rpc_listener).as_str(),
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
     )?;
 
     // Launch lightwalletd
 
     // Write a fake zcashd configuration that has the rpcbind and rpcport options set
     let ldir = testdir()?;
-    let ldir = ldir.with_lightwalletd_config(zebra_rpc_listener)?;
+    let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
     let result = ldir.spawn_lightwalletd_child(&[]);
@@ -1090,6 +1074,7 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // zcash/lightwalletd exits by itself, but
     // adityapk00/lightwalletd keeps on going, so it gets killed by the test harness.
+
     lightwalletd_output
         .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
@@ -1198,15 +1183,15 @@ fn zebra_rpc_conflict() -> Result<()> {
         return Ok(());
     }
 
+    // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{}", port);
+    let mut config = random_known_rpc_port_config()?;
 
-    // Write a configuration that has our created RPC listen_addr
-    let mut config = default_test_config()?;
-    config.rpc.listen_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(r"Opened RPC endpoint at {}", listen_addr));
+    let regex1 = regex::escape(&format!(
+        r"Opened RPC endpoint at {}",
+        config.rpc.listen_addr.unwrap(),
+    ));
 
     // From another folder create a configuration with the same endpoint.
     // `rpc.listen_addr` will be the same in the 2 nodes.
