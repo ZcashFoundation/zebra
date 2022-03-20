@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5a2d60ee208b2bcd8443786a20b2e1fb4f296eb7881a7d1157f65847a3967db8 # shrinks to mut val = Height(16777216)
+cc 898538fff628bfe8898b0f72a3388d962b514d7d95fa9b509be6f70e79482e14 # shrinks to mut val = TransactionLocation { height: Height(16777216), index: TransactionIndex(0) }
+cc 009490ee7d01837977aa3f6c08a4a7e8fffde5d4eef31d5f4367271ac77f79f7 # shrinks to mut val = Utxo { output: Output { value: Amount<zebra_chain::amount::NonNegative>(0), lock_script: Script("") }, height: Height(16777216), from_coinbase: false }

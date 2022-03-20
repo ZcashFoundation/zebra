@@ -15,21 +15,56 @@ use zebra_chain::{
     transaction,
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk, IntoDiskFixedLen};
+use crate::service::finalized_state::disk_format::{
+    expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// The maximum value of an on-disk serialized [`Height`].
+///
+/// This allows us to store [`OutputIndex`]es in 8 bytes,
+/// which makes database searches more efficient.
+///
+/// # Consensus
+///
+/// This maximum height supports on-disk storage of blocks until around 2050.
+///
+/// Since Zebra only stores fully verified blocks on disk, blocks with heights
+/// larger than this height are rejected before reaching the database.
+/// (It would take decades to generate a valid chain this high.)
+pub const MAX_ON_DISK_HEIGHT: Height = Height((1 << (HEIGHT_DISK_BYTES * 8)) - 1);
+
+/// [`Height`]s are stored as 3 bytes on disk.
+///
+/// This reduces database size and increases lookup performance.
+pub const HEIGHT_DISK_BYTES: usize = 3;
+
+/// [`TransactionIndex`]es are stored as 2 bytes on disk.
+///
+/// This reduces database size and increases lookup performance.
+pub const TX_INDEX_DISK_BYTES: usize = 2;
+
 // Transaction types
 
 /// A transaction's index in its block.
+///
+/// # Consensus
+///
+/// This maximum height supports on-disk storage of transactions in blocks up to ~5 MB.
+/// (The current maximum block size is 2 MB.)
+///
+/// Since Zebra only stores fully verified blocks on disk,
+/// blocks larger than this size are rejected before reaching the database.
+///
+/// (The maximum transaction count is tested by the large generated block serialization tests.)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct TransactionIndex(u32);
+pub struct TransactionIndex(u16);
 
 impl TransactionIndex {
-    /// Create a transaction index from the native index integer type.
-    #[allow(dead_code)]
+    /// Creates a transaction index from the native index integer type.
     pub fn from_usize(transaction_index: usize) -> TransactionIndex {
         TransactionIndex(
             transaction_index
@@ -38,8 +73,7 @@ impl TransactionIndex {
         )
     }
 
-    /// Return this index as the native index integer type.
-    #[allow(dead_code)]
+    /// Returns this index as the native index integer type.
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
@@ -61,8 +95,7 @@ pub struct TransactionLocation {
 }
 
 impl TransactionLocation {
-    /// Create a transaction location from a block height and index (as the native index integer type).
-    #[allow(dead_code)]
+    /// Creates a transaction location from a block height and index (as the native index integer type).
     pub fn from_usize(height: Height, transaction_index: usize) -> TransactionLocation {
         TransactionLocation {
             height,
@@ -90,17 +123,25 @@ impl FromDisk for Block {
 }
 
 impl IntoDisk for Height {
-    type Bytes = [u8; 4];
+    /// Consensus: see the note at [`MAX_ON_DISK_HEIGHT`].
+    type Bytes = [u8; HEIGHT_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0.to_be_bytes()
+        let mem_bytes = self.0.to_be_bytes();
+
+        let disk_bytes = truncate_zero_be_bytes(&mem_bytes, HEIGHT_DISK_BYTES);
+
+        disk_bytes.try_into().unwrap()
     }
 }
 
 impl FromDisk for Height {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        Height(u32::from_be_bytes(array))
+        let mem_len = u32::BITS / 8;
+        let mem_len = mem_len.try_into().unwrap();
+
+        let mem_bytes = expand_zero_be_bytes(bytes.as_ref(), mem_len);
+        Height(u32::from_be_bytes(mem_bytes.try_into().unwrap()))
     }
 }
 
@@ -122,7 +163,7 @@ impl FromDisk for block::Hash {
 // Transaction trait impls
 
 impl IntoDisk for TransactionIndex {
-    type Bytes = [u8; 4];
+    type Bytes = [u8; TX_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0.to_be_bytes()
@@ -131,16 +172,16 @@ impl IntoDisk for TransactionIndex {
 
 impl FromDisk for TransactionIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        TransactionIndex(u32::from_be_bytes(disk_bytes.as_ref().try_into().unwrap()))
+        TransactionIndex(u16::from_be_bytes(disk_bytes.as_ref().try_into().unwrap()))
     }
 }
 
 impl IntoDisk for TransactionLocation {
-    type Bytes = [u8; 8];
+    type Bytes = [u8; HEIGHT_DISK_BYTES + TX_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.as_bytes();
-        let index_bytes = self.index.as_bytes();
+        let height_bytes = self.height.as_bytes().to_vec();
+        let index_bytes = self.index.as_bytes().to_vec();
 
         [height_bytes, index_bytes].concat().try_into().unwrap()
     }
@@ -148,9 +189,7 @@ impl IntoDisk for TransactionLocation {
 
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let height_len = Height::fixed_byte_len();
-
-        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(height_len);
+        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
 
         let height = Height::from_bytes(height_bytes);
         let index = TransactionIndex::from_bytes(index_bytes);
