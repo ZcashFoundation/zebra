@@ -10,8 +10,15 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::{
-    arbitrary::assert_value_properties, disk_format::TransactionLocation,
+    arbitrary::assert_value_properties,
+    disk_format::{transparent::OutputLocation, TransactionLocation},
 };
+
+#[test]
+fn roundtrip_block_height() {
+    zebra_test::init();
+    proptest!(|(val in any::<block::Height>())| assert_value_properties(val));
+}
 
 #[test]
 fn roundtrip_transaction_location() {
@@ -20,15 +27,15 @@ fn roundtrip_transaction_location() {
 }
 
 #[test]
-fn roundtrip_block_hash() {
+fn roundtrip_output_location() {
     zebra_test::init();
-    proptest!(|(val in any::<block::Hash>())| assert_value_properties(val));
+    proptest!(|(val in any::<OutputLocation>())| assert_value_properties(val));
 }
 
 #[test]
-fn roundtrip_block_height() {
+fn roundtrip_block_hash() {
     zebra_test::init();
-    proptest!(|(val in any::<block::Height>())| assert_value_properties(val));
+    proptest!(|(val in any::<block::Hash>())| assert_value_properties(val));
 }
 
 #[test]

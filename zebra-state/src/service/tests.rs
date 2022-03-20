@@ -1,3 +1,7 @@
+//! StateService test vectors.
+//!
+//! TODO: move these tests into tests::vectors and tests::prop modules.
+
 use std::{convert::TryInto, env, sync::Arc};
 
 use tower::{buffer::Buffer, util::BoxService};
@@ -11,6 +15,7 @@ use zebra_chain::{
     transaction, transparent,
     value_balance::ValueBalance,
 };
+
 use zebra_test::{prelude::*, transcript::Transcript};
 
 use crate::{

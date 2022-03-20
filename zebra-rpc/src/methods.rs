@@ -114,8 +114,8 @@ pub struct RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
-        zebra_state::Request,
-        Response = zebra_state::Response,
+        zebra_state::ReadRequest,
+        Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
     Tip: ChainTip,
@@ -141,8 +141,8 @@ impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
     State: Service<
-        zebra_state::Request,
-        Response = zebra_state::Response,
+        zebra_state::ReadRequest,
+        Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
     Tip: ChainTip + Send + Sync,
@@ -174,8 +174,8 @@ where
         tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
     Mempool::Future: Send,
     State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
         > + Clone
         + Send
@@ -332,7 +332,8 @@ where
                 data: None,
             })?;
 
-            let request = zebra_state::Request::Block(zebra_state::HashOrHeight::Height(height));
+            let request =
+                zebra_state::ReadRequest::Block(zebra_state::HashOrHeight::Height(height));
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -344,8 +345,8 @@ where
                 })?;
 
             match response {
-                zebra_state::Response::Block(Some(block)) => Ok(GetBlock(block.into())),
-                zebra_state::Response::Block(None) => Err(Error {
+                zebra_state::ReadResponse::Block(Some(block)) => Ok(GetBlock(block.into())),
+                zebra_state::ReadResponse::Block(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Block not found".to_string(),
                     data: None,

@@ -1,6 +1,10 @@
+//! Basic integration tests for zebra-state
+
+use std::sync::Arc;
+
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
-use std::sync::Arc;
+
 use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 

@@ -33,9 +33,9 @@ env:
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
-  GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: zealous-zebra
+  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  GCR_BASE: gcr.io/zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-4
@@ -46,6 +46,9 @@ jobs:
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     steps:
       - uses: actions/checkout@v3.0.0
         with:
@@ -78,19 +81,27 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v1
 
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.6.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v1.14.1
         with:
           registry: us-docker.pkg.dev
-          username: _json_key
-          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       - name: Login to Google Container Registry
         uses: docker/login-action@v1.14.1
         with:
           registry: gcr.io
-          username: _json_key
-          password: ${{ secrets.GOOGLE_CREDENTIALS }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       # Build and push image to Google Artifact Registry
       - name: Build & push
@@ -195,7 +206,7 @@ jobs:
       - name: Run tests with included lightwalletd binary
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS -e ZEBRA_TEST_LIGHTWALLETD --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration
+          docker run -e ZEBRA_SKIP_IPV6_TESTS -e ZEBRA_TEST_LIGHTWALLETD --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration --nocapture
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
@@ -205,6 +216,9 @@ jobs:
     needs: build
     outputs:
       any_changed: ${{ steps.changed-files-specific.outputs.any_changed }}
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     steps:
       - uses: actions/checkout@v3.0.0
         with:
@@ -214,7 +228,7 @@ jobs:
       # only run this job if the database format might have changed
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v18.1
+        uses: tj-actions/changed-files@v18.3
         with:
           files: |
             zebra-state/**/config.rs
@@ -242,9 +256,11 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.5.0
+        uses: google-github-actions/auth@v0.6.0
         with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
@@ -344,6 +360,9 @@ jobs:
     name: Test full validation sync from cached state
     runs-on: ubuntu-latest
     needs: [ build, regenerate-stateful-disks]
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     steps:
       - uses: actions/checkout@v3.0.0
         with:
@@ -359,9 +378,11 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.5.0
+        uses: google-github-actions/auth@v0.6.0
         with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA

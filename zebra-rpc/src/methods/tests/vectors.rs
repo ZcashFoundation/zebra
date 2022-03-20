@@ -15,9 +15,6 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
-// Number of blocks to populate state with
-const NUMBER_OF_BLOCKS: u32 = 10;
-
 #[tokio::test]
 async fn rpc_getinfo() {
     zebra_test::init();
@@ -51,10 +48,10 @@ async fn rpc_getinfo() {
 async fn rpc_getblock() {
     zebra_test::init();
 
-    // Put the first `NUMBER_OF_BLOCKS` blocks in a vector
-    let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
-        .range(0..=NUMBER_OF_BLOCKS)
-        .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -114,17 +111,15 @@ async fn rpc_getblock_error() {
 async fn rpc_getbestblockhash() {
     zebra_test::init();
 
-    // Put `NUMBER_OF_BLOCKS` blocks in a vector
-    let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
-        .range(0..=NUMBER_OF_BLOCKS)
-        .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Get the hash of the block at the tip using hardcoded block tip bytes.
     // We want to test the RPC response is equal to this hash
-    let tip_block: Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
+    let tip_block = blocks.last().unwrap();
     let tip_block_hash = tip_block.hash();
 
     // Get a mempool handle

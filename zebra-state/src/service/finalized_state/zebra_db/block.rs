@@ -69,7 +69,8 @@ impl ZebraDb {
         self.db.zs_get(height_by_hash, &hash)
     }
 
-    /// Returns the given block if it exists.
+    /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
+    /// [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
         let block_by_height = self.db.cf_handle("block_by_height").unwrap();
@@ -101,11 +102,17 @@ impl ZebraDb {
 
     // Read transaction methods
 
-    /// Returns the given transaction if it exists.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+    /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
+    /// if it exists in the finalized chain.
+    pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
         let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        self.db
-            .zs_get(tx_by_hash, &hash)
+        self.db.zs_get(tx_by_hash, &hash)
+    }
+
+    /// Returns the [`Transaction`] with [`transaction::Hash`],
+    /// if it exists in the finalized chain.
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+        self.transaction_location(hash)
             .map(|TransactionLocation { index, height }| {
                 let block = self
                     .block(height.into())
