@@ -19,7 +19,7 @@ fn roundtrip_block_height() {
     zebra_test::init();
 
     proptest!(
-        |(mut val in any::<block::Height>())| {
+        |(mut val in any::<Height>())| {
             // Limit the random height to the valid on-disk range.
             // Blocks outside this range are rejected before they reach the state.
             // (It would take decades to generate a valid chain this high.)
