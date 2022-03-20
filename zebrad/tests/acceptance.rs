@@ -1682,26 +1682,42 @@ fn lightwalletd_integration() -> Result<()> {
     // Check that `lightwalletd` is calling the expected Zebra RPCs
 
     // getblockchaininfo
-    let result = lightwalletd.expect_stdout_line_matches("Got sapling height");
+    //
+    // TODO: update branchID when we're using cached state (#3511)
+    let result = lightwalletd.expect_stdout_line_matches(
+        "Got sapling height 419200 block height [0-9]+ chain main branchID 00000000",
+    );
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // getblock with block 1 in Zebra's state
+    // getblock with the first Sapling block in Zebra's state
     //
     // zcash/lightwalletd calls getbestblockhash here, but
     // adityapk00/lightwalletd calls getblock
     //
-    // Until block 1 has been downloaded, lightwalletd will log Zebra's RPC error:
+    // The log also depends on what is in Zebra's state:
+    //
+    // # Empty Zebra State
+    //
+    // lightwalletd tries to download the Sapling activation block, but it's not in the state.
+    //
+    // Until the Sapling activation block has been downloaded, lightwalletd will log Zebra's RPC error:
     // "error requesting block: 0: Block not found"
-    // But we can't check for that, because Zebra might download genesis before lightwalletd asks.
     // We also get a similar log when lightwalletd reaches the end of Zebra's cache.
     //
-    // After the first getblock call, lightwalletd will log:
+    // # Cached Zebra State
+    //
+    // After the first successful getblock call, lightwalletd will log:
     // "Block hash changed, clearing mempool clients"
     // But we can't check for that, because it can come before or after the Ingestor log.
-    let result = lightwalletd.expect_stdout_line_matches("Ingestor adding block to cache");
+    //
+    // TODO: expect Ingestor log when we're using cached state (#3511)
+    //       "Ingestor adding block to cache"
+    let result = lightwalletd.expect_stdout_line_matches(
+        r#"error requesting block: 0: Block not found","height":419200"#,
+    );
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // (next RPC)
