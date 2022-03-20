@@ -1059,15 +1059,13 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     //
     // get_block_chain_info
     //
-    // missing branchID, should be the 8 hex digits "76b809bb"
-    " branchID 0",
     // TODO: enable these checks after PR #3891 merges
     //
     // invalid sapling height
     //"Got sapling height 0",
     // missing BIP70 chain name, should be "main" or "test"
     //" chain  ",
-    // missing branchID, should be the 8 hex digits "76b809bb"
+    // missing branchID, should be 8 hex digits
     //" branchID \"",
     //
     // TODO: complete this list for each RPC with fields?
