@@ -1942,6 +1942,7 @@ checksum = "282a6247722caba404c065016bbfa522806e51714c34f5dfc3e4a3a46fcb4223"
 dependencies = [
  "autocfg 1.1.0",
  "hashbrown",
+ "serde",
 ]
 
 [[package]]
@@ -3870,6 +3871,7 @@ version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e8d9fa5c3b304765ce1fd9c4c8a3de2c8db365a5b91be52f186efc675681d95"
 dependencies = [
+ "indexmap",
  "itoa 1.0.1",
  "ryu",
  "serde",
@@ -5750,11 +5752,13 @@ dependencies = [
  "futures",
  "hex",
  "hyper",
+ "indexmap",
  "jsonrpc-core",
  "jsonrpc-derive",
  "jsonrpc-http-server",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tower",

@@ -120,20 +120,7 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConsensusBranchId(u32);
 
 impl ConsensusBranchId {
@@ -153,6 +140,16 @@ impl From<ConsensusBranchId> for u32 {
 }
 
 impl ToHex for &ConsensusBranchId {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for ConsensusBranchId {
     fn encode_hex<T: FromIterator<char>>(&self) -> T {
         self.bytes_in_display_order().encode_hex()
     }
@@ -460,6 +457,16 @@ impl NetworkUpgrade {
 }
 
 impl ConsensusBranchId {
+    /// The value used by `zcashd` RPCs for missing consensus branch IDs.
+    ///
+    /// # Consensus
+    ///
+    /// This value must only be used in RPCs.
+    ///
+    /// The consensus rules handle missing branch IDs by rejecting blocks and transactions,
+    /// so this substitute value must not be used in consensus-critical code.
+    pub const RPC_MISSING_ID: ConsensusBranchId = ConsensusBranchId(0);
+
     /// Returns the current consensus branch id for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.
