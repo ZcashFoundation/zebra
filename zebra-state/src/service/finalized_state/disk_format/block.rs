@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Block, Height},
-    serialization::{ZcashDeserialize, ZcashSerialize},
-    transaction,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::{self, Transaction},
 };
 
 use crate::service::finalized_state::disk_format::{
@@ -106,6 +106,7 @@ impl TransactionLocation {
 
 // Block trait impls
 
+// TODO: remove block serialization impls (#3151)
 impl IntoDisk for Block {
     type Bytes = Vec<u8>;
 
@@ -118,6 +119,24 @@ impl IntoDisk for Block {
 impl FromDisk for Block {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         Block::zcash_deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+impl IntoDisk for block::Header {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.zcash_serialize_to_vec()
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for block::Header {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bytes
+            .as_ref()
+            .zcash_deserialize_into()
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -162,6 +181,25 @@ impl FromDisk for block::Hash {
 
 // Transaction trait impls
 
+impl IntoDisk for Transaction {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.zcash_serialize_to_vec()
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for Transaction {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bytes
+            .as_ref()
+            .zcash_deserialize_into()
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+/// TransactionIndex is only serialized as part of TransactionLocation
 impl IntoDisk for TransactionIndex {
     type Bytes = [u8; TX_INDEX_DISK_BYTES];
 
