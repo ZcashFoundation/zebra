@@ -604,7 +604,7 @@ We use the following rocksdb column families:
 | ------------------------------ | ---------------------- | ----------------------------------- | ------- |
 | *Blocks*                       |                        |                                     |         |
 | `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
-| `height_tx_count_by_hash`      | `block::Hash`          | `HeightTransactionCount`            | Never   |
+| `height_tx_count_by_hash`      | `block::Hash`          | `block::Height`                     | Never   |
 | `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
 | *Transactions*                 |                        |                                     |         |
 | `tx_by_loc`                    | `TransactionLocation`  | `Transaction`                       | Never   |
@@ -639,7 +639,6 @@ Block and Transaction Data:
 - `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
 - `TransactionCount`: same as `TransactionIndex`
 - `TransactionLocation`: `Height \|\| TransactionIndex`
-- `HeightTransactionCount`: `Height \|\| TransactionCount`
 - `OutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
 - transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
 - `OutputLocation`: `TransactionLocation \|\| OutputIndex`
@@ -675,7 +674,7 @@ Each column family handles updates differently, based on its specific consensus 
   - Code called by ReadStateService must ignore deleted keys and values,
     accept truncated or extended sets, and accept old or new values.
     Or it should use a read lock.
-    
+
 ### RocksDB read locks
 [rocksdb-read-locks]: #rocksdb-read-locks
 
@@ -728,28 +727,27 @@ So they should not be used for consensus-critical checks.
 ### Notes on rocksdb column families
 [rocksdb-column-families]: #rocksdb-column-families
 
-- The `hash_by_height` and `height_tx_count_by_hash` column families provide a bijection between
+- The `hash_by_height` and `height_by_hash` column families provide a bijection between
   block heights and block hashes.  (Since the rocksdb state only stores finalized
   state, they are actually a bijection).
 
-- Similarly, the `tx_by_hash` and `hash_by_tx` column families provide a bijection between
+- Similarly, the `tx_loc_by_hash` and `hash_by_tx_loc` column families provide a bijection between
   transaction locations and transaction hashes.
 
 - The `block_header_by_height` column family provides a bijection between block
   heights and block header data. There is no corresponding `height_by_block` column
-  family: instead, hash the block, and use the hash from `height_tx_count_by_hash`. (Since the
-  rocksdb state only stores finalized state, they are actually a bijection).
+  family: instead, hash the block header, and use the hash from `height_by_hash`.
+  (Since the rocksdb state only stores finalized state, they are actually a bijection).
   Similarly, there are no column families that go from transaction data
-  to transaction locations: hash the transaction and use `tx_by_hash`.
+  to transaction locations: hash the transaction and use `tx_loc_by_hash`.
 
 - Block headers and transactions are stored separately in the database,
   so that individual transactions can be accessed efficiently.
   Blocks can be re-created on request using the following process:
-  - Look up `height` and `tx_count` in `height_tx_count_by_hash`
+  - Look up `height` in `height_by_hash`
   - Get the block header for `height` from `block_header_by_height`
-  - Use [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
-    or [`multi_get`](https://github.com/facebook/rocksdb/wiki/MultiGet-Performance)
-    to get each transaction from `0..tx_count` from `tx_by_location`
+  - Use a [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
+    to get each transaction with `height` from `tx_by_location`
 
 - Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
@@ -759,26 +757,27 @@ So they should not be used for consensus-critical checks.
   the fact that we commit blocks in order means we're writing only to the end
   of the rocksdb column family, which may help save space.
 
-- Similarly, transaction data is stored in chain order in `tx_by_location`,
-  and chain order within each vector in `tx_by_transparent_address`.
+- Similarly, transaction data is stored in chain order in `tx_by_loc` and `utxo_by_out_loc`,
+  and chain order within each vector in `utxo_by_transparent_addr_loc` and
+  `tx_by_transparent_addr_loc`.
 
 - `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
   block.  This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
-  Transaction hashes can be looked up using `hash_by_tx`.
+  Transaction hashes can be looked up using `hash_by_tx_loc`.
 
-- Similarly, UTXOs are stored in `utxo_by_outpoint` by `OutputLocation`,
-  rather than `OutPoint`. `OutPoint`s can be looked up using `tx_by_hash`,
-  and reconstructed using `hash_by_tx`.
+- Similarly, UTXOs are stored in `utxo_by_out_loc` by `OutputLocation`,
+  rather than `OutPoint`. `OutPoint`s can be looked up using `tx_loc_by_hash`,
+  and reconstructed using `hash_by_tx_loc`.
 
-- The `Utxo` type can be constructed from the `Output` data,
-  `height: TransactionLocation.height`, and
-  `is_coinbase: TransactionLocation.index == 0`
+- The `Utxo` type can be constructed from the `OutputLocation` and `Output` data,
+  `height: OutputLocation.height`, and
+  `is_coinbase: OutputLocation.transaction_index == 0`
   (coinbase transactions are always the first transaction in a block).
 
 - `balance_by_transparent_addr` is the sum of all `utxo_by_transparent_addr_loc`s
-  that are still in `utxo_by_outpoint`. It is cached to improve performance for
+  that are still in `utxo_by_out_loc`. It is cached to improve performance for
   addresses with large UTXO sets. It also stores the `AddressLocation` for each
   address, which allows for efficient lookups.
 
@@ -786,10 +785,10 @@ So they should not be used for consensus-critical checks.
   by address. UTXO locations are appended by each block.
   This list includes the `AddressLocation`, if it has not been spent.
   (This duplicate data is small, and helps simplify the code.)
-  
-- When a block write deletes a UTXO from `utxo_by_outpoint`,
+
+- When a block write deletes a UTXO from `utxo_by_out_loc`,
   that UTXO location should be deleted from `utxo_by_transparent_addr_loc`.
-  This is an index optimisation.
+  This is an index optimisation, which does not affect query results.
 
 - `tx_by_transparent_addr_loc` stores transaction locations by address.
   This list includes transactions containing spent UTXOs.
@@ -822,6 +821,8 @@ So they should not be used for consensus-critical checks.
   regardless of where they come from. The exception is `sprout_anchors` which also maps
   the anchor to the matching note commitment tree. This is required to support interstitial
   treestates, which are unique to Sprout.
+  **TODO:** store the `Root` hash in `sprout_note_commitment_tree`, and use it to look up the
+  note commitment tree. This de-duplicates tree state data.
 
 - The value pools are only stored for the finalized tip.
 
