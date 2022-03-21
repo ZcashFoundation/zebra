@@ -4,13 +4,12 @@
 //! as used by `lightwalletd.`
 //!
 //! Some parts of the `zcashd` RPC documentation are outdated.
-//! So this implementation follows the `lightwalletd` client implementation.
-
-use std::collections::BTreeMap;
+//! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
+use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
@@ -227,10 +226,16 @@ where
             })?;
 
         // `upgrades` object
-        let mut upgrades = BTreeMap::new();
+        //
+        // Get the network upgrades in height order, like `zcashd`.
+        let mut upgrades = IndexMap::new();
         for (activation_height, network_upgrade) in NetworkUpgrade::activation_list(network) {
-            // zcashd output network upgrades greater than height 1.
-            if activation_height > Height(1) {
+            // Zebra defines network upgrades based on incompatible consensus rule changes,
+            // but zcashd defines them based on ZIPs.
+            //
+            // All the network upgrades with a consensus branch ID are the same in Zebra and zcashd.
+            if let Some(branch_id) = network_upgrade.branch_id() {
+                // zcashd's RPC seems to ignore Disabled network upgrages, so Zebra does too.
                 let status = if tip_height >= activation_height {
                     NetworkUpgradeStatus::Active
                 } else {
@@ -242,24 +247,23 @@ where
                     activation_height,
                     status,
                 };
-                let branch = ConsensusBranchIdHex(network_upgrade.branch_id().unwrap_or_default());
-                upgrades.insert(branch, upgrade);
+                upgrades.insert(ConsensusBranchIdHex(branch_id), upgrade);
             }
         }
 
         // `consensus` object
         let next_block_height =
             (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
-        let consensus = Consensus {
+        let consensus = TipConsensusBranch {
             chain_tip: ConsensusBranchIdHex(
                 NetworkUpgrade::current(network, tip_height)
                     .branch_id()
-                    .unwrap_or_default(),
+                    .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
             next_block: ConsensusBranchIdHex(
                 NetworkUpgrade::current(network, next_block_height)
                     .branch_id()
-                    .unwrap_or_default(),
+                    .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
         };
 
@@ -398,19 +402,19 @@ where
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
     build: String,
     subversion: String,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockChainInfo {
     chain: String,
     blocks: u32,
@@ -418,14 +422,16 @@ pub struct GetBlockChainInfo {
     best_block_hash: GetBestBlockHash,
     #[serde(rename = "estimatedheight")]
     estimated_height: u32,
-    upgrades: BTreeMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
-    consensus: Consensus,
+    upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
+    consensus: TipConsensusBranch,
 }
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+/// A hex-encoded [`ConsensusBranchId`] string.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// Information about [`NetworkUpgrade`] activation.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 struct NetworkUpgradeInfo {
     name: NetworkUpgrade,
     #[serde(rename = "activationheight")]
@@ -433,7 +439,8 @@ struct NetworkUpgradeInfo {
     status: NetworkUpgradeStatus,
 }
 
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+/// The activation status of a [`NetworkUpgrade`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 enum NetworkUpgradeStatus {
     #[serde(rename = "active")]
     Active,
@@ -443,32 +450,35 @@ enum NetworkUpgradeStatus {
     Pending,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct Consensus {
+/// The [`ConsensusBranchId`]s for the tip and the next block.
+///
+/// These branch IDs are different when the next block is a network upgrade activation block.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+struct TipConsensusBranch {
     #[serde(rename = "chaintip")]
     chain_tip: ConsensusBranchIdHex,
     #[serde(rename = "nextblock")]
     next_block: ConsensusBranchIdHex,
 }
 
-#[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 /// Response to a `sendrawtransaction` RPC request.
 ///
 /// Contains the hex-encoded hash of the sent transaction.
 ///
 /// See the notes for the [`Rpc::send_raw_transaction` method].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
-#[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`Rpc::get_block` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 
-#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 /// Response to a `getbestblockhash` RPC request.
 ///
 /// Contains the hex-encoded hash of the tip block.
 ///
 /// Also see the notes for the [`Rpc::get_best_block_hash` method].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
