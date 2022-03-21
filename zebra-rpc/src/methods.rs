@@ -401,10 +401,10 @@ where
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
     build: String,
     subversion: String,
@@ -460,24 +460,24 @@ struct TipConsensusBranch {
     next_block: ConsensusBranchIdHex,
 }
 
-#[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 /// Response to a `sendrawtransaction` RPC request.
 ///
 /// Contains the hex-encoded hash of the sent transaction.
 ///
 /// See the notes for the [`Rpc::send_raw_transaction` method].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
-#[derive(serde::Serialize)]
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`Rpc::get_block` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 
-#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 /// Response to a `getbestblockhash` RPC request.
 ///
 /// Contains the hex-encoded hash of the tip block.
 ///
 /// Also see the notes for the [`Rpc::get_best_block_hash` method].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
