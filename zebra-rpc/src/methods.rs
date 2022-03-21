@@ -393,7 +393,6 @@ where
             };
 
             // Now check the state
-
             let request = zebra_state::ReadRequest::Transaction(txid);
             let response = state
                 .ready()
