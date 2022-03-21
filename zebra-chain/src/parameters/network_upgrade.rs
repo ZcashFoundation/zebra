@@ -139,8 +139,8 @@ pub struct ConsensusBranchId(u32);
 impl ConsensusBranchId {
     /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
     ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
+    /// Zebra displays consensus branch IDs in big-endian byte-order,
+    /// following the convention set by zcashd.
     fn bytes_in_display_order(&self) -> [u8; 4] {
         self.0.to_be_bytes()
     }
@@ -225,8 +225,8 @@ const TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT: block::Height = block::Height(299
 pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
 
 impl NetworkUpgrade {
-    /// Returns a BTreeMap of activation heights and network upgrades for
-    /// `network`.
+    /// Returns a map between activation heights and network upgrades for `network`,
+    /// in ascending height order.
     ///
     /// If the activation height of a future upgrade is not known, that
     /// network upgrade does not appear in the list.
@@ -313,7 +313,7 @@ impl NetworkUpgrade {
         NetworkUpgrade::activation_list(network).contains_key(&height)
     }
 
-    /// Returns a BTreeMap of NetworkUpgrades and their ConsensusBranchIds.
+    /// Returns an unordered mapping between NetworkUpgrades and their ConsensusBranchIds.
     ///
     /// Branch ids are the same for mainnet and testnet.
     ///
