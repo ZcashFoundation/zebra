@@ -8,7 +8,7 @@ use zebra_chain::{
     block::Block,
     chain_tip::NoChainTip,
     parameters::Network::*,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{UnminedTx, UnminedTxId},
 };
 use zebra_network::constants::USER_AGENT;
@@ -199,7 +199,7 @@ async fn rpc_getrawtransaction() {
             let (response, _) = futures::join!(get_tx_req, mempool_req);
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
-                assert_eq!(raw_tx, tx.zcash_serialize_to_vec().unwrap());
+                assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
             }
@@ -225,7 +225,7 @@ async fn rpc_getrawtransaction() {
             let (response, _) = futures::join!(get_tx_req, mempool_req);
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
-                assert_eq!(raw_tx, tx.zcash_serialize_to_vec().unwrap());
+                assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
             }
