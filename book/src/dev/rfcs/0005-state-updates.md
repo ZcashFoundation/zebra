@@ -604,7 +604,7 @@ We use the following rocksdb column families:
 | ------------------------------ | ---------------------- | ----------------------------------- | ------- |
 | *Blocks*                       |                        |                                     |         |
 | `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
-| `height_tx_count_by_hash`      | `block::Hash`          | `block::Height`                     | Never   |
+| `height_by_hash`               | `block::Hash`          | `block::Height`                     | Never   |
 | `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
 | *Transactions*                 |                        |                                     |         |
 | `tx_by_loc`                    | `TransactionLocation`  | `Transaction`                       | Never   |
@@ -747,7 +747,7 @@ So they should not be used for consensus-critical checks.
   - Look up `height` in `height_by_hash`
   - Get the block header for `height` from `block_header_by_height`
   - Use a [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
-    to get each transaction with `height` from `tx_by_location`
+    to get each transaction with `height` from `tx_by_loc`
 
 - Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
@@ -822,7 +822,7 @@ So they should not be used for consensus-critical checks.
   the anchor to the matching note commitment tree. This is required to support interstitial
   treestates, which are unique to Sprout.
   **TODO:** store the `Root` hash in `sprout_note_commitment_tree`, and use it to look up the
-  note commitment tree. This de-duplicates tree state data.
+  note commitment tree. This de-duplicates tree state data. But we currently only store one sprout tree by height.
 
 - The value pools are only stored for the finalized tip.
 
