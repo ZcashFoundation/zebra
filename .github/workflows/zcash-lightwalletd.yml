@@ -47,7 +47,9 @@ jobs:
         persist-credentials: false
 
     - name: Inject slug/short variables
-      uses: rlespinasse/github-slug-action@v4
+      uses: rlespinasse/github-slug-action@v4.0.2
+        with:
+          short-length: 7
 
       # Automatic tag management and OCI Image Format Specification for labels
     - name: Docker meta

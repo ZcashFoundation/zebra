@@ -37,7 +37,9 @@ jobs:
         persist-credentials: false
 
     - name: Inject slug/short variables
-      uses: rlespinasse/github-slug-action@v4
+      uses: rlespinasse/github-slug-action@v4.0.2
+      with:
+        short-length: 7
 
       # Automatic tag management and OCI Image Format Specification for labels
     - name: Docker meta
@@ -129,12 +131,10 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
     steps:
-      - uses: actions/checkout@v3.0.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v4.0.2
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -195,12 +195,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v3.0.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v4.0.2
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
