@@ -396,7 +396,7 @@ proptest! {
             },
         };
 
-        // check no futures were called in this test
+        // check no requests were made during this test
         runtime.block_on(async move {
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
