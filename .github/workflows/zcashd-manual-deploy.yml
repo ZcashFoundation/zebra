@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4.2.0
+        uses: rlespinasse/github-slug-action@v4.2
         with:
           short-length: 7
 
