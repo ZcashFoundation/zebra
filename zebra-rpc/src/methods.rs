@@ -355,7 +355,14 @@ where
                 data: None,
             })?;
 
-            // Check the mempool first
+            // Check the mempool first.
+            //
+            // # Correctness
+            //
+            // Transactions are removed from the mempool after they are mined into blocks,
+            // so the transaction could be just in the mempool, just in the state, or in both.
+            // (And the mempool and state transactions could have different authorising data.)
+            // But it doesn't matter which transaction we choose, because the effects are the same.
             let mut txid_set = HashSet::new();
             txid_set.insert(txid);
             let request = mempool::Request::TransactionsByMinedId(txid_set);
@@ -463,7 +470,6 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-// pub struct GetRawTransaction(pub(super) SerializedTransaction);
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum GetRawTransaction {
