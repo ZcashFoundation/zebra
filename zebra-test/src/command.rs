@@ -1,22 +1,29 @@
 //! Launching test commands for Zebra integration and acceptance tests.
 
-use color_eyre::{
-    eyre::{eyre, Context, Report, Result},
-    Help, SectionExt,
-};
-use tracing::instrument;
-
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
-
 use std::{
     convert::Infallible as NoDir,
-    fmt::{self, Write as _},
+    fmt::{self, Debug, Write as _},
     io::{BufRead, BufReader, Lines, Read, Write as _},
     path::Path,
     process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
 };
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
+use color_eyre::{
+    eyre::{eyre, Context, Report, Result},
+    Help, SectionExt,
+};
+use regex::RegexSet;
+use tracing::instrument;
+
+pub mod to_regex;
+
+use to_regex::{CollectRegexSet, ToRegex};
+
+use self::to_regex::ToRegexSet;
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
@@ -126,9 +133,13 @@ where
     }
 }
 
+/// Test command exit status information.
 #[derive(Debug)]
 pub struct TestStatus {
+    /// The original command string.
     pub cmd: String,
+
+    /// The exit status of the command.
     pub status: ExitStatus,
 }
 
@@ -150,14 +161,31 @@ impl TestStatus {
     }
 }
 
+/// A test command child process.
 #[derive(Debug)]
 pub struct TestChild<T> {
+    /// The working directory of the command.
     pub dir: T,
+
+    /// The original command string.
     pub cmd: String,
+
+    /// The child process itself.
     pub child: Child,
+
+    /// The standard output stream of the child process.
     pub stdout: Option<Lines<BufReader<ChildStdout>>>,
+
+    /// The standard error stream of the child process.
     pub stderr: Option<Lines<BufReader<ChildStderr>>>,
+
+    /// The deadline for this command to finish.
+    ///
+    /// Only checked when the command outputs each new line (#1140).
     pub deadline: Option<Instant>,
+
+    /// If true, write child output directly to standard output,
+    /// bypassing the Rust test harness output capture.
     bypass_test_capture: bool,
 }
 
@@ -215,7 +243,10 @@ impl<T> TestChild<T> {
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
-    pub fn expect_stdout_line_matches(&mut self, regex: &str) -> Result<&mut Self> {
+    pub fn expect_stdout_line_matches<R>(&mut self, regex: R) -> Result<&mut Self>
+    where
+        R: ToRegex + Debug,
+    {
         if self.stdout.is_none() {
             self.stdout = self
                 .child
@@ -230,7 +261,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching(&mut lines, regex, "stdout") {
+        match self.expect_line_matching_regex_set(&mut lines, regex, "stdout") {
             Ok(()) => {
                 self.stdout = Some(lines);
                 Ok(self)
@@ -245,7 +276,10 @@ impl<T> TestChild<T> {
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See `expect_line_matching` for details.
     #[instrument(skip(self))]
-    pub fn expect_stderr_line_matches(&mut self, regex: &str) -> Result<&mut Self> {
+    pub fn expect_stderr_line_matches<R>(&mut self, regex: R) -> Result<&mut Self>
+    where
+        R: ToRegex + Debug,
+    {
         if self.stderr.is_none() {
             self.stderr = self
                 .child
@@ -260,7 +294,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching(&mut lines, regex, "stderr") {
+        match self.expect_line_matching_regex_set(&mut lines, regex, "stderr") {
             Ok(()) => {
                 self.stderr = Some(lines);
                 Ok(self)
@@ -269,25 +303,59 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line in `lines` against `regex`, and returns Ok if a line
+    /// [`TestChild::expect_line_matching`] wrapper for strings, [`Regex`]es,
+    /// and [`RegexSet`]s.
+    pub fn expect_line_matching_regex_set<L, R>(
+        &mut self,
+        lines: &mut L,
+        regex_set: R,
+        stream_name: &str,
+    ) -> Result<()>
+    where
+        L: Iterator<Item = std::io::Result<String>>,
+        R: ToRegexSet,
+    {
+        let regex_set = regex_set.to_regex_set().expect("regexes must be valid");
+
+        self.expect_line_matching(lines, regex_set, stream_name)
+    }
+
+    /// [`TestChild::expect_line_matching`] wrapper for regular expression iterators.
+    pub fn expect_line_matching_regex_iter<L, I>(
+        &mut self,
+        lines: &mut L,
+        regex_iter: I,
+        stream_name: &str,
+    ) -> Result<()>
+    where
+        L: Iterator<Item = std::io::Result<String>>,
+        I: CollectRegexSet,
+    {
+        let regex_set = regex_iter
+            .collect_regex_set()
+            .expect("regexes must be valid");
+
+        self.expect_line_matching(lines, regex_set, stream_name)
+    }
+
+    /// Checks each line in `lines` against `regex_set`, and returns Ok if a line
     /// matches. Uses `stream_name` as the name for `lines` in error reports.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
+    ///
     /// Note: the timeout is only checked after each full line is received from
-    /// the child.
+    /// the child (#1140).
     #[instrument(skip(self, lines))]
     #[allow(clippy::print_stdout)]
     pub fn expect_line_matching<L>(
         &mut self,
         lines: &mut L,
-        regex: &str,
+        regex_set: RegexSet,
         stream_name: &str,
     ) -> Result<()>
     where
         L: Iterator<Item = std::io::Result<String>>,
     {
-        let re = regex::Regex::new(regex).expect("regex must be valid");
-
         // We don't check `is_running` here,
         // because we want to read to the end of the buffered output,
         // even if the child process has exited.
@@ -315,7 +383,7 @@ impl<T> TestChild<T> {
             // Some OSes require a flush to send all output to the terminal.
             std::io::stdout().lock().flush()?;
 
-            if re.is_match(&line) {
+            if regex_set.is_match(&line) {
                 return Ok(());
             }
         }
@@ -332,7 +400,7 @@ impl<T> TestChild<T> {
             stream_name
         )
         .context_from(self)
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"));
+        .with_section(|| format!("{:?}", regex_set).header("Match Regex:"));
 
         Err(report)
     }
@@ -513,8 +581,11 @@ impl<T> TestOutput<T> {
 
     /// Tests if standard output matches `regex`.
     #[instrument(skip(self))]
-    pub fn stdout_matches(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
+    pub fn stdout_matches<R>(&self, regex: R) -> Result<&Self>
+    where
+        R: ToRegex + Debug,
+    {
+        let re = regex.to_regex().expect("regex must be valid");
 
         self.output_check(
             |stdout| re.is_match(stdout),
@@ -533,8 +604,11 @@ impl<T> TestOutput<T> {
 
     /// Tests if any lines in standard output match `regex`.
     #[instrument(skip(self))]
-    pub fn stdout_line_matches(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
+    pub fn stdout_line_matches<R>(&self, regex: R) -> Result<&Self>
+    where
+        R: ToRegex + Debug,
+    {
+        let re = regex.to_regex().expect("regex must be valid");
 
         self.any_output_line(
             |line| re.is_match(line),
@@ -559,8 +633,11 @@ impl<T> TestOutput<T> {
 
     /// Tests if standard error matches `regex`.
     #[instrument(skip(self))]
-    pub fn stderr_matches(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
+    pub fn stderr_matches<R>(&self, regex: R) -> Result<&Self>
+    where
+        R: ToRegex + Debug,
+    {
+        let re = regex.to_regex().expect("regex must be valid");
 
         self.output_check(
             |stderr| re.is_match(stderr),
@@ -579,8 +656,11 @@ impl<T> TestOutput<T> {
 
     /// Tests if any lines in standard error match `regex`.
     #[instrument(skip(self))]
-    pub fn stderr_line_matches(&self, regex: &str) -> Result<&Self> {
-        let re = regex::Regex::new(regex)?;
+    pub fn stderr_line_matches<R>(&self, regex: R) -> Result<&Self>
+    where
+        R: ToRegex + Debug,
+    {
+        let re = regex.to_regex().expect("regex must be valid");
 
         self.any_output_line(
             |line| re.is_match(line),
@@ -661,12 +741,17 @@ impl ContextFrom<&TestStatus> for Report {
 impl<T> ContextFrom<&mut TestChild<T>> for Report {
     type Return = Report;
 
+    #[allow(clippy::print_stdout)]
     fn context_from(mut self, source: &mut TestChild<T>) -> Self::Return {
         self = self.section(source.cmd.clone().header("Command:"));
 
         if let Ok(Some(status)) = source.child.try_wait() {
             self = self.context_from(&status);
         }
+
+        // Reading test child process output could hang if the child process is still running,
+        // so kill it first.
+        let _ = source.child.kill();
 
         let mut stdout_buf = String::new();
         let mut stderr_buf = String::new();
