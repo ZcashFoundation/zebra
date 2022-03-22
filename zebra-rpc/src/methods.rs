@@ -503,7 +503,10 @@ impl GetRawTransaction {
             Ok(GetRawTransaction::Object {
                 hex: tx.into(),
                 height: match height {
-                    Some(height) => height.0 as i32,
+                    Some(height) => height
+                        .0
+                        .try_into()
+                        .expect("valid block heights are limited to i32::MAX"),
                     None => -1,
                 },
             })
