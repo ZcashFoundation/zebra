@@ -34,7 +34,7 @@ impl ZebraDb {
         let mut batch = DiskWriteBatch::new();
         let value_pool_cf = self.db().cf_handle("tip_chain_value_pool").unwrap();
 
-        batch.zs_insert(value_pool_cf, (), fake_value_pool);
+        batch.zs_insert(&value_pool_cf, (), fake_value_pool);
         self.db().write(batch).unwrap();
     }
 
@@ -51,7 +51,7 @@ impl ZebraDb {
             // Sprout
             for joinsplit in transaction.sprout_groth16_joinsplits() {
                 batch.zs_insert(
-                    sprout_anchors,
+                    &sprout_anchors,
                     joinsplit.anchor,
                     sprout::tree::NoteCommitmentTree::default(),
                 );
@@ -59,12 +59,12 @@ impl ZebraDb {
 
             // Sapling
             for anchor in transaction.sapling_anchors() {
-                batch.zs_insert(sapling_anchors, anchor, ());
+                batch.zs_insert(&sapling_anchors, anchor, ());
             }
 
             // Orchard
             if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-                batch.zs_insert(orchard_anchors, orchard_shielded_data.shared_anchor, ());
+                batch.zs_insert(&orchard_anchors, orchard_shielded_data.shared_anchor, ());
             }
         }
 

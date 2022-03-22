@@ -40,38 +40,38 @@ impl ZebraDb {
     /// Returns `true` if the finalized state contains `sprout_nullifier`.
     pub fn contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
         let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
-        self.db.zs_contains(sprout_nullifiers, &sprout_nullifier)
+        self.db.zs_contains(&sprout_nullifiers, &sprout_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `sapling_nullifier`.
     pub fn contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
         let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
-        self.db.zs_contains(sapling_nullifiers, &sapling_nullifier)
+        self.db.zs_contains(&sapling_nullifiers, &sapling_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `orchard_nullifier`.
     pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
-        self.db.zs_contains(orchard_nullifiers, &orchard_nullifier)
+        self.db.zs_contains(&orchard_nullifiers, &orchard_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
     #[allow(unused)]
     pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
         let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
-        self.db.zs_contains(sprout_anchors, &sprout_anchor)
+        self.db.zs_contains(&sprout_anchors, &sprout_anchor)
     }
 
     /// Returns `true` if the finalized state contains `sapling_anchor`.
     pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
         let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
-        self.db.zs_contains(sapling_anchors, &sapling_anchor)
+        self.db.zs_contains(&sapling_anchors, &sapling_anchor)
     }
 
     /// Returns `true` if the finalized state contains `orchard_anchor`.
     pub fn contains_orchard_anchor(&self, orchard_anchor: &orchard::tree::Root) -> bool {
         let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
-        self.db.zs_contains(orchard_anchors, &orchard_anchor)
+        self.db.zs_contains(&orchard_anchors, &orchard_anchor)
     }
 
     /// Returns the Sprout note commitment tree of the finalized tip
@@ -85,7 +85,7 @@ impl ZebraDb {
         let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(sprout_note_commitment_tree, &height)
+            .zs_get(&sprout_note_commitment_tree, &height)
             .expect("Sprout note commitment tree must exist if there is a finalized tip")
     }
 
@@ -98,7 +98,7 @@ impl ZebraDb {
     ) -> Option<sprout::tree::NoteCommitmentTree> {
         let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
 
-        self.db.zs_get(sprout_anchors, sprout_anchor)
+        self.db.zs_get(&sprout_anchors, sprout_anchor)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
@@ -113,7 +113,7 @@ impl ZebraDb {
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(sapling_note_commitment_tree, &height)
+            .zs_get(&sapling_note_commitment_tree, &height)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
@@ -125,7 +125,7 @@ impl ZebraDb {
     ) -> Option<sapling::tree::NoteCommitmentTree> {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
-        self.db.zs_get(sapling_trees, height)
+        self.db.zs_get(&sapling_trees, height)
     }
 
     /// Returns the Orchard note commitment tree of the finalized tip
@@ -140,7 +140,7 @@ impl ZebraDb {
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(orchard_note_commitment_tree, &height)
+            .zs_get(&orchard_note_commitment_tree, &height)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
@@ -152,7 +152,7 @@ impl ZebraDb {
     ) -> Option<orchard::tree::NoteCommitmentTree> {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        self.db.zs_get(orchard_trees, height)
+        self.db.zs_get(&orchard_trees, height)
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
@@ -184,13 +184,13 @@ impl DiskWriteBatch {
 
         // Mark sprout, sapling and orchard nullifiers as spent
         for sprout_nullifier in transaction.sprout_nullifiers() {
-            self.zs_insert(sprout_nullifiers, sprout_nullifier, ());
+            self.zs_insert(&sprout_nullifiers, sprout_nullifier, ());
         }
         for sapling_nullifier in transaction.sapling_nullifiers() {
-            self.zs_insert(sapling_nullifiers, sapling_nullifier, ());
+            self.zs_insert(&sapling_nullifiers, sapling_nullifier, ());
         }
         for orchard_nullifier in transaction.orchard_nullifiers() {
-            self.zs_insert(orchard_nullifiers, orchard_nullifier, ());
+            self.zs_insert(&orchard_nullifiers, orchard_nullifier, ());
         }
 
         Ok(())
@@ -262,14 +262,14 @@ impl DiskWriteBatch {
 
         // Compute the new anchors and index them
         // Note: if the root hasn't changed, we write the same value again.
-        self.zs_insert(sprout_anchors, sprout_root, &note_commitment_trees.sprout);
-        self.zs_insert(sapling_anchors, sapling_root, ());
-        self.zs_insert(orchard_anchors, orchard_root, ());
+        self.zs_insert(&sprout_anchors, sprout_root, &note_commitment_trees.sprout);
+        self.zs_insert(&sapling_anchors, sapling_root, ());
+        self.zs_insert(&orchard_anchors, orchard_root, ());
 
         // Delete the previously stored Sprout note commitment tree.
         let current_tip_height = *height - 1;
         if let Some(h) = current_tip_height {
-            self.zs_delete(sprout_note_commitment_tree_cf, h);
+            self.zs_delete(&sprout_note_commitment_tree_cf, h);
         }
 
         // TODO: if we ever need concurrent read-only access to the sprout tree,
@@ -277,19 +277,19 @@ impl DiskWriteBatch {
         // access a height that was just deleted by a concurrent StateService
         // write. This requires a database version update.
         self.zs_insert(
-            sprout_note_commitment_tree_cf,
+            &sprout_note_commitment_tree_cf,
             height,
             note_commitment_trees.sprout,
         );
 
         self.zs_insert(
-            sapling_note_commitment_tree_cf,
+            &sapling_note_commitment_tree_cf,
             height,
             note_commitment_trees.sapling,
         );
 
         self.zs_insert(
-            orchard_note_commitment_tree_cf,
+            &orchard_note_commitment_tree_cf,
             height,
             note_commitment_trees.orchard,
         );
@@ -324,17 +324,17 @@ impl DiskWriteBatch {
         // since the block validation will make sure only appropriate
         // transactions are allowed in a block.
         self.zs_insert(
-            sprout_note_commitment_tree_cf,
+            &sprout_note_commitment_tree_cf,
             height,
             sprout::tree::NoteCommitmentTree::default(),
         );
         self.zs_insert(
-            sapling_note_commitment_tree_cf,
+            &sapling_note_commitment_tree_cf,
             height,
             sapling::tree::NoteCommitmentTree::default(),
         );
         self.zs_insert(
-            orchard_note_commitment_tree_cf,
+            &orchard_note_commitment_tree_cf,
             height,
             orchard::tree::NoteCommitmentTree::default(),
         );

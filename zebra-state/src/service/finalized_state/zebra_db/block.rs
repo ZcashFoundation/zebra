@@ -64,13 +64,13 @@ impl ZebraDb {
     /// Returns the finalized hash for a given `block::Height` if it is present.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db.zs_get(hash_by_height, &height)
+        self.db.zs_get(&hash_by_height, &height)
     }
 
     /// Returns the height of the given block if it exists.
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        self.db.zs_get(height_by_hash, &hash)
+        self.db.zs_get(&height_by_hash, &hash)
     }
 
     /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
@@ -82,8 +82,9 @@ impl ZebraDb {
         let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
 
-        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
-        let header = self.db.zs_get(block_header_by_height, &height)?;
+        let height =
+            hash_or_height.height_or_else(|hash| self.db.zs_get(&height_by_hash, &hash))?;
+        let header = self.db.zs_get(&block_header_by_height, &height)?;
 
         // Transactions
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
@@ -128,7 +129,7 @@ impl ZebraDb {
     /// if it exists in the finalized chain.
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
         let tx_loc_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        self.db.zs_get(tx_loc_by_hash, &hash)
+        self.db.zs_get(&tx_loc_by_hash, &hash)
     }
 
     /// Returns the [`transaction::Hash`] for [`TransactionLocation`],
@@ -136,7 +137,7 @@ impl ZebraDb {
     #[allow(dead_code)]
     pub fn transaction_hash(&self, location: TransactionLocation) -> Option<transaction::Hash> {
         let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
-        self.db.zs_get(hash_by_tx_loc, &location)
+        self.db.zs_get(&hash_by_tx_loc, &location)
     }
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
@@ -150,8 +151,9 @@ impl ZebraDb {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
         let transaction_location = self.transaction_location(hash)?;
+
         self.db
-            .zs_get(tx_by_loc, &transaction_location)
+            .zs_get(&tx_by_loc, &transaction_location)
             .map(|tx| (tx, transaction_location.height))
     }
 
@@ -306,11 +308,11 @@ impl DiskWriteBatch {
         } = finalized;
 
         // Commit block header data
-        self.zs_insert(block_header_by_height, height, block.header);
+        self.zs_insert(&block_header_by_height, height, block.header);
 
         // Index the block hash and height
-        self.zs_insert(hash_by_height, height, hash);
-        self.zs_insert(height_by_hash, hash, height);
+        self.zs_insert(&hash_by_height, height, hash);
+        self.zs_insert(&height_by_hash, hash, height);
 
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
@@ -321,11 +323,11 @@ impl DiskWriteBatch {
             let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
 
             // Commit each transaction's data
-            self.zs_insert(tx_by_loc, transaction_location, transaction);
+            self.zs_insert(&tx_by_loc, transaction_location, transaction);
 
             // Index each transaction hash and location
-            self.zs_insert(hash_by_tx_loc, transaction_location, transaction_hash);
-            self.zs_insert(tx_loc_by_hash, transaction_hash, transaction_location);
+            self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);
+            self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
         }
 
         Ok(())
