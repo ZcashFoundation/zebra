@@ -357,10 +357,8 @@ where
         let mut mempool = self.mempool.clone();
 
         async move {
-            let txid = transaction::Hash::from_hex(txid_hex).map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
+            let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
+                Error::invalid_params("transaction ID is not specified as a hex string")
             })?;
 
             // Check the mempool first.
