@@ -16,7 +16,7 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    service::finalized_state::disk_format::{FromDisk, IntoDisk},
+    service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk},
     Config,
 };
 
@@ -188,6 +188,11 @@ impl DiskDb {
         let path = config.db_path(network);
         let db_options = DiskDb::options();
 
+        // Use a custom height prefix extractor,
+        // to efficiently iterate through the transactions for each block.
+        let mut tx_by_loc_options = db_options.clone();
+        tx_by_loc_options.set_prefix_extractor(Self::height_prefix_extractor());
+
         let column_families = vec![
             // Blocks
             // TODO: rename to block_header_by_height (#3151)
@@ -195,7 +200,7 @@ impl DiskDb {
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
             // Transactions
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", tx_by_loc_options),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
             // TODO: rename to tx_loc_by_hash (#3151)
             rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
@@ -251,6 +256,17 @@ impl DiskDb {
         }
     }
 
+    /// Returns a RocksDB prefix extractor for [`Height`]s in:
+    /// - [`TransactionLocation`]s
+    /// - [`OutputLocation`]s (currently unused)
+    ///
+    /// Avoid using this prefix for [`AddressLocation`]s.
+    /// They are the height of the first block that contains the address,
+    /// so prefix iteration might not give you the data you want.
+    pub(crate) fn height_prefix_extractor() -> rocksdb::SliceTransform {
+        rocksdb::SliceTransform::create_fixed_prefix(HEIGHT_DISK_BYTES)
+    }
+
     // Read methods
 
     /// Returns the `Path` where the files used by this database are located.
@@ -295,11 +311,7 @@ impl DiskDb {
     {
         let prefix = prefix.as_bytes();
 
-        // Despite what the RocksDB wiki says,
-        // prefix iterators sometimes return extra trailing entries
-        self.db
-            .prefix_iterator_cf(cf_handle, prefix.as_ref())
-            .filter(move |(key_bytes, _value_bytes)| key_bytes.starts_with(prefix.as_ref()))
+        self.db.prefix_iterator_cf(cf_handle, prefix.as_ref())
     }
 
     /// Returns true if `cf` does not contain any entries.
