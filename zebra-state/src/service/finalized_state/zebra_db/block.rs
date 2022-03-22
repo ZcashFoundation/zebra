@@ -24,7 +24,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{FromDisk, TransactionLocation},
+        disk_format::{FromDisk, IntoDisk, TransactionLocation},
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
@@ -72,11 +72,27 @@ impl ZebraDb {
     /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
     /// [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+        // Blocks
+        let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = self.db.cf_handle("block_by_height").unwrap();
-        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
 
-        self.db.zs_get(block_by_height, &height)
+        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
+        let header = self.db.zs_get(block_header_by_height, &height)?;
+
+        // Transactions
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        // Optimisation for fetching an entire block's transactions
+        let tx_iter = self.db.prefix_iterator(tx_by_loc, height);
+        let transactions = tx_iter
+            .filter(|(tx_loc_bytes, _tx_bytes)| tx_loc_bytes.starts_with(&height.as_bytes()))
+            .map(|(_tx_loc_bytes, tx_bytes)| Arc::new(Transaction::from_bytes(tx_bytes)))
+            .collect();
+
+        Some(Arc::new(Block {
+            header,
+            transactions,
+        }))
     }
 
     // Read tip block methods
@@ -105,25 +121,22 @@ impl ZebraDb {
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
-        let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        self.db.zs_get(tx_by_hash, &hash)
+        let tx_loc_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
+        self.db.zs_get(tx_loc_by_hash, &hash)
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`],
-    /// if it exists in the finalized chain.
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
+    /// if a transaction with that hash exists in the finalized chain.
     pub fn transaction(
         &self,
         hash: transaction::Hash,
     ) -> Option<(Arc<Transaction>, block::Height)> {
-        self.transaction_location(hash)
-            .map(|TransactionLocation { index, height }| {
-                let block = self
-                    .block(height.into())
-                    .expect("block will exist if TransactionLocation does");
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
-                // TODO: store transactions in a separate database index (#3151)
-                (block.transactions[index.as_usize()].clone(), height)
-            })
+        let transaction_location = self.transaction_location(hash)?;
+        self.db
+            .zs_get(tx_by_loc, &transaction_location)
+            .map(|tx| (tx, transaction_location.height))
     }
 
     // Write block methods

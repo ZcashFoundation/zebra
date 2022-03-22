@@ -303,14 +303,10 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                 // Check all the transaction column families,
                 // using transaction location queries.
-                let stored_transaction_location = state.transaction_location(transaction_hash);
 
-                // Consensus: the genesis transaction is not indexed.
-                if query_height.0 > 0 {
-                    assert_eq!(stored_transaction_location, Some(transaction_location));
-                } else {
-                    assert_eq!(stored_transaction_location, None);
-                }
+                // TODO: expect all TransactionLocations to be Some (#3151)
+                let stored_transaction_location = state.transaction_location(transaction_hash);
+                assert_eq!(stored_transaction_location, Some(transaction_location));
 
                 let stored_transaction_hash =
                     TransactionHashByLocation::new(stored_transaction_location, transaction_hash);
@@ -328,6 +324,10 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                     let stored_utxo = state.utxo(&outpoint);
 
+                    // # Consensus
+                    //
+                    // The genesis transaction's UTXO is not indexed.
+                    // This check also ignores spent UTXOs.
                     if let Some(stored_utxo) = &stored_utxo {
                         assert_eq!(&stored_utxo.output, output);
                         assert_eq!(stored_utxo.height, query_height);

@@ -263,7 +263,7 @@ impl DiskDb {
         self.db.cf_handle(cf_name)
     }
 
-    /// Returns an iterator over the keys in `cf_name`, starting from the first key.
+    /// Returns a forward iterator over the keys in `cf_name`, starting from the first key.
     ///
     /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn forward_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
@@ -275,6 +275,23 @@ impl DiskDb {
     /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn reverse_iterator(&self, cf_handle: &rocksdb::ColumnFamily) -> rocksdb::DBIterator {
         self.db.iterator_cf(cf_handle, rocksdb::IteratorMode::End)
+    }
+
+    /// Returns a forward iterator over keys with `prefix` in `cf_name`,
+    /// starting from the first key with `prefix`.
+    ///
+    /// This iterator ends after returning all the keys with `prefix`.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
+    pub fn prefix_iterator<P>(
+        &self,
+        cf_handle: &rocksdb::ColumnFamily,
+        prefix: P,
+    ) -> rocksdb::DBIterator
+    where
+        P: IntoDisk,
+    {
+        self.db.prefix_iterator_cf(cf_handle, prefix.as_bytes())
     }
 
     /// Returns true if `cf` does not contain any entries.

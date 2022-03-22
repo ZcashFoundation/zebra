@@ -74,6 +74,7 @@ impl TransactionIndex {
     }
 
     /// Returns this index as the native index integer type.
+    #[allow(dead_code)]
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
