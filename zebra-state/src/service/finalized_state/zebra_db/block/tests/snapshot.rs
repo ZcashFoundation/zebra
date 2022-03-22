@@ -236,6 +236,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         //       test the rest of the chain data (value balance).
         let history_tree_at_tip = state.history_tree();
 
+        // TODO: split out block snapshots into their own function (#3151)
         for query_height in 0..=max_height.0 {
             let query_height = Height(query_height);
 

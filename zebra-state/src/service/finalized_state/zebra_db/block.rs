@@ -38,12 +38,16 @@ impl ZebraDb {
     // Read block methods
 
     /// Returns true if the database is empty.
+    //
+    // TODO: move this method to the tip section
     pub fn is_empty(&self) -> bool {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db.is_empty(hash_by_height)
     }
 
     /// Returns the tip height and hash, if there is one.
+    //
+    // TODO: move this method to the tip section
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db
@@ -71,6 +75,8 @@ impl ZebraDb {
 
     /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
     /// [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
+    //
+    // TODO: move this method to the start of the section
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         // Blocks
         let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
@@ -135,6 +141,8 @@ impl ZebraDb {
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
     /// if a transaction with that hash exists in the finalized chain.
+    //
+    // TODO: move this method to the start of the section
     pub fn transaction(
         &self,
         hash: transaction::Hash,
