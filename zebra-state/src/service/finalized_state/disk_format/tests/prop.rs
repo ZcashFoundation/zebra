@@ -4,7 +4,7 @@ use proptest::{arbitrary::any, prelude::*};
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, Height},
     transparent,
     value_balance::ValueBalance,
 };
@@ -54,10 +54,10 @@ fn roundtrip_block_hash() {
 }
 
 #[test]
-fn roundtrip_block() {
+fn roundtrip_block_header() {
     zebra_test::init();
 
-    proptest!(|(val in any::<Block>())| assert_value_properties(val));
+    proptest!(|(val in any::<block::Header>())| assert_value_properties(val));
 }
 
 #[test]

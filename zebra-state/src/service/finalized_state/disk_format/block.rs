@@ -10,8 +10,8 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
-    block::{self, Block, Height},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    block::{self, Height},
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction},
 };
 
@@ -106,23 +106,6 @@ impl TransactionLocation {
 }
 
 // Block trait impls
-
-// TODO: remove block serialization impls (#3151)
-impl IntoDisk for Block {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for Block {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Block::zcash_deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
 
 impl IntoDisk for block::Header {
     type Bytes = Vec<u8>;
