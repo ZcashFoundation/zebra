@@ -259,14 +259,14 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
+        let block_header_by_height = db.cf_handle("block_by_height").unwrap();
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
-        let block_header_by_height = db.cf_handle("block_by_height").unwrap();
 
         // Transactions
+        let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_by_hash").unwrap();
-        let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
 
         let FinalizedBlock {
             block,
@@ -276,12 +276,12 @@ impl DiskWriteBatch {
             ..
         } = finalized;
 
+        // Commit block header data
+        self.zs_insert(block_header_by_height, height, block.header);
+
         // Index the block hash and height
         self.zs_insert(hash_by_height, height, hash);
         self.zs_insert(height_by_hash, hash, height);
-
-        // Commit block header data
-        self.zs_insert(block_header_by_height, height, block.header);
 
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
@@ -291,12 +291,12 @@ impl DiskWriteBatch {
         {
             let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
 
+            // Commit each transaction's data
+            self.zs_insert(tx_by_loc, transaction_location, transaction);
+
             // Index each transaction hash and location
             self.zs_insert(hash_by_tx_loc, transaction_location, transaction_hash);
             self.zs_insert(tx_loc_by_hash, transaction_hash, transaction_location);
-
-            // Commit each transaction's data
-            self.zs_insert(tx_by_loc, transaction_location, transaction);
         }
 
         Ok(())

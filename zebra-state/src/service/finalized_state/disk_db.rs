@@ -190,10 +190,10 @@ impl DiskDb {
 
         let column_families = vec![
             // Blocks
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
             // TODO: rename to block_header_by_height (#3151)
             rocksdb::ColumnFamilyDescriptor::new("block_by_height", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
             // Transactions
             rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
