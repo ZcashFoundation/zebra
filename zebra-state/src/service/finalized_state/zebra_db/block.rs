@@ -210,8 +210,8 @@ impl DiskWriteBatch {
             ..
         } = &finalized;
 
-        // Commit block and transaction data,
-        // but not transaction indexes, note commitments, or UTXOs.
+        // Commit block and transaction data.
+        // (Transaction indexes, note commitments, and UTXOs are committed later.)
         self.prepare_block_header_transactions_batch(db, &finalized)?;
 
         // # Consensus
@@ -258,23 +258,46 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
+        // Blocks
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = db.cf_handle("block_by_height").unwrap();
+        let block_header_by_height = db.cf_handle("block_by_height").unwrap();
+
+        // Transactions
+        let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
+        let tx_loc_by_hash = db.cf_handle("tx_by_hash").unwrap();
+        let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
 
         let FinalizedBlock {
             block,
             hash,
             height,
+            transaction_hashes,
             ..
         } = finalized;
 
-        // Index the block
+        // Index the block hash and height
         self.zs_insert(hash_by_height, height, hash);
         self.zs_insert(height_by_hash, hash, height);
 
-        // Commit block and transaction data, but not UTXOs or address indexes
-        self.zs_insert(block_by_height, height, block);
+        // Commit block header data
+        self.zs_insert(block_header_by_height, height, block.header);
+
+        for (transaction_index, (transaction, transaction_hash)) in block
+            .transactions
+            .iter()
+            .zip(transaction_hashes.iter())
+            .enumerate()
+        {
+            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
+
+            // Index each transaction hash and location
+            self.zs_insert(hash_by_tx_loc, transaction_location, transaction_hash);
+            self.zs_insert(tx_loc_by_hash, transaction_hash, transaction_location);
+
+            // Commit each transaction's data
+            self.zs_insert(tx_by_loc, transaction_location, transaction);
+        }
 
         Ok(())
     }
@@ -318,25 +341,10 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
-        let tx_by_hash = db.cf_handle("tx_by_hash").unwrap();
+        let FinalizedBlock { block, .. } = finalized;
 
-        let FinalizedBlock {
-            block,
-            height,
-            transaction_hashes,
-            ..
-        } = finalized;
-
-        // Index each transaction hash
-        for (transaction_index, (transaction, transaction_hash)) in block
-            .transactions
-            .iter()
-            .zip(transaction_hashes.iter())
-            .enumerate()
-        {
-            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
-            self.zs_insert(tx_by_hash, transaction_hash, transaction_location);
-
+        // Index each transaction's transparent and shielded data
+        for transaction in block.transactions.iter() {
             self.prepare_nullifier_batch(db, transaction)?;
 
             DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
