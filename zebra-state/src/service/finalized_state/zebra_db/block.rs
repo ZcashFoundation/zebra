@@ -125,6 +125,14 @@ impl ZebraDb {
         self.db.zs_get(tx_loc_by_hash, &hash)
     }
 
+    /// Returns the [`transaction::Hash`] for [`TransactionLocation`],
+    /// if it exists in the finalized chain.
+    #[allow(dead_code)]
+    pub fn transaction_hash(&self, location: TransactionLocation) -> Option<transaction::Hash> {
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+        self.db.zs_get(hash_by_tx_loc, &location)
+    }
+
     /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
     /// if a transaction with that hash exists in the finalized chain.
     pub fn transaction(
