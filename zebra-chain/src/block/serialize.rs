@@ -7,7 +7,6 @@ use crate::{
     serialization::{
         ReadZcashExt, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
-    transaction::Transaction,
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -161,38 +160,5 @@ impl<B: Borrow<Block>> From<B> for SerializedBlock {
 impl AsRef<[u8]> for SerializedBlock {
     fn as_ref(&self) -> &[u8] {
         self.bytes.as_ref()
-    }
-}
-
-/// A serialized transaction.
-///
-/// Stores bytes that are guaranteed to be deserializable into a [`Transaction`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct SerializedTransaction {
-    bytes: Vec<u8>,
-}
-
-/// Build a [`SerializedTransaction`] by serializing a block.
-impl<B: Borrow<Transaction>> From<B> for SerializedTransaction {
-    fn from(tx: B) -> Self {
-        SerializedTransaction {
-            bytes: tx
-                .borrow()
-                .zcash_serialize_to_vec()
-                .expect("Writing to a `Vec` should never fail"),
-        }
-    }
-}
-
-/// Access the serialized bytes of a [`SerializedTransaction`].
-impl AsRef<[u8]> for SerializedTransaction {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes.as_ref()
-    }
-}
-
-impl From<Vec<u8>> for SerializedTransaction {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self { bytes }
     }
 }

@@ -15,11 +15,11 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::{self, SerializedBlock, SerializedTransaction},
+    block::{self, SerializedBlock},
     chain_tip::ChainTip,
     parameters::Network,
     serialization::{SerializationError, ZcashDeserialize},
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
