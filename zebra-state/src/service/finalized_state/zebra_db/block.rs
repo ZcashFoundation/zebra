@@ -89,10 +89,14 @@ impl ZebraDb {
         // Transactions
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
-        // Optimisation for fetching an entire block's transactions
-        let tx_iter = self.db.prefix_iterator(tx_by_loc, height);
+        // Fetch the entire block's transactions
+        let first_tx_in_block = TransactionLocation::from_usize(height, 0);
+        let tx_iter = self.db.forward_iterator_from(tx_by_loc, &first_tx_in_block);
         let transactions = tx_iter
             .into_iter()
+            .filter(|(tx_loc_bytes, _tx_bytes)| {
+                TransactionLocation::from_bytes(tx_loc_bytes).height == height
+            })
             .map(|(_tx_loc_bytes, tx_bytes)| Arc::new(Transaction::from_bytes(tx_bytes)))
             .collect();
 

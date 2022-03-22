@@ -16,7 +16,7 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk},
+    service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
 
@@ -24,7 +24,7 @@ use crate::{
 mod tests;
 
 /// The [`rocksdb::ThreadMode`] used by the database.
-pub type DBThreadMode = rocksdb::MultiThreaded;
+pub type DBThreadMode = rocksdb::SingleThreaded;
 
 /// The [`rocksdb`] database type, including thread mode.
 ///
@@ -201,10 +201,14 @@ impl DiskDb {
         let path = config.db_path(network);
         let db_options = DiskDb::options();
 
-        // Use a custom height prefix extractor,
-        // to efficiently iterate through the transactions for each block.
-        let mut tx_by_loc_options = db_options.clone();
-        tx_by_loc_options.set_prefix_extractor(Self::height_prefix_extractor());
+        // # Correctness
+        //
+        // We can't use prefix extractors here, because they cause hangs,
+        // probably due to column family locks.
+        //
+        // This bug might be fixed by moving database operations to blocking threads (#2188),
+        // so that they don't block the tokio executor.
+        // (Or it might be fixed by future RocksDB upgrades.)
 
         let column_families = vec![
             // Blocks
@@ -213,7 +217,7 @@ impl DiskDb {
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
             // Transactions
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", tx_by_loc_options),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
             // TODO: rename to tx_loc_by_hash (#3151)
             rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
@@ -273,17 +277,6 @@ impl DiskDb {
         }
     }
 
-    /// Returns a RocksDB prefix extractor for [`Height`]s in:
-    /// - [`TransactionLocation`]s
-    /// - [`OutputLocation`]s (currently unused)
-    ///
-    /// Avoid using this prefix for [`AddressLocation`]s.
-    /// They are the height of the first block that contains the address,
-    /// so prefix iteration might not give you the data you want.
-    pub(crate) fn height_prefix_extractor() -> rocksdb::SliceTransform {
-        rocksdb::SliceTransform::create_fixed_prefix(HEIGHT_DISK_BYTES)
-    }
-
     // Read methods
 
     /// Returns the `Path` where the files used by this database are located.
@@ -307,6 +300,35 @@ impl DiskDb {
             .iterator_cf(&cf_handle, rocksdb::IteratorMode::Start)
     }
 
+    /// Returns a forward iterator over the keys in `cf_name`, starting from `lowest_key`.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
+    pub fn forward_iterator_from(
+        &self,
+        cf_handle: impl rocksdb::AsColumnFamilyRef,
+        lowest_key: &impl IntoDisk,
+    ) -> rocksdb::DBIteratorWithThreadMode<DB> {
+        let lowest_key = lowest_key.as_bytes();
+        let from = rocksdb::IteratorMode::From(lowest_key.as_ref(), rocksdb::Direction::Forward);
+
+        self.db.iterator_cf(&cf_handle, from)
+    }
+
+    /// Returns a reverse iterator over the keys in `cf_name`, starting from `highest_key`.
+    ///
+    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
+    #[allow(dead_code)]
+    pub fn reverse_iterator_from(
+        &self,
+        cf_handle: impl rocksdb::AsColumnFamilyRef,
+        highest_key: &impl IntoDisk,
+    ) -> rocksdb::DBIteratorWithThreadMode<DB> {
+        let highest_key = highest_key.as_bytes();
+        let from = rocksdb::IteratorMode::From(highest_key.as_ref(), rocksdb::Direction::Reverse);
+
+        self.db.iterator_cf(&cf_handle, from)
+    }
+
     /// Returns a reverse iterator over the keys in `cf_name`, starting from the last key.
     ///
     /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
@@ -315,27 +337,6 @@ impl DiskDb {
         cf_handle: impl rocksdb::AsColumnFamilyRef,
     ) -> rocksdb::DBIteratorWithThreadMode<DB> {
         self.db.iterator_cf(&cf_handle, rocksdb::IteratorMode::End)
-    }
-
-    /// Returns a forward iterator over keys with `prefix` in `cf_name`,
-    /// starting from the first key with `prefix`.
-    ///
-    /// This iterator ends after returning all the keys with `prefix`.
-    ///
-    /// TODO: make the iterator return high-level types rather than bytes
-    ///       add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
-    pub fn prefix_iterator<P>(
-        &self,
-        cf_handle: impl rocksdb::AsColumnFamilyRef,
-        prefix: P,
-    ) -> impl IntoIterator<Item = (Box<[u8]>, Box<[u8]>)> + '_
-    where
-        P: IntoDisk,
-        <P as IntoDisk>::Bytes: 'static,
-    {
-        let prefix = prefix.as_bytes();
-
-        self.db.prefix_iterator_cf(&cf_handle, prefix.as_ref())
     }
 
     /// Returns true if `cf` does not contain any entries.
