@@ -282,16 +282,24 @@ impl DiskDb {
     ///
     /// This iterator ends after returning all the keys with `prefix`.
     ///
-    /// TODO: add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
+    /// TODO: make the iterator return high-level types rather than bytes
+    ///       add an iterator wrapper struct that does disk reads in a blocking thread (#2188)
     pub fn prefix_iterator<P>(
         &self,
         cf_handle: &rocksdb::ColumnFamily,
         prefix: P,
-    ) -> rocksdb::DBIterator
+    ) -> impl IntoIterator<Item = (Box<[u8]>, Box<[u8]>)> + '_
     where
         P: IntoDisk,
+        <P as IntoDisk>::Bytes: 'static,
     {
-        self.db.prefix_iterator_cf(cf_handle, prefix.as_bytes())
+        let prefix = prefix.as_bytes();
+
+        // Despite what the RocksDB wiki says,
+        // prefix iterators sometimes return extra trailing entries
+        self.db
+            .prefix_iterator_cf(cf_handle, prefix.as_ref())
+            .filter(move |(key_bytes, _value_bytes)| key_bytes.starts_with(prefix.as_ref()))
     }
 
     /// Returns true if `cf` does not contain any entries.

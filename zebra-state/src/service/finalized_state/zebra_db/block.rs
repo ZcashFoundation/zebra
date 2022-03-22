@@ -24,7 +24,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{FromDisk, IntoDisk, TransactionLocation},
+        disk_format::{FromDisk, TransactionLocation},
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
@@ -85,7 +85,7 @@ impl ZebraDb {
         // Optimisation for fetching an entire block's transactions
         let tx_iter = self.db.prefix_iterator(tx_by_loc, height);
         let transactions = tx_iter
-            .filter(|(tx_loc_bytes, _tx_bytes)| tx_loc_bytes.starts_with(&height.as_bytes()))
+            .into_iter()
             .map(|(_tx_loc_bytes, tx_bytes)| Arc::new(Transaction::from_bytes(tx_bytes)))
             .collect();
 
