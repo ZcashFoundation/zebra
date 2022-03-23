@@ -7,3 +7,5 @@
 pub mod config;
 pub mod methods;
 pub mod server;
+#[cfg(test)]
+mod tests;
