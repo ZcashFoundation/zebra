@@ -222,7 +222,7 @@ jobs:
       # only run this job if the database format might have changed
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v18.3
+        uses: tj-actions/changed-files@v18.4
         with:
           files: |
             zebra-state/**/config.rs
