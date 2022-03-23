@@ -21,12 +21,10 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud

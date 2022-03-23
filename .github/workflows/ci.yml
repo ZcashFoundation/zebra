@@ -99,7 +99,7 @@ jobs:
         run: echo "ZCASH_PARAMS=$(cargo run --example get-params-path)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-sprout-and-sapling-params
