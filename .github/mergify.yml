@@ -51,13 +51,13 @@ queue_rules:
 pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
+      - '#approved-reviews-by>=1'
+      - '#review-threads-unresolved=0'
       - -draft
       - base=main
       - or:
-          - "label~=^P-Critical"
-          - "label~=^P-High"
+          - 'label~=^P-Critical'
+          - 'label~=^P-High'
       - label!=do-not-merge
     actions:
       queue:
@@ -66,11 +66,11 @@ pull_request_rules:
 
   - name: move to medium queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
+      - '#approved-reviews-by>=1'
+      - '#review-threads-unresolved=0'
       - -draft
       - base=main
-      - "label~=^P-Medium"
+      - 'label~=^P-Medium'
       - label!=do-not-merge
     actions:
       queue:
@@ -79,8 +79,8 @@ pull_request_rules:
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
+      - '#approved-reviews-by>=1'
+      - '#review-threads-unresolved=0'
       - -draft
       - base=main
       - label!=do-not-merge
