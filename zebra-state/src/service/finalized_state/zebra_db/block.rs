@@ -16,6 +16,7 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    serialization::TrustedPreallocate,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -42,7 +43,7 @@ impl ZebraDb {
     // TODO: move this method to the tip section
     pub fn is_empty(&self) -> bool {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db.is_empty(hash_by_height)
+        self.db.zs_is_empty(&hash_by_height)
     }
 
     /// Returns the tip height and hash, if there is one.
@@ -51,8 +52,7 @@ impl ZebraDb {
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db
-            .reverse_iterator(hash_by_height)
-            .next()
+            .zs_last_key_value(&hash_by_height)
             .map(|(height_bytes, hash_bytes)| {
                 let height = block::Height::from_bytes(height_bytes);
                 let hash = block::Hash::from_bytes(hash_bytes);
@@ -90,15 +90,19 @@ impl ZebraDb {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
         // Fetch the entire block's transactions
-        let first_tx_in_block = TransactionLocation::from_usize(height, 0);
-        let tx_iter = self.db.forward_iterator_from(tx_by_loc, &first_tx_in_block);
-        let transactions = tx_iter
-            .into_iter()
-            .filter(|(tx_loc_bytes, _tx_bytes)| {
-                TransactionLocation::from_bytes(tx_loc_bytes).height == height
-            })
-            .map(|(_tx_loc_bytes, tx_bytes)| Arc::new(Transaction::from_bytes(tx_bytes)))
-            .collect();
+        let mut transactions = Vec::new();
+
+        // TODO: is this loop more efficient if we store the number of transactions?
+        //       is the difference large enough to matter?
+        for tx_index in 0..=Transaction::max_allocation() {
+            let tx_loc = TransactionLocation::from_u64(height, tx_index);
+
+            if let Some(tx) = self.db.zs_get(&tx_by_loc, &tx_loc) {
+                transactions.push(tx);
+            } else {
+                break;
+            }
+        }
 
         Some(Arc::new(Block {
             header,
