@@ -25,7 +25,6 @@ jobs:
     name: Test all
     runs-on: ubuntu-latest
     needs: build
-    if: github.event.inputs.regenerate-disks != 'true'
     steps:
       - run: 'echo "No build required"'
 
@@ -33,7 +32,6 @@ jobs:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
     needs: build
-    if: github.event.inputs.regenerate-disks != 'true'
     steps:
       - run: 'echo "No build required"'
 
@@ -42,7 +40,6 @@ jobs:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     needs: build
-    if: github.event.inputs.regenerate-disks != 'true'
     steps:
       - run: 'echo "No build required"'
 
@@ -50,8 +47,6 @@ jobs:
     name: Regenerate stateful disks
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      disk_short_sha: ${{ steps.disk-short-sha.outputs.disk_short_sha }}
     steps:
       - run: 'echo "No build required"'
 
