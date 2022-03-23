@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: "Mainnet"
-        description: "Network to deploy: Mainnet or Testnet"
+        default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
         required: true
   pull_request:
     branches:
@@ -13,23 +13,23 @@ on:
     paths:
       # code and tests (including full sync acceptance test changes)
       # TODO: ignore changes in test code that isn't used in the full sync test
-      - "**/*.rs"
+      - '**/*.rs'
       # hard-coded checkpoints
       # TODO: ignore changes to proptest seed .txt files
-      - "**/*.txt"
+      - '**/*.txt'
       # dependencies
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
       # workflow definitions
-      - "docker/**"
-      - ".github/workflows/test-full-sync.yml"
+      - 'docker/**'
+      - '.github/workflows/test-full-sync.yml'
 
 env:
-  CARGO_INCREMENTAL: "1"
-  ZEBRA_SKIP_IPV6_TESTS: "1"
+  CARGO_INCREMENTAL: '1'
+  ZEBRA_SKIP_IPV6_TESTS: '1'
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: "1"
+  COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
@@ -48,8 +48,8 @@ jobs:
     timeout-minutes: 210
     runs-on: ubuntu-latest
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
     steps:
       - uses: actions/checkout@v3.0.0
         with:
@@ -88,9 +88,9 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.6.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v1.14.1
@@ -136,8 +136,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -149,9 +149,9 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.6.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA

@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: "Mainnet"
-        description: "Network to deploy: Mainnet or Testnet"
+        default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
         required: true
       size:
-        default: "10"
-        description: "GCP Managed Instance Group size"
+        default: '10'
+        description: 'GCP Managed Instance Group size'
         required: true
 
 env:
@@ -24,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
 
     steps:
       - uses: actions/checkout@v3.0.0
@@ -42,9 +42,9 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.6.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Create instance template from container image
       - name: Create instance template

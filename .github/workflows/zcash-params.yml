@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "main"
+      - 'main'
     paths:
       # parameter download code
-      - "zebra-consensus/src/primitives/groth16/params.rs"
-      - "zebra-consensus/src/chain.rs"
-      - "zebrad/src/commands/start.rs"
+      - 'zebra-consensus/src/primitives/groth16/params.rs'
+      - 'zebra-consensus/src/chain.rs'
+      - 'zebrad/src/commands/start.rs'
       # workflow definitions
-      - "docker/zcash-params/Dockerfile"
-      - ".github/workflows/zcash-params.yml"
+      - 'docker/zcash-params/Dockerfile'
+      - '.github/workflows/zcash-params.yml'
 
 env:
-  CARGO_INCREMENTAL: "1"
+  CARGO_INCREMENTAL: '1'
   PROJECT_ID: zealous-zebra
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   GCR_BASE: gcr.io/zealous-zebra
@@ -28,8 +28,8 @@ jobs:
     # timeout-minutes: 180
     runs-on: ubuntu-latest
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
 
     steps:
       - uses: actions/checkout@v3.0.0
@@ -76,9 +76,9 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.6.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v1.14.1

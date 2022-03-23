@@ -7,32 +7,32 @@ on:
       - main
     paths:
       # code and tests
-      - "**/*.rs"
+      - '**/*.rs'
       # hard-coded checkpoints and proptest regressions
-      - "**/*.txt"
+      - '**/*.txt'
       # test data snapshots
-      - "**/*.snap"
+      - '**/*.snap'
       # dependencies
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
       # workflow definitions
-      - "codecov.yml"
-      - ".github/workflows/coverage.yml"
+      - 'codecov.yml'
+      - '.github/workflows/coverage.yml'
   pull_request:
     paths:
-      - "**/*.rs"
-      - "**/*.txt"
-      - "**/*.snap"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - "codecov.yml"
-      - ".github/workflows/coverage.yml"
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/*.snap'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'codecov.yml'
+      - '.github/workflows/coverage.yml'
 
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: "1"
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   coverage:

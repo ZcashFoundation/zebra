@@ -5,13 +5,13 @@ on:
     branches:
       - main
     paths-ignore:
-      - "**/*.rs"
-      - "**/*.txt"
-      - "**/*.snap"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - "docker/**"
-      - ".github/workflows/test.yml"
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/*.snap'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'docker/**'
+      - '.github/workflows/test.yml'
 
 jobs:
   build:

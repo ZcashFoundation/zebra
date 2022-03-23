@@ -5,23 +5,23 @@ on:
   pull_request:
     paths:
       # code and tests
-      - "**/*.rs"
+      - '**/*.rs'
       # hard-coded checkpoints and proptest regressions
-      - "**/*.txt"
+      - '**/*.txt'
       # test data snapshots
-      - "**/*.snap"
+      - '**/*.snap'
       # dependencies
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - "**/deny.toml"
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
       # workflow definitions
-      - ".github/workflows/ci.yml"
+      - '.github/workflows/ci.yml'
 
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: "1"
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   test:
@@ -159,7 +159,7 @@ jobs:
       - name: Run tests with fake activation heights
         uses: actions-rs/cargo@v1.0.3
         env:
-          TEST_FAKE_ACTIVATION_HEIGHTS: ""
+          TEST_FAKE_ACTIVATION_HEIGHTS: ''
         with:
           command: test
           # Note: this only runs the zebra-state crate tests,
