@@ -3,13 +3,13 @@ name: CI
 on:
   pull_request:
     paths-ignore:
-      - '**/*.rs'
-      - '**/*.txt'
-      - '**/*.snap'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/deny.toml'
-      - '.github/workflows/ci.yml'
+      - "**/*.rs"
+      - "**/*.txt"
+      - "**/*.snap"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/deny.toml"
+      - ".github/workflows/ci.yml"
 
 jobs:
   test:
@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        os: [ubuntu-latest, macOS-latest]
+        os: [ubuntu-latest, macos-latest]
         rust: [stable]
 
     steps:

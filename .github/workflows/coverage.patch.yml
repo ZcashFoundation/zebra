@@ -3,13 +3,13 @@ name: Coverage
 on:
   pull_request:
     paths-ignore:
-      - '**/*.rs'
-      - '**/*.txt'
-      - '**/*.snap'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - 'codecov.yml'
-      - '.github/workflows/coverage.yml'
+      - "**/*.rs"
+      - "**/*.txt"
+      - "**/*.snap"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "codecov.yml"
+      - ".github/workflows/coverage.yml"
 
 jobs:
   coverage:
