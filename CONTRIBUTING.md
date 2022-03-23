@@ -27,7 +27,7 @@ increase development coordination and makes PRs easier to merge.
 Check out the [help wanted][hw] or [good first issue][gfi] labels if you're
 looking for a place to get started!
 
-Zebra follows the [convential commits][conventional] standard for the commits
+Zebra follows the [conventional commits][conventional] standard for the commits
 merged to main. Since PRs are squashed before merging to main, the PR titles
 should follow the conventional commits standard so that the merged commits
 are conformant.
