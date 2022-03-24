@@ -223,7 +223,7 @@ pub fn sync_until(
         // if it has already exited, ignore that error
         let _ = child.kill();
 
-        Ok(child.dir)
+        Ok(child.dir.take().expect("dir was not already taken"))
     } else {
         // Require that the mempool didn't activate,
         // checking the entire `zebrad` output after it exits.
