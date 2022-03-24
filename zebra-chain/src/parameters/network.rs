@@ -101,6 +101,15 @@ impl Network {
         (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
             .expect("ZIP-212 grace period ends at a valid block height")
     }
+
+    /// Return the network name as defined in
+    /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
+    pub fn bip70_network_name(&self) -> String {
+        match self {
+            Network::Mainnet => "main".to_string(),
+            Network::Testnet => "test".to_string(),
+        }
+    }
 }
 
 impl Default for Network {
