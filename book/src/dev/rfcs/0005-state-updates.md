@@ -611,10 +611,10 @@ We use the following rocksdb column families:
 | `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
 | `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
 | *Transparent*                  |                        |                                     |         |
-| `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
-| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `AtLeastOne<OutputLocation>`        | Up/Del  |
 | `tx_by_transparent_addr_loc`   | `AddressLocation`      | `AtLeastOne<TransactionLocation>`   | Append  |
+| `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
+| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `AtLeastOne<OutputLocation>`        | Up/Del  |
 | *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
