@@ -208,6 +208,26 @@ impl Address {
         }
     }
 
+    /// Returns the network for this address.
+    pub fn network(&self) -> Network {
+        match *self {
+            Address::PayToScriptHash { network, .. } => network,
+            Address::PayToPublicKeyHash { network, .. } => network,
+        }
+    }
+
+    /// Returns the hash bytes for this address, regardless of the address type.
+    ///
+    /// # Correctness
+    ///
+    /// Use [`ZcashSerialize`] and [`ZcashDeserialize`] for consensus-critical serialization.
+    pub fn hash_bytes(&self) -> [u8; 20] {
+        match *self {
+            Address::PayToScriptHash { script_hash, .. } => script_hash,
+            Address::PayToPublicKeyHash { pub_key_hash, .. } => pub_key_hash,
+        }
+    }
+
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
     /// addresses.
