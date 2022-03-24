@@ -270,7 +270,7 @@ where
             //
             // All the network upgrades with a consensus branch ID are the same in Zebra and zcashd.
             if let Some(branch_id) = network_upgrade.branch_id() {
-                // zcashd's RPC seems to ignore Disabled network upgrages, so Zebra does too.
+                // zcashd's RPC seems to ignore Disabled network upgrades, so Zebra does too.
                 let status = if tip_height >= activation_height {
                     NetworkUpgradeStatus::Active
                 } else {
