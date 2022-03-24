@@ -6,6 +6,8 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
+use std::{collections::HashSet, io, sync::Arc};
+
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
@@ -19,7 +21,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
@@ -106,6 +108,30 @@ pub trait Rpc {
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     #[rpc(name = "getrawmempool")]
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
+
+    /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
+    ///
+    /// zcashd reference: [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required) The transaction ID of the transaction to be returned.
+    /// - `verbose`: (numeric, optional, default=0) If 0, return a string of hex-encoded data, otherwise return a JSON object.
+    ///
+    /// # Notes
+    ///
+    /// We don't currently support the `blockhash` parameter since lightwalletd does not
+    /// use it.
+    ///
+    /// In verbose mode, we only expose the `hex` and `height` fields since
+    /// lightwalletd uses only those:
+    /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L119>
+    #[rpc(name = "getrawtransaction")]
+    fn get_raw_transaction(
+        &self,
+        txid_hex: String,
+        verbose: u8,
+    ) -> BoxFuture<Result<GetRawTransaction>>;
 }
 
 /// RPC method implementations.
@@ -409,6 +435,89 @@ where
         }
         .boxed()
     }
+
+    fn get_raw_transaction(
+        &self,
+        txid_hex: String,
+        verbose: u8,
+    ) -> BoxFuture<Result<GetRawTransaction>> {
+        let mut state = self.state.clone();
+        let mut mempool = self.mempool.clone();
+
+        async move {
+            let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
+                Error::invalid_params("transaction ID is not specified as a hex string")
+            })?;
+
+            // Check the mempool first.
+            //
+            // # Correctness
+            //
+            // Transactions are removed from the mempool after they are mined into blocks,
+            // so the transaction could be just in the mempool, just in the state, or in both.
+            // (And the mempool and state transactions could have different authorising data.)
+            // But it doesn't matter which transaction we choose, because the effects are the same.
+            let mut txid_set = HashSet::new();
+            txid_set.insert(txid);
+            let request = mempool::Request::TransactionsByMinedId(txid_set);
+
+            let response = mempool
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                mempool::Response::Transactions(unmined_transactions) => {
+                    if !unmined_transactions.is_empty() {
+                        let tx = unmined_transactions[0].transaction.clone();
+                        return GetRawTransaction::from_transaction(tx, None, verbose != 0)
+                            .map_err(|error| Error {
+                                code: ErrorCode::ServerError(0),
+                                message: error.to_string(),
+                                data: None,
+                            });
+                    }
+                }
+                _ => unreachable!("unmatched response to a transactionids request"),
+            };
+
+            // Now check the state
+            let request = zebra_state::ReadRequest::Transaction(txid);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::Transaction(Some((tx, height))) => Ok(
+                    GetRawTransaction::from_transaction(tx, Some(height), verbose != 0).map_err(
+                        |error| Error {
+                            code: ErrorCode::ServerError(0),
+                            message: error.to_string(),
+                            data: None,
+                        },
+                    )?,
+                ),
+                zebra_state::ReadResponse::Transaction(None) => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Transaction not found".to_string(),
+                    data: None,
+                }),
+                _ => unreachable!("unmatched response to a transaction request"),
+            }
+        }
+        .boxed()
+    }
 }
 
 /// Response to a `getinfo` RPC request.
@@ -491,3 +600,45 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 /// Also see the notes for the [`Rpc::get_best_block_hash` method].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+
+/// Response to a `getrawtransaction` RPC request.
+///
+/// See the notes for the [`Rpc::get_raw_transaction` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum GetRawTransaction {
+    /// The raw transaction, encoded as hex bytes.
+    Raw(#[serde(with = "hex")] SerializedTransaction),
+    /// The transaction object.
+    Object {
+        /// The raw transaction, encoded as hex bytes.
+        #[serde(with = "hex")]
+        hex: SerializedTransaction,
+        /// The height of the block that contains the transaction, or -1 if
+        /// not applicable.
+        height: i32,
+    },
+}
+
+impl GetRawTransaction {
+    fn from_transaction(
+        tx: Arc<Transaction>,
+        height: Option<block::Height>,
+        verbose: bool,
+    ) -> std::result::Result<Self, io::Error> {
+        if verbose {
+            Ok(GetRawTransaction::Object {
+                hex: tx.into(),
+                height: match height {
+                    Some(height) => height
+                        .0
+                        .try_into()
+                        .expect("valid block heights are limited to i32::MAX"),
+                    None => -1,
+                },
+            })
+        } else {
+            Ok(GetRawTransaction::Raw(tx.into()))
+        }
+    }
+}

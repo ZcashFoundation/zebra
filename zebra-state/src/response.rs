@@ -52,5 +52,5 @@ pub enum ReadResponse {
     Block(Option<Arc<Block>>),
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
-    Transaction(Option<Arc<Transaction>>),
+    Transaction(Option<(Arc<Transaction>, block::Height)>),
 }
