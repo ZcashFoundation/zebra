@@ -209,7 +209,16 @@ where
             })?;
 
         // `estimated_height` field
-        let estimated_height = self
+        let current_block_time =
+            self.latest_chain_tip
+                .best_tip_block_time()
+                .ok_or_else(|| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "No Chain tip available yet".to_string(),
+                    data: None,
+                })?;
+
+        let zebra_estimated_height = self
             .latest_chain_tip
             .estimate_network_chain_tip_height(network, Utc::now())
             .ok_or_else(|| Error {
@@ -217,6 +226,13 @@ where
                 message: "No Chain tip available yet".to_string(),
                 data: None,
             })?;
+
+        let estimated_height;
+        if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
+            estimated_height = tip_height;
+        } else {
+            estimated_height = zebra_estimated_height;
+        }
 
         // `upgrades` object
         //
