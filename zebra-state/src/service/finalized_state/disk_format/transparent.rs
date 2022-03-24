@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::Height,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction, transparent,
@@ -99,6 +100,65 @@ impl OutputLocation {
             hash: outpoint.hash,
             index: OutputIndex::from_zcash(outpoint.index),
         }
+    }
+}
+
+/// The location of the first [`transparent::Output`] sent to an address.
+///
+/// The address location stays the same, even if the corresponding output
+/// has been spent.
+///
+/// The first output location is used to represent the address in the database,
+/// because output locations are significantly smaller than addresses.
+///
+/// TODO: make this a different type to OutputLocation?
+///       derive IntoDisk and FromDisk?
+pub type AddressLocation = OutputLocation;
+
+/// Data which Zebra indexes for each [`transparent::Address`].
+///
+/// Currently, Zebra tracks this data 1:1 for each address:
+/// - the balance [`Amount`] for a transparent address, and
+/// - the [`OutputLocation`] for the first [`transparent::Output`] sent to that address
+///   (regardless of whether that output is spent or unspent).
+///
+/// All other address data is tracked multiple times for each address
+/// (UTXOs and transactions).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct AddressBalanceLocation {
+    /// The total balance of all UTXOs sent to an address.
+    balance: Amount<NonNegative>,
+
+    /// The location of the first [`transparent::Output`] sent to an address.
+    location: AddressLocation,
+}
+
+impl AddressBalanceLocation {
+    /// Creates a new [`AddressBalanceLocation`] from the location of
+    /// the first [`transparent::Output`] sent to an address.
+    ///
+    /// The returned value has a zero initial balance.
+    pub fn new(first_output: OutputLocation) -> AddressBalanceLocation {
+        AddressBalanceLocation {
+            balance: Amount::zero(),
+            location: first_output,
+        }
+    }
+
+    /// Returns the current balance for the address.
+    pub fn balance(&self) -> Amount<NonNegative> {
+        self.balance
+    }
+
+    /// Returns a mutable reference to the current balance for the address.
+    pub fn balance_mut(&mut self) -> &mut Amount<NonNegative> {
+        &mut self.balance
+    }
+
+    /// Returns the location of the first [`transparent::Output`] sent to an address.
+    pub fn location(&self) -> AddressLocation {
+        self.location
     }
 }
 
