@@ -253,12 +253,12 @@ where
                 data: None,
             })?;
 
-        let estimated_height;
-        if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
-            estimated_height = tip_height;
-        } else {
-            estimated_height = zebra_estimated_height;
-        }
+        let estimated_height =
+            if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
+                tip_height
+            } else {
+                zebra_estimated_height
+            };
 
         // `upgrades` object
         //
