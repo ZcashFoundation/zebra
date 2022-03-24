@@ -424,17 +424,14 @@ proptest! {
         })?;
     }
 
-    /// Test the `get_blockchain_info` response using an arbitrary block to feed `ChainTip`
+    /// Test the `get_blockchain_info` response when Zebra's state is empty.
     #[test]
-    fn get_blockchain_info_response(network in any::<Network>(), block in any::<Block>())
-    {
+    fn get_blockchain_info_response_without_a_chain_tip(network in any::<Network>()) {
         let runtime = zebra_test::init_async();
         let _guard = runtime.enter();
-
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-        // first look for an error with a `NoChainTip`
+        // look for an error with a `NoChainTip`
         let rpc = RpcImpl::new(
             "RPC test",
             Buffer::new(mempool.clone(), 1),
@@ -443,7 +440,24 @@ proptest! {
             network,
         );
         let response = rpc.get_blockchain_info();
-        prop_assert_eq!(response.err().unwrap().message, "No Chain tip available yet".to_string());
+        prop_assert_eq!(&response.err().unwrap().message, "No Chain tip available yet");
+        runtime.block_on(async move {
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test the `get_blockchain_info` response using an arbitrary block as the `ChainTip`.
+    #[test]
+    fn get_blockchain_info_response_with_an_arbitrary_chain_tip(
+        network in any::<Network>(),
+        block in any::<Block>(),
+    ) {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+        let mut mempool = MockService::build().for_prop_tests();
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
         // get block data
         let block_height = block.coinbase_height().unwrap();
