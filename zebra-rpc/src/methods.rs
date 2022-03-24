@@ -198,22 +198,15 @@ where
         // `chain` field
         let chain = self.network.bip70_network_name();
 
-        // `blocks` field
-        let tip_height = self
+        // `blocks` and `best_block_hash` fields
+        let (tip_height, tip_hash) = self
             .latest_chain_tip
-            .best_tip_height()
+            .best_tip_height_and_hash()
             .ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "No Chain tip available yet".to_string(),
                 data: None,
             })?;
-
-        // `best_block_hash` field
-        let tip_hash = self.latest_chain_tip.best_tip_hash().ok_or_else(|| Error {
-            code: ErrorCode::ServerError(0),
-            message: "No Chain tip available yet".to_string(),
-            data: None,
-        })?;
 
         // `estimated_height` field
         let estimated_height = self

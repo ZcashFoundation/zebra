@@ -334,6 +334,11 @@ impl ChainTip for LatestChainTip {
     }
 
     #[instrument(skip(self))]
+    fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
+        self.with_chain_tip_block(|block| (block.height, block.hash))
+    }
+
+    #[instrument(skip(self))]
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
         self.with_chain_tip_block(|block| block.time)
     }

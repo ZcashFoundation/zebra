@@ -69,6 +69,13 @@ impl ChainTip for MockChainTip {
         *self.best_tip_hash.borrow()
     }
 
+    fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
+        let height = (*self.best_tip_height.borrow())?;
+        let hash = (*self.best_tip_hash.borrow())?;
+
+        Some((height, hash))
+    }
+
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
         *self.best_tip_block_time.borrow()
     }
