@@ -12,7 +12,7 @@ use zebra_chain::{
     chain_tip::NoChainTip,
     parameters::Network::*,
     serialization::{ZcashDeserialize, ZcashSerialize},
-    transaction::{Transaction, UnminedTx, UnminedTxId},
+    transaction::{self, Transaction, UnminedTx, UnminedTxId},
 };
 use zebra_node_services::mempool;
 use zebra_state::BoxError;
@@ -318,6 +318,104 @@ proptest! {
                 .expect("Sending raw transactions should not panic");
 
             prop_assert_eq!(result, Ok(expected_response));
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test that the method rejects non-hexadecimal characters.
+    ///
+    /// Try to call `get_raw_transaction` using a string parameter that has at least one
+    /// non-hexadecimal character, and check that it fails with an expected error.
+    #[test]
+    fn get_raw_transaction_non_hexadecimal_string_results_in_an_error(non_hex_string in ".*[^0-9A-Fa-f].*") {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
+
+        runtime.block_on(async move {
+            let mut mempool = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
+            let rpc = RpcImpl::new(
+                "RPC test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
+            );
+
+            let send_task = tokio::spawn(rpc.get_raw_transaction(non_hex_string, 0));
+
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            let result = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        ..
+                    })
+                ),
+                "Result is not an invalid parameters error: {result:?}"
+            );
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test that the method rejects an input that's not a transaction.
+    ///
+    /// Try to call `get_raw_transaction` using random bytes that fail to deserialize as a
+    /// transaction, and check that it fails with an expected error.
+    #[test]
+    fn get_raw_transaction_invalid_transaction_results_in_an_error(random_bytes in any::<Vec<u8>>()) {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
+
+        prop_assume!(transaction::Hash::zcash_deserialize(&*random_bytes).is_err());
+
+        runtime.block_on(async move {
+            let mut mempool = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
+            let rpc = RpcImpl::new(
+                "RPC test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
+            );
+
+            let send_task = tokio::spawn(rpc.get_raw_transaction(hex::encode(random_bytes), 0));
+
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            let result = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        ..
+                    })
+                ),
+                "Result is not an invalid parameters error: {result:?}"
+            );
 
             Ok::<_, TestCaseError>(())
         })?;
