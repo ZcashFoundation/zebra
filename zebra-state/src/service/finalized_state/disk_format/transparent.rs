@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::Height,
+    parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction, transparent,
+    transaction,
+    transparent::{self, Address::*},
 };
 
 use crate::service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk};
@@ -21,14 +23,17 @@ use crate::service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, Fro
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// Transparent balances are stored as an 8 byte integer on disk.
+pub const BALANCE_DISK_BYTES: usize = 8;
+
 /// Output transaction locations are stored as a 32 byte transaction hash on disk.
 ///
-/// TODO: change to TransactionLocation to reduce database size and increases lookup performance (#3151)
+/// TODO: change to TransactionLocation to reduce database size and increases lookup performance (#3953)
 pub const OUTPUT_TX_HASH_DISK_BYTES: usize = 32;
 
 /// [`OutputIndex`]es are stored as 4 bytes on disk.
 ///
-/// TODO: change to 3 bytes to reduce database size and increases lookup performance (#3151)
+/// TODO: change to 3 bytes to reduce database size and increases lookup performance (#3953)
 pub const OUTPUT_INDEX_DISK_BYTES: usize = 4;
 
 // Transparent types
@@ -164,8 +169,47 @@ impl AddressBalanceLocation {
 
 // Transparent trait impls
 
-// TODO: serialize the index into a smaller number of bytes (#3152)
-//       serialize the index in big-endian order (#3150)
+/// Returns a byte representing the [`transparent::Address`] variant.
+fn address_variant(address: &transparent::Address) -> u8 {
+    // Return smaller values for more common variants.
+    //
+    // (This probably doesn't matter, but it might help slightly with data compression.)
+    match (address.network(), address) {
+        (Mainnet, PayToPublicKeyHash { .. }) => 0,
+        (Mainnet, PayToScriptHash { .. }) => 1,
+        (Testnet, PayToPublicKeyHash { .. }) => 2,
+        (Testnet, PayToScriptHash { .. }) => 3,
+    }
+}
+
+impl IntoDisk for transparent::Address {
+    type Bytes = [u8; 21];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let variant_bytes = vec![address_variant(self)];
+        let hash_bytes = self.hash_bytes().to_vec();
+
+        [variant_bytes, hash_bytes].concat().try_into().unwrap()
+    }
+}
+
+impl IntoDisk for Amount<NonNegative> {
+    type Bytes = [u8; BALANCE_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for Amount<NonNegative> {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array = bytes.as_ref().try_into().unwrap();
+        Amount::from_bytes(array).unwrap()
+    }
+}
+
+// TODO: serialize the index into a smaller number of bytes (#3953)
+//       serialize the index in big-endian order (#3953)
 impl IntoDisk for OutputIndex {
     type Bytes = [u8; OUTPUT_INDEX_DISK_BYTES];
 
@@ -202,7 +246,32 @@ impl FromDisk for OutputLocation {
     }
 }
 
-// TODO: just serialize the Output, and derive the Utxo data from OutputLocation (#3151)
+impl IntoDisk for AddressBalanceLocation {
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_TX_HASH_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let balance_bytes = self.balance().as_bytes().to_vec();
+        let location_bytes = self.location().as_bytes().to_vec();
+
+        [balance_bytes, location_bytes].concat().try_into().unwrap()
+    }
+}
+
+impl FromDisk for AddressBalanceLocation {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (balance_bytes, location_bytes) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+
+        let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
+        let location = AddressLocation::from_bytes(location_bytes);
+
+        let mut balance_location = AddressBalanceLocation::new(location);
+        *balance_location.balance_mut() = balance;
+
+        balance_location
+    }
+}
+
+// TODO: just serialize the Output, and derive the Utxo data from OutputLocation (#3953)
 impl IntoDisk for transparent::Utxo {
     type Bytes = Vec<u8>;
 
