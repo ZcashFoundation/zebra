@@ -38,8 +38,8 @@ jobs:
 
     - name: Inject slug/short variables
       uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
+      with:
+        short-length: 7
 
       # Automatic tag management and OCI Image Format Specification for labels
     - name: Docker meta
