@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use group::{cofactor::CofactorGroup, GroupEncoding};
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use group::{cofactor::CofactorGroup, ff::PrimeField, GroupEncoding};
+use halo2::pasta::pallas;
 
 use super::*;
 
@@ -154,7 +154,7 @@ impl<T: SigType> VerificationKey<T> {
 
         let s = {
             // XXX-pasta_curves: should not use CtOption here
-            let maybe_scalar = pallas::Scalar::from_bytes(&signature.s_bytes);
+            let maybe_scalar = pallas::Scalar::from_repr(signature.s_bytes);
             if maybe_scalar.is_some().into() {
                 maybe_scalar.unwrap()
             } else {

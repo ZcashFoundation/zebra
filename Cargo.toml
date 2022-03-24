@@ -32,7 +32,10 @@ opt-level = 3
 [profile.dev.package.pasta_curves]
 opt-level = 3
 
-[profile.dev.package.halo2]
+[profile.dev.package.halo2_proofs]
+opt-level = 3
+
+[profile.dev.package.halo2_gadgets]
 opt-level = 3
 
 [profile.dev.package.bls12_381]
@@ -55,12 +58,12 @@ panic = "abort"
 
 # These are librustzcash file requirements specified in its workspace Cargo.toml,
 # that we must replace with git requirements
-equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "ff243b4f0055d89d3abb526e234688a09c3d8cb7" }
+equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
 hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "576683b9f2865f1118c309017ff36e01f84420c9" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "ff243b4f0055d89d3abb526e234688a09c3d8cb7" }
-zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "ff243b4f0055d89d3abb526e234688a09c3d8cb7" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "ff243b4f0055d89d3abb526e234688a09c3d8cb7" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
+zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
 # Currently pointing to `download-sprout-params-new` branch which contains the
-# changes from `download-sprout-params-new` rebased on top of ff243b4f as
+# changes from `download-sprout-params-new` rebased on top of 9c1ed86c as
 # required by `zcash/Cargo.toml`.
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "d0e187e64d69d8c6d7df9bf10becec296c23b06f" }
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "5761bb4b731a739ce7d156e3a586f282e9fe0eaf" }

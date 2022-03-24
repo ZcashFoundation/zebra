@@ -29,9 +29,9 @@ displaydoc = "0.2.3"
 fpe = "0.5.1"
 futures = "0.3.21"
 group = "0.11.0"
-halo2 = "=0.1.0-beta.1"
+halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.3" }
 hex = "0.4.3"
-incrementalmerkletree = "0.2.0"
+incrementalmerkletree = "0.3.0-beta.1"
 itertools = "0.10.3"
 jubjub = "0.8.0"
 lazy_static = "1.4.0"
@@ -45,10 +45,10 @@ sha2 = { version = "0.9.9", features=["compress"] }
 static_assertions = "1.1.0"
 subtle = "2.4.1"
 thiserror = "1.0.30"
-uint = "0.9.3"
+uint = "0.9.1"
 x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
-orchard = "=0.1.0-beta.1"
+orchard = "=0.1.0-beta.2"
 
 equihash = "0.1.0"
 zcash_note_encryption = "0.1"

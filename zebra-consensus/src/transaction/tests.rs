@@ -1,13 +1,12 @@
 //! Tests for Zcash transaction consensus checks.
 
 use std::{
-    cmp::max,
     collections::HashMap,
     convert::{TryFrom, TryInto},
     sync::Arc,
 };
 
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
@@ -306,23 +305,29 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
     let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
     let verifier = Verifier::new(network, state_service);
 
-    let transaction = fake_v5_transactions_for_network(network, blocks)
+    let mut transaction = fake_v5_transactions_for_network(network, blocks)
         .rev()
         .next()
         .expect("At least one fake V5 transaction in the test vectors");
+    if transaction
+        .expiry_height()
+        .expect("V5 must have expiry_height")
+        < nu5_activation_height
+    {
+        let expiry_height = transaction.expiry_height_mut();
+        *expiry_height = nu5_activation_height;
+    }
 
     let expected_hash = transaction.unmined_id();
-
-    let fake_block_height = max(
-        nu5_activation_height,
-        transaction.expiry_height().unwrap_or(nu5_activation_height),
-    );
+    let expiry_height = transaction
+        .expiry_height()
+        .expect("V5 must have expiry_height");
 
     let result = verifier
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
-            height: fake_block_height,
+            height: expiry_height,
             time: chrono::MAX_DATETIME,
         })
         .await;
@@ -2167,7 +2172,7 @@ fn fill_action_with_note_encryption_test_vector(
 ) -> zebra_chain::orchard::Action {
     let mut action = action.clone();
     action.cv = v.cv_net.try_into().expect("test vector must be valid");
-    action.cm_x = pallas::Base::from_bytes(&v.cmx).unwrap();
+    action.cm_x = pallas::Base::from_repr(v.cmx).unwrap();
     action.nullifier = v.rho.try_into().expect("test vector must be valid");
     action.ephemeral_key = v
         .ephemeral_key
