@@ -35,7 +35,11 @@ use zebra_chain::{
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
-use zebra_test::{command::ContextFrom, net::random_known_port, prelude::*};
+use zebra_test::{
+    command::{ContextFrom, NO_MATCHES_REGEX_ITER},
+    net::random_known_port,
+    prelude::*,
+};
 
 mod common;
 
@@ -989,6 +993,9 @@ async fn rpc_endpoint() -> Result<()> {
 }
 
 /// Failure log messages for any process, from the OS or shell.
+///
+/// These messages show that the child process has failed.
+/// So when we see them in the logs, we make the test fail.
 const PROCESS_FAILURE_MESSAGES: &[&str] = &[
     // Linux
     "Aborted",
@@ -998,6 +1005,9 @@ const PROCESS_FAILURE_MESSAGES: &[&str] = &[
 ];
 
 /// Failure log messages from Zebra.
+///
+/// These `zebrad` messages show that the `lightwalletd` integration test has failed.
+/// So when we see them in the logs, we make the test fail.
 const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",
@@ -1020,6 +1030,9 @@ const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
 ];
 
 /// Failure log messages from lightwalletd.
+///
+/// These `lightwalletd` messages show that the `lightwalletd` integration test has failed.
+/// So when we see them in the logs, we make the test fail.
 const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     // Go-specific panics
     "panic:",
@@ -1039,7 +1052,7 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     // Go json package error messages:
     "json: cannot unmarshal",
     "into Go value of type",
-    // lightwalletd RPC error messages from:
+    // lightwalletd custom RPC error messages from:
     // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
     "block requested is newer than latest block",
     "Cache add failed",
@@ -1077,6 +1090,21 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     // get_address_utxos
 ];
 
+/// Ignored failure logs for lightwalletd.
+/// These regexes override the [`LIGHTWALLETD_FAILURE_MESSAGES`].
+///
+/// These `lightwalletd` messages look like failure messages, but they are actually ok.
+/// So when we see them in the logs, we make the test continue.
+const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
+    // Exceptions to lightwalletd custom RPC error messages:
+    //
+    // This log matches the "error with" RPC error message,
+    // but we expect Zebra to start with an empty state.
+    //
+    // TODO: this exception should not be used for the cached state tests (#3511)
+    r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
+];
+
 /// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
@@ -1108,6 +1136,7 @@ fn lightwalletd_integration() -> Result<()> {
                 .iter()
                 .chain(PROCESS_FAILURE_MESSAGES)
                 .cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
         );
 
     // Wait until `zebrad` has opened the RPC endpoint
@@ -1132,6 +1161,8 @@ fn lightwalletd_integration() -> Result<()> {
                 .iter()
                 .chain(PROCESS_FAILURE_MESSAGES)
                 .cloned(),
+            // TODO: some exceptions do not apply to the cached state tests (#3511)
+            LIGHTWALLETD_IGNORE_MESSAGES.iter().cloned(),
         );
 
     // Wait until `lightwalletd` has launched
