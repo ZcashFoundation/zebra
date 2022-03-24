@@ -467,7 +467,7 @@ impl StateService {
     /// Returns the [`Transaction`] with [`transaction::Hash`],
     /// if it exists in the current best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        read::transaction(self.mem.best_chain(), self.disk.db(), hash)
+        read::transaction(self.mem.best_chain(), self.disk.db(), hash).map(|(tx, _height)| tx)
     }
 
     /// Return the hash for the block at `height` in the current best chain.
@@ -957,11 +957,12 @@ impl Service<ReadRequest> for ReadStateService {
                 let state = self.clone();
 
                 async move {
-                    let transaction = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::transaction(best_chain, &state.db, hash)
-                    });
+                    let transaction_and_height =
+                        state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transaction(best_chain, &state.db, hash)
+                        });
 
-                    Ok(ReadResponse::Transaction(transaction))
+                    Ok(ReadResponse::Transaction(transaction_and_height))
                 }
                 .boxed()
             }
