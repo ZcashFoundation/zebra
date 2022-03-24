@@ -25,6 +25,7 @@ pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
+pub use serialize::SerializedTransaction;
 pub use sighash::{HashType, SigHash};
 pub use unmined::{UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
