@@ -243,9 +243,10 @@ proptest! {
     fn branch_id_hex_roundtrip(nu in any::<NetworkUpgrade>()) {
         zebra_test::init();
 
-        if let Some(branch) = &nu.branch_id() {
+        if let Some(branch) = nu.branch_id() {
             let hex_branch: String = branch.encode_hex();
             let new_branch = ConsensusBranchId::from_hex(hex_branch.clone()).expect("hex branch_id should parse");
+            prop_assert_eq!(branch, new_branch);
             prop_assert_eq!(hex_branch, new_branch.to_string());
         }
     }
