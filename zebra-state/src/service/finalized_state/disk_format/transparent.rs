@@ -271,7 +271,21 @@ impl FromDisk for AddressBalanceLocation {
     }
 }
 
-// TODO: just serialize the Output, and derive the Utxo data from OutputLocation (#3953)
+impl IntoDisk for transparent::Output {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.zcash_serialize_to_vec().unwrap()
+    }
+}
+
+impl FromDisk for transparent::Output {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bytes.as_ref().zcash_deserialize_into().unwrap()
+    }
+}
+
+// TODO: delete UTXO serialization (#3953)
 impl IntoDisk for transparent::Utxo {
     type Bytes = Vec<u8>;
 
