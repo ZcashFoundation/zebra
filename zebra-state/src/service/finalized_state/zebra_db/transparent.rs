@@ -11,14 +11,17 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, collections::HashMap};
 
-use zebra_chain::transparent;
+use zebra_chain::{
+    amount::{Amount, NonNegative},
+    transparent,
+};
 
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::transparent::OutputLocation,
+        disk_format::transparent::{AddressBalanceLocation, AddressLocation, OutputLocation},
         zebra_db::ZebraDb,
         FinalizedBlock,
     },
@@ -28,8 +31,37 @@ use crate::{
 impl ZebraDb {
     // Read transparent methods
 
-    /// Returns the `transparent::Output` pointed to by the given
-    /// `transparent::OutPoint` if it is present.
+    /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
+    /// if it is in the finalized state.
+    pub fn address_balance_location(
+        &self,
+        address: &transparent::Address,
+    ) -> Option<AddressBalanceLocation> {
+        let balance_by_transparent_addr = self.db.cf_handle("balance_by_transparent_addr").unwrap();
+
+        self.db.zs_get(&balance_by_transparent_addr, address)
+    }
+
+    /// Returns the balance for a [`transparent::Address`],
+    /// if it is in the finalized state.
+    #[allow(dead_code)]
+    pub fn address_balance(&self, address: &transparent::Address) -> Option<Amount<NonNegative>> {
+        self.address_balance_location(address)
+            .map(|abl| abl.balance())
+    }
+
+    /// Returns the first output that sent funds to a [`transparent::Address`],
+    /// if it is in the finalized state.
+    ///
+    /// This location is used as an efficient index key for addresses.
+    #[allow(dead_code)]
+    pub fn address_location(&self, address: &transparent::Address) -> Option<AddressLocation> {
+        self.address_balance_location(address)
+            .map(|abl| abl.location())
+    }
+
+    /// Returns the transparent output for a [`transparent::OutPoint`],
+    /// if it is still unspent in the finalized state.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
 
@@ -40,7 +72,11 @@ impl ZebraDb {
 }
 
 impl DiskWriteBatch {
-    /// Prepare a database batch containing `finalized.block`'s UTXO changes,
+    /// Prepare a database batch containing `finalized.block`'s:
+    /// - transparent address balance changes,
+    /// TODO:
+    /// - transparent address index changes (add in #3951, #3953), and
+    /// - UTXO changes (modify in #3952)
     /// and return it (without actually writing anything).
     ///
     /// # Errors
@@ -50,8 +86,11 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
+        all_utxos_spent_by_block: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
+        let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
         let FinalizedBlock {
             block, new_outputs, ..
@@ -59,23 +98,59 @@ impl DiskWriteBatch {
 
         // Index all new transparent outputs, before deleting any we've spent
         for (outpoint, utxo) in new_outputs.borrow().iter() {
+            let receiving_address = utxo.output.address(self.network());
             let output_location = OutputLocation::from_outpoint(outpoint);
+
+            // Update the address balance by adding this UTXO's value
+            if let Some(receiving_address) = receiving_address {
+                let address_balance = address_balances
+                    .entry(receiving_address)
+                    .or_insert_with(|| AddressBalanceLocation::new(output_location))
+                    .balance_mut();
+
+                let new_address_balance = (*address_balance + utxo.output.value())
+                    .expect("balance overflow already checked");
+
+                *address_balance = new_address_balance;
+            }
 
             self.zs_insert(&utxo_by_outpoint, output_location, utxo);
         }
 
         // Mark all transparent inputs as spent.
         //
-        // Coinbase inputs represent new coins,
-        // so there are no UTXOs to mark as spent.
-        for output_location in block
+        // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
+        for outpoint in block
             .transactions
             .iter()
             .flat_map(|tx| tx.inputs())
             .flat_map(|input| input.outpoint())
-            .map(|outpoint| OutputLocation::from_outpoint(&outpoint))
         {
+            let output_location = OutputLocation::from_outpoint(&outpoint);
+
+            let spent_output = &all_utxos_spent_by_block.get(&outpoint).unwrap().output;
+            let sending_address = spent_output.address(self.network());
+
+            // Update the address balance by subtracting this UTXO's value
+            if let Some(sending_address) = sending_address {
+                let address_balance = address_balances
+                    .entry(sending_address)
+                    .or_insert_with(|| panic!("spent outputs must already have an address balance"))
+                    .balance_mut();
+
+                let new_address_balance = (*address_balance - spent_output.value())
+                    .expect("balance underflow already checked");
+
+                *address_balance = new_address_balance;
+            }
+
             self.zs_delete(&utxo_by_outpoint, output_location);
+        }
+
+        // Write the new address balances to the database
+        for (address, address_balance) in address_balances.into_iter() {
+            // Some of these balances are new, and some are updates
+            self.zs_insert(&balance_by_transparent_addr, address, address_balance);
         }
 
         Ok(())

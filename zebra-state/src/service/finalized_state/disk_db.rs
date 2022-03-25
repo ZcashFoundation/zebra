@@ -68,6 +68,10 @@ pub struct DiskDb {
 ///
 /// [`rocksdb::WriteBatch`] is a batched set of database updates,
 /// which must be written to the database using `DiskDb::write(batch)`.
+//
+// TODO: move DiskDb, FinalizedBlock, and the source String into this struct,
+//       (DiskDb can be cloned),
+//       and make them accessible via read-only methods
 #[must_use = "batches must be written to the database"]
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
