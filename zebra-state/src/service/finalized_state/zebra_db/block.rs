@@ -11,6 +11,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use itertools::Itertools;
+
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block},
@@ -25,7 +27,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{FromDisk, TransactionLocation},
+        disk_format::{transparent::AddressBalanceLocation, FromDisk, TransactionLocation},
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
@@ -188,7 +190,7 @@ impl ZebraDb {
         let finalized_hash = finalized.hash;
 
         // Get a list of the spent UTXOs, before we delete any from the database
-        let all_utxos_spent_by_block = finalized
+        let all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo> = finalized
             .block
             .transactions
             .iter()
@@ -205,6 +207,15 @@ impl ZebraDb {
             })
             .collect();
 
+        // Get the current address balances, before the transactions in this block
+        let address_balances = all_utxos_spent_by_block
+            .values()
+            .chain(finalized.new_outputs.values())
+            .filter_map(|utxo| utxo.output.address(network))
+            .unique()
+            .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+            .collect();
+
         let mut batch = DiskWriteBatch::new(network);
 
         // In case of errors, propagate and do not write the batch.
@@ -212,6 +223,7 @@ impl ZebraDb {
             &self.db,
             finalized,
             all_utxos_spent_by_block,
+            address_balances,
             self.note_commitment_trees(),
             history_tree,
             self.finalized_value_pool(),
@@ -237,11 +249,13 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
@@ -271,7 +285,13 @@ impl DiskWriteBatch {
         }
 
         // Commit transaction indexes
-        self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
+        self.prepare_transaction_index_batch(
+            db,
+            &finalized,
+            &all_utxos_spent_by_block,
+            address_balances,
+            &mut note_commitment_trees,
+        )?;
 
         self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
@@ -376,6 +396,8 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
+        all_utxos_spent_by_block: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, .. } = finalized;
@@ -387,6 +409,11 @@ impl DiskWriteBatch {
             DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
         }
 
-        self.prepare_transparent_outputs_batch(db, finalized)
+        self.prepare_transparent_outputs_batch(
+            db,
+            finalized,
+            all_utxos_spent_by_block,
+            address_balances,
+        )
     }
 }
