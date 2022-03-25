@@ -193,6 +193,28 @@ impl IntoDisk for transparent::Address {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
+impl FromDisk for transparent::Address {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (address_variant, hash_bytes) = disk_bytes.as_ref().split_at(1);
+
+        let address_variant = address_variant[0];
+        let hash_bytes = hash_bytes.try_into().unwrap();
+
+        let network = if address_variant < 2 {
+            Mainnet
+        } else {
+            Testnet
+        };
+
+        if address_variant % 2 == 0 {
+            transparent::Address::from_pub_key_hash(network, hash_bytes)
+        } else {
+            transparent::Address::from_script_hash(network, hash_bytes)
+        }
+    }
+}
+
 impl IntoDisk for Amount<NonNegative> {
     type Bytes = [u8; BALANCE_DISK_BYTES];
 
