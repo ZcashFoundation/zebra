@@ -3836,12 +3836,11 @@ dependencies = [
 
 [[package]]
 name = "serde-big-array"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18b20e7752957bbe9661cff4e0bb04d183d0948cdab2ea58cdb9df36a61dfe62"
+checksum = "01890a6856e9a7fbb42f3bc847957b61aeaf024fe99f6abc76d137ed1799dc80"
 dependencies = [
  "serde",
- "serde_derive",
 ]
 
 [[package]]
