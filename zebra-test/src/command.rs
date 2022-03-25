@@ -104,6 +104,7 @@ impl CommandExt for Command {
             stdout: None,
             stderr: None,
             failure_regexes: RegexSet::empty(),
+            ignore_regexes: RegexSet::empty(),
             deadline: None,
             bypass_test_capture: false,
         })
@@ -204,6 +205,15 @@ pub struct TestChild<T> {
     /// If any line matches any failure regex, the test fails.
     failure_regexes: RegexSet,
 
+    /// Command outputs which are ignored when checking for test failure.
+    /// These regexes override `failure_regexes`.
+    ///
+    /// This list of regexes is matches against `stdout` or `stderr`,
+    /// in every method that reads command output.
+    ///
+    /// If a line matches any ignore regex, the failure regex check is skipped for that line.
+    ignore_regexes: RegexSet,
+
     /// The deadline for this command to finish.
     ///
     /// Only checked when the command outputs each new line (#1140).
@@ -215,22 +225,50 @@ pub struct TestChild<T> {
 }
 
 /// Checks command output log `line` from `cmd` against a `failure_regexes` regex set,
-/// and panics if any regex matches the log line.
+/// and panics if any regex matches. The line is skipped if it matches `ignore_regexes`.
 ///
 /// # Panics
 ///
-/// - if any stdout or stderr lines match any failure regex
+/// - if any stdout or stderr lines match any failure regex, but do not match any ignore regex
 pub fn check_failure_regexes(
     line: &std::io::Result<String>,
     failure_regexes: &RegexSet,
+    ignore_regexes: &RegexSet,
     cmd: &str,
+    bypass_test_capture: bool,
 ) {
     if let Ok(line) = line {
+        let ignore_matches = ignore_regexes.matches(line);
+        let ignore_matches: Vec<&str> = ignore_matches
+            .iter()
+            .map(|index| ignore_regexes.patterns()[index].as_str())
+            .collect();
+
         let failure_matches = failure_regexes.matches(line);
         let failure_matches: Vec<&str> = failure_matches
             .iter()
             .map(|index| failure_regexes.patterns()[index].as_str())
             .collect();
+
+        if !ignore_matches.is_empty() {
+            let ignore_matches = ignore_matches.join(",");
+
+            let ignore_msg = if failure_matches.is_empty() {
+                format!(
+                    "Log matched ignore regexes: {:?}, but no failure regexes",
+                    ignore_matches,
+                )
+            } else {
+                let failure_matches = failure_matches.join(",");
+                format!(
+                    "Ignoring failure regexes: {:?}, because log matched ignore regexes: {:?}",
+                    failure_matches, ignore_matches,
+                )
+            };
+
+            write_to_test_logs(ignore_msg, bypass_test_capture);
+            return;
+        }
 
         assert!(
             failure_matches.is_empty(),
@@ -247,64 +285,124 @@ pub fn check_failure_regexes(
     }
 }
 
+/// Write `line` to stdout, so it can be seen in the test logs.
+///
+/// Set `bypass_test_capture` to `true` or
+/// use `cargo test -- --nocapture` to see this output.
+///
+/// May cause weird reordering for stdout / stderr.
+/// Uses stdout even if the original lines were from stderr.
+#[allow(clippy::print_stdout)]
+fn write_to_test_logs<S>(line: S, bypass_test_capture: bool)
+where
+    S: AsRef<str>,
+{
+    let line = line.as_ref();
+
+    if bypass_test_capture {
+        // Send lines directly to the terminal (or process stdout file redirect).
+        #[allow(clippy::explicit_write)]
+        writeln!(std::io::stdout(), "{}", line).unwrap();
+    } else {
+        // If the test fails, the test runner captures and displays this output.
+        // To show this output unconditionally, use `cargo test -- --nocapture`.
+        println!("{}", line);
+    }
+
+    // Some OSes require a flush to send all output to the terminal.
+    let _ = std::io::stdout().lock().flush();
+}
+
+/// A [`CollectRegexSet`] iterator that never matches anything.
+///
+/// Used to work around type inference issues in [`TestChild::with_failure_regex_iter`].
+pub const NO_MATCHES_REGEX_ITER: &[&str] = &[];
+
 impl<T> TestChild<T> {
-    /// Sets up command output so it is checked against a failure regex set.
+    /// Sets up command output so each line is checked against a failure regex set,
+    /// unless it matches any of the ignore regexes.
+    ///
     /// The failure regexes are ignored by `wait_with_output`.
     ///
-    /// [`TestChild::with_failure_regexes`] wrapper for strings, [`Regex`]es,
-    /// and [`RegexSet`]s.
+    /// To never match any log lines, use `RegexSet::empty()`.
+    ///
+    /// This method is a [`TestChild::with_failure_regexes`] wrapper for
+    /// strings, [`Regex`]es, and [`RegexSet`]s.
     ///
     /// # Panics
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    pub fn with_failure_regex_set<R>(self, failure_regexes: R) -> Self
+    pub fn with_failure_regex_set<F, X>(self, failure_regexes: F, ignore_regexes: X) -> Self
     where
-        R: ToRegexSet,
+        F: ToRegexSet,
+        X: ToRegexSet,
     {
         let failure_regexes = failure_regexes
             .to_regex_set()
-            .expect("regexes must be valid");
+            .expect("failure regexes must be valid");
 
-        self.with_failure_regexes(failure_regexes)
+        let ignore_regexes = ignore_regexes
+            .to_regex_set()
+            .expect("ignore regexes must be valid");
+
+        self.with_failure_regexes(failure_regexes, ignore_regexes)
     }
 
-    /// Sets up command output so it is checked against a failure regex set.
+    /// Sets up command output so each line is checked against a failure regex set,
+    /// unless it matches any of the ignore regexes.
+    ///
     /// The failure regexes are ignored by `wait_with_output`.
     ///
-    /// [`TestChild::with_failure_regexes`] wrapper for regular expression iterators.
+    /// To never match any log lines, use [`NO_MATCHES_REGEX_ITER`].
+    ///
+    /// This method is a [`TestChild::with_failure_regexes`] wrapper for
+    /// regular expression iterators.
     ///
     /// # Panics
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    pub fn with_failure_regex_iter<I>(self, failure_regexes: I) -> Self
+    pub fn with_failure_regex_iter<F, X>(self, failure_regexes: F, ignore_regexes: X) -> Self
     where
-        I: CollectRegexSet,
+        F: CollectRegexSet,
+        X: CollectRegexSet,
     {
         let failure_regexes = failure_regexes
             .collect_regex_set()
-            .expect("regexes must be valid");
+            .expect("failure regexes must be valid");
 
-        self.with_failure_regexes(failure_regexes)
+        let ignore_regexes = ignore_regexes
+            .collect_regex_set()
+            .expect("ignore regexes must be valid");
+
+        self.with_failure_regexes(failure_regexes, ignore_regexes)
     }
 
-    /// Sets up command output so it is checked against a failure regex set.
+    /// Sets up command output so each line is checked against a failure regex set,
+    /// unless it matches any of the ignore regexes.
+    ///
     /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// # Panics
     ///
     /// - adds a panic to any method that reads output,
     ///   if any stdout or stderr lines match any failure regex
-    pub fn with_failure_regexes(mut self, failure_regexes: RegexSet) -> Self {
+    pub fn with_failure_regexes(
+        mut self,
+        failure_regexes: RegexSet,
+        ignore_regexes: impl Into<Option<RegexSet>>,
+    ) -> Self {
         self.failure_regexes = failure_regexes;
+        self.ignore_regexes = ignore_regexes.into().unwrap_or_else(RegexSet::empty);
 
         self.apply_failure_regexes_to_outputs();
 
         self
     }
 
-    /// Applies the failure regex set to command output.
+    /// Applies the failure and ignore regex sets to command output.
+    ///
     /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// # Panics
@@ -329,7 +427,8 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Maps a reader into a string line iterator.
+    /// Maps a reader into a string line iterator,
+    /// and applies the failure and ignore regex sets to it.
     fn map_into_string_lines<R>(
         &self,
         reader: R,
@@ -338,11 +437,20 @@ impl<T> TestChild<T> {
         R: Read + Debug + 'static,
     {
         let failure_regexes = self.failure_regexes.clone();
+        let ignore_regexes = self.ignore_regexes.clone();
         let cmd = self.cmd.clone();
+        let bypass_test_capture = self.bypass_test_capture;
 
         let reader = BufReader::new(reader);
-        let lines = BufRead::lines(reader)
-            .inspect(move |line| check_failure_regexes(line, &failure_regexes, &cmd));
+        let lines = BufRead::lines(reader).inspect(move |line| {
+            check_failure_regexes(
+                line,
+                &failure_regexes,
+                &ignore_regexes,
+                &cmd,
+                bypass_test_capture,
+            )
+        });
 
         Box::new(lines) as _
     }
@@ -385,6 +493,7 @@ impl<T> TestChild<T> {
             while self.wait_for_stdout_line(None) {}
 
             if wrote_lines {
+                // Write an empty line, to make output more readable
                 self.write_to_test_logs("");
             }
         }
@@ -683,20 +792,7 @@ impl<T> TestChild<T> {
     where
         S: AsRef<str>,
     {
-        let line = line.as_ref();
-
-        if self.bypass_test_capture {
-            // Send lines directly to the terminal (or process stdout file redirect).
-            #[allow(clippy::explicit_write)]
-            writeln!(std::io::stdout(), "{}", line).unwrap();
-        } else {
-            // If the test fails, the test runner captures and displays this output.
-            // To show this output unconditionally, use `cargo test -- --nocapture`.
-            println!("{}", line);
-        }
-
-        // Some OSes require a flush to send all output to the terminal.
-        let _ = std::io::stdout().lock().flush();
+        write_to_test_logs(line, self.bypass_test_capture);
     }
 
     /// Kill `child`, wait for its output, and use that output as the context for
