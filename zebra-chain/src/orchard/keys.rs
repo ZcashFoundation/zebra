@@ -647,6 +647,43 @@ impl From<IncomingViewingKey> for [u8; 64] {
     }
 }
 
+impl TryFrom<[u8; 64]> for IncomingViewingKey {
+    type Error = &'static str;
+
+    /// Convert an array of bytes into a [`IncomingViewingKey`].
+    ///
+    /// Returns an error if the encoding is malformed or if it [encodes the scalar additive
+    /// identity, 0][1].
+    ///
+    /// > ivk MUST be in the range {1 .. 𝑞P - 1}
+    ///
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#orchardinviewingkeyencoding
+    fn try_from(bytes: [u8; 64]) -> Result<Self, Self::Error> {
+        let mut dk_bytes = [0u8; 32];
+        dk_bytes.copy_from_slice(&bytes[..32]);
+        let dk = DiversifierKey::from(dk_bytes);
+
+        let mut ivk_bytes = [0u8; 32];
+        ivk_bytes[..].copy_from_slice(&bytes[32..]);
+
+        let possible_scalar = pallas::Scalar::from_bytes(&ivk_bytes);
+
+        if possible_scalar.is_some().into() {
+            let scalar = possible_scalar.unwrap();
+            if scalar.is_zero().into() {
+                Err("pallas::Scalar value for Orchard IncomingViewingKey is 0")
+            } else {
+                Ok(Self {
+                    dk,
+                    ivk: possible_scalar.unwrap(),
+                })
+            }
+        } else {
+            Err("Invalid pallas::Scalar value for Orchard IncomingViewingKey")
+        }
+    }
+}
+
 impl TryFrom<FullViewingKey> for IncomingViewingKey {
     type Error = &'static str;
 
@@ -816,6 +853,12 @@ impl From<FullViewingKey> for DiversifierKey {
 
         // "let dk be the first [32] bytes of R"
         Self(R[..32].try_into().expect("subslice of R is a valid array"))
+    }
+}
+
+impl From<[u8; 32]> for DiversifierKey {
+    fn from(bytes: [u8; 32]) -> DiversifierKey {
+        DiversifierKey(bytes)
     }
 }
 
@@ -1017,10 +1060,11 @@ impl From<&OutgoingCipherKey> for [u8; 32] {
 
 // TODO: implement PrivateKey: #2192
 
-/// An ephemeral private key for Orchard key agreement.
+/// An _ephemeral private key_ for Orchard key agreement.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
 /// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
+// TODO: refine so that the inner `Scalar` != 0
 #[derive(Copy, Clone, Debug)]
 pub struct EphemeralPrivateKey(pub(crate) pallas::Scalar);
 
