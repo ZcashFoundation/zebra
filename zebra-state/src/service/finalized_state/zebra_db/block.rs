@@ -197,13 +197,12 @@ impl ZebraDb {
             .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
             .collect();
 
-        let mut batch = DiskWriteBatch::new();
+        let mut batch = DiskWriteBatch::new(network);
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
             &self.db,
             finalized,
-            network,
             all_utxos_spent_by_block,
             self.note_commitment_trees(),
             history_tree,
@@ -230,14 +229,11 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
-    #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
-        network: Network,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
-        // TODO: make an argument struct for all the current note commitment trees & history
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
@@ -269,13 +265,7 @@ impl DiskWriteBatch {
         // Commit transaction indexes
         self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
 
-        self.prepare_note_commitment_batch(
-            db,
-            &finalized,
-            network,
-            note_commitment_trees,
-            history_tree,
-        )?;
+        self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;

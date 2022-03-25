@@ -16,9 +16,7 @@ use std::{borrow::Borrow, collections::HashMap};
 use zebra_chain::{
     amount::NonNegative,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
-    orchard,
-    parameters::Network,
-    sapling, transparent,
+    orchard, sapling, transparent,
     value_balance::ValueBalance,
 };
 
@@ -73,7 +71,6 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        network: Network,
         sapling_root: sapling::tree::Root,
         orchard_root: orchard::tree::Root,
         mut history_tree: HistoryTree,
@@ -82,7 +79,7 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { block, height, .. } = finalized;
 
-        history_tree.push(network, block.clone(), sapling_root, orchard_root)?;
+        history_tree.push(self.network(), block.clone(), sapling_root, orchard_root)?;
 
         // Update the tree in state
         let current_tip_height = *height - 1;

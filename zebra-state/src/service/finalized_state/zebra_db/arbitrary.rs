@@ -4,7 +4,9 @@
 
 use std::ops::Deref;
 
-use zebra_chain::{amount::NonNegative, block::Block, sprout, value_balance::ValueBalance};
+use zebra_chain::{
+    amount::NonNegative, block::Block, parameters::Network::*, sprout, value_balance::ValueBalance,
+};
 
 use crate::service::finalized_state::{
     disk_db::{DiskDb, DiskWriteBatch, WriteDisk},
@@ -31,7 +33,7 @@ impl ZebraDb {
 
     /// Allow to set up a fake value pool in the database for testing purposes.
     pub fn set_finalized_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
-        let mut batch = DiskWriteBatch::new();
+        let mut batch = DiskWriteBatch::new(Mainnet);
         let value_pool_cf = self.db().cf_handle("tip_chain_value_pool").unwrap();
 
         batch.zs_insert(&value_pool_cf, (), fake_value_pool);
@@ -41,7 +43,7 @@ impl ZebraDb {
     /// Artificially prime the note commitment tree anchor sets with anchors
     /// referenced in a block, for testing purposes _only_.
     pub fn populate_with_anchors(&self, block: &Block) {
-        let mut batch = DiskWriteBatch::new();
+        let mut batch = DiskWriteBatch::new(Mainnet);
 
         let sprout_anchors = self.db().cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = self.db().cf_handle("sapling_anchors").unwrap();
