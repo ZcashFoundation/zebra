@@ -116,6 +116,13 @@ fn serialized_transparent_address_equal() {
 }
 
 #[test]
+fn roundtrip_transparent_address() {
+    zebra_test::init();
+
+    proptest!(|(val in any::<transparent::Address>())| assert_value_properties(val));
+}
+
+#[test]
 fn roundtrip_output_location() {
     zebra_test::init();
 
