@@ -82,6 +82,7 @@ impl OutputIndex {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OutputLocation {
     /// The transaction hash.
+    #[serde(with = "hex")]
     pub hash: transaction::Hash,
 
     /// The index of the transparent output in its transaction.
