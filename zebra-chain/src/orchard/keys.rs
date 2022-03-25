@@ -18,7 +18,7 @@ use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::{ff::PrimeField, prime::PrimeCurveAffine, Group, GroupEncoding};
 use halo2::{
-    arithmetic::{Coordinates, CurveAffine, FieldExt},
+    arithmetic::{Coordinates, CurveAffine, Field, FieldExt},
     pasta::pallas,
 };
 use rand_core::{CryptoRng, RngCore};
@@ -203,7 +203,12 @@ impl SpendingKey {
             let sk = Self::from_bytes(bytes, network);
 
             // "if ask = 0, discard this key and repeat with a new sk"
-            if SpendAuthorizingKey::from(sk).0 == pallas::Scalar::zero() {
+            if SpendAuthorizingKey::from(sk).0.is_zero().into() {
+                continue;
+            }
+
+            // "if ivk = {0, ⊥ }, discard this key and repeat with a new sk"
+            if IncomingViewingKey::try_from(FullViewingKey::from(sk)).is_err() {
                 continue;
             }
 
@@ -595,7 +600,7 @@ impl PartialEq for FullViewingKey {
 #[derive(Copy, Clone)]
 pub struct IncomingViewingKey {
     dk: DiversifierKey,
-    // TODO: refine type
+    // TODO: refine type, so that IncomingViewingkey.ivk cannot be 0
     ivk: pallas::Scalar,
 }
 
@@ -642,7 +647,9 @@ impl From<IncomingViewingKey> for [u8; 64] {
     }
 }
 
-impl From<FullViewingKey> for IncomingViewingKey {
+impl TryFrom<FullViewingKey> for IncomingViewingKey {
+    type Error = &'static str;
+
     /// Commit^ivk_rivk(ak, nk) :=
     ///     SinsemillaShortCommit_rcm(︁
     ///        "z.cash:Orchard-CommitIvk",
@@ -652,8 +659,8 @@ impl From<FullViewingKey> for IncomingViewingKey {
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
     #[allow(non_snake_case)]
-    fn from(fvk: FullViewingKey) -> Self {
-        let mut M: BitVec<u8, Lsb0> = BitVec::new();
+    fn try_from(fvk: FullViewingKey) -> Result<Self, Self::Error> {
+        let mut M: BitVec<Lsb0, u8> = BitVec::new();
 
         // I2LEBSP_l^Orchard_base(ak)︁
         let ak_bytes =
@@ -674,10 +681,18 @@ impl From<FullViewingKey> for IncomingViewingKey {
         )
         .expect("deriving orchard commit^ivk should not output ⊥ ");
 
-        Self {
-            dk: fvk.into(),
-            // mod r_P
-            ivk: pallas::Scalar::from_repr(commit_x.into()).unwrap(),
+        let ivk_ctoption = pallas::Scalar::from_bytes(&commit_x.into());
+
+        // if ivk ∈ {0, ⊥}, discard this key
+
+        // [`Scalar::is_zero()`] is constant-time under the hood, and ivk is mod r_P
+        if ivk_ctoption.is_some().into() && !<bool>::from(ivk_ctoption.unwrap().is_zero()) {
+            Ok(Self {
+                dk: fvk.into(),
+                ivk: ivk_ctoption.unwrap(),
+            })
+        } else {
+            Err("generated ivk is the additive identity 0, invalid")
         }
     }
 }
