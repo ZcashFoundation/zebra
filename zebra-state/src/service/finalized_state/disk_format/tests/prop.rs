@@ -3,7 +3,7 @@
 use proptest::{arbitrary::any, prelude::*};
 
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{Amount, NonNegative},
     block::{self, Height},
     transparent,
     value_balance::ValueBalance,
@@ -11,8 +11,43 @@ use zebra_chain::{
 
 use crate::service::finalized_state::{
     arbitrary::assert_value_properties,
-    disk_format::{block::MAX_ON_DISK_HEIGHT, transparent::OutputLocation, TransactionLocation},
+    disk_format::{
+        block::MAX_ON_DISK_HEIGHT,
+        transparent::{AddressBalanceLocation, AddressLocation, OutputLocation},
+        IntoDisk, TransactionLocation,
+    },
 };
+
+#[test]
+fn serialized_transparent_address_equal() {
+    zebra_test::init();
+    proptest!(|(addr1 in any::<transparent::Address>(), addr2 in any::<transparent::Address>())| {
+        if addr1 == addr2 {
+            prop_assert_eq!(
+                addr1.as_bytes(),
+                addr2.as_bytes(),
+                "transparent addresses were equal, but serialized bytes were not.\n\
+                 Addresses:\n\
+                 {:?}\n\
+                 {:?}",
+                addr1,
+                addr2,
+            );
+        } else {
+            prop_assert_ne!(
+                addr1.as_bytes(),
+                addr2.as_bytes(),
+                "transparent addresses were not equal, but serialized bytes were equal:\n\
+                 Addresses:\n\
+                 {:?}\n\
+                 {:?}",
+                addr1,
+                addr2,
+            );
+        }
+    }
+    );
+}
 
 #[test]
 fn roundtrip_block_height() {
@@ -48,6 +83,18 @@ fn roundtrip_output_location() {
 }
 
 #[test]
+fn roundtrip_address_location() {
+    zebra_test::init();
+    proptest!(|(val in any::<AddressLocation>())| assert_value_properties(val));
+}
+
+#[test]
+fn roundtrip_address_balance_location() {
+    zebra_test::init();
+    proptest!(|(val in any::<AddressBalanceLocation>())| assert_value_properties(val));
+}
+
+#[test]
 fn roundtrip_block_hash() {
     zebra_test::init();
     proptest!(|(val in any::<block::Hash>())| assert_value_properties(val));
@@ -70,6 +117,13 @@ fn roundtrip_transparent_output() {
             assert_value_properties(val)
         }
     );
+}
+
+#[test]
+fn roundtrip_amount() {
+    zebra_test::init();
+
+    proptest!(|(val in any::<Amount::<NonNegative>>())| assert_value_properties(val));
 }
 
 #[test]
