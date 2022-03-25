@@ -194,7 +194,15 @@ impl ZebraDb {
             .iter()
             .flat_map(|tx| tx.inputs().iter())
             .flat_map(|input| input.outpoint())
-            .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
+            .map(|outpoint| {
+                (
+                    outpoint,
+                    // Some utxos are spent in the same block, so they will be in `new_outputs`
+                    self.utxo(&outpoint)
+                        .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                        .expect("already checked UTXO was in state or block"),
+                )
+            })
             .collect();
 
         let mut batch = DiskWriteBatch::new(network);

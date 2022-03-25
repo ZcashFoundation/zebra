@@ -112,17 +112,12 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let FinalizedBlock {
-            block, new_outputs, ..
-        } = finalized;
-
-        // Some utxos are spent in the same block, so they will be in `new_outputs`.
-        all_utxos_spent_by_block.extend(new_outputs.clone());
+        let FinalizedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);
