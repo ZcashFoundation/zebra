@@ -13,8 +13,7 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use zebra_chain::{
-    block::Height, history_tree::HistoryTree, orchard, parameters::Network, sapling, sprout,
-    transaction::Transaction,
+    block::Height, history_tree::HistoryTree, orchard, sapling, sprout, transaction::Transaction,
 };
 
 use crate::{
@@ -241,8 +240,6 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        network: Network,
-        // TODO: make an argument struct for all the note commitment trees & history
         note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
     ) -> Result<(), BoxError> {
@@ -294,14 +291,7 @@ impl DiskWriteBatch {
             note_commitment_trees.orchard,
         );
 
-        self.prepare_history_batch(
-            db,
-            finalized,
-            network,
-            sapling_root,
-            orchard_root,
-            history_tree,
-        )
+        self.prepare_history_batch(db, finalized, sapling_root, orchard_root, history_tree)
     }
 
     /// Prepare a database batch containing the initial note commitment trees,

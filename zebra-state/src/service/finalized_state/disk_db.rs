@@ -72,6 +72,9 @@ pub struct DiskDb {
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
+
+    /// The configured network.
+    network: Network,
 }
 
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
@@ -298,10 +301,23 @@ impl ReadDisk for DiskDb {
 }
 
 impl DiskWriteBatch {
-    pub fn new() -> Self {
+    /// Creates and returns a new transactional batch write.
+    ///
+    /// # Correctness
+    ///
+    /// Each block must be written to the state inside a batch, so that:
+    /// - concurrent `ReadStateService` queries don't see half-written blocks, and
+    /// - if Zebra calls `exit`, panics, or crashes, half-written blocks are rolled back.
+    pub fn new(network: Network) -> Self {
         DiskWriteBatch {
             batch: rocksdb::WriteBatch::default(),
+            network,
         }
+    }
+
+    /// Returns the configured network for this write batch.
+    pub fn network(&self) -> Network {
+        self.network
     }
 }
 
