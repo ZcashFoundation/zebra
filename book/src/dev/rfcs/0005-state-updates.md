@@ -614,7 +614,7 @@ We use the following rocksdb column families:
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
 | `tx_by_transparent_addr_loc`   | `AddressLocation`      | `AtLeastOne<TransactionLocation>`   | Append  |
 | `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
-| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `AtLeastOne<OutputLocation>`        | Up/Del  |
+| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `Vec<OutputLocation>`               | Up/Del  |
 | *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
@@ -645,7 +645,7 @@ Block and Transaction Data:
 - `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
   Always has the same value for each address, even if the first output is spent.
 - `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
-- `AtLeastOne<T>`: `[T; AtLeastOne::len()]` (for known-size `T`)
+- `AtLeastOne<T>` and `Vec<T>`: `[T; len()]` (for known-size `T`)
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
@@ -746,8 +746,9 @@ So they should not be used for consensus-critical checks.
   Blocks can be re-created on request using the following process:
   - Look up `height` in `height_by_hash`
   - Get the block header for `height` from `block_header_by_height`
-  - Use a [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
-    to get each transaction with `height` from `tx_by_loc`
+  - Iterate from `TransactionIndex` 0,
+    to get each transaction with `height` from `tx_by_loc`,
+    stopping when there are no more transactions in the block
 
 - Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
@@ -784,15 +785,16 @@ So they should not be used for consensus-critical checks.
 - `utxo_by_transparent_addr_loc` stores unspent transparent output locations
   by address. UTXO locations are appended by each block.
   This list includes the `AddressLocation`, if it has not been spent.
-  (This duplicate data is small, and helps simplify the code.)
 
 - When a block write deletes a UTXO from `utxo_by_out_loc`,
   that UTXO location should be deleted from `utxo_by_transparent_addr_loc`.
+  The `OutputLocations` are in order, so the deleted UTXO can be found using a
+  [binary search](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search).
   This is an index optimisation, which does not affect query results.
 
 - `tx_by_transparent_addr_loc` stores transaction locations by address.
   This list includes transactions containing spent UTXOs.
-  It also includes the `TransactionLocation` from the `AddressLocation`.
+  It also includes the `TransactionLocation` of the transaction for the `AddressLocation`.
   (This duplicate data is small, and helps simplify the code.)
 
 - The `sprout_note_commitment_tree` stores the note commitment tree state
