@@ -241,7 +241,7 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.5/";
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_015);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_050);
 
 /// The default RTT estimate for peer responses.
 ///
