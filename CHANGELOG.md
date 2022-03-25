@@ -4,12 +4,150 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.6) - 2022-03-25
+
+Zebra's latest beta brings the RPC server support and part of needed API calls to become a **lightwalletd** back end.
+
+### Added
+
+#### RPC
+
+- RPC server support (#3589 #3863)
+- `getinfo` RPC method (#3660)
+- `sendrawtransaction` RPC method (#3685 #3706)
+- `getbestblockhash` RPC method (#3754 #3864)
+- `getblock` RPC method (#3707)
+- `getrawmempool` RPC method (#3851)
+- `getblockchaininfo` RPC method (#3891)
+- `getrawtransaction`RPC method (#3908)
+
+#### Tests
+
+- Basic RPC server tests (#3641 #3726 #3879)
+- Lightwalletd integration test (#3619 #3627 #3628 #3859 #3824 #3758 #3903)
+- Full sync test (#3582)
+
+#### Documentation
+
+- Document RPC methods (#3868)
+- Document consensus rules from 4.6 Action Descriptions (#3549)
+
+#### CI
+
+- Add lightwaletd integration test build and CI pipeline (#3657 #3700 #3705)
+
+#### Others
+
+- Added `TransactionsByMinedId` to mempool (#3907)
+- Added code owners and automatic review assigment to the repository (#3677 #3708 #3718)
+- Validate ZIP-212 grace period blocks using checkpoints (#3889)
+- Store Sapling and Orchard note commitment trees in finalized and non-finalized state (#3818)
+- Get addresses from transparent outputs (#3802)
+- Explain the different ways .txt files are usedin the CI (#3743)
+
+### Changed
+
+The Zebra team made a huge refactor to the database storage and the state to serve RPC calls efficiently. The refactor is accompanied with extensive low level tests in the form of snapshots.
+
+#### Database and State
+
+- Tests: #3691 #3759 #3630
+- Database: #3717 #3741 #3874 #3578 #3579 #3590 #3607 #3617
+- State: #3778 #3810 #3846 #3847 #3870 #3865 #3866 #3811 #3826
+
+#### CI
+
+- Cleanup GCP instances on a single PR (#3766)
+- Use OCI Image Format Specification for labels (#3728)
+- Use improved OIDC for gcloud authentication (#3885)
+- Use gcloud to search for cached disk state (#3775)
+
+#### Dependency updates
+
+- Remove an outdated dependabot ignore rule (#3719)
+- Manually upgraded some dependencies (#3625)
+- Replace unmantained multiset with mset (#3595)
+- Update sha2 from 0.9.8 to 0.9.9 (#3585)
+- Update semver from 1.0.5 to 1.0.6 (#3610)
+- Update secp256k1 from 0.21.2 to 0.21.3 (#3632)
+- Update insta from 1.12.0 to 1.13.0 (#3762)
+- Update inferno from 0.10.12 to 0.11.1 (#3748 #3919)
+- Update regex from 1.5.4 to 1.5.5 (#3797)
+- Update google-github-actions/setup-gcloud from 0.5.1 to 0.6.0 (#3814)
+- Update docker/login-action from 1.12.0 to 1.14.1 (#3570 #3761)
+- Update actions/cache from 2 to 3 (#3918)
+- Update tj-actions/changed-files from 14.4 to 18.4 (#3667 #3917 #3796 #3895 #3876)
+- Update docker/build-push-action from 2.9.0 to 2.10.0 (#3878)
+- Update once_cell from 1.9.0 to 1.10.0 (#3747)
+- Update actions/checkout from 2.4.0 to 3.0.0 (#3806)
+- Update owo-colors from 3.2.0 to 3.3.0 (#3920)
+- Update vergen from 6.0.2 to 7.0.0 (#3837)
+
+#### Documentation
+
+- Simplify the database design using prefix iterators (#3916)
+- Link to Conventional Commits specification in CONTRIBUTING file (#3858)
+- Update database design for read-only state service (#3843)
+- Explain optional zebra-network/tor dependencies (#3765)
+- Simplify zebra-checkpoints summary (#3612)
+
+#### Tests
+
+- Turn on full backtraces and disable frame filtering (#3763)
+- Decouple full sync from other tests (#3735)
+- Split zebrad acceptance tests into sub-modules (#3901)
+- Improve zebrad test API (#3899 #3892)
+
+#### Others
+
+- Move mempool service to a new `zebra-node-services` crate (#3648)
+- Enable `checkpoint_sync` by default (#3777)
+- Update Zebra's hard-coded blockchain checkpoint lists  (#3606)
+- Clippy lints: warn on manual printing to stdout or stderr (#3767)
+
+### Removed
+
+- Temporally removed Windows support from CI (#3819)
+
+### Fixed
+
+- Make FromHex consistent with ToHex for tx/block hashes (#3893)
+- Prevent synchronizer loop when very close to tip (#3854)
+- Use RwLock for note commitment tree root caches (#3809)
+
+#### Tests
+
+- Use the correct stop condition for the cached state tests (#3688)
+- Stop excessive logging which causes test hangs (#3755)
+- Use all available checkpoints in the full sync test (#3613)
+- Use `TEST_FAKE_ACTIVATION_HEIGHTS` at runtime and fix tests (#3749)
+- Check for zebrad test output in the correct order (#3643)
+
+#### CI
+
+- Do not use GHA cache for images (#3794)
+- Run coverage collection when pushing to main (#3561)
+- Check for duplicate dependencies with optional features off (#3592)
+- Remove coverage from mergify because nightly builds fail (#3886)
+- Only run the full sync test on mergify queue PRs (#3773)
+- Fix syntax in some yml workflows (#3957)
+- Update CI job path triggers (#3692)
+- Change pd-extreme to pd-ssd to avoid quotas (#3823)
+- Use a specific shortening length for SHAs (#3929)
+- Path format for cached state rebuild (#3873)
+- Re-enable manual dispatch for test full sync (#3812)
+- Use correct conditional in job to deploy Mainnet nodes (#3750)
+- Missing job key and timeout bump for build (#3744)
+
+### Security
+
+- Forbid non-ascii identifiers (#3615)
+
+
 ## [Zebra 1.0.0-beta.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.5) - 2022-02-18
 
 Zebra's latest beta brings better networking, documents more consensus rules and
 improves the CI pipelines.
-
-
 
 ### Added
 
