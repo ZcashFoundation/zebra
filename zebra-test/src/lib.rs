@@ -55,6 +55,7 @@ static INIT: Once = Once::new();
 ///
 /// This function should be called at the start of every test.
 pub fn init() {
+    panic!("deliberately fail all the tests");
     // Per-test
 
     // Settings for threads that snapshots data using `insta`
