@@ -9,7 +9,7 @@ on:
         default: 10
 
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2-standard-4
@@ -19,6 +19,9 @@ jobs:
     name: Deploy zcashd nodes
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     steps:
       - uses: actions/checkout@v3.0.0
@@ -27,13 +30,17 @@ jobs:
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
-      - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.6.0
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.6.0
         with:
-          project_id: ${{ env.PROJECT_ID }}
-          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Create instance template from container image
       - name: Create instance template

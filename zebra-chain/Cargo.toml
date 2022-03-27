@@ -9,7 +9,8 @@ edition = "2021"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio"]
+proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio",
+"hex/serde"]
 bench = ["zebra-test"]
 
 [dependencies]
@@ -75,6 +76,8 @@ criterion = { version = "0.3.5", features = ["html_reports"] }
 itertools = "0.10.3"
 spandoc = "0.2.1"
 tracing = "0.1.31"
+
+hex = { version = "0.4.3", features = ["serde"] }
 
 proptest = "0.10.1"
 proptest-derive = "0.3.0"

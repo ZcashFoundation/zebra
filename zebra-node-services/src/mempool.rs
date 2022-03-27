@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use zebra_chain::transaction::{UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{Hash, UnminedTx, UnminedTxId};
 
 use crate::BoxError;
 
@@ -28,6 +28,12 @@ pub enum Request {
     /// Query matching  transactions in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
     TransactionsById(HashSet<UnminedTxId>),
+
+    /// Query matching  transactions in the mempool,
+    /// using a unique set of [`Hash`]s. Pre-V5 transactions are matched
+    /// directly; V5 transaction are matched just by the Hash, disregarding
+    /// the [`AuthDigest`].
+    TransactionsByMinedId(HashSet<Hash>),
 
     /// Query matching cached rejected transaction IDs in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
@@ -74,7 +80,9 @@ pub enum Response {
     /// Returns matching transactions from the mempool.
     ///
     /// Since the [`TransactionsById`] request is unique,
-    /// the response transactions are also unique.
+    /// the response transactions are also unique. The same applies to
+    /// [`TransactionByMinedId`] requests, since the mempool does not allow
+    /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 
     /// Returns matching cached rejected transaction IDs from the mempool,

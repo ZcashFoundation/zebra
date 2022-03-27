@@ -44,8 +44,8 @@ use crate::{
         pending_utxos::PendingUtxos,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, Request,
-    Response, ValidateContextError,
+    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, ReadRequest,
+    ReadResponse, Request, Response, ValidateContextError,
 };
 
 pub mod block_iter;
@@ -464,12 +464,10 @@ impl StateService {
         read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
 
-    /// Return the transaction identified by `hash` if it exists in the current
-    /// best chain.
+    /// Returns the [`Transaction`] with [`transaction::Hash`],
+    /// if it exists in the current best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        self.mem
-            .best_transaction(hash)
-            .or_else(|| self.disk.db().transaction(hash))
+        read::transaction(self.mem.best_chain(), self.disk.db(), hash).map(|(tx, _height)| tx)
     }
 
     /// Return the hash for the block at `height` in the current best chain.
@@ -739,7 +737,12 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
             Request::CommitBlock(prepared) => {
-                metrics::counter!("state.requests", 1, "type" => "commit_block");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "commit_block",
+                );
 
                 self.assert_block_can_be_validated(&prepared);
 
@@ -757,7 +760,12 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::CommitFinalizedBlock(finalized) => {
-                metrics::counter!("state.requests", 1, "type" => "commit_finalized_block");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "commit_finalized_block",
+                );
 
                 self.pending_utxos.check_against(&finalized.new_outputs);
                 let rsp_rx = self.queue_and_commit_finalized(finalized);
@@ -772,32 +780,67 @@ impl Service<Request> for StateService {
                 .boxed()
             }
             Request::Depth(hash) => {
-                metrics::counter!("state.requests", 1, "type" => "depth");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "depth",
+                );
+
                 let rsp = Ok(self.best_depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
             Request::Tip => {
-                metrics::counter!("state.requests", 1, "type" => "tip");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "tip",
+                );
+
                 let rsp = Ok(self.best_tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
             Request::BlockLocator => {
-                metrics::counter!("state.requests", 1, "type" => "block_locator");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "block_locator",
+                );
+
                 let rsp = Ok(self.block_locator().unwrap_or_default()).map(Response::BlockLocator);
                 async move { rsp }.boxed()
             }
             Request::Transaction(hash) => {
-                metrics::counter!("state.requests", 1, "type" => "transaction");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "transaction",
+                );
+
                 let rsp = Ok(self.best_transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
             Request::Block(hash_or_height) => {
-                metrics::counter!("state.requests", 1, "type" => "block");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "block",
+                );
+
                 let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
             Request::AwaitUtxo(outpoint) => {
-                metrics::counter!("state.requests", 1, "type" => "await_utxo");
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "await_utxo",
+                );
 
                 let fut = self.pending_utxos.queue(outpoint);
 
@@ -808,12 +851,26 @@ impl Service<Request> for StateService {
                 fut.boxed()
             }
             Request::FindBlockHashes { known_blocks, stop } => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "find_block_hashes",
+                );
+
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
                 let res =
                     self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "find_block_headers",
+                );
+
                 const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
                 // Zcashd will blindly request more block headers as long as it
                 // got 160 block headers in response to a previous query, EVEN
@@ -845,8 +902,8 @@ impl Service<Request> for StateService {
     }
 }
 
-impl Service<Request> for ReadStateService {
-    type Response = Response;
+impl Service<ReadRequest> for ReadStateService {
+    type Response = ReadResponse;
     type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
@@ -856,31 +913,9 @@ impl Service<Request> for ReadStateService {
     }
 
     #[instrument(name = "read_state", skip(self))]
-    fn call(&mut self, req: Request) -> Self::Future {
+    fn call(&mut self, req: ReadRequest) -> Self::Future {
         match req {
-            // Used by get_block RPC.
-            Request::Block(hash_or_height) => {
-                let state = self.clone();
-
-                async move {
-                    let block = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::block(best_chain, &state.db, hash_or_height)
-                    });
-
-                    Ok(Response::Block(block))
-                }
-                .boxed()
-            }
-
-            // TODO: implement for lightwalletd as part of these tickets
-
-            // get_raw_transaction (#3145)
-            Request::Transaction(_hash) => {
-                unimplemented!("ReadStateService doesn't Transaction yet")
-            }
-
-            // TODO: split the Request enum, then implement these new ReadRequests for lightwalletd
-            //       as part of these tickets
+            // TODO: implement these new ReadRequests for lightwalletd, as part of these tickets
 
             // z_get_tree_state (#3156)
 
@@ -889,44 +924,47 @@ impl Service<Request> for ReadStateService {
             // get_address_balance (#3157)
             // get_address_utxos (#3158)
 
-            // Out of Scope
-            // TODO: delete when splitting the Request enum
+            // Used by get_block RPC.
+            ReadRequest::Block(hash_or_height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "block",
+                );
 
-            // Use ChainTip instead.
-            Request::Tip => unreachable!("ReadStateService doesn't need to Tip"),
+                let state = self.clone();
 
-            // These requests don't need better performance at the moment.
-            Request::FindBlockHashes {
-                known_blocks: _,
-                stop: _,
-            } => {
-                unreachable!("ReadStateService doesn't need to FindBlockHashes")
-            }
-            Request::FindBlockHeaders {
-                known_blocks: _,
-                stop: _,
-            } => {
-                unreachable!("ReadStateService doesn't need to FindBlockHeaders")
-            }
+                async move {
+                    let block = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::block(best_chain, &state.db, hash_or_height)
+                    });
 
-            // Some callers of this request need to wait for queued blocks.
-            Request::Depth(_hash) => unreachable!("ReadStateService could change depth behaviour"),
-
-            // This request needs to wait for queued blocks.
-            Request::BlockLocator => {
-                unreachable!("ReadStateService should not be used for block locators")
+                    Ok(ReadResponse::Block(block))
+                }
+                .boxed()
             }
 
-            // Impossible Requests
+            // For the get_raw_transaction RPC, to be implemented in #3145.
+            ReadRequest::Transaction(hash) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "transaction",
+                );
 
-            // The read-only service doesn't have the shared internal state
-            // needed to await UTXOs.
-            Request::AwaitUtxo(_outpoint) => unreachable!("ReadStateService can't await UTXOs"),
+                let state = self.clone();
 
-            // The read-only service can't write.
-            Request::CommitBlock(_prepared) => unreachable!("ReadStateService can't commit blocks"),
-            Request::CommitFinalizedBlock(_finalized) => {
-                unreachable!("ReadStateService can't commit blocks")
+                async move {
+                    let transaction_and_height =
+                        state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transaction(best_chain, &state.db, hash)
+                        });
+
+                    Ok(ReadResponse::Transaction(transaction_and_height))
+                }
+                .boxed()
             }
         }
     }
@@ -964,12 +1002,40 @@ pub fn init(
     )
 }
 
-/// Initialize a state service with an ephemeral [`Config`] and a buffer with a single slot.
+/// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
 ///
-/// This can be used to create a state service for testing. See also [`init`].
+/// This can be used to create a state service for testing.
+///
+/// See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     let (state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 
     Buffer::new(BoxService::new(state_service), 1)
+}
+
+/// Initializes a state service with an ephemeral [`Config`] and a buffer with a single slot,
+/// then returns the read-write service, read-only service, and tip watch channels.
+///
+/// This can be used to create a state service for testing. See also [`init`].
+#[cfg(any(test, feature = "proptest-impl"))]
+pub fn init_test_services(
+    network: Network,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
+        StateService::new(Config::ephemeral(), network);
+
+    let state_service = Buffer::new(BoxService::new(state_service), 1);
+
+    (
+        state_service,
+        read_state_service,
+        latest_chain_tip,
+        chain_tip_change,
+    )
 }

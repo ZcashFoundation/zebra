@@ -74,7 +74,8 @@ impl FromHex for Hash {
     type Error = <[u8; 32] as FromHex>::Error;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-        let hash = <[u8; 32]>::from_hex(hex)?;
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
 
         Ok(hash.into())
     }

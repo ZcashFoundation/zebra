@@ -29,27 +29,26 @@
 //! cargo insta test --review --delete-unreferenced-snapshots
 //! ```
 //! to update the test snapshots, then commit the `test_*.snap` files using git.
-//!
-//! # TODO
-//!
-//! Test the rest of the shielded data,
-//! and data activated in Overwinter and later network upgrades.
 
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock},
     orchard,
     parameters::Network::{self, *},
     sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::Transaction,
+    transaction::{self, Transaction},
+    transparent,
 };
 
 use crate::{
-    service::finalized_state::{disk_format::TransactionLocation, FinalizedState},
+    service::finalized_state::{
+        disk_format::{block::TransactionIndex, transparent::OutputLocation, TransactionLocation},
+        FinalizedState,
+    },
     Config,
 };
 
@@ -57,7 +56,7 @@ use crate::{
 ///
 /// This structure snapshots the height and hash on separate lines,
 /// which looks good for a single entry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct Tip {
     height: u32,
     block_hash: String,
@@ -76,28 +75,25 @@ impl From<(Height, block::Hash)> for Tip {
 ///
 /// This structure is used to snapshot the height and hash on the same line,
 /// which looks good for a vector of heights and hashes.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 struct BlockHash(String);
 
 /// Block data structure for RON snapshots.
 ///
 /// This structure is used to snapshot the height and block data on separate lines,
 /// which looks good for a vector of heights and block data.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct BlockData {
     height: u32,
-    block: String,
+    #[serde(with = "hex")]
+    block: SerializedBlock,
 }
 
 impl BlockData {
     pub fn new(height: Height, block: &Block) -> BlockData {
-        let block = block
-            .zcash_serialize_to_vec()
-            .expect("serialization of stored block succeeds");
-
         BlockData {
             height: height.0,
-            block: hex::encode(block),
+            block: block.into(),
         }
     }
 }
@@ -106,18 +102,19 @@ impl BlockData {
 ///
 /// This structure is used to snapshot the location and transaction hash on separate lines,
 /// which looks good for a vector of locations and transaction hashes.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-struct TransactionHash {
-    loc: TransactionLocation,
-    hash: String,
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct TransactionHashByLocation {
+    loc: Option<TransactionLocation>,
+    #[serde(with = "hex")]
+    hash: transaction::Hash,
 }
 
-impl TransactionHash {
-    pub fn new(loc: TransactionLocation, transaction: &Transaction) -> TransactionHash {
-        TransactionHash {
-            loc,
-            hash: transaction.hash().to_string(),
-        }
+impl TransactionHashByLocation {
+    pub fn new(
+        loc: Option<TransactionLocation>,
+        hash: transaction::Hash,
+    ) -> TransactionHashByLocation {
+        TransactionHashByLocation { loc, hash }
     }
 }
 
@@ -125,9 +122,12 @@ impl TransactionHash {
 ///
 /// This structure is used to snapshot the location and transaction data on separate lines,
 /// which looks good for a vector of locations and transaction data.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 struct TransactionData {
     loc: TransactionLocation,
+    // TODO: after #3145, replace with:
+    // #[serde(with = "hex")]
+    // transaction: SerializedTransaction,
     transaction: String,
 }
 
@@ -177,6 +177,8 @@ fn test_block_and_transaction_data_with_network(network: Network) {
     };
 
     // We limit the number of blocks, because the serialized data is a few kilobytes per block.
+    //
+    // TODO: Test data activated in Overwinter and later network upgrades.
     for height in 0..=2 {
         let block: Arc<Block> = blocks
             .get(&height)
@@ -223,10 +225,22 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         let mut stored_transaction_hashes = Vec::new();
         let mut stored_transactions = Vec::new();
 
+        let mut stored_utxos = Vec::new();
+
+        let sapling_tree_at_tip = state.sapling_note_commitment_tree();
+        let orchard_tree_at_tip = state.orchard_note_commitment_tree();
+
+        // Test the history tree.
+        //
+        // TODO: test non-empty history trees, using Heartwood or later blocks.
+        //       test the rest of the chain data (value balance).
+        let history_tree_at_tip = state.history_tree();
+
         for query_height in 0..=max_height.0 {
             let query_height = Height(query_height);
 
-            // Check block height, block hash, and block database queries.
+            // Check all the block column families,
+            // using block height, block hash, and block database queries.
             let stored_block_hash = state
                 .hash(query_height)
                 .expect("heights up to tip have hashes");
@@ -237,14 +251,15 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .block(query_height.into())
                 .expect("heights up to tip have blocks");
 
+            // Check the sapling and orchard note commitment trees.
+            //
+            // TODO: test the rest of the shielded data (anchors, nullifiers, sprout)
             let sapling_tree_by_height = state
                 .sapling_note_commitment_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
             let orchard_tree_by_height = state
                 .orchard_note_commitment_tree_by_height(&query_height)
                 .expect("heights up to tip have Orchard trees");
-            let sapling_tree_at_tip = state.sapling_note_commitment_tree();
-            let orchard_tree_at_tip = state.db.orchard_note_commitment_tree();
 
             // We don't need to snapshot the heights,
             // because they are fully determined by the tip and block hashes.
@@ -257,6 +272,12 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                 assert_eq!(sapling_tree_at_tip, sapling_tree_by_height);
                 assert_eq!(orchard_tree_at_tip, orchard_tree_by_height);
+
+                // Skip these checks for empty history trees.
+                if let Some(history_tree_at_tip) = history_tree_at_tip.as_ref() {
+                    assert_eq!(history_tree_at_tip.current_height(), max_height);
+                    assert_eq!(history_tree_at_tip.network(), state.network());
+                }
             }
 
             assert_eq!(
@@ -277,11 +298,55 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 let transaction = &stored_block.transactions[tx_index];
                 let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
 
-                let transaction_hash = TransactionHash::new(transaction_location, transaction);
+                let transaction_hash = transaction.hash();
                 let transaction_data = TransactionData::new(transaction_location, transaction);
 
-                stored_transaction_hashes.push(transaction_hash);
+                // Check all the transaction column families,
+                // using transaction location queries.
+                let stored_transaction_location = state.transaction_location(transaction_hash);
+
+                // Consensus: the genesis transaction is not indexed.
+                if query_height.0 > 0 {
+                    assert_eq!(stored_transaction_location, Some(transaction_location));
+                } else {
+                    assert_eq!(stored_transaction_location, None);
+                }
+
+                let stored_transaction_hash =
+                    TransactionHashByLocation::new(stored_transaction_location, transaction_hash);
+
+                stored_transaction_hashes.push(stored_transaction_hash);
                 stored_transactions.push(transaction_data);
+
+                for output_index in 0..stored_block.transactions[tx_index].outputs().len() {
+                    let output = &stored_block.transactions[tx_index].outputs()[output_index];
+                    let outpoint =
+                        transparent::OutPoint::from_usize(transaction_hash, output_index);
+
+                    let output_location =
+                        OutputLocation::from_usize(transaction_hash, output_index);
+
+                    let stored_utxo = state.utxo(&outpoint);
+
+                    if let Some(stored_utxo) = &stored_utxo {
+                        assert_eq!(&stored_utxo.output, output);
+                        assert_eq!(stored_utxo.height, query_height);
+
+                        assert_eq!(
+                            stored_utxo.from_coinbase,
+                            transaction_location.index == TransactionIndex::from_usize(0),
+                            "coinbase transactions must be the first transaction in a block:\n\
+                             from_coinbase was: {from_coinbase},\n\
+                             but transaction index was: {tx_index},\n\
+                             at: {transaction_location:?},\n\
+                             {output_location:?}",
+                            from_coinbase = stored_utxo.from_coinbase,
+                        );
+                    }
+
+                    // TODO: use output_location in #3151
+                    stored_utxos.push((outpoint, stored_utxo));
+                }
             }
         }
 
@@ -290,13 +355,6 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             is_sorted(&stored_block_hashes),
             "unsorted: {:?}",
             stored_block_hashes
-        );
-        assert!(is_sorted(&stored_blocks), "unsorted: {:?}", stored_blocks);
-
-        assert!(
-            is_sorted(&stored_transaction_hashes),
-            "unsorted: {:?}",
-            stored_transaction_hashes
         );
         assert!(
             is_sorted(&stored_transactions),
@@ -310,14 +368,19 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         insta::assert_ron_snapshot!("block_hashes", stored_block_hashes);
         insta::assert_ron_snapshot!("blocks", stored_blocks);
 
+        insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
+        insta::assert_ron_snapshot!("transactions", stored_transactions);
+
+        insta::assert_ron_snapshot!("utxos", stored_utxos);
+
         // These snapshots will change if the trees do not have cached roots.
         // But we expect them to always have cached roots,
         // because those roots are used to populate the anchor column families.
         insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
         insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
 
-        insta::assert_ron_snapshot!("transaction_hashes", stored_transaction_hashes);
-        insta::assert_ron_snapshot!("transactions", stored_transactions);
+        // The zcash_history types used in this tree don't support serde.
+        insta::assert_debug_snapshot!("history_tree", (max_height, history_tree_at_tip));
     }
 }
 

@@ -9,9 +9,7 @@ use zebra_chain::{
     history_tree::HistoryTree,
     orchard,
     parameters::Network,
-    sapling, sprout,
-    transaction::{self, Transaction},
-    transparent,
+    sapling, sprout, transparent,
 };
 
 use crate::{
@@ -345,15 +343,6 @@ impl NonFinalizedState {
         }
 
         None
-    }
-
-    /// Returns the given transaction if it exists in the best chain.
-    pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        let best_chain = self.best_chain()?;
-        best_chain
-            .tx_by_hash
-            .get(&hash)
-            .map(|(height, index)| best_chain.blocks[height].block.transactions[*index].clone())
     }
 
     /// Returns `true` if the best chain contains `sprout_nullifier`.
