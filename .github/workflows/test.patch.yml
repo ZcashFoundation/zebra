@@ -46,6 +46,13 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  test-lightwalletd-integration:
+    name: Test integration with lightwalletd
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - run: 'echo "No build required"'
+
   regenerate-stateful-disks:
     name: Regenerate stateful disks
     runs-on: ubuntu-latest
