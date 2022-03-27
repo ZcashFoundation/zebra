@@ -389,7 +389,7 @@ where
             "starting sync, obtaining new tips"
         );
         if let Err(e) = self.obtain_tips().await {
-            warn!(?e, "error obtaining tips");
+            info!("temporary error obtaining tips: {:#}", e);
             return Err(());
         }
         self.update_metrics();
@@ -438,7 +438,7 @@ where
             );
 
             if let Err(e) = self.extend_tips().await {
-                warn!(?e, "error extending tips");
+                info!("temporary error extending tips: {:#}", e);
                 return Err(());
             }
             self.update_metrics();
