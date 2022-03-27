@@ -50,7 +50,6 @@ jobs:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     steps:
       - run: 'echo "No build required"'
 
