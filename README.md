@@ -1,4 +1,4 @@
-![Zebra logotype](https://www.zfnd.org/images/zebra-logotype.png)
+![Zebra logotype](https://zfnd.org/wp-content/uploads/2022/03/zebra-logotype.png)
 
 ---
 
