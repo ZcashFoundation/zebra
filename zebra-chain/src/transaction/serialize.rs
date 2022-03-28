@@ -1,7 +1,7 @@
 //! Contains impls of `ZcashSerialize`, `ZcashDeserialize` for all of the
 //! transaction types, so that all of the serialization logic is in one place.
 
-use std::{convert::TryInto, io, sync::Arc};
+use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
@@ -975,5 +975,38 @@ impl TrustedPreallocate for transparent::Input {
 impl TrustedPreallocate for transparent::Output {
     fn max_allocation() -> u64 {
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_OUTPUT_SIZE
+    }
+}
+
+/// A serialized transaction.
+///
+/// Stores bytes that are guaranteed to be deserializable into a [`Transaction`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SerializedTransaction {
+    bytes: Vec<u8>,
+}
+
+/// Build a [`SerializedTransaction`] by serializing a block.
+impl<B: Borrow<Transaction>> From<B> for SerializedTransaction {
+    fn from(tx: B) -> Self {
+        SerializedTransaction {
+            bytes: tx
+                .borrow()
+                .zcash_serialize_to_vec()
+                .expect("Writing to a `Vec` should never fail"),
+        }
+    }
+}
+
+/// Access the serialized bytes of a [`SerializedTransaction`].
+impl AsRef<[u8]> for SerializedTransaction {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_ref()
+    }
+}
+
+impl From<Vec<u8>> for SerializedTransaction {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes }
     }
 }

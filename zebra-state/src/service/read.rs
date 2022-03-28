@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
     sapling,
     transaction::{self, Transaction},
 };
@@ -56,7 +56,7 @@ pub(crate) fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<Arc<Transaction>>
+) -> Option<(Arc<Transaction>, block::Height)>
 where
     C: AsRef<Chain>,
 {
@@ -71,7 +71,12 @@ where
     // memory, but `db` stores transactions on disk, with a memory cache.)
     chain
         .as_ref()
-        .and_then(|chain| chain.as_ref().transaction(hash).cloned())
+        .and_then(|chain| {
+            chain
+                .as_ref()
+                .transaction(hash)
+                .map(|(tx, height)| (tx.clone(), height))
+        })
         .or_else(|| db.transaction(hash))
 }
 

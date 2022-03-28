@@ -128,7 +128,10 @@ impl ZebraDb {
 
     /// Returns the [`Transaction`] with [`transaction::Hash`],
     /// if it exists in the finalized chain.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
+    pub fn transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Option<(Arc<Transaction>, block::Height)> {
         self.transaction_location(hash)
             .map(|TransactionLocation { index, height }| {
                 let block = self
@@ -136,7 +139,7 @@ impl ZebraDb {
                     .expect("block will exist if TransactionLocation does");
 
                 // TODO: store transactions in a separate database index (#3151)
-                block.transactions[index.as_usize()].clone()
+                (block.transactions[index.as_usize()].clone(), height)
             })
     }
 

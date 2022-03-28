@@ -19,7 +19,7 @@ use tokio::sync::watch;
 /// # Note
 ///
 /// If a lot of blocks are committed at the same time,
-/// the watch chanel will skip some block updates,
+/// the watch channel will skip some block updates,
 /// even though those updates were committed to the state.
 #[derive(Clone, Debug)]
 pub struct WatchReceiver<T> {

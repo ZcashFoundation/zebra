@@ -57,7 +57,7 @@ pub enum ReadResponse {
     /// Response to
     /// [`ReadRequest::Transaction`](crate::ReadRequest::Transaction) with the
     /// specified transaction.
-    Transaction(Option<Arc<Transaction>>),
+    Transaction(Option<(Arc<Transaction>, block::Height)>),
 
     /// Response to
     /// [`ReadRequest::SaplingTree`](crate::ReadRequest::SaplingTree) with the

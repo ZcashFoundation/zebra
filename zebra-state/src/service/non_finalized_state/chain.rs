@@ -330,10 +330,13 @@ impl Chain {
     }
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in this chain.
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<&Arc<Transaction>> {
+    pub fn transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Option<(&Arc<Transaction>, block::Height)> {
         self.tx_by_hash
             .get(&hash)
-            .map(|(height, index)| &self.blocks[height].block.transactions[*index])
+            .map(|(height, index)| (&self.blocks[height].block.transactions[*index], *height))
     }
 
     /// Returns the Sapling
