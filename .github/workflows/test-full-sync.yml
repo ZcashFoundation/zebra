@@ -212,6 +212,19 @@ jobs:
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
+      # Create image from disk
+      # Force the image creation as the disk is still attached, even though is not being used by the container
+      - name: Create image from state disk
+        # Only run if the earlier step succeeds
+        if: steps.full-sync-mainnet.outcome == 'success'
+        run: |
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet \
+          --force \
+          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet \
+          --source-disk-zone=${{ env.ZONE }} \
+          --storage-location=us \
+          --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
+
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
         if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
