@@ -1,11 +1,13 @@
-use serde::{Deserialize, Serialize};
 use std::{fmt, io};
 
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// An encoding of a Groth16 proof, as used in Zcash.
 #[derive(Serialize, Deserialize)]
-pub struct Groth16Proof(#[serde(with = "serde_helpers::BigArray")] pub [u8; 192]);
+pub struct Groth16Proof(#[serde(with = "BigArray")] pub [u8; 192]);
 
 impl fmt::Debug for Groth16Proof {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

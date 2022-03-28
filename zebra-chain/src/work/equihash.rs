@@ -2,11 +2,13 @@
 
 use std::{fmt, io};
 
+use serde_big_array::BigArray;
+
 use crate::{
     block::Header,
     serialization::{
-        serde_helpers, zcash_serialize_bytes, SerializationError, ZcashDeserialize,
-        ZcashDeserializeInto, ZcashSerialize,
+        zcash_serialize_bytes, SerializationError, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
 };
 
@@ -28,7 +30,7 @@ pub(crate) const SOLUTION_SIZE: usize = 1344;
 /// The size of an Equihash solution in bytes is always 1344 so the
 /// length of this type is fixed.
 #[derive(Deserialize, Serialize)]
-pub struct Solution(#[serde(with = "serde_helpers::BigArray")] pub [u8; SOLUTION_SIZE]);
+pub struct Solution(#[serde(with = "BigArray")] pub [u8; SOLUTION_SIZE]);
 
 impl Solution {
     /// The length of the portion of the header used as input when verifying

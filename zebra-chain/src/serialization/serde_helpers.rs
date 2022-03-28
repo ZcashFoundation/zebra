@@ -1,17 +1,5 @@
 use group::GroupEncoding;
 use halo2::{arithmetic::FieldExt, pasta::pallas};
-use serde_big_array::big_array;
-
-big_array! {
-    BigArray;
-    + 1344, // `EquihashSolution`
-    80,   // `sapling::OutCiphertext`
-    580,  // `sapling::EncryptedCiphertext`
-    601,  // `sprout::EncryptedCiphertext`
-    296,  // `Bctv14Proof`
-    196,  // `Groth16Proof`
-}
-
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "jubjub::AffinePoint")]
 pub struct AffinePoint {
