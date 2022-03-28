@@ -27,6 +27,9 @@ use crate::service::finalized_state::disk_format::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
 
@@ -44,9 +47,8 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 
 // Transparent types
 
-/// A transaction's index in its block.
+/// A transparent output's index in its transaction.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OutputIndex(u32);
 
 impl OutputIndex {
@@ -62,7 +64,7 @@ impl OutputIndex {
         self.0
     }
 
-    /// Create a transparent output index from the native index integer type.
+    /// Create a transparent output index from `usize`.
     #[allow(dead_code)]
     pub fn from_usize(output_index: usize) -> OutputIndex {
         OutputIndex(
@@ -72,12 +74,30 @@ impl OutputIndex {
         )
     }
 
-    /// Return this index as the native index integer type.
+    /// Return this index as `usize`.
     #[allow(dead_code)]
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
             .expect("the maximum valid index fits in usize")
+    }
+
+    /// Create a transparent output index from `u64`.
+    #[allow(dead_code)]
+    pub fn from_u64(output_index: u64) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum u64 index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `u64`.
+    #[allow(dead_code)]
+    pub fn as_u64(&self) -> u64 {
+        self.0
+            .try_into()
+            .expect("the maximum valid index fits in u64")
     }
 }
 
@@ -155,6 +175,13 @@ impl OutputLocation {
     pub fn transaction_location(&self) -> TransactionLocation {
         self.transaction_location
     }
+
+    /// Allows tests to set the height of this output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn height_mut(&mut self) -> &mut Height {
+        &mut self.transaction_location.height
+    }
 }
 
 /// The location of the first [`transparent::Output`] sent to an address.
@@ -213,6 +240,13 @@ impl AddressBalanceLocation {
     /// Returns the location of the first [`transparent::Output`] sent to an address.
     pub fn location(&self) -> AddressLocation {
         self.location
+    }
+
+    /// Allows tests to set the height of the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn height_mut(&mut self) -> &mut Height {
+        &mut self.location.transaction_location.height
     }
 }
 
