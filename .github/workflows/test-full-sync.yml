@@ -142,6 +142,11 @@ jobs:
         with:
           short-length: 7
 
+      - name: Format network string
+        run: |
+          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >>${GITHUB_ENV}
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -199,8 +204,8 @@ jobs:
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
           sleep 60
 
-      - name: Full sync mainnet
-        id: full-sync-mainnet
+      - name: Full sync
+        id: full-sync
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
@@ -216,11 +221,11 @@ jobs:
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
         # Only run if the earlier step succeeds
-        if: steps.full-sync-mainnet.outcome == 'success'
+        if: steps.full-sync.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }} \
           --force \
-          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-mainnet \
+          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
