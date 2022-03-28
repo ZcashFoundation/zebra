@@ -1,9 +1,13 @@
 use std::{process::Command, time::Duration};
 
 use color_eyre::eyre::{eyre, Result};
+use regex::RegexSet;
 use tempfile::tempdir;
 
-use zebra_test::{command::TestDirExt, prelude::Stdio};
+use zebra_test::{
+    command::{TestDirExt, NO_MATCHES_REGEX_ITER},
+    prelude::Stdio,
+};
 
 /// Returns true if `cmd` with `args` runs successfully.
 ///
@@ -200,7 +204,7 @@ fn failure_regex_matches_stdout_failure_message() {
         .spawn_child_with_command(TEST_CMD, &["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Any method that reads output should work here.
     // We use a non-matching regex, to trigger the failure panic.
@@ -236,7 +240,7 @@ fn failure_regex_matches_stderr_failure_message() {
         .spawn_child_with_command(TEST_CMD, &["-c", "read -t 1 -p failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Any method that reads output should work here.
     // We use a non-matching regex, to trigger the failure panic.
@@ -266,7 +270,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
         .spawn_child_with_command(TEST_CMD, &["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Give the child process enough time to print its output.
     std::thread::sleep(Duration::from_secs(1));
@@ -295,7 +299,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
         .spawn_child_with_command(TEST_CMD, &["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Give the child process enough time to print its output.
     std::thread::sleep(Duration::from_secs(1));
@@ -326,7 +330,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
         .spawn_child_with_command(TEST_CMD, &["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Give the child process enough time to print its output.
     std::thread::sleep(Duration::from_secs(1));
@@ -358,7 +362,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
         .spawn_child_with_command(TEST_CMD, &["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Give the child process enough time to print its output.
     std::thread::sleep(Duration::from_secs(1));
@@ -397,7 +401,7 @@ fn failure_regex_timeout_continuous_output() {
         .spawn_child_with_command(TEST_CMD, &["-v", "/dev/zero"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
-        .with_failure_regex_set("0");
+        .with_failure_regex_set("0", RegexSet::empty());
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout and the failure panic.
@@ -429,7 +433,7 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
         .spawn_child_with_command(TEST_CMD, &["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("fail");
+        .with_failure_regex_set("fail", RegexSet::empty());
 
     // Give the child process enough time to print its output.
     std::thread::sleep(Duration::from_secs(1));
@@ -437,4 +441,81 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
     // Wait with output should read all unread output to generate the error context,
     // or the output should be read on drop.
     child.wait_with_output().unwrap_err();
+}
+
+/// Make sure failure regex iters detect when a child process prints a failure message to stdout,
+/// and panic with a test failure message.
+#[test]
+#[should_panic(expected = "Logged a failure message")]
+fn failure_regex_iter_matches_stdout_failure_message() {
+    zebra_test::init();
+
+    const TEST_CMD: &str = "echo";
+    // Skip the test if the test system does not have the command
+    if !is_command_available(TEST_CMD, &[]) {
+        panic!(
+            "skipping test: command not available\n\
+             fake panic message: Logged a failure message"
+        );
+    }
+
+    let mut child = tempdir()
+        .unwrap()
+        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .unwrap()
+        .with_timeout(Duration::from_secs(2))
+        .with_failure_regex_iter(
+            ["fail"].iter().cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
+        );
+
+    // Any method that reads output should work here.
+    // We use a non-matching regex, to trigger the failure panic.
+    child
+        .expect_stdout_line_matches("this regex should not match")
+        .unwrap_err();
+}
+
+/// Make sure ignore regexes override failure regexes.
+#[test]
+fn ignore_regex_ignores_stdout_failure_message() {
+    zebra_test::init();
+
+    const TEST_CMD: &str = "echo";
+    // Skip the test if the test system does not have the command
+    if !is_command_available(TEST_CMD, &[]) {
+        return;
+    }
+
+    let mut child = tempdir()
+        .unwrap()
+        .spawn_child_with_command(TEST_CMD, &["failure_message ignore_message"])
+        .unwrap()
+        .with_timeout(Duration::from_secs(2))
+        .with_failure_regex_set("fail", "ignore");
+
+    // Any method that reads output should work here.
+    child.expect_stdout_line_matches("ignore_message").unwrap();
+}
+
+/// Make sure ignore regex iters override failure regex iters.
+#[test]
+fn ignore_regex_iter_ignores_stdout_failure_message() {
+    zebra_test::init();
+
+    const TEST_CMD: &str = "echo";
+    // Skip the test if the test system does not have the command
+    if !is_command_available(TEST_CMD, &[]) {
+        return;
+    }
+
+    let mut child = tempdir()
+        .unwrap()
+        .spawn_child_with_command(TEST_CMD, &["failure_message ignore_message"])
+        .unwrap()
+        .with_timeout(Duration::from_secs(2))
+        .with_failure_regex_iter(["fail"].iter().cloned(), ["ignore"].iter().cloned());
+
+    // Any method that reads output should work here.
+    child.expect_stdout_line_matches("ignore_message").unwrap();
 }

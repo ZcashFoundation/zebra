@@ -389,7 +389,7 @@ where
             "starting sync, obtaining new tips"
         );
         if let Err(e) = self.obtain_tips().await {
-            warn!(?e, "error obtaining tips");
+            info!("temporary error obtaining tips: {:#}", e);
             return Err(());
         }
         self.update_metrics();
@@ -438,7 +438,7 @@ where
             );
 
             if let Err(e) = self.extend_tips().await {
-                warn!(?e, "error extending tips");
+                info!("temporary error extending tips: {:#}", e);
                 return Err(());
             }
             self.update_metrics();
@@ -776,7 +776,7 @@ where
 
     /// Handles a response for a requested block.
     ///
-    /// Returns `Ok` if the block was successfully verified and commited to the state, or if an
+    /// Returns `Ok` if the block was successfully verified and committed to the state, or if an
     /// expected error occurred, so that the synchronization can continue normally.
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
