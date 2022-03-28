@@ -357,15 +357,23 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                         transparent::OutPoint::from_usize(transaction_hash, output_index);
 
                     let output_location =
-                        OutputLocation::from_usize(transaction_hash, output_index);
+                        OutputLocation::from_usize(query_height, tx_index, output_index);
 
-                    let stored_utxo = state.utxo(&outpoint);
+                    let stored_output_location = state
+                        .output_location(&outpoint)
+                        .expect("all outpoints are indexed");
+
+                    let stored_utxo_by_outpoint = state.utxo(&outpoint);
+                    let stored_utxo_by_out_loc = state.utxo_by_location(output_location);
+
+                    assert_eq!(stored_output_location, output_location);
+                    assert_eq!(stored_utxo_by_out_loc, stored_utxo_by_outpoint);
 
                     // # Consensus
                     //
                     // The genesis transaction's UTXO is not indexed.
                     // This check also ignores spent UTXOs.
-                    if let Some(stored_utxo) = &stored_utxo {
+                    if let Some(stored_utxo) = &stored_utxo_by_out_loc {
                         assert_eq!(&stored_utxo.output, output);
                         assert_eq!(stored_utxo.height, query_height);
 
@@ -381,8 +389,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                         );
                     }
 
-                    // TODO: use output_location in #3151
-                    stored_utxos.push((outpoint, stored_utxo));
+                    stored_utxos.push((output_location, stored_utxo_by_out_loc));
                 }
             }
         }

@@ -73,10 +73,15 @@ impl ZebraDb {
     /// Returns the transparent output for a [`transparent::OutPoint`],
     /// if it is unspent in the finalized state.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
-
         let output_location = self.output_location(outpoint)?;
 
+        self.utxo_by_location(output_location)
+    }
+
+    /// Returns the transparent output for an [`OutputLocation`],
+    /// if it is unspent in the finalized state.
+    pub fn utxo_by_location(&self, output_location: OutputLocation) -> Option<transparent::Utxo> {
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
         self.db.zs_get(&utxo_by_out_loc, &output_location)
     }
 }
