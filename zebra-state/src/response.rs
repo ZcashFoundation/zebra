@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::{self, Block},
+    sapling,
     transaction::Transaction,
     transparent,
 };
@@ -46,11 +47,20 @@ pub enum Response {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A response to a read-only [`ReadStateService`] [`ReadRequest`].
+/// A response to a read-only [`ReadStateService`](crate::ReadStateService)'s
+/// [`ReadRequest`](crate::ReadRequest).
 pub enum ReadResponse {
-    /// Response to [`ReadRequest::Block`] with the specified block.
+    /// Response to [`ReadRequest::Block`](crate::ReadRequest::Block) with the
+    /// specified block.
     Block(Option<Arc<Block>>),
 
-    /// Response to [`ReadRequest::Transaction`] with the specified transaction.
+    /// Response to
+    /// [`ReadRequest::Transaction`](crate::ReadRequest::Transaction) with the
+    /// specified transaction.
     Transaction(Option<Arc<Transaction>>),
+
+    /// Response to
+    /// [`ReadRequest::SaplingTree`](crate::ReadRequest::SaplingTree) with the
+    /// specified Sapling note commitment tree.
+    SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 }

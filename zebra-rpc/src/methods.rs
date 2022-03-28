@@ -16,6 +16,7 @@ use zebra_chain::{
     block::{self, SerializedBlock},
     chain_tip::ChainTip,
     parameters::Network,
+    sapling,
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, Transaction},
 };
@@ -103,6 +104,22 @@ pub trait Rpc {
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     #[rpc(name = "getrawmempool")]
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
+
+    /// Returns information about the given block's Sapling & Orchard tree state.
+    ///
+    /// zcashd reference: [`z_gettreestate`](https://zcash.github.io/rpc/z_gettreestate.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `hash | height`: (string, required) The block hash or height. Height can
+    /// be negative where -1 is the last known valid block
+    ///
+    /// # Notes
+    ///
+    /// The negative height is not implemented yet.
+    // TODO: implement the negative heights and remove the note above.
+    #[rpc(name = "z_gettreestate")]
+    fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>>;
 }
 
 /// RPC method implementations.
@@ -321,6 +338,44 @@ where
         }
         .boxed()
     }
+
+    fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
+        let mut state = self.state.clone();
+
+        async move {
+            let hash_or_height = hash_or_height
+                .parse()
+                .map_err(|error: SerializationError| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
+                    Ok(GetTreestate((*tree).clone()))
+                }
+                zebra_state::ReadResponse::SaplingTree(None) => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Tree not found".to_string(),
+                    data: None,
+                }),
+                _ => unreachable!("unmatched response to a block request"),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -362,3 +417,11 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 ///
 /// Also see the notes for the [`Rpc::get_best_block_hash` method].
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+
+#[derive(serde::Serialize)]
+/// Response to a `z_gettreestate` RPC request.
+///
+/// Contains the hex-encoded Sapling & Orchard note commitment trees.
+// TODO: adjust the description above so that it reflects the new fields once
+// they are added.
+pub struct GetTreestate(sapling::tree::NoteCommitmentTree);

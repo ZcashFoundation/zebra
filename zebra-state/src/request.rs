@@ -5,6 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 use zebra_chain::{
     amount::NegativeAllowed,
     block::{self, Block},
+    serialization::SerializationError,
     transaction,
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
@@ -50,6 +51,22 @@ impl From<block::Hash> for HashOrHeight {
 impl From<block::Height> for HashOrHeight {
     fn from(hash: block::Height) -> Self {
         Self::Height(hash)
+    }
+}
+
+impl std::str::FromStr for HashOrHeight {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse() {
+            Ok(hash) => Ok(Self::Hash(hash)),
+            Err(_) => match s.parse() {
+                Ok(height) => Ok(Self::Height(height)),
+                Err(_) => Err(SerializationError::Parse(
+                    "Could not convert the input string to a hash nor a height",
+                )),
+            },
+        }
     }
 }
 
@@ -401,4 +418,13 @@ pub enum ReadRequest {
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Looks up a Sapling note commitment tree either by a hash or height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SaplingTree(Some(Arc<sapling::tree::NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
+    ///   if the corresponding block contains a Sapling note commitment tree.
+    /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
+    SaplingTree(HashOrHeight),
 }

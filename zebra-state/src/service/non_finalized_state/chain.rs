@@ -336,6 +336,19 @@ impl Chain {
             .map(|(height, index)| &self.blocks[height].block.transactions[*index])
     }
 
+    /// Returns the Sapling
+    /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
+    /// hash or height, if it exists in the non-finalized `chain`.
+    pub fn sapling_tree(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<&sapling::tree::NoteCommitmentTree> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.sapling_trees_by_height.get(&height)
+    }
+
     /// Returns the block hash of the tip block.
     pub fn non_finalized_tip_hash(&self) -> block::Hash {
         self.blocks
