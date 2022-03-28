@@ -1206,9 +1206,9 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: expect Ingestor log when we're using cached state (#3511)
     //       "Ingestor adding block to cache"
-    let result = lightwalletd.expect_stdout_line_matches(
-        r#"error requesting block: 0: Block not found","height":419200"#,
-    );
+    let result = lightwalletd.expect_stdout_line_matches(regex::escape(
+        "Waiting for zcashd height to reach Sapling activation height (419200)",
+    ));
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // (next RPC)
