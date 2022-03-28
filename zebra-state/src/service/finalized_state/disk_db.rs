@@ -361,15 +361,15 @@ impl DiskDb {
             // Transactions
             rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
-            // TODO: rename to tx_loc_by_hash (#3151)
+            // TODO: rename to tx_loc_by_hash (#3950)
             rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
             // Transparent
             rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
-            // TODO: #3954
+            // TODO: #3951
             //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", db_options.clone()),
-            // TODO: rename to utxo_by_out_loc (#3953)
+            // TODO: rename to utxo_by_out_loc (#3952)
             rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
-            // TODO: #3952
+            // TODO: #3953
             //rocksdb::ColumnFamilyDescriptor::new("utxo_by_transparent_addr_loc", db_options.clone()),
             // Sprout
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
