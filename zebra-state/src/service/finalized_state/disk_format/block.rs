@@ -22,7 +22,7 @@ use proptest_derive::Arbitrary;
 
 /// The maximum value of an on-disk serialized [`Height`].
 ///
-/// This allows us to store [`OutputIndex`]es in 8 bytes,
+/// This allows us to store [`OutputLocation`]s in 8 bytes,
 /// which makes database searches more efficient.
 ///
 /// # Consensus
@@ -55,7 +55,7 @@ pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_
 ///
 /// # Consensus
 ///
-/// This maximum height supports on-disk storage of transactions in blocks up to ~5 MB.
+/// A 2-byte index supports on-disk storage of transactions in blocks up to ~5 MB.
 /// (The current maximum block size is 2 MB.)
 ///
 /// Since Zebra only stores fully verified blocks on disk,
