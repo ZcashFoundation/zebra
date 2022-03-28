@@ -11,7 +11,10 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{borrow::Borrow, collections::HashMap};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, HashMap},
+};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -60,13 +63,23 @@ impl ZebraDb {
             .map(|abl| abl.location())
     }
 
+    /// Returns the [`OutputLocation`] for a [`transparent::OutPoint`].
+    ///
+    /// This method returns the locations of spent and unspent outpoints.
+    /// Returns `None` if the output was never in the finalized state.
+    pub fn output_location(&self, outpoint: &transparent::OutPoint) -> Option<OutputLocation> {
+        self.transaction_location(outpoint.hash)
+            .map(|transaction_location| {
+                OutputLocation::from_outpoint(transaction_location, outpoint)
+            })
+    }
+
     /// Returns the transparent output for a [`transparent::OutPoint`],
     /// if it is unspent in the finalized state.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
 
-        let transaction_location = self.transaction_location(outpoint.hash)?;
-        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+        let output_location = self.output_location(outpoint)?;
 
         self.db.zs_get(&utxo_by_out_loc, &output_location)
     }
@@ -75,9 +88,9 @@ impl ZebraDb {
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s:
     /// - transparent address balance changes,
+    /// - UTXO changes, and
     /// TODO:
-    /// - transparent address index changes (add in #3951, #3953), and
-    /// - UTXO changes (modify in #3952)
+    /// - transparent address index changes (add in #3951, #3953),
     /// and return it (without actually writing anything).
     ///
     /// # Errors
@@ -87,7 +100,7 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        all_utxos_spent_by_block: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
@@ -121,15 +134,8 @@ impl DiskWriteBatch {
         // Mark all transparent inputs as spent.
         //
         // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
-        for outpoint in block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.inputs())
-            .flat_map(|input| input.outpoint())
-        {
-            let output_location = OutputLocation::from_outpoint(&outpoint);
-
-            let spent_output = &all_utxos_spent_by_block.get(&outpoint).unwrap().output;
+        for (output_location, utxo) in utxos_spent_by_block {
+            let spent_output = utxo.output;
             let sending_address = spent_output.address(self.network());
 
             // Update the address balance by subtracting this UTXO's value
