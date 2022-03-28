@@ -18,7 +18,7 @@ use itertools::Itertools;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block},
+    block::{self, Block, Height},
     history_tree::HistoryTree,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::TrustedPreallocate,
@@ -157,14 +157,11 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_tx_loc, &location)
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
     /// if a transaction with that hash exists in the finalized chain.
     //
     // TODO: move this method to the start of the section
-    pub fn transaction(
-        &self,
-        hash: transaction::Hash,
-    ) -> Option<(Arc<Transaction>, block::Height)> {
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
         let transaction_location = self.transaction_location(hash)?;
@@ -203,6 +200,22 @@ impl ZebraDb {
             .map(|(index, hash)| (*hash, index))
             .collect();
 
+        // Get a list of the new UTXOs in the format we need for database updates.
+        //
+        // TODO: index new_outputs by TransactionLocation,
+        //       simplify the spent_utxos location lookup code,
+        //       and remove the extra new_outputs_by_out_loc argument
+        let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
+            .new_outputs
+            .iter()
+            .map(|(outpoint, utxo)| {
+                (
+                    lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
+                    utxo.clone(),
+                )
+            })
+            .collect();
+
         // Get a list of the spent UTXOs, before we delete any from the database
         let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
             finalized
@@ -217,8 +230,6 @@ impl ZebraDb {
                         // Some utxos are spent in the same block, so they will be in
                         // `tx_hash_indexes` and `new_outputs`
                         self.output_location(&outpoint).unwrap_or_else(|| {
-                            // TODO: index new_outputs by TransactionLocation,
-                            //       and replace this code with a lookup
                             let tx_index = tx_hash_indexes
                                 .get(&outpoint.hash)
                                 .expect("already checked UTXO was in state or block");
@@ -258,6 +269,7 @@ impl ZebraDb {
         batch.prepare_block_batch(
             &self.db,
             finalized,
+            new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
@@ -272,6 +284,23 @@ impl ZebraDb {
 
         Ok(finalized_hash)
     }
+}
+
+/// Lookup the output location for an outpoint.
+///
+/// `tx_hash_indexes` must contain `outpoint.hash` and that transaction's index in its block.
+fn lookup_out_loc(
+    height: Height,
+    outpoint: &transparent::OutPoint,
+    tx_hash_indexes: &HashMap<transaction::Hash, usize>,
+) -> OutputLocation {
+    let tx_index = tx_hash_indexes
+        .get(&outpoint.hash)
+        .expect("already checked UTXO was in state or block");
+
+    let tx_loc = TransactionLocation::from_usize(height, *tx_index);
+
+    OutputLocation::from_outpoint(tx_loc, outpoint)
 }
 
 impl DiskWriteBatch {
@@ -291,6 +320,7 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
@@ -326,6 +356,7 @@ impl DiskWriteBatch {
         self.prepare_transaction_index_batch(
             db,
             &finalized,
+            new_outputs_by_out_loc,
             spent_utxos_by_out_loc,
             address_balances,
             &mut note_commitment_trees,
@@ -434,6 +465,7 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         note_commitment_trees: &mut NoteCommitmentTrees,
@@ -449,7 +481,7 @@ impl DiskWriteBatch {
 
         self.prepare_transparent_outputs_batch(
             db,
-            finalized,
+            new_outputs_by_out_loc,
             utxos_spent_by_block,
             address_balances,
         )

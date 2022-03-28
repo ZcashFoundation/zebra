@@ -11,10 +11,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{
-    borrow::Borrow,
-    collections::{BTreeMap, HashMap},
-};
+use std::collections::{BTreeMap, HashMap};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -26,7 +23,6 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::transparent::{AddressBalanceLocation, AddressLocation, OutputLocation},
         zebra_db::ZebraDb,
-        FinalizedBlock,
     },
     BoxError,
 };
@@ -99,21 +95,16 @@ impl DiskWriteBatch {
     pub fn prepare_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
         let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
-        let FinalizedBlock {
-            block, new_outputs, ..
-        } = finalized;
-
         // Index all new transparent outputs, before deleting any we've spent
-        for (outpoint, utxo) in new_outputs.borrow().iter() {
+        for (output_location, utxo) in new_outputs_by_out_loc {
             let receiving_address = utxo.output.address(self.network());
-            let output_location = OutputLocation::from_outpoint(outpoint);
 
             // Update the address balance by adding this UTXO's value
             if let Some(receiving_address) = receiving_address {
