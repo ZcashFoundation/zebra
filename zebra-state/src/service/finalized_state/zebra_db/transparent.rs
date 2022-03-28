@@ -1,6 +1,6 @@
 //! Provides high-level access to database:
-//! - unspent [`transparent::Outputs`]s
-//! - transparent address indexes
+//! - unspent [`transparent::Outputs`]s (UTXOs), and
+//! - transparent address indexes.
 //!
 //! This module makes sure that:
 //! - all disk writes happen inside a RocksDB transaction, and
@@ -61,13 +61,14 @@ impl ZebraDb {
     }
 
     /// Returns the transparent output for a [`transparent::OutPoint`],
-    /// if it is still unspent in the finalized state.
+    /// if it is unspent in the finalized state.
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        let utxo_by_outpoint = self.db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
 
-        let output_location = OutputLocation::from_outpoint(outpoint);
+        let transaction_location = self.transaction_location(outpoint.hash)?;
+        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
 
-        self.db.zs_get(&utxo_by_outpoint, &output_location)
+        self.db.zs_get(&utxo_by_out_loc, &output_location)
     }
 }
 

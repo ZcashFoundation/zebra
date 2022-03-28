@@ -27,7 +27,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{transparent::AddressBalanceLocation, FromDisk, TransactionLocation},
+        disk_format::{block::TransactionLocation, transparent::AddressBalanceLocation, FromDisk},
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
