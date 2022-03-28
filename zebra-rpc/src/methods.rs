@@ -129,8 +129,6 @@ pub trait Rpc {
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
     /// zcashd reference: [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html)
-    /// We don't currently support the `blockhash` parameter since lightwalletd does not
-    /// use it.
     ///
     /// # Parameters
     ///
@@ -139,6 +137,8 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
+    /// We don't currently support the `blockhash` parameter since lightwalletd does not
+    /// use it.
     /// In verbose mode, we only expose the `hex` and `height` fields since
     /// lightwalletd uses only those:
     /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L119>
