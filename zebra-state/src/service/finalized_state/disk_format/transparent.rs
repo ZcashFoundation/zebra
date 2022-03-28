@@ -63,6 +63,7 @@ impl OutputIndex {
     }
 
     /// Create a transparent output index from the native index integer type.
+    #[allow(dead_code)]
     pub fn from_usize(output_index: usize) -> OutputIndex {
         OutputIndex(
             output_index
@@ -72,6 +73,7 @@ impl OutputIndex {
     }
 
     /// Return this index as the native index integer type.
+    #[allow(dead_code)]
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
@@ -95,6 +97,7 @@ pub struct OutputLocation {
 
 impl OutputLocation {
     /// Creates an output location from a block height, and `usize` transaction and output indexes.
+    #[allow(dead_code)]
     pub fn from_usize(
         height: Height,
         transaction_index: usize,
@@ -132,11 +135,13 @@ impl OutputLocation {
     }
 
     /// Returns the height of this [`transparent::Output`].
+    #[allow(dead_code)]
     pub fn height(&self) -> Height {
         self.transaction_location.height
     }
 
     /// Returns the transaction index of this [`transparent::Output`].
+    #[allow(dead_code)]
     pub fn transaction_index(&self) -> TransactionIndex {
         self.transaction_location.index
     }
