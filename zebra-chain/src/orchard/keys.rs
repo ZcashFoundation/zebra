@@ -207,7 +207,7 @@ impl SpendingKey {
                 continue;
             }
 
-            // "if ivk = {0, ⊥ }, discard this key and repeat with a new sk"
+            // "if ivk ∈ {0, ⊥}, discard this key and repeat with a new sk"
             if IncomingViewingKey::try_from(FullViewingKey::from(sk)).is_err() {
                 continue;
             }
