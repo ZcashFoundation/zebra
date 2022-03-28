@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.6) - 2022-03-28
 
-Zebra's latest beta brings the RPC server support and part of needed API calls to become a **lightwalletd** back end.
+Zebra's latest beta validates all the NU5 consensus rules.
+It also adds RPC server support, including some of the RPC calls needed to become a **lightwalletd** back end.
+As part of the RPC changes, we made performance improvements to cached state access.
 
 ### Added
 
@@ -100,7 +102,7 @@ The Zebra team made a huge refactor to the database storage and the state to ser
 
 #### Others
 
-- Move mempool service to a new `zebra-node-services` crate (#3648)
+- Move mempool request and response types to a new `zebra-node-services` crate (#3648)
 - Enable `checkpoint_sync` by default (#3777)
 - Update Zebra's hard-coded blockchain checkpoint lists  (#3606)
 - Clippy lints: warn on manual printing to stdout or stderr (#3767)
