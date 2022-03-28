@@ -6,8 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.6) - 2022-03-28
 
-Zebra's latest beta validates all the NU5 consensus rules.
-It also adds RPC server support, including some of the RPC calls needed to become a **lightwalletd** back end.
+Zebra's latest beta adds RPC server support, including some of the RPC calls needed to become a **lightwalletd** back end.
 As part of the RPC changes, we made performance improvements to cached state access.
 
 ### Added
