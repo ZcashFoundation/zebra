@@ -452,7 +452,7 @@ where
         .boxed()
     }
 
-        fn get_raw_transaction(
+    fn get_raw_transaction(
         &self,
         txid_hex: String,
         verbose: u8,
@@ -534,7 +534,6 @@ where
         }
         .boxed()
     }
-}
 
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
         let mut state = self.state.clone();
@@ -659,13 +658,10 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 #[derive(serde::Serialize)]
 /// Response to a `z_gettreestate` RPC request.
 ///
-    /// Contains the hex-encoded Sapling & Orchard note commitment trees.
-    // TODO: adjust the description above so that it reflects the new fields once
-    // they are added.
-    pub struct GetTreestate(sapling::tree::NoteCommitmentTree);
-
-
-
+/// Contains the hex-encoded Sapling & Orchard note commitment trees.
+// TODO: adjust the description above so that it reflects the new fields once
+// they are added.
+pub struct GetTreestate(sapling::tree::NoteCommitmentTree);
 
 /// Response to a `getrawtransaction` RPC request.
 ///
