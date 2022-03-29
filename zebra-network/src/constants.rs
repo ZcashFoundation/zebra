@@ -278,7 +278,7 @@ lazy_static! {
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, NetworkUpgrade> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(Network::Mainnet, NetworkUpgrade::Canopy);
-        hash_map.insert(Network::Testnet, NetworkUpgrade::Nu5);
+        hash_map.insert(Network::Testnet, NetworkUpgrade::Canopy);
         hash_map
     };
 
