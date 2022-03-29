@@ -201,7 +201,7 @@ pub type AddressLocation = OutputLocation;
 ///
 /// Currently, Zebra tracks this data 1:1 for each address:
 /// - the balance [`Amount`] for a transparent address, and
-/// - the [`OutputLocation`] for the first [`transparent::Output`] sent to that address
+/// - the [`AddressLocation`] for the first [`transparent::Output`] sent to that address
 ///   (regardless of whether that output is spent or unspent).
 ///
 /// All other address data is tracked multiple times for each address
@@ -242,7 +242,7 @@ impl AddressBalanceLocation {
     }
 
     /// Returns the location of the first [`transparent::Output`] sent to an address.
-    pub fn location(&self) -> AddressLocation {
+    pub fn address_location(&self) -> AddressLocation {
         self.location
     }
 
@@ -377,9 +377,12 @@ impl IntoDisk for AddressBalanceLocation {
 
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
-        let location_bytes = self.location().as_bytes().to_vec();
+        let address_location_bytes = self.address_location().as_bytes().to_vec();
 
-        [balance_bytes, location_bytes].concat().try_into().unwrap()
+        [balance_bytes, address_location_bytes]
+            .concat()
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -388,9 +391,9 @@ impl FromDisk for AddressBalanceLocation {
         let (balance_bytes, location_bytes) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
-        let location = AddressLocation::from_bytes(location_bytes);
+        let address_location = AddressLocation::from_bytes(location_bytes);
 
-        let mut balance_location = AddressBalanceLocation::new(location);
+        let mut balance_location = AddressBalanceLocation::new(address_location);
         *balance_location.balance_mut() = balance;
 
         balance_location
