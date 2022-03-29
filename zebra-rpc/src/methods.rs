@@ -656,12 +656,12 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 
-#[derive(serde::Serialize)]
 /// Response to a `z_gettreestate` RPC request.
 ///
 /// Contains the hex-encoded Sapling & Orchard note commitment trees.
 // TODO: adjust the description above so that it reflects the new fields once
 // they are added.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetTreestate(sapling::tree::NoteCommitmentTree);
 
 /// Response to a `getrawtransaction` RPC request.
