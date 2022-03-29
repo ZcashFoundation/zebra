@@ -221,7 +221,7 @@ jobs:
         id: get-sync-height
         run: |
           INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          SYNC_HEIGHT=$(gcloud logging read '(resource.type="gce_instance" AND resource.labels.instance_id="${INSTANCE_ID}")' --format='value(jsonPayload.MESSAGE)' | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\(\d+\)' | grep -o -E '\d+')
+          SYNC_HEIGHT=$(gcloud logging read '(resource.type="gce_instance" AND resource.labels.instance_id="${INSTANCE_ID}")' --format='value(jsonPayload.MESSAGE)' --limit 500 | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\(\d+\)' | grep -o -E '\d+')
           echo "::set-output name=sync_height::$SYNC_HEIGHT"
           sleep 60
 
