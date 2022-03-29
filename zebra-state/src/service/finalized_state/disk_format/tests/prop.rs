@@ -152,7 +152,7 @@ fn roundtrip_address_balance_location() {
 
     proptest!(
         |(mut val in any::<AddressBalanceLocation>())| {
-            *val.height_mut() = val.location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            *val.height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
             assert_value_properties(val)
         }
     );
