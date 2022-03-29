@@ -10,7 +10,7 @@ use crate::serialization::{
 #[derive(Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary, serde::Serialize)
+    derive(proptest_derive::Arbitrary, Serialize, Deserialize)
 )]
 pub struct Script(
     /// # Correctness

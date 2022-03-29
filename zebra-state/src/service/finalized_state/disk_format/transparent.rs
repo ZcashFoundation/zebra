@@ -5,9 +5,10 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::fmt::Debug;
-
-use serde::{Deserialize, Serialize};
+use std::{
+    fmt::Debug,
+    io::{Cursor, Read},
+};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -24,6 +25,8 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -46,7 +49,8 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 // Transparent types
 
 /// A transparent output's index in its transaction.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize, Deserialize))]
 pub struct OutputIndex(u32);
 
 impl OutputIndex {
@@ -101,8 +105,11 @@ impl OutputIndex {
 ///
 /// [`OutputLocation`]s are sorted in increasing chain order, by height, transaction index,
 /// and output index.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.
     transaction_location: TransactionLocation,
@@ -199,8 +206,11 @@ pub type AddressLocation = OutputLocation;
 ///
 /// All other address data is tracked multiple times for each address
 /// (UTXOs and transactions).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct AddressBalanceLocation {
     /// The total balance of all UTXOs sent to an address.
     balance: Amount<NonNegative>,
