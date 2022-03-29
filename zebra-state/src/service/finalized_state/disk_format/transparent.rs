@@ -459,15 +459,14 @@ impl IntoDisk for UnspentOutputAddressLocation {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let output_bytes = self.output().zcash_serialize_to_vec().unwrap();
+        let mut bytes = self.output().zcash_serialize_to_vec().unwrap();
 
         // If there is no address location, don't write any bytes for it
-        let address_location_bytes = self
-            .address_location()
-            .map(|address_location| address_location.as_bytes().to_vec())
-            .unwrap_or_default();
+        if let Some(address_location) = self.address_location() {
+            bytes.extend(address_location.as_bytes())
+        }
 
-        [output_bytes, address_location_bytes].concat()
+        bytes
     }
 }
 
