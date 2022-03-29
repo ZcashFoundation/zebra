@@ -15,7 +15,9 @@ use crate::service::finalized_state::{
     arbitrary::assert_value_properties,
     disk_format::{
         block::MAX_ON_DISK_HEIGHT,
-        transparent::{AddressBalanceLocation, AddressLocation, OutputLocation},
+        transparent::{
+            AddressBalanceLocation, AddressLocation, OutputLocation, UnspentOutputAddressLocation,
+        },
         IntoDisk, TransactionLocation,
     },
 };
@@ -163,6 +165,20 @@ fn roundtrip_transparent_output() {
     zebra_test::init();
 
     proptest!(|(val in any::<transparent::Output>())| assert_value_properties(val));
+}
+
+#[test]
+fn roundtrip_unspent_output_address_location() {
+    zebra_test::init();
+
+    proptest!(
+        |(mut val in any::<UnspentOutputAddressLocation>())| {
+            if let Some(address_location) =val.address_location() {
+                *val.height_mut().unwrap() = address_location.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            }
+            assert_value_properties(val)
+        }
+    );
 }
 
 #[test]
