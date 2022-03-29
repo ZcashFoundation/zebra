@@ -21,7 +21,9 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::transparent::{AddressBalanceLocation, AddressLocation, OutputLocation},
+        disk_format::transparent::{
+            AddressBalanceLocation, AddressLocation, OutputLocation, UnspentOutputAddressLocation,
+        },
         zebra_db::ZebraDb,
     },
     BoxError,
@@ -91,6 +93,18 @@ impl ZebraDb {
             output_location.transaction_index().as_usize(),
         ))
     }
+
+    /// Returns the [`UnspentOutputAddressLocation`] for an [`OutputLocation`],
+    /// if its output is unspent in the finalized state.
+    #[allow(dead_code)]
+    pub fn utxo_address_location_by_output_location(
+        &self,
+        output_location: OutputLocation,
+    ) -> Option<UnspentOutputAddressLocation> {
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
+
+        self.db.zs_get(&utxo_by_out_loc, &output_location)
+    }
 }
 
 impl DiskWriteBatch {
@@ -118,21 +132,25 @@ impl DiskWriteBatch {
         for (output_location, utxo) in new_outputs_by_out_loc {
             let output = utxo.output;
             let receiving_address = output.address(self.network());
+            let mut receiving_address_location = None;
 
             // Update the address balance by adding this UTXO's value
             if let Some(receiving_address) = receiving_address {
-                let address_balance = address_balances
+                let address_balance_location = address_balances
                     .entry(receiving_address)
-                    .or_insert_with(|| AddressBalanceLocation::new(output_location))
-                    .balance_mut();
+                    .or_insert_with(|| AddressBalanceLocation::new(output_location));
+                receiving_address_location = Some(address_balance_location.address_location());
 
+                let address_balance = address_balance_location.balance_mut();
                 let new_address_balance =
                     (*address_balance + output.value()).expect("balance overflow already checked");
 
                 *address_balance = new_address_balance;
             }
 
-            self.zs_insert(&utxo_by_outpoint, output_location, output);
+            let output_address_location =
+                UnspentOutputAddressLocation::new(output, receiving_address_location);
+            self.zs_insert(&utxo_by_outpoint, output_location, output_address_location);
         }
 
         // Mark all transparent inputs as spent.
