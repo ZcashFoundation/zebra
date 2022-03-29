@@ -355,9 +355,9 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                     let output = &stored_block.transactions[tx_index].outputs()[output_index];
                     let outpoint =
                         transparent::OutPoint::from_usize(transaction_hash, output_index);
-
                     let output_location =
                         OutputLocation::from_usize(query_height, tx_index, output_index);
+                    let output_address = output.address(state.network());
 
                     let stored_output_location = state
                         .output_location(&outpoint)
@@ -365,6 +365,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                     let stored_utxo_by_outpoint = state.utxo(&outpoint);
                     let stored_utxo_by_out_loc = state.utxo_by_location(output_location);
+                    let stored_output_address_loc =
+                        state.utxo_address_location_by_output_location(output_location);
 
                     assert_eq!(stored_output_location, output_location);
                     assert_eq!(stored_utxo_by_out_loc, stored_utxo_by_outpoint);
@@ -389,7 +391,26 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                         );
                     }
 
-                    stored_utxos.push((output_location, stored_utxo_by_out_loc));
+                    let output_address_location = stored_output_address_loc
+                        .as_ref()
+                        .and_then(|oal| oal.address_location());
+                    if let Some(output_address_location) = output_address_location {
+                        assert!(
+                            output_location >= output_address_location,
+                            "a UTXO's address location must be its output location, \
+                             or an earlier location in the chain",
+                        );
+                    }
+
+                    let stored_address_location = output_address
+                        .and_then(|output_address| state.address_location(&output_address));
+                    assert_eq!(
+                        output_address_location, stored_address_location,
+                        "a UTXO's address location must be \
+                         the output location for the first UTXO with that address",
+                    );
+
+                    stored_utxos.push((output_location, stored_output_address_loc));
                 }
             }
         }
