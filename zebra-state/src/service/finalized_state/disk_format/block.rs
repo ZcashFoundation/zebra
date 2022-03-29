@@ -87,7 +87,6 @@ impl TransactionIndex {
     }
 
     /// Returns this index as a `usize`
-    #[allow(dead_code)]
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
