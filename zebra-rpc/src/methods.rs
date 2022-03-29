@@ -116,13 +116,14 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `hash | height`: (string, required) The block hash or height. Height can
-    /// be negative where -1 is the last known valid block
+    /// - `hash | height`: (string, required) The block hash or height.
     ///
     /// # Notes
     ///
-    /// The negative height is not implemented yet.
-    // TODO: implement the negative heights and remove the note above.
+    /// The zcashd doc reference above says that the parameter "`height` can be
+    /// negative where -1 is the last known valid block". On the other hand,
+    /// `lightwalletd` only uses positive heights, so Zebra does not support
+    /// negative heights.
     #[rpc(name = "z_gettreestate")]
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>>;
 
