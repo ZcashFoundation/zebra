@@ -173,7 +173,7 @@ fn roundtrip_unspent_output_address_location() {
 
     proptest!(
         |(mut val in any::<UnspentOutputAddressLocation>())| {
-            if let Some(address_location) =val.address_location() {
+            if let Some(address_location) = val.address_location() {
                 *val.height_mut().unwrap() = address_location.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
             }
             assert_value_properties(val)
