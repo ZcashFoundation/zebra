@@ -14,7 +14,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::Height,
     parameters::Network::*,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transparent::{self, Address::*},
 };
 
@@ -254,6 +254,61 @@ impl AddressBalanceLocation {
     }
 }
 
+/// Data which Zebra indexes for each unspent [`transparent::Output`].
+///
+/// Currently, Zebra tracks this data 1:1 for each unspent transparent output:
+/// - the serialized [`Output`] data, and
+/// - the [`AddressLocation`] for the first [`transparent::Output`] sent to this output's address
+///   (this is usually different to the [`OutputLocation`] of this output).
+///
+/// All other transparent data is tracked per-address.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
+pub struct UnspentOutputAddressLocation {
+    /// The output data for this unspent output.
+    output: transparent::Output,
+
+    /// The location of the first [`transparent::Output`] sent to the address in `output`,
+    /// if `output` contains an address.
+    address_location: Option<AddressLocation>,
+}
+
+impl UnspentOutputAddressLocation {
+    /// Creates a new [`UnspentOutputAddressLocation`] from its fields.
+    pub fn new(
+        output: transparent::Output,
+        address_location: impl Into<Option<AddressLocation>>,
+    ) -> UnspentOutputAddressLocation {
+        UnspentOutputAddressLocation {
+            output,
+            address_location: address_location.into(),
+        }
+    }
+
+    /// Returns the output.
+    pub fn output(&self) -> &transparent::Output {
+        &self.output
+    }
+
+    /// The location of the first [`transparent::Output`] sent to the address of this output,
+    /// if `output` contains an address.
+    pub fn address_location(&self) -> Option<AddressLocation> {
+        self.address_location
+    }
+
+    /// Allows tests to set the height of the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn height_mut(&mut self) -> Option<&mut Height> {
+        self.address_location
+            .as_mut()
+            .map(|address_location| &mut address_location.transaction_location.height)
+    }
+}
+
 // Transparent trait impls
 
 /// Returns a byte representing the [`transparent::Address`] variant.
@@ -397,6 +452,40 @@ impl FromDisk for AddressBalanceLocation {
         *balance_location.balance_mut() = balance;
 
         balance_location
+    }
+}
+
+impl IntoDisk for UnspentOutputAddressLocation {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let output_bytes = self.output().zcash_serialize_to_vec().unwrap();
+
+        // If there is no address location, don't write any bytes for it
+        let address_location_bytes = self
+            .address_location()
+            .map(|address_location| address_location.as_bytes().to_vec())
+            .unwrap_or_default();
+
+        [output_bytes, address_location_bytes].concat()
+    }
+}
+
+impl FromDisk for UnspentOutputAddressLocation {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        // Use a cursor to read the output data, then the address location data,
+        // if it is present. (Some outputs don't have addresses.)
+        let mut disk_bytes = Cursor::new(disk_bytes);
+
+        let output = transparent::Output::zcash_deserialize(&mut disk_bytes).unwrap();
+
+        let mut address_location_bytes = [0; OUTPUT_LOCATION_DISK_BYTES];
+        let address_location = match disk_bytes.read_exact(&mut address_location_bytes) {
+            Ok(()) => Some(AddressLocation::from_bytes(address_location_bytes)),
+            Err(_) => None,
+        };
+
+        UnspentOutputAddressLocation::new(output, address_location)
     }
 }
 
