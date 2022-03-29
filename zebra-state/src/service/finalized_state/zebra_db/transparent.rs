@@ -56,7 +56,7 @@ impl ZebraDb {
     #[allow(dead_code)]
     pub fn address_location(&self, address: &transparent::Address) -> Option<AddressLocation> {
         self.address_balance_location(address)
-            .map(|abl| abl.location())
+            .map(|abl| abl.address_location())
     }
 
     /// Returns the [`OutputLocation`] for a [`transparent::OutPoint`].
