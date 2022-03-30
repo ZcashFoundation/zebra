@@ -454,40 +454,49 @@ fn snapshot_transparent_address_data(state: &FinalizedState) {
     let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
 
     let mut stored_address_balances = Vec::new();
+    let mut stored_address_utxos = Vec::new();
 
-    // TODO: UTXOs for each address (#3953)
-    //       transactions for each address (#3951)
+    // TODO: transactions for each address (#3951)
 
     // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
     let addresses =
         state.full_iterator_cf(&balance_by_transparent_addr, rocksdb::IteratorMode::Start);
 
-    // The default raw data serialization is very verbose, so we hex-encode the bytes.
     let addresses: Vec<transparent::Address> = addresses
         .map(|(key, _value)| transparent::Address::from_bytes(key))
         .collect();
 
     for address in addresses {
-        let stored_address_balance = state
+        let stored_address_balance_location = state
             .address_balance_location(&address)
             .expect("address indexes are consistent");
 
-        stored_address_balances.push((address.to_string(), stored_address_balance));
-    }
+        let stored_address_location = stored_address_balance_location.address_location();
 
-    // TODO: check that the UTXO and transaction lists are in chain order.
-    /*
-       assert!(
-           is_sorted(&stored_address_utxos),
-           "unsorted: {:?}",
-           stored_address_utxos,
-       );
-    */
+        let stored_utxos = state.address_utxo_locations(stored_address_location);
+
+        // Check that the lists are in chain order
+        //
+        // TODO: check that the transaction list is in chain order (#3951)
+        let stored_utxos_vec: Vec<OutputLocation> = stored_utxos.iter().copied().collect();
+        assert!(
+            is_sorted(&stored_utxos_vec),
+            "unsorted: {:?}\n\
+             for address: {:?}",
+            stored_utxos,
+            address,
+        );
+
+        // The default raw data serialization is very verbose, so we hex-encode the bytes.
+        stored_address_balances.push((address.to_string(), stored_address_balance_location));
+        stored_address_utxos.push((stored_address_location, stored_utxos));
+    }
 
     // We want to snapshot the order in the database,
     // because sometimes it is significant for performance or correctness.
     // So we don't sort the vectors before snapshotting.
     insta::assert_ron_snapshot!("address_balances", stored_address_balances);
+    insta::assert_ron_snapshot!("address_utxos", stored_address_utxos);
 }
 
 /// Return true if `list` is sorted in ascending order.
