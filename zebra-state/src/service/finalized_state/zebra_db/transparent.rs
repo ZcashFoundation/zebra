@@ -116,9 +116,10 @@ impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s:
     /// - transparent address balance changes,
     /// - UTXO changes, and
-    /// TODO:
-    /// - transparent address index changes (add in #3951, #3953),
+    /// - transparent address index changes,
     /// and return it (without actually writing anything).
+    ///
+    /// TODO: transparent address transaction index (#3951)
     ///
     /// # Errors
     ///
@@ -131,7 +132,6 @@ impl DiskWriteBatch {
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
-        let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
         // Index all new transparent outputs, before deleting any we've spent
         for (output_location, utxo) in new_outputs_by_out_loc {
@@ -180,6 +180,25 @@ impl DiskWriteBatch {
 
             self.zs_delete(&utxo_by_outpoint, output_location);
         }
+
+        self.prepare_transparent_balances_batch(db, address_balances)?;
+
+        Ok(())
+    }
+
+    /// Prepare a database batch containing `finalized.block`'s:
+    /// - transparent address balance changes,
+    /// and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - This method doesn't currently return any errors, but it might in future
+    pub fn prepare_transparent_balances_batch(
+        &mut self,
+        db: &DiskDb,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+    ) -> Result<(), BoxError> {
+        let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
         // Write the new address balances to the database
         for (address, address_balance) in address_balances.into_iter() {
