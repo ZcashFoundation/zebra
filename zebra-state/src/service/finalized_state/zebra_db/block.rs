@@ -10,7 +10,7 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -32,7 +32,7 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocation, OutputLocation},
+            transparent::{AddressBalanceLocation, AddressUnspentOutputs, OutputLocation},
             FromDisk,
         },
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
@@ -249,13 +249,30 @@ impl ZebraDb {
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
             .collect();
 
-        // Get the current address balances, before the transactions in this block
-        let address_balances = spent_utxos_by_out_loc
+        // Get the transparent addresses with changed balances/UTXOs
+        let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
             .chain(finalized.new_outputs.values())
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
-            .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+            .collect();
+
+        // Get the current address balances, before the transactions in this block
+        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
+            changed_addresses
+                .iter()
+                .filter_map(|address| Some((*address, self.address_balance_location(address)?)))
+                .collect();
+
+        // Get the current address UTXOs, before the transactions in this block
+        let address_utxo_locations = address_balances
+            .iter()
+            .map(|(address, address_balance_location)| {
+                (
+                    *address,
+                    self.address_utxo_locations(address_balance_location.address_location()),
+                )
+            })
             .collect();
 
         let mut batch = DiskWriteBatch::new(network);
@@ -268,6 +285,7 @@ impl ZebraDb {
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
+            address_utxo_locations,
             self.note_commitment_trees(),
             history_tree,
             self.finalized_value_pool(),
@@ -310,6 +328,8 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
+    //
+    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
@@ -319,6 +339,7 @@ impl DiskWriteBatch {
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        address_utxo_locations: HashMap<transparent::Address, AddressUnspentOutputs>,
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
@@ -354,6 +375,7 @@ impl DiskWriteBatch {
             new_outputs_by_out_loc,
             spent_utxos_by_out_loc,
             address_balances,
+            address_utxo_locations,
             &mut note_commitment_trees,
         )?;
 
@@ -456,6 +478,9 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating note commitment trees
+    //
+    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare_transaction_index_batch(
         &mut self,
         db: &DiskDb,
@@ -463,6 +488,7 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        address_utxo_locations: HashMap<transparent::Address, AddressUnspentOutputs>,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, .. } = finalized;
@@ -479,6 +505,7 @@ impl DiskWriteBatch {
             new_outputs_by_out_loc,
             utxos_spent_by_block,
             address_balances,
+            address_utxo_locations,
         )
     }
 }

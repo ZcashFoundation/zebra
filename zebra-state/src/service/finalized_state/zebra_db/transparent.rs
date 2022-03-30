@@ -22,7 +22,8 @@ use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::transparent::{
-            AddressBalanceLocation, AddressLocation, OutputLocation, UnspentOutputAddressLocation,
+            AddressBalanceLocation, AddressLocation, AddressUnspentOutputs, OutputLocation,
+            UnspentOutputAddressLocation,
         },
         zebra_db::ZebraDb,
     },
@@ -55,7 +56,6 @@ impl ZebraDb {
     /// if it is in the finalized state.
     ///
     /// This location is used as an efficient index key for addresses.
-    #[allow(dead_code)]
     pub fn address_location(&self, address: &transparent::Address) -> Option<AddressLocation> {
         self.address_balance_location(address)
             .map(|abl| abl.address_location())
@@ -105,6 +105,42 @@ impl ZebraDb {
 
         self.db.zs_get(&utxo_by_out_loc, &output_location)
     }
+
+    /// Returns the unspent transparent outputs for a [`transparent::Address`],
+    /// if they are in the finalized state.
+    #[allow(dead_code)]
+    pub fn address_utxos(
+        &self,
+        address: &transparent::Address,
+    ) -> BTreeMap<OutputLocation, transparent::Utxo> {
+        let address_location = match self.address_location(address) {
+            Some(address_location) => address_location,
+            None => return BTreeMap::new(),
+        };
+
+        let output_locations = self.address_utxo_locations(address_location);
+
+        output_locations
+            .iter()
+            .flat_map(|&output_location| {
+                Some((output_location, self.utxo_by_location(output_location)?))
+            })
+            .collect()
+    }
+
+    /// Returns the unspent transparent output locations for a [`transparent::Address`],
+    /// if they are in the finalized state.
+    pub fn address_utxo_locations(
+        &self,
+        address_location: AddressLocation,
+    ) -> AddressUnspentOutputs {
+        let utxo_by_transparent_addr_loc =
+            self.db.cf_handle("utxo_by_transparent_addr_loc").unwrap();
+
+        self.db
+            .zs_get(&utxo_by_transparent_addr_loc, &address_location)
+            .unwrap_or_default()
+    }
 }
 
 impl DiskWriteBatch {
@@ -125,6 +161,7 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        mut address_utxo_locations: HashMap<transparent::Address, AddressUnspentOutputs>,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
 
@@ -136,6 +173,9 @@ impl DiskWriteBatch {
 
             // Update the address balance by adding this UTXO's value
             if let Some(receiving_address) = receiving_address {
+                // TODO: fix up tests that use missing outputs,
+                //       then replace entry() with get_mut().expect()
+
                 let address_balance_location = address_balances
                     .entry(receiving_address)
                     .or_insert_with(|| AddressBalanceLocation::new(output_location));
@@ -144,6 +184,11 @@ impl DiskWriteBatch {
                 address_balance_location
                     .receive_output(&unspent_output)
                     .expect("balance overflow already checked");
+
+                address_utxo_locations
+                    .entry(receiving_address)
+                    .or_default()
+                    .insert(output_location);
             }
 
             let output_address_location =
@@ -168,12 +213,17 @@ impl DiskWriteBatch {
                 address_balance_location
                     .spend_output(&spent_output)
                     .expect("balance underflow already checked");
+
+                address_utxo_locations
+                    .get_mut(&sending_address)
+                    .expect("contains a list for each address, including empty lists")
+                    .remove(&output_location);
             }
 
             self.zs_delete(&utxo_by_out_loc, output_location);
         }
 
-        self.prepare_transparent_balances_batch(db, address_balances)?;
+        self.prepare_transparent_balances_batch(db, address_balances, address_utxo_locations)?;
 
         Ok(())
     }
@@ -189,13 +239,38 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        address_utxo_locations: HashMap<transparent::Address, AddressUnspentOutputs>,
     ) -> Result<(), BoxError> {
         let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
+        let utxo_by_transparent_addr_loc = db.cf_handle("utxo_by_transparent_addr_loc").unwrap();
 
-        // Write the new address balances to the database
-        for (address, address_balance) in address_balances.into_iter() {
+        // Write to the database:
+        // - the updated address balances, and
+        // - the updated address UTXO lists, if they have any entries
+        for (address, address_balance_location) in address_balances.into_iter() {
             // Some of these balances are new, and some are updates
-            self.zs_insert(&balance_by_transparent_addr, address, address_balance);
+            self.zs_insert(
+                &balance_by_transparent_addr,
+                address,
+                address_balance_location,
+            );
+
+            // Some of the unspent output lists are new, some are updates,
+            // and some have just become empty
+            let address_location = address_balance_location.address_location();
+            let unspent_outputs = address_utxo_locations
+                .get(&address)
+                .expect("hash maps have the same keys");
+
+            if unspent_outputs.is_empty() {
+                self.zs_delete(&utxo_by_transparent_addr_loc, address_location);
+            } else {
+                self.zs_insert(
+                    &utxo_by_transparent_addr_loc,
+                    address_location,
+                    unspent_outputs,
+                );
+            }
         }
 
         Ok(())
