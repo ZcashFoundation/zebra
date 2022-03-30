@@ -15,7 +15,7 @@ use std::{
 use itertools::Itertools;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{self, Amount, NonNegative},
     block::Height,
     parameters::Network::*,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -243,6 +243,26 @@ impl AddressBalanceLocation {
     /// Returns a mutable reference to the current balance for the address.
     pub fn balance_mut(&mut self) -> &mut Amount<NonNegative> {
         &mut self.balance
+    }
+
+    /// Updates the current balance by adding the supplied output's value.
+    pub fn receive_output(
+        &mut self,
+        unspent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self.balance + unspent_output.value())?;
+
+        Ok(())
+    }
+
+    /// Updates the current balance by subtracting the supplied output's value.
+    pub fn spend_output(
+        &mut self,
+        spent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self.balance - spent_output.value())?;
+
+        Ok(())
     }
 
     /// Returns the location of the first [`transparent::Output`] sent to an address.
