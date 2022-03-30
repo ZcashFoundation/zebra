@@ -196,7 +196,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
         settings.set_snapshot_suffix(format!("{}_{}", net_suffix, height));
 
         settings.bind(|| snapshot_block_and_transaction_data(&state));
-        settings.bind(|| snapshot_transparent_address_data(&state));
+        settings.bind(|| snapshot_transparent_address_data(&state, height));
     }
 }
 
@@ -450,21 +450,37 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 }
 
 /// Snapshot transparent address data, using `cargo insta` and RON serialization.
-fn snapshot_transparent_address_data(state: &FinalizedState) {
+fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
+    // TODO: transactions for each address (#3951)
+
     let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
+    let utxo_by_transparent_addr_loc = state.cf_handle("utxo_by_transparent_addr_loc").unwrap();
 
     let mut stored_address_balances = Vec::new();
     let mut stored_address_utxos = Vec::new();
 
-    // TODO: transactions for each address (#3951)
-
     // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
     let addresses =
         state.full_iterator_cf(&balance_by_transparent_addr, rocksdb::IteratorMode::Start);
+    let utxo_address_location_count = state
+        .full_iterator_cf(&utxo_by_transparent_addr_loc, rocksdb::IteratorMode::Start)
+        .count();
 
     let addresses: Vec<transparent::Address> = addresses
         .map(|(key, _value)| transparent::Address::from_bytes(key))
         .collect();
+
+    // # Consensus
+    //
+    // The genesis transaction's UTXO is not indexed.
+    // This check also ignores spent UTXOs.
+    if height == 0 {
+        assert_eq!(addresses.len(), 0);
+        assert_eq!(utxo_address_location_count, 0);
+        return;
+    }
+
+    assert_eq!(addresses.len(), utxo_address_location_count);
 
     for address in addresses {
         let stored_address_balance_location = state
