@@ -221,7 +221,7 @@ jobs:
         id: get-sync-height
         run: |
           INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          SYNC_HEIGHT=$(gcloud logging read '(resource.labels.instance_id="${INSTANCE_ID}" AND logName="projects/zealous-zebra/logs/cos_containers")' --format='value(jsonPayload.MESSAGE)' --limit 25 | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\([0-9]+\)' | grep -o -E '[0-9]+')
+          SYNC_HEIGHT=$(gcloud logging read '(resource.labels.instance_id="${INSTANCE_ID}" AND logName="projects/zealous-zebra/logs/cos_containers")' --format='value(jsonPayload.MESSAGE)' --order="desc" --limit 25 | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\([0-9]+\)' | grep -o -E '[0-9]+')
           echo "::set-output name=sync_height::$SYNC_HEIGHT"
           sleep 60
 
