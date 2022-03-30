@@ -1,10 +1,9 @@
 name: Lint Rust files
 
 on:
-  push:
+  pull_request:
     branches:
-      - '**'
-      - '!main'
+      - 'main'
     paths-ignore:
       - '**/*.rs'
       - '**/Cargo.toml'
