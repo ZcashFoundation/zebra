@@ -6,9 +6,13 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
+    collections::BTreeSet,
     fmt::Debug,
     io::{Cursor, Read},
+    ops::Deref,
 };
+
+use itertools::Itertools;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -309,6 +313,48 @@ impl UnspentOutputAddressLocation {
     }
 }
 
+/// A list of unspent outputs for a [`transparent::Address`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
+pub struct AddressUnspentOutputs {
+    /// A list of unspent transparent output locations, in chain order.
+    inner: BTreeSet<OutputLocation>,
+}
+
+impl AddressUnspentOutputs {
+    /// Creates a new [`AddressUnspentOutputs`] from the first output for an address.
+    pub fn new(first_output: OutputLocation) -> AddressUnspentOutputs {
+        let mut inner = BTreeSet::new();
+        inner.insert(first_output);
+
+        AddressUnspentOutputs { inner }
+    }
+
+    /// Returns the inner list.
+    #[allow(dead_code)]
+    pub fn inner(&self) -> &BTreeSet<OutputLocation> {
+        &self.inner
+    }
+
+    /// Allows tests to modify the inner list.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn inner_mut(&mut self) -> &mut BTreeSet<OutputLocation> {
+        &mut self.inner
+    }
+}
+
+impl Deref for AddressUnspentOutputs {
+    type Target = BTreeSet<OutputLocation>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 // Transparent trait impls
 
 /// Returns a byte representing the [`transparent::Address`] variant.
@@ -499,5 +545,39 @@ impl IntoDisk for transparent::Output {
 impl FromDisk for transparent::Output {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         bytes.as_ref().zcash_deserialize_into().unwrap()
+    }
+}
+
+impl IntoDisk for AddressUnspentOutputs {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.iter()
+            .map(|out_loc| out_loc.as_bytes().to_vec())
+            .concat()
+    }
+}
+
+impl FromDisk for AddressUnspentOutputs {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let len = disk_bytes.as_ref().len();
+
+        assert_eq!(
+            len % OUTPUT_LOCATION_DISK_BYTES,
+            0,
+            "unexpected trailing data,\n\
+             expected length divisible by: {OUTPUT_LOCATION_DISK_BYTES}\n\
+             got length: {len}\n\
+             with remainder: {}",
+            len % OUTPUT_LOCATION_DISK_BYTES,
+        );
+
+        let inner = disk_bytes
+            .as_ref()
+            .chunks_exact(OUTPUT_LOCATION_DISK_BYTES)
+            .map(OutputLocation::from_bytes)
+            .collect();
+
+        AddressUnspentOutputs { inner }
     }
 }
