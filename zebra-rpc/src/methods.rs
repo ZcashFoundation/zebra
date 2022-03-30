@@ -8,7 +8,7 @@
 
 use std::{collections::HashSet, io, sync::Arc};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::{FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
@@ -550,6 +550,29 @@ where
                     data: None,
                 })?;
 
+            let block_request = zebra_state::ReadRequest::Block(hash_or_height);
+            let block_response = state
+                .ready()
+                .and_then(|service| service.call(block_request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let time = match block_response {
+                zebra_state::ReadResponse::Block(Some(block)) => block.header.time,
+                zebra_state::ReadResponse::Block(None) => {
+                    return Err(Error {
+                        code: ErrorCode::ServerError(0),
+                        message: "could not get the time of the requested block".to_string(),
+                        data: None,
+                    })
+                }
+                _ => unreachable!("unmatched response to a block request"),
+            };
+
             let sapling_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
             let sapling_response = state
                 .ready()
@@ -566,7 +589,7 @@ where
                     NoteCommitmentTree::Sapling(Some((*tree).clone()))
                 }
                 zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
-                _ => unreachable!("unmatched response to a block request"),
+                _ => unreachable!("unmatched response to a sapling tree request"),
             };
 
             let orchard_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
@@ -585,10 +608,11 @@ where
                     NoteCommitmentTree::Sapling(Some((*tree).clone()))
                 }
                 zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
-                _ => unreachable!("unmatched response to a block request"),
+                _ => unreachable!("unmatched response to an orchard tree request"),
             };
 
             Ok(GetTreestate {
+                time,
                 sapling_tree,
                 orchard_tree,
             })
@@ -685,6 +709,7 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 // they are added.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetTreestate {
+    time: DateTime<Utc>,
     sapling_tree: NoteCommitmentTree,
     orchard_tree: NoteCommitmentTree,
 }
