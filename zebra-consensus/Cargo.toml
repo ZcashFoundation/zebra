@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
+proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
 blake2b_simd = "1.0.0"

@@ -5757,6 +5757,7 @@ dependencies = [
  "jsonrpc-derive",
  "jsonrpc-http-server",
  "proptest",
+ "proptest-derive",
  "serde",
  "serde_json",
  "thiserror",
