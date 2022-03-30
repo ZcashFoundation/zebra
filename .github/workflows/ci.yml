@@ -197,7 +197,7 @@ jobs:
         run: cargo build --verbose --no-default-features
 
   install-from-lockfile-no-cache:
-    name: Install --locked --path ./zebrad/ zebrad, stable on ubuntu-latest, no cache
+    name: Install --locked zebrad on ubuntu-latest, no cache
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
