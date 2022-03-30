@@ -9,6 +9,16 @@ repository = "https://github.com/ZcashFoundation/zebra"
 # when run in the workspace directory
 default-run = "zebrad"
 
+[features]
+default = []
+proptest-impl = ["zebra-chain/proptest-impl", "zebra-state/proptest-impl", "zebra-consensus/proptest-impl", "zebra-network/proptest-impl"]
+
+enable-sentry = []
+test_sync_to_mandatory_checkpoint_mainnet = []
+test_sync_to_mandatory_checkpoint_testnet = []
+test_sync_past_mandatory_checkpoint_mainnet = []
+test_sync_past_mandatory_checkpoint_testnet = []
+
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus/" }
@@ -74,10 +84,3 @@ zebra-consensus = { path = "../zebra-consensus/", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test" }
-
-[features]
-enable-sentry = []
-test_sync_to_mandatory_checkpoint_mainnet = []
-test_sync_to_mandatory_checkpoint_testnet = []
-test_sync_past_mandatory_checkpoint_mainnet = []
-test_sync_past_mandatory_checkpoint_testnet = []

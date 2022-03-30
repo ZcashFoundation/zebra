@@ -7,6 +7,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+proptest-impl = ["zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
+
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
 zebra-network = { path = "../zebra-network" }
