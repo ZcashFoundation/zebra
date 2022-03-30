@@ -614,7 +614,7 @@ We use the following rocksdb column families:
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
 | `tx_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                                | Never   |
 | `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
-| `utxo_by_transparent_addr_loc` | `AddressOutput`        | `()`                                | Delete  |
+| `utxo_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                                | Delete  |
 | *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
@@ -645,7 +645,7 @@ Block and Transaction Data:
 - `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
   Always has the same value for each address, even if the first output is spent.
 - `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
-- `AddressOutput`: `AddressLocation \|\| OutputLocation`,
+- `AddressUnspentOutput`: `AddressLocation \|\| OutputLocation`,
   used instead of a `BTreeSet<OutputLocation>` value, to improve database performance
 - `AddressTransaction`: `AddressLocation \|\| TransactionLocation`
   used instead of a `BTreeSet<TransactionLocation>` value, to improve database performance
