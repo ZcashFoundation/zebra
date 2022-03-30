@@ -32,8 +32,7 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocation, AddressUnspentOutputs, OutputLocation},
-            FromDisk,
+            transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
@@ -60,14 +59,7 @@ impl ZebraDb {
     // TODO: move this method to the tip section
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db
-            .zs_last_key_value(&hash_by_height)
-            .map(|(height_bytes, hash_bytes)| {
-                let height = block::Height::from_bytes(height_bytes);
-                let hash = block::Hash::from_bytes(hash_bytes);
-
-                (height, hash)
-            })
+        self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
