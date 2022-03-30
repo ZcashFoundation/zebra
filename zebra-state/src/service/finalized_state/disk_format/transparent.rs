@@ -95,9 +95,7 @@ impl OutputIndex {
     /// Return this index as `u64`.
     #[allow(dead_code)]
     pub fn as_u64(&self) -> u64 {
-        self.0
-            .try_into()
-            .expect("the maximum valid index fits in u64")
+        self.0.into()
     }
 }
 
