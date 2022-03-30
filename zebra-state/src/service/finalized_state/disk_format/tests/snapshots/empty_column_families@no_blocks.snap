@@ -22,4 +22,5 @@ expression: empty_column_families
   "tx_by_hash: no entries",
   "tx_by_loc: no entries",
   "utxo_by_outpoint: no entries",
+  "utxo_by_transparent_addr_loc: no entries",
 ]
