@@ -68,7 +68,10 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
         for transaction in &block.transactions {
             let transaction_cases = vec![(
                 ReadRequest::Transaction(transaction.hash()),
-                Ok(ReadResponse::Transaction(Some(transaction.clone()))),
+                Ok(ReadResponse::Transaction(Some((
+                    transaction.clone(),
+                    block.coinbase_height().unwrap(),
+                )))),
             )];
 
             let transaction_cases = Transcript::from(transaction_cases);

@@ -35,7 +35,11 @@ use zebra_chain::{
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
-use zebra_test::{command::ContextFrom, net::random_known_port, prelude::*};
+use zebra_test::{
+    command::{ContextFrom, NO_MATCHES_REGEX_ITER},
+    net::random_known_port,
+    prelude::*,
+};
 
 mod common;
 
@@ -659,7 +663,7 @@ fn full_sync_testnet() {
 /// The timeout is specified using an environment variable, with the name configured by the
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
-fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Result<()> {
+fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
         .and_then(|timeout_string| timeout_string.parse().ok());
@@ -678,8 +682,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
             // TODO: if full validation performance improves, do another test with checkpoint_sync off
             true,
             true,
-        )
-        .map(|_| ())
+        )?;
     } else {
         tracing::info!(
             ?network,
@@ -687,9 +690,9 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
              set the {:?} environmental variable to run the test",
             timeout_argument_name,
         );
-
-        Ok(())
     }
+
+    Ok(())
 }
 
 fn create_cached_database(network: Network) -> Result<()> {
@@ -989,6 +992,119 @@ async fn rpc_endpoint() -> Result<()> {
     Ok(())
 }
 
+/// Failure log messages for any process, from the OS or shell.
+///
+/// These messages show that the child process has failed.
+/// So when we see them in the logs, we make the test fail.
+const PROCESS_FAILURE_MESSAGES: &[&str] = &[
+    // Linux
+    "Aborted",
+    // macOS / BSDs
+    "Abort trap",
+    // TODO: add other OS or C library errors?
+];
+
+/// Failure log messages from Zebra.
+///
+/// These `zebrad` messages show that the `lightwalletd` integration test has failed.
+/// So when we see them in the logs, we make the test fail.
+const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
+    // Rust-specific panics
+    "The application panicked",
+    // RPC port errors
+    "Unable to start RPC server",
+    // TODO: disable if this actually happens during test zebrad shutdown
+    "Stopping RPC endpoint",
+    // Missing RPCs in zebrad logs (this log is from PR #3860)
+    //
+    // TODO: temporarily disable until enough RPCs are implemented, if needed
+    "Received unrecognized RPC request",
+    // RPC argument errors: parsing and data
+    //
+    // These logs are produced by jsonrpc_core inside Zebra,
+    // but it doesn't log them yet.
+    //
+    // TODO: log these errors in Zebra, and check for them in the Zebra logs?
+    "Invalid params",
+    "Method not found",
+];
+
+/// Failure log messages from lightwalletd.
+///
+/// These `lightwalletd` messages show that the `lightwalletd` integration test has failed.
+/// So when we see them in the logs, we make the test fail.
+const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
+    // Go-specific panics
+    "panic:",
+    // Missing RPCs in lightwalletd logs
+    // TODO: temporarily disable until enough RPCs are implemented, if needed
+    "unable to issue RPC call",
+    // RPC response errors: parsing and data
+    //
+    // jsonrpc_core error messages from Zebra,
+    // received by lightwalletd and written to its logs
+    "Invalid params",
+    "Method not found",
+    // Early termination
+    //
+    // TODO: temporarily disable until enough RPCs are implemented, if needed
+    "Lightwalletd died with a Fatal error",
+    // Go json package error messages:
+    "json: cannot unmarshal",
+    "into Go value of type",
+    // lightwalletd custom RPC error messages from:
+    // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
+    "block requested is newer than latest block",
+    "Cache add failed",
+    "error decoding",
+    "error marshaling",
+    "error parsing JSON",
+    "error reading JSON response",
+    "error with",
+    // We expect these errors when lightwalletd reaches the end of the zebrad cached state
+    // "error requesting block: 0: Block not found",
+    // "error zcashd getblock rpc",
+    "received overlong message",
+    "received unexpected height block",
+    "Reorg exceeded max",
+    "unable to issue RPC call",
+    // Missing fields for each specific RPC
+    //
+    // get_block_chain_info
+    //
+    // TODO: enable these checks after PR #3891 merges
+    //
+    // invalid sapling height
+    //"Got sapling height 0",
+    // missing BIP70 chain name, should be "main" or "test"
+    //" chain  ",
+    // missing branchID, should be 8 hex digits
+    //" branchID \"",
+    //
+    // TODO: complete this list for each RPC with fields?
+    // get_info
+    // get_raw_transaction
+    // z_get_tree_state
+    // get_address_txids
+    // get_address_balance
+    // get_address_utxos
+];
+
+/// Ignored failure logs for lightwalletd.
+/// These regexes override the [`LIGHTWALLETD_FAILURE_MESSAGES`].
+///
+/// These `lightwalletd` messages look like failure messages, but they are actually ok.
+/// So when we see them in the logs, we make the test continue.
+const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
+    // Exceptions to lightwalletd custom RPC error messages:
+    //
+    // This log matches the "error with" RPC error message,
+    // but we expect Zebra to start with an empty state.
+    //
+    // TODO: this exception should not be used for the cached state tests (#3511)
+    r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
+];
+
 /// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
@@ -1011,7 +1127,17 @@ fn lightwalletd_integration() -> Result<()> {
     let mut config = random_known_rpc_port_config()?;
 
     let zdir = testdir()?.with_config(&mut config)?;
-    let mut zebrad = zdir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
+    let mut zebrad = zdir
+        .spawn_child(&["start"])?
+        .with_timeout(LAUNCH_DELAY)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            ZEBRA_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
+        );
 
     // Wait until `zebrad` has opened the RPC endpoint
     zebrad.expect_stdout_line_matches(
@@ -1027,7 +1153,17 @@ fn lightwalletd_integration() -> Result<()> {
     // Launch the lightwalletd process
     let result = ldir.spawn_lightwalletd_child(&[]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
-    let mut lightwalletd = lightwalletd.with_timeout(LIGHTWALLETD_DELAY);
+    let mut lightwalletd = lightwalletd
+        .with_timeout(LIGHTWALLETD_DELAY)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            LIGHTWALLETD_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            // TODO: some exceptions do not apply to the cached state tests (#3511)
+            LIGHTWALLETD_IGNORE_MESSAGES.iter().cloned(),
+        );
 
     // Wait until `lightwalletd` has launched
     let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
@@ -1036,26 +1172,43 @@ fn lightwalletd_integration() -> Result<()> {
     // Check that `lightwalletd` is calling the expected Zebra RPCs
 
     // getblockchaininfo
-    let result = lightwalletd.expect_stdout_line_matches("Got sapling height");
+    //
+    // TODO: update branchID when we're using cached state (#3511)
+    //       add "Waiting for zcashd height to reach Sapling activation height"
+    let result = lightwalletd.expect_stdout_line_matches(
+        "Got sapling height 419200 block height [0-9]+ chain main branchID 00000000",
+    );
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // getblock with block 1 in Zebra's state
+    // getblock with the first Sapling block in Zebra's state
     //
     // zcash/lightwalletd calls getbestblockhash here, but
     // adityapk00/lightwalletd calls getblock
     //
-    // Until block 1 has been downloaded, lightwalletd will log Zebra's RPC error:
+    // The log also depends on what is in Zebra's state:
+    //
+    // # Empty Zebra State
+    //
+    // lightwalletd tries to download the Sapling activation block, but it's not in the state.
+    //
+    // Until the Sapling activation block has been downloaded, lightwalletd will log Zebra's RPC error:
     // "error requesting block: 0: Block not found"
-    // But we can't check for that, because Zebra might download genesis before lightwalletd asks.
     // We also get a similar log when lightwalletd reaches the end of Zebra's cache.
     //
-    // After the first getblock call, lightwalletd will log:
+    // # Cached Zebra State
+    //
+    // After the first successful getblock call, lightwalletd will log:
     // "Block hash changed, clearing mempool clients"
     // But we can't check for that, because it can come before or after the Ingestor log.
-    let result = lightwalletd.expect_stdout_line_matches("Ingestor adding block to cache");
+    //
+    // TODO: expect Ingestor log when we're using cached state (#3511)
+    //       "Ingestor adding block to cache"
+    let result = lightwalletd.expect_stdout_line_matches(
+        r#"error requesting block: 0: Block not found","height":419200"#,
+    );
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // (next RPC)
