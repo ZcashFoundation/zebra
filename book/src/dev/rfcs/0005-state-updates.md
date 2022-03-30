@@ -612,9 +612,9 @@ We use the following rocksdb column families:
 | `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
 | *Transparent*                  |                        |                                     |         |
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
-| `tx_by_transparent_addr_loc`   | `AddressLocation`      | `AtLeastOne<TransactionLocation>`   | Append  |
+| `tx_by_transparent_addr_loc`   | `AddressLocation`      | `BTreeSet<TransactionLocation>`     | Append  |
 | `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
-| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `Vec<OutputLocation>`               | Up/Del  |
+| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `BTreeSet<OutputLocation>`          | Up/Del  |
 | *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
@@ -645,7 +645,7 @@ Block and Transaction Data:
 - `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
   Always has the same value for each address, even if the first output is spent.
 - `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
-- `AtLeastOne<T>` and `Vec<T>`: `[T; len()]` (for known-size `T`)
+- `BTreeSet<T>`: `[T; len()]` (for known-size `T`)
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
@@ -788,8 +788,7 @@ So they should not be used for consensus-critical checks.
 
 - When a block write deletes a UTXO from `utxo_by_out_loc`,
   that UTXO location should be deleted from `utxo_by_transparent_addr_loc`.
-  The `OutputLocations` are in order, so the deleted UTXO can be found using a
-  [binary search](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.binary_search).
+  The `OutputLocations` are in order, so the deleted UTXO can be removed efficiently.
   This is an index optimisation, which does not affect query results.
 
 - `tx_by_transparent_addr_loc` stores transaction locations by address.
