@@ -230,12 +230,7 @@ impl ZebraDb {
                         // Some utxos are spent in the same block, so they will be in
                         // `tx_hash_indexes` and `new_outputs`
                         self.output_location(&outpoint).unwrap_or_else(|| {
-                            let tx_index = tx_hash_indexes
-                                .get(&outpoint.hash)
-                                .expect("already checked UTXO was in state or block");
-                            let tx_loc =
-                                TransactionLocation::from_usize(finalized.height, *tx_index);
-                            OutputLocation::from_outpoint(tx_loc, &outpoint)
+                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
                         }),
                         self.utxo(&outpoint)
                             .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
